@@ -1,10 +1,12 @@
 mod config;
 mod repl;
-mod server;
 mod store;
 mod subscribers;
 mod utils;
 mod worterbuch;
+
+#[cfg(feature = "graphql")]
+mod server;
 
 use crate::{config::Config, repl::repl, worterbuch::Worterbuch};
 use anyhow::Result;
@@ -25,9 +27,10 @@ async fn main() -> Result<()> {
     let worterbuch = Worterbuch::with_config(config.clone());
     let worterbuch = Arc::new(RwLock::new(worterbuch));
 
-    spawn(repl(worterbuch.clone()));
+    #[cfg(feature = "graphql")]
+    spawn(server::start(worterbuch.clone(), config));
 
-    server::start(worterbuch, config).await;
+    spawn(repl(worterbuch));
 
     Ok(())
 }
