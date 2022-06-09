@@ -11,7 +11,11 @@ mod server;
 use crate::{config::Config, repl::repl, worterbuch::Worterbuch};
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::{spawn, sync::RwLock};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    spawn,
+    sync::RwLock,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,6 +35,9 @@ async fn main() -> Result<()> {
     spawn(server::start(worterbuch.clone(), config));
 
     spawn(repl(worterbuch));
+
+    let mut signal = signal(SignalKind::terminate())?;
+    signal.recv().await;
 
     Ok(())
 }
