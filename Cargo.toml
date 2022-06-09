@@ -1,0 +1,23 @@
+[package]
+name = "worterbuch"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.19.2", features = ["full"] }
+log = "0.4.17"
+env_logger = "0.9.0"
+dotenv = "0.15.0"
+anyhow = "1.0.57"
+serde = { version = "1.0.137", features = ["derive"] }
+serde_json = "1.0.81"
+juniper = "0.15.9"
+juniper_graphql_ws = "0.3.0"
+juniper_warp = { version = "0.7.0", features = ["subscriptions"] }
+warp = { version = "0.3.2", features = ["tls"] }
+futures = "0.3.21"
+async-stream = "0.3"
+uuid = { version = "1.1.1", features = ["v4"] }
+openssl = { version = "0.10.38", features = ["vendored"] }

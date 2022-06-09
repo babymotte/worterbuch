@@ -1,0 +1,21 @@
+version: '2'
+
+services:
+    worterbuch:
+        build: .
+        hostname: worterbuch
+        container_name: worterbuch
+        restart: always
+        ports:
+          - 4242:4242
+        environment:
+          - RUST_LOG=info
+          - WORTERBUCH_BIND_ADDRESS=0.0.0.0
+        volumes:
+          - ./props.json:/app/props.json
+        command: /bin/sh -c "echo 'load /app/props.json' | /app/worterbuch"
+        logging:
+            options:
+                max-size: '10M'
+                max-file: '5'
+        
