@@ -11,9 +11,6 @@ services:
         environment:
           - RUST_LOG=info
           - WORTERBUCH_BIND_ADDRESS=0.0.0.0
-        volumes:
-          - ./props.json:/app/props.json
-        command: /bin/sh -c "echo 'load /app/props.json' | /app/worterbuch"
         logging:
             options:
                 max-size: '10M'
