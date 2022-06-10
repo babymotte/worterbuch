@@ -159,7 +159,22 @@ mod blocking {
     }
 
     fn read_subscribe_message(mut data: impl Read) -> Result<Subscribe> {
-        todo!()
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf)?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf)?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Subscribe {
+            transaction_id,
+            request_pattern,
+        })
     }
 
     fn read_state_message(mut data: impl Read) -> Result<State> {
@@ -216,6 +231,26 @@ mod blocking {
                     transaction_id: 0,
                     key: "yo/mama".to_owned(),
                     value: "fat".to_owned()
+                })
+            )
+        }
+
+        #[test]
+        fn subscribe_message_is_read_correctly() {
+            let data = [
+                SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
+                0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
+                b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
+                b't', b'u', b'r', b'e', b's',
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(
+                result,
+                Message::Subscribe(Subscribe {
+                    transaction_id: 5536684732567,
+                    request_pattern: "let/me/?/you/its/features".to_owned()
                 })
             )
         }
