@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::io::{self, BufRead};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use worterbuch_cli::Connection;
 
 #[tokio::main]
@@ -12,15 +12,25 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "graphql"))]
     let con = worterbuch_cli::tcp::connect()?;
 
-    for line in io::stdin().lock().lines() {
-        let line = line?;
+    let mut ticket = 0;
+
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
         if let Some(index) = line.find('=') {
             let key = &line[..index];
             let val = &line[index + 1..];
-            con.set(key, val).await?;
+            ticket = con.set(key, val)?;
+            if ticket % 1000 == 0 {
+                eprintln!("{ticket}");
+            }
         } else {
             eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
         }
     }
+
+    eprintln!("all tasks sent, waiting for tickets to complete");
+
+    con.wait_for_ticket(ticket).await;
+
     Ok(())
 }

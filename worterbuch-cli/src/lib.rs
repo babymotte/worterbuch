@@ -9,12 +9,12 @@ pub mod tcp;
 
 #[async_trait]
 pub trait Connection {
-    async fn set(&mut self, key: &str, value: &str) -> Result<()>;
-    async fn get(&mut self, key: &str) -> Result<()>;
-    async fn subscribe(&mut self, key: &str) -> Result<()>;
+    fn set(&mut self, key: &str, value: &str) -> Result<u64>;
+    fn get(&mut self, key: &str) -> Result<u64>;
+    fn subscribe(&mut self, key: &str) -> Result<u64>;
+    async fn wait_for_ticket(&self, ticket: u64);
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Command {
     Init,
     Get(String, u64),
