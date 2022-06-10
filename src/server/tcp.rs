@@ -11,7 +11,7 @@ use worterbuch::{
     codec::{
         encode_ack_message, encode_state_message, read_message, Ack, Get, Set, State, Subscribe,
     },
-    error::EncodeError,
+    error::{DecodeError, EncodeError},
 };
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
@@ -31,19 +31,28 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
 
 async fn serve(mut client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result<()> {
     loop {
-        match read_message(&mut client).await? {
-            worterbuch::codec::Message::Get(msg) => {
+        match read_message(&mut client).await {
+            Ok(worterbuch::codec::Message::Get(msg)) => {
                 get(msg, worterbuch.clone(), &mut client).await?
             }
-            worterbuch::codec::Message::Set(msg) => {
+            Ok(worterbuch::codec::Message::Set(msg)) => {
                 set(msg, worterbuch.clone(), &mut client).await?
             }
-            worterbuch::codec::Message::Subscribe(msg) => {
+            Ok(worterbuch::codec::Message::Subscribe(msg)) => {
                 subscribe(msg, worterbuch.clone(), &mut client).await
+            }
+            Err(e) => {
+                log::error!("error decoding message: {e}");
+                if let DecodeError::IoError(_) = e {
+                    break;
+                }
+                // TODO send special ERR message
             }
             _ => { /* ignore server messages */ }
         }
     }
+
+    Ok(())
 }
 
 async fn get(msg: Get, worterbuch: Arc<RwLock<Worterbuch>>, client: &mut TcpStream) -> Result<()> {
