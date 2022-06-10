@@ -449,6 +449,8 @@ mod blocking {
 
     #[cfg(test)]
     mod test {
+        use crate::codec::encode_set_message;
+
         use super::*;
 
         #[test]
@@ -601,6 +603,21 @@ mod blocking {
                     metadata: "THIS IS METAAA!!!".to_owned()
                 })
             )
+        }
+
+        #[test]
+        fn utf_message_roundtrip_is_successful() {
+            let msg = Set {
+                transaction_id: 42,
+                key: "🦀/🕸/😅".to_owned(),
+                value: "…".to_owned(),
+            };
+
+            let data = encode_set_message(&msg).unwrap();
+
+            let decoded = read_message(&*data).unwrap();
+
+            assert_eq!(Message::Set(msg), decoded);
         }
     }
 }
