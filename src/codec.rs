@@ -276,7 +276,27 @@ mod blocking {
     }
 
     fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
-        todo!()
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 1];
+        data.read_exact(&mut buf)?;
+        let error_code = buf[0];
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf)?;
+        let metadata_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; metadata_length as usize];
+        data.read_exact(&mut buf)?;
+        let metadata = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Err {
+            transaction_id,
+            error_code,
+            metadata,
+        })
     }
 
     #[cfg(test)]
@@ -410,6 +430,27 @@ mod blocking {
                     request_pattern: "1/2/3".to_owned(),
                     key: "1/2/3".to_owned(),
                     value: "4".to_owned()
+                })
+            )
+        }
+
+        #[test]
+        fn err_message_is_read_correctly() {
+            let data = [
+                ERR, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+                0b00000000, 0b00101010, 0b00000101, 0b00000000, 0b00000000, 0b00000000, 0b00010001,
+                b'T', b'H', b'I', b'S', b' ', b'I', b'S', b' ', b'M', b'E', b'T', b'A', b'A', b'A',
+                b'!', b'!', b'!',
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(
+                result,
+                Message::Err(Err {
+                    transaction_id: 42,
+                    error_code: 5,
+                    metadata: "THIS IS METAAA!!!".to_owned()
                 })
             )
         }

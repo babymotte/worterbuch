@@ -182,3 +182,5 @@ These are a 32 Bit unsigned integer designating the length of the metadata conta
 The payload, being an UTF-8 encoded string of the length specified in the header.
 
 ## Errors
+
+// TODO
