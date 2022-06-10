@@ -95,26 +95,55 @@ pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
 pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
     let key_length = get_key_length(&msg.key)?;
     let value_length = get_value_length(&msg.value)?;
+
     let mut buf = vec![SET];
+
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(key_length.to_be_bytes());
     buf.extend(value_length.to_be_bytes());
     buf.extend(msg.key.as_bytes());
     buf.extend(msg.value.as_bytes());
+
     Ok(buf)
 }
 
 pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
     let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+
     let mut buf = vec![SUB];
+
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(msg.request_pattern.as_bytes());
+
     Ok(buf)
 }
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let num_key_val_pairs = get_num_key_val_pairs(&msg.key_value_pairs)?;
+
+    let mut buf = vec![STA];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(request_pattern_length.to_be_bytes());
+    buf.extend(num_key_val_pairs.to_be_bytes());
+
+    for (key, value) in &msg.key_value_pairs {
+        let key_length = get_key_length(&key)?;
+        let value_length = get_value_length(&value)?;
+        buf.extend(key_length.to_be_bytes());
+        buf.extend(value_length.to_be_bytes());
+    }
+
+    buf.extend(msg.request_pattern.as_bytes());
+
+    for (key, value) in &msg.key_value_pairs {
+        buf.extend(key.as_bytes());
+        buf.extend(value.as_bytes());
+    }
+
+    Ok(buf)
 }
 
 pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
@@ -153,6 +182,15 @@ fn get_value_length(string: &str) -> EncodeResult<ValueLength> {
         Err(EncodeError::ValueTooLong(length))
     } else {
         Ok(length as ValueLength)
+    }
+}
+
+fn get_num_key_val_pairs(pairs: &[(String, String)]) -> EncodeResult<NumKeyValuePairs> {
+    let length = pairs.len();
+    if length > NumKeyValuePairs::MAX as usize {
+        Err(EncodeError::TooManyKeyValuePairs(length))
+    } else {
+        Ok(length as NumKeyValuePairs)
     }
 }
 
@@ -584,5 +622,41 @@ mod test {
         ];
 
         assert_eq!(data, encode_subscribe_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn state_message_is_encoded_correctly() {
+        let msg = State {
+            transaction_id: u64::MAX,
+            request_pattern: "who/let/the/?/#".to_owned(),
+            key_value_pairs: vec![
+                (
+                    "who/let/the/chicken/cross/the/road".to_owned(),
+                    "yeah, that was me, I guess".to_owned(),
+                ),
+                (
+                    "who/let/the/dogs/out".to_owned(),
+                    "Who? Who? Who? Who? Who?".to_owned(),
+                ),
+            ],
+        };
+
+        let data = vec![
+            STA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
+            0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
+            0b00000000, 0b00010100, 0b00000000, 0b00000000, 0b00000000, 0b00011000, b'w', b'h',
+            b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'?', b'/', b'#', b'w',
+            b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'c', b'h', b'i',
+            b'c', b'k', b'e', b'n', b'/', b'c', b'r', b'o', b's', b's', b'/', b't', b'h', b'e',
+            b'/', b'r', b'o', b'a', b'd', b'y', b'e', b'a', b'h', b',', b' ', b't', b'h', b'a',
+            b't', b' ', b'w', b'a', b's', b' ', b'm', b'e', b',', b' ', b'I', b' ', b'g', b'u',
+            b'e', b's', b's', b'w', b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e',
+            b'/', b'd', b'o', b'g', b's', b'/', b'o', b'u', b't', b'W', b'h', b'o', b'?', b' ',
+            b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?',
+            b' ', b'W', b'h', b'o', b'?',
+        ];
+
+        assert_eq!(data, encode_state_message(&msg).unwrap());
     }
 }
