@@ -147,7 +147,9 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let mut buf = vec![ACK];
+    buf.extend(msg.transaction_id.to_be_bytes());
+    Ok(buf)
 }
 
 pub fn encode_event_message(msg: &Event) -> EncodeResult<Vec<u8>> {
@@ -658,5 +660,17 @@ mod test {
         ];
 
         assert_eq!(data, encode_state_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn ack_message_is_encoded_correctly() {
+        let msg = Ack { transaction_id: 42 };
+
+        let data = vec![
+            ACK, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010,
+        ];
+
+        assert_eq!(data, encode_ack_message(&msg).unwrap());
     }
 }
