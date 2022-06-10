@@ -85,10 +85,13 @@ pub struct Err {
 
 pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
     let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+
     let mut buf = vec![GET];
+
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(msg.request_pattern.as_bytes());
+
     Ok(buf)
 }
 
@@ -148,16 +151,41 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
 
 pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
     let mut buf = vec![ACK];
+
     buf.extend(msg.transaction_id.to_be_bytes());
+
     Ok(buf)
 }
 
 pub fn encode_event_message(msg: &Event) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let key_length = get_key_length(&msg.key)?;
+    let value_length = get_value_length(&msg.value)?;
+
+    let mut buf = vec![EVE];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(request_pattern_length.to_be_bytes());
+    buf.extend(key_length.to_be_bytes());
+    buf.extend(value_length.to_be_bytes());
+    buf.extend(msg.request_pattern.as_bytes());
+    buf.extend(msg.key.as_bytes());
+    buf.extend(msg.value.as_bytes());
+
+    Ok(buf)
 }
 
 pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let metadata_length = get_metadata_length(&msg.metadata)?;
+
+    let mut buf = vec![ERR];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.push(msg.error_code);
+    buf.extend(metadata_length.to_be_bytes());
+    buf.extend(msg.metadata.as_bytes());
+
+    Ok(buf)
 }
 
 fn get_request_pattern_length(string: &str) -> EncodeResult<RequestPatternLength> {
@@ -193,6 +221,15 @@ fn get_num_key_val_pairs(pairs: &[(String, String)]) -> EncodeResult<NumKeyValue
         Err(EncodeError::TooManyKeyValuePairs(length))
     } else {
         Ok(length as NumKeyValuePairs)
+    }
+}
+
+fn get_metadata_length(string: &str) -> EncodeResult<MetaDataLength> {
+    let length = string.len();
+    if length > MetaDataLength::MAX as usize {
+        Err(EncodeError::MetaDataTooLong(length))
+    } else {
+        Ok(length as MetaDataLength)
     }
 }
 
@@ -672,5 +709,42 @@ mod test {
         ];
 
         assert_eq!(data, encode_ack_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn event_message_is_encoded_correctly() {
+        let msg = Event {
+            transaction_id: 42,
+            request_pattern: "1/2/3".to_owned(),
+            key: "1/2/3".to_owned(),
+            value: "4".to_owned(),
+        };
+
+        let data = vec![
+            EVE, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000101, 0b00000000,
+            0b00000000, 0b00000000, 0b00000001, b'1', b'/', b'2', b'/', b'3', b'1', b'/', b'2',
+            b'/', b'3', b'4',
+        ];
+
+        assert_eq!(data, encode_event_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn err_message_is_encoded_correctly() {
+        let msg = Err {
+            transaction_id: 42,
+            error_code: 5,
+            metadata: "THIS IS METAAA!!!".to_owned(),
+        };
+
+        let data = vec![
+            ERR, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000101, 0b00000000, 0b00000000, 0b00000000, 0b00010001,
+            b'T', b'H', b'I', b'S', b' ', b'I', b'S', b' ', b'M', b'E', b'T', b'A', b'A', b'A',
+            b'!', b'!', b'!',
+        ];
+
+        assert_eq!(data, encode_err_message(&msg).unwrap());
     }
 }

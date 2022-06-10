@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::codec::{KeyLength, MessageType, NumKeyValuePairs, RequestPatternLength, ValueLength};
+use crate::codec::{
+    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, RequestPatternLength, ValueLength,
+};
 
 #[derive(Debug)]
 pub enum DecodeError {
@@ -30,6 +32,7 @@ pub enum EncodeError {
     RequestPatternTooLong(usize),
     KeyTooLong(usize),
     ValueTooLong(usize),
+    MetaDataTooLong(usize),
     TooManyKeyValuePairs(usize),
     Other(String),
 }
@@ -54,6 +57,12 @@ impl fmt::Display for EncodeError {
                 "value is too long : {} bytes (max {} bytes allowed)",
                 len,
                 ValueLength::MAX
+            ),
+            EncodeError::MetaDataTooLong(len) => write!(
+                f,
+                "meta data is too long : {} bytes (max {} bytes allowed)",
+                len,
+                MetaDataLength::MAX
             ),
             EncodeError::TooManyKeyValuePairs(len) => write!(
                 f,
