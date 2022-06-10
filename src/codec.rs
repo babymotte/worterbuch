@@ -88,9 +88,9 @@ mod blocking {
     use super::{
         Ack, Err, Event, Get, Message, Set, State, Subscribe, ACK, ERR, EVE, GET, SET, STA, SUB,
     };
-    use crate::error::{Error, Result};
+    use crate::error::{DecodeError, DecodeResult};
 
-    pub fn read_message(mut data: impl Read) -> Result<Message> {
+    pub fn read_message(mut data: impl Read) -> DecodeResult<Message> {
         let mut buf = [0];
         data.read_exact(&mut buf)?;
         match buf[0] {
@@ -104,14 +104,14 @@ mod blocking {
             EVE => read_event_message(data).map(Message::Event),
             ERR => read_err_message(data).map(Message::Err),
             // undefined
-            _ => Err(Error::DecodeError(format!(
+            _ => Err(DecodeError::with_message(format!(
                 "type byte {:b} not defined",
                 buf[0]
             ))),
         }
     }
 
-    fn read_get_message(mut data: impl Read) -> Result<Get> {
+    fn read_get_message(mut data: impl Read) -> DecodeResult<Get> {
         let mut buf = [0; 8];
         data.read_exact(&mut buf)?;
         let transaction_id = u64::from_be_bytes(buf);
@@ -130,7 +130,7 @@ mod blocking {
         })
     }
 
-    fn read_set_message(mut data: impl Read) -> Result<Set> {
+    fn read_set_message(mut data: impl Read) -> DecodeResult<Set> {
         let mut buf = [0; 8];
         data.read_exact(&mut buf)?;
         let transaction_id = u64::from_be_bytes(buf);
@@ -158,7 +158,7 @@ mod blocking {
         })
     }
 
-    fn read_subscribe_message(mut data: impl Read) -> Result<Subscribe> {
+    fn read_subscribe_message(mut data: impl Read) -> DecodeResult<Subscribe> {
         let mut buf = [0; 8];
         data.read_exact(&mut buf)?;
         let transaction_id = u64::from_be_bytes(buf);
@@ -177,19 +177,67 @@ mod blocking {
         })
     }
 
-    fn read_state_message(mut data: impl Read) -> Result<State> {
+    fn read_state_message(mut data: impl Read) -> DecodeResult<State> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf)?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf)?;
+        let num_key_val_pairs = u32::from_be_bytes(buf);
+
+        let mut key_value_lengths = Vec::new();
+
+        for _ in 0..num_key_val_pairs {
+            let mut buf = [0; 2];
+            data.read_exact(&mut buf)?;
+            let key_length = u16::from_be_bytes(buf);
+
+            let mut buf = [0; 4];
+            data.read_exact(&mut buf)?;
+            let value_length = u32::from_be_bytes(buf);
+
+            key_value_lengths.push((key_length, value_length));
+        }
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf)?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        let mut key_value_pairs = Vec::new();
+
+        for (key_length, value_length) in key_value_lengths {
+            let mut buf = vec![0u8; key_length as usize];
+            data.read_exact(&mut buf)?;
+            let key = String::from_utf8(buf)?;
+
+            let mut buf = vec![0u8; value_length as usize];
+            data.read_exact(&mut buf)?;
+            let value = String::from_utf8_lossy(&buf).to_string();
+
+            key_value_pairs.push((key, value));
+        }
+
+        Ok(State {
+            transaction_id,
+            request_pattern,
+            key_value_pairs,
+        })
+    }
+
+    fn read_ack_message(mut data: impl Read) -> DecodeResult<Ack> {
         todo!()
     }
 
-    fn read_ack_message(mut data: impl Read) -> Result<Ack> {
+    fn read_event_message(mut data: impl Read) -> DecodeResult<Event> {
         todo!()
     }
 
-    fn read_event_message(mut data: impl Read) -> Result<Event> {
-        todo!()
-    }
-
-    fn read_err_message(mut data: impl Read) -> Result<Err> {
+    fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
         todo!()
     }
 
@@ -251,6 +299,45 @@ mod blocking {
                 Message::Subscribe(Subscribe {
                     transaction_id: 5536684732567,
                     request_pattern: "let/me/?/you/its/features".to_owned()
+                })
+            )
+        }
+
+        #[test]
+        fn state_message_is_read_correctly() {
+            let data = [
+                STA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+                0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
+                0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
+                0b00000000, 0b00010100, 0b00000000, 0b00000000, 0b00000000, 0b00011000, b'w', b'h',
+                b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'?', b'/', b'#', b'w',
+                b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'c', b'h', b'i',
+                b'c', b'k', b'e', b'n', b'/', b'c', b'r', b'o', b's', b's', b'/', b't', b'h', b'e',
+                b'/', b'r', b'o', b'a', b'd', b'y', b'e', b'a', b'h', b',', b' ', b't', b'h', b'a',
+                b't', b' ', b'w', b'a', b's', b' ', b'm', b'e', b',', b' ', b'I', b' ', b'g', b'u',
+                b'e', b's', b's', b'w', b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e',
+                b'/', b'd', b'o', b'g', b's', b'/', b'o', b'u', b't', b'W', b'h', b'o', b'?', b' ',
+                b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?',
+                b' ', b'W', b'h', b'o', b'?',
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(
+                result,
+                Message::State(State {
+                    transaction_id: u64::MAX,
+                    request_pattern: "who/let/the/?/#".to_owned(),
+                    key_value_pairs: vec![
+                        (
+                            "who/let/the/chicken/cross/the/road".to_owned(),
+                            "yeah, that was me, I guess".to_owned()
+                        ),
+                        (
+                            "who/let/the/dogs/out".to_owned(),
+                            "Who? Who? Who? Who? Who?".to_owned()
+                        )
+                    ]
                 })
             )
         }

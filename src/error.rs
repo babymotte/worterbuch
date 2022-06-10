@@ -1,24 +1,28 @@
-use std::{fmt, io};
+use std::fmt;
 
 #[derive(Debug)]
-pub enum Error {
-    DecodeError(String),
+pub struct DecodeError {
+    msg: String,
 }
 
-impl fmt::Display for Error {
+impl DecodeError {
+    pub fn with_message(msg: String) -> DecodeError {
+        DecodeError { msg }
+    }
+}
+
+impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::DecodeError(msg) => write!(f, "{msg}"),
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl<E: std::error::Error> From<E> for DecodeError {
+    fn from(e: E) -> Self {
+        DecodeError {
+            msg: format!("{e}"),
         }
     }
 }
 
-impl std::error::Error for Error {}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::DecodeError(format!("{e}"))
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
+pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
