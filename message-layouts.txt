@@ -1,0 +1,35 @@
+GET
+
+1 Type | 8 Transaction ID | 2 Request Pattern Length | n Request Pattern
+
+
+SET
+
+1 Type | 8 Transaction ID | 2 Key Length | 4 Value Length | m Key | l Value
+
+
+SUBSCRIBE
+
+1 Type | 8 Transaction ID | 2 Request Pattern Length | n Request Pattern
+
+
+-----------------------------
+
+STATE
+
+1 Type | 8 Transaction ID | 2 Request Pattern Length | 4 No of K/V Pairs | 2 Key 1 Length | 4 Value 1 Length | 2 Key 2 Length | 4 Value 2 Length | ... | p Request Pattern | n Key 1 | m Value 1 | l Key 2 | k Value 2 | ...
+
+
+ACK
+
+1 Type | 8 Transaction ID
+
+
+ERR
+
+1 Type | 8 Transaction ID | 1 Error Code | 4 Metadata Length | n Metadata
+
+
+EVENT
+
+1 Type | 8 Transaction ID | 2 Request Pattern Length | 2 Key Length | 4 Value Length | n Request Pattern | m Key | l Value
