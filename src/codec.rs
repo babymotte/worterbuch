@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub type MessageType = u8;
 pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type Key = String;
@@ -14,14 +15,14 @@ pub type ValueLength = u32;
 pub type MetaDataLength = u32;
 pub type NumKeyValuePairs = u32;
 
-pub const GET: u8 = 0b00000000;
-pub const SET: u8 = 0b00000001;
-pub const SUB: u8 = 0b00000010;
+pub const GET: MessageType = 0b00000000;
+pub const SET: MessageType = 0b00000001;
+pub const SUB: MessageType = 0b00000010;
 
-pub const STA: u8 = 0b10000000;
-pub const ACK: u8 = 0b10000001;
-pub const EVE: u8 = 0b10000010;
-pub const ERR: u8 = 0b10000011;
+pub const STA: MessageType = 0b10000000;
+pub const ACK: MessageType = 0b10000001;
+pub const EVE: MessageType = 0b10000010;
+pub const ERR: MessageType = 0b10000011;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Message {
@@ -38,58 +39,100 @@ pub enum Message {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Get {
-    transaction_id: TransactionId,
-    request_pattern: RequestPattern,
+    pub transaction_id: TransactionId,
+    pub request_pattern: RequestPattern,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Set {
-    transaction_id: TransactionId,
-    key: Key,
-    value: Value,
+    pub transaction_id: TransactionId,
+    pub key: Key,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Subscribe {
-    transaction_id: TransactionId,
-    request_pattern: RequestPattern,
+    pub transaction_id: TransactionId,
+    pub request_pattern: RequestPattern,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct State {
-    transaction_id: TransactionId,
-    request_pattern: RequestPattern,
-    key_value_pairs: KeyValuePairs,
+    pub transaction_id: TransactionId,
+    pub request_pattern: RequestPattern,
+    pub key_value_pairs: KeyValuePairs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Ack {
-    transaction_id: TransactionId,
+    pub transaction_id: TransactionId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Event {
-    transaction_id: TransactionId,
-    request_pattern: RequestPattern,
-    key: Key,
-    value: Value,
+    pub transaction_id: TransactionId,
+    pub request_pattern: RequestPattern,
+    pub key: Key,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Err {
-    transaction_id: TransactionId,
-    error_code: ErrorCode,
-    metadata: MetaData,
+    pub transaction_id: TransactionId,
+    pub error_code: ErrorCode,
+    pub metadata: MetaData,
+}
+
+pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let mut buf = vec![GET];
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(request_pattern_length.to_be_bytes());
+    buf.extend(msg.request_pattern.as_bytes());
+    Ok(buf)
+}
+
+pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+pub fn encode_event_message(msg: &Event) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
+    todo!()
+}
+
+fn get_request_pattern_length(request_pattern: &str) -> EncodeResult<RequestPatternLength> {
+    let request_pattern_length = request_pattern.len();
+    if request_pattern_length > RequestPatternLength::MAX as usize {
+        Err(EncodeError::RequestPatternTooLong(request_pattern_length))
+    } else {
+        Ok(request_pattern_length as RequestPatternLength)
+    }
 }
 
 #[cfg(not(feature = "async"))]
 mod blocking {
-    use std::io::Read;
 
     use super::{
         Ack, Err, Event, Get, Message, Set, State, Subscribe, ACK, ERR, EVE, GET, SET, STA, SUB,
     };
     use crate::error::{DecodeError, DecodeResult};
+    use std::io::Read;
 
     pub fn read_message(mut data: impl Read) -> DecodeResult<Message> {
         let mut buf = [0];
@@ -105,10 +148,7 @@ mod blocking {
             EVE => read_event_message(data).map(Message::Event),
             ERR => read_err_message(data).map(Message::Err),
             // undefined
-            _ => Err(DecodeError::with_message(format!(
-                "type byte {:b} not defined",
-                buf[0]
-            ))),
+            _ => Err(DecodeError::UndefinedType(buf[0])),
         }
     }
 
@@ -459,3 +499,25 @@ mod blocking {
 
 #[cfg(not(feature = "async"))]
 pub use blocking::*;
+
+use crate::error::{EncodeError, EncodeResult};
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn get_message_is_encoded_correctly() {
+        let msg = Get {
+            transaction_id: 4,
+            request_pattern: "trolo".to_owned(),
+        };
+
+        let data = vec![
+            GET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
+        ];
+
+        assert_eq!(data, encode_get_message(&msg).unwrap());
+    }
+}
