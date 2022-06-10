@@ -105,7 +105,12 @@ pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let mut buf = vec![SUB];
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(request_pattern_length.to_be_bytes());
+    buf.extend(msg.request_pattern.as_bytes());
+    Ok(buf)
 }
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
@@ -562,5 +567,22 @@ mod test {
         ];
 
         assert_eq!(data, encode_set_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn subscribe_message_is_encoded_correctly() {
+        let msg = Subscribe {
+            transaction_id: 5536684732567,
+            request_pattern: "let/me/?/you/its/features".to_owned(),
+        };
+
+        let data = vec![
+            SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
+            0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
+            b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
+            b't', b'u', b'r', b'e', b's',
+        ];
+
+        assert_eq!(data, encode_subscribe_message(&msg).unwrap());
     }
 }
