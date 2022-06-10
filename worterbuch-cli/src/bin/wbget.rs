@@ -10,7 +10,7 @@ async fn main() -> Result<()> {
     let mut con = worterbuch_cli::gql::connect().await?;
 
     #[cfg(not(feature = "graphql"))]
-    let con = worterbuch_cli::tcp::connect()?;
+    let mut con = worterbuch_cli::tcp::connect()?;
 
     let mut ticket = 0;
 

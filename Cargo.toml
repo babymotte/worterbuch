@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["graphql"]
+default = ["tcp"]
 graphql = [
     "juniper",
     "juniper_graphql_ws",
@@ -16,6 +16,7 @@ graphql = [
     "async-stream",
     "openssl",
 ]
+tcp = []
 
 [dependencies]
 tokio = { version = "1.19.2", features = ["full"] }
