@@ -93,7 +93,15 @@ pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
-    todo!()
+    let key_length = get_key_length(&msg.key)?;
+    let value_length = get_value_length(&msg.value)?;
+    let mut buf = vec![SET];
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(key_length.to_be_bytes());
+    buf.extend(value_length.to_be_bytes());
+    buf.extend(msg.key.as_bytes());
+    buf.extend(msg.value.as_bytes());
+    Ok(buf)
 }
 
 pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
@@ -116,12 +124,30 @@ pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
     todo!()
 }
 
-fn get_request_pattern_length(request_pattern: &str) -> EncodeResult<RequestPatternLength> {
-    let request_pattern_length = request_pattern.len();
-    if request_pattern_length > RequestPatternLength::MAX as usize {
-        Err(EncodeError::RequestPatternTooLong(request_pattern_length))
+fn get_request_pattern_length(string: &str) -> EncodeResult<RequestPatternLength> {
+    let length = string.len();
+    if length > RequestPatternLength::MAX as usize {
+        Err(EncodeError::RequestPatternTooLong(length))
     } else {
-        Ok(request_pattern_length as RequestPatternLength)
+        Ok(length as RequestPatternLength)
+    }
+}
+
+fn get_key_length(string: &str) -> EncodeResult<KeyLength> {
+    let length = string.len();
+    if length > KeyLength::MAX as usize {
+        Err(EncodeError::KeyTooLong(length))
+    } else {
+        Ok(length as KeyLength)
+    }
+}
+
+fn get_value_length(string: &str) -> EncodeResult<ValueLength> {
+    let length = string.len();
+    if length > ValueLength::MAX as usize {
+        Err(EncodeError::ValueTooLong(length))
+    } else {
+        Ok(length as ValueLength)
     }
 }
 
@@ -519,5 +545,22 @@ mod test {
         ];
 
         assert_eq!(data, encode_get_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn set_message_is_encoded_correctly() {
+        let msg = Set {
+            transaction_id: 0,
+            key: "yo/mama".to_owned(),
+            value: "fat".to_owned(),
+        };
+
+        let data = vec![
+            SET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000000, 0b00000000, 0b00000111, 0b00000000, 0b00000000, 0b00000000,
+            0b00000011, b'y', b'o', b'/', b'm', b'a', b'm', b'a', b'f', b'a', b't',
+        ];
+
+        assert_eq!(data, encode_set_message(&msg).unwrap());
     }
 }

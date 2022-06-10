@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::codec::MessageType;
+use crate::codec::{KeyLength, MessageType, RequestPatternLength, ValueLength};
 
 #[derive(Debug)]
 pub enum DecodeError {
@@ -28,6 +28,8 @@ pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
 #[derive(Debug)]
 pub enum EncodeError {
     RequestPatternTooLong(usize),
+    KeyTooLong(usize),
+    ValueTooLong(usize),
     Other(String),
 }
 
@@ -38,7 +40,19 @@ impl fmt::Display for EncodeError {
                 f,
                 "request pattern is too long : {} bytes (max {} bytes allowed)",
                 len,
-                u16::MAX
+                RequestPatternLength::MAX
+            ),
+            EncodeError::KeyTooLong(len) => write!(
+                f,
+                "key is too long : {} bytes (max {} bytes allowed)",
+                len,
+                KeyLength::MAX
+            ),
+            EncodeError::ValueTooLong(len) => write!(
+                f,
+                "value is too long : {} bytes (max {} bytes allowed)",
+                len,
+                ValueLength::MAX
             ),
             EncodeError::Other(msg) => write!(f, "{msg}"),
         }
