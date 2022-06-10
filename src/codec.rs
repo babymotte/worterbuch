@@ -70,6 +70,7 @@ pub struct Ack {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Event {
     transaction_id: TransactionId,
+    request_pattern: RequestPattern,
     key: Key,
     value: Value,
 }
@@ -230,11 +231,48 @@ mod blocking {
     }
 
     fn read_ack_message(mut data: impl Read) -> DecodeResult<Ack> {
-        todo!()
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        Ok(Ack { transaction_id })
     }
 
     fn read_event_message(mut data: impl Read) -> DecodeResult<Event> {
-        todo!()
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf)?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf)?;
+        let key_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf)?;
+        let value_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf)?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; key_length as usize];
+        data.read_exact(&mut buf)?;
+        let key = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; value_length as usize];
+        data.read_exact(&mut buf)?;
+        let value = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Event {
+            transaction_id,
+            request_pattern,
+            key,
+            value,
+        })
     }
 
     fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
@@ -338,6 +376,40 @@ mod blocking {
                             "Who? Who? Who? Who? Who?".to_owned()
                         )
                     ]
+                })
+            )
+        }
+
+        #[test]
+        fn ack_message_is_read_correctly() {
+            let data = [
+                ACK, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+                0b00000000, 0b00101010,
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(result, Message::Ack(Ack { transaction_id: 42 }))
+        }
+
+        #[test]
+        fn event_message_is_read_correctly() {
+            let data = [
+                EVE, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+                0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000101, 0b00000000,
+                0b00000000, 0b00000000, 0b00000001, b'1', b'/', b'2', b'/', b'3', b'1', b'/', b'2',
+                b'/', b'3', b'4',
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(
+                result,
+                Message::Event(Event {
+                    transaction_id: 42,
+                    request_pattern: "1/2/3".to_owned(),
+                    key: "1/2/3".to_owned(),
+                    value: "4".to_owned()
                 })
             )
         }
