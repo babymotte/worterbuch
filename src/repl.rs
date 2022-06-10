@@ -28,6 +28,8 @@ pub async fn repl(worterbuch: Arc<RwLock<Worterbuch>>) {
     let (tx, mut rx) = unbounded_channel();
     thread::spawn(|| read(tx));
 
+    log::info!("Starting REPL:");
+
     while let Some(line) = rx.recv().await {
         if let Err(e) = interpret(line, &worterbuch).await {
             log::error!("{e}: {}", e.root_cause());

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, io, string::FromUtf8Error};
 
 use crate::codec::{
     KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, RequestPatternLength, ValueLength,
@@ -7,21 +7,31 @@ use crate::codec::{
 #[derive(Debug)]
 pub enum DecodeError {
     UndefinedType(MessageType),
-    Other(String),
+    IoError(io::Error),
+    FromUtf8Error(FromUtf8Error),
 }
+
+impl std::error::Error for DecodeError {}
 
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DecodeError::UndefinedType(mtype) => write!(f, "undefined message type: {mtype})",),
-            DecodeError::Other(msg) => write!(f, "{msg}"),
+            DecodeError::IoError(e) => write!(f, "{e}"),
+            DecodeError::FromUtf8Error(e) => write!(f, "{e}"),
         }
     }
 }
 
-impl<E: std::error::Error> From<E> for DecodeError {
-    fn from(e: E) -> Self {
-        DecodeError::Other(format!("{e}"))
+impl From<io::Error> for DecodeError {
+    fn from(e: io::Error) -> Self {
+        DecodeError::IoError(e)
+    }
+}
+
+impl From<FromUtf8Error> for DecodeError {
+    fn from(e: FromUtf8Error) -> Self {
+        DecodeError::FromUtf8Error(e)
     }
 }
 
@@ -34,8 +44,10 @@ pub enum EncodeError {
     ValueTooLong(usize),
     MetaDataTooLong(usize),
     TooManyKeyValuePairs(usize),
-    Other(String),
+    IoError(io::Error),
 }
+
+impl std::error::Error for EncodeError {}
 
 impl fmt::Display for EncodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -70,14 +82,14 @@ impl fmt::Display for EncodeError {
                 len,
                 NumKeyValuePairs::MAX
             ),
-            EncodeError::Other(msg) => write!(f, "{msg}"),
+            EncodeError::IoError(ioe) => write!(f, "{ioe}"),
         }
     }
 }
 
-impl<E: std::error::Error> From<E> for EncodeError {
-    fn from(e: E) -> Self {
-        EncodeError::Other(format!("{e}"))
+impl From<io::Error> for EncodeError {
+    fn from(e: io::Error) -> Self {
+        EncodeError::IoError(e)
     }
 }
 

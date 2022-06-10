@@ -32,6 +32,8 @@ async fn main() -> Result<()> {
     #[cfg(feature = "graphql")]
     spawn(server::warp::start(worterbuch.clone(), config));
 
+    spawn(server::tcp::start(worterbuch.clone(), config));
+
     spawn(repl(worterbuch));
 
     let mut signal = signal(SignalKind::terminate())?;
