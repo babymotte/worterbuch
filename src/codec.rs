@@ -14,6 +14,15 @@ pub type ValueLength = u32;
 pub type MetaDataLength = u32;
 pub type NumKeyValuePairs = u32;
 
+pub const GET: u8 = 0b00000000;
+pub const SET: u8 = 0b00000001;
+pub const SUB: u8 = 0b00000010;
+
+pub const STA: u8 = 0b10000000;
+pub const ACK: u8 = 0b10000001;
+pub const EVE: u8 = 0b10000010;
+pub const ERR: u8 = 0b10000011;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Message {
     // client messages
@@ -76,7 +85,9 @@ pub struct Err {
 mod blocking {
     use std::io::Read;
 
-    use super::{Ack, Err, Event, Get, Message, Set, State, Subscribe};
+    use super::{
+        Ack, Err, Event, Get, Message, Set, State, Subscribe, ACK, ERR, EVE, GET, SET, STA, SUB,
+    };
     use crate::error::{Error, Result};
 
     pub fn read_message(mut data: impl Read) -> Result<Message> {
@@ -84,14 +95,14 @@ mod blocking {
         data.read_exact(&mut buf)?;
         match buf[0] {
             // client messages
-            0b00000000 => read_get_message(data).map(Message::Get),
-            0b00000001 => read_set_message(data).map(Message::Set),
-            0b00000010 => read_subscribe_message(data).map(Message::Subscribe),
+            GET => read_get_message(data).map(Message::Get),
+            SET => read_set_message(data).map(Message::Set),
+            SUB => read_subscribe_message(data).map(Message::Subscribe),
             // server messages
-            0b10000000 => read_state_message(data).map(Message::State),
-            0b10000001 => read_ack_message(data).map(Message::Ack),
-            0b10000010 => read_event_message(data).map(Message::Event),
-            0b10000011 => read_err_message(data).map(Message::Err),
+            STA => read_state_message(data).map(Message::State),
+            ACK => read_ack_message(data).map(Message::Ack),
+            EVE => read_event_message(data).map(Message::Event),
+            ERR => read_err_message(data).map(Message::Err),
             // undefined
             _ => Err(Error::DecodeError(format!(
                 "type byte {:b} not defined",
@@ -120,7 +131,31 @@ mod blocking {
     }
 
     fn read_set_message(mut data: impl Read) -> Result<Set> {
-        todo!()
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf)?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf)?;
+        let key_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf)?;
+        let value_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; key_length as usize];
+        data.read_exact(&mut buf)?;
+        let key = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; value_length as usize];
+        data.read_exact(&mut buf)?;
+        let value = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Set {
+            transaction_id,
+            key,
+            value,
+        })
     }
 
     fn read_subscribe_message(mut data: impl Read) -> Result<Subscribe> {
@@ -147,8 +182,6 @@ mod blocking {
     mod test {
         use super::*;
 
-        const GET: u8 = 0b00000000;
-
         #[test]
         fn get_message_is_read_correctly() {
             let data = [
@@ -163,6 +196,26 @@ mod blocking {
                 Message::Get(Get {
                     transaction_id: 4,
                     request_pattern: "trolo".to_owned()
+                })
+            )
+        }
+
+        #[test]
+        fn set_message_is_read_correctly() {
+            let data = [
+                SET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+                0b00000000, 0b00000000, 0b00000000, 0b00000111, 0b00000000, 0b00000000, 0b00000000,
+                0b00000011, b'y', b'o', b'/', b'm', b'a', b'm', b'a', b'f', b'a', b't',
+            ];
+
+            let result = read_message(&data[..]).unwrap();
+
+            assert_eq!(
+                result,
+                Message::Set(Set {
+                    transaction_id: 0,
+                    key: "yo/mama".to_owned(),
+                    value: "fat".to_owned()
                 })
             )
         }
