@@ -233,6 +233,226 @@ fn get_metadata_length(string: &str) -> EncodeResult<MetaDataLength> {
     }
 }
 
+#[cfg(feature = "async")]
+mod nonblocking {
+
+    use super::{
+        Ack, Err, Event, Get, Message, Set, State, Subscribe, ACK, ERR, EVE, GET, SET, STA, SUB,
+    };
+    use crate::error::{DecodeError, DecodeResult};
+    use tokio::io::AsyncReadExt;
+
+    pub async fn read_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Message> {
+        let mut buf = [0];
+        data.read_exact(&mut buf).await?;
+        match buf[0] {
+            // client messages
+            GET => read_get_message(data).await.map(Message::Get),
+            SET => read_set_message(data).await.map(Message::Set),
+            SUB => read_subscribe_message(data).await.map(Message::Subscribe),
+            // server messages
+            STA => read_state_message(data).await.map(Message::State),
+            ACK => read_ack_message(data).await.map(Message::Ack),
+            EVE => read_event_message(data).await.map(Message::Event),
+            ERR => read_err_message(data).await.map(Message::Err),
+            // undefined
+            _ => Err(DecodeError::UndefinedType(buf[0])),
+        }
+    }
+
+    async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Get> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf).await?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Get {
+            transaction_id,
+            request_pattern,
+        })
+    }
+
+    async fn read_set_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Set> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let key_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf).await?;
+        let value_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; key_length as usize];
+        data.read_exact(&mut buf).await?;
+        let key = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; value_length as usize];
+        data.read_exact(&mut buf).await?;
+        let value = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Set {
+            transaction_id,
+            key,
+            value,
+        })
+    }
+
+    async fn read_subscribe_message(
+        mut data: impl AsyncReadExt + Unpin,
+    ) -> DecodeResult<Subscribe> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf).await?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Subscribe {
+            transaction_id,
+            request_pattern,
+        })
+    }
+
+    async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<State> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf).await?;
+        let num_key_val_pairs = u32::from_be_bytes(buf);
+
+        let mut key_value_lengths = Vec::new();
+
+        for _ in 0..num_key_val_pairs {
+            let mut buf = [0; 2];
+            data.read_exact(&mut buf).await?;
+            let key_length = u16::from_be_bytes(buf);
+
+            let mut buf = [0; 4];
+            data.read_exact(&mut buf).await?;
+            let value_length = u32::from_be_bytes(buf);
+
+            key_value_lengths.push((key_length, value_length));
+        }
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf).await?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        let mut key_value_pairs = Vec::new();
+
+        for (key_length, value_length) in key_value_lengths {
+            let mut buf = vec![0u8; key_length as usize];
+            data.read_exact(&mut buf).await?;
+            let key = String::from_utf8(buf)?;
+
+            let mut buf = vec![0u8; value_length as usize];
+            data.read_exact(&mut buf).await?;
+            let value = String::from_utf8_lossy(&buf).to_string();
+
+            key_value_pairs.push((key, value));
+        }
+
+        Ok(State {
+            transaction_id,
+            request_pattern,
+            key_value_pairs,
+        })
+    }
+
+    async fn read_ack_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Ack> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        Ok(Ack { transaction_id })
+    }
+
+    async fn read_event_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Event> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let request_pattern_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 2];
+        data.read_exact(&mut buf).await?;
+        let key_length = u16::from_be_bytes(buf);
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf).await?;
+        let value_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; request_pattern_length as usize];
+        data.read_exact(&mut buf).await?;
+        let request_pattern = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; key_length as usize];
+        data.read_exact(&mut buf).await?;
+        let key = String::from_utf8_lossy(&buf).to_string();
+
+        let mut buf = vec![0u8; value_length as usize];
+        data.read_exact(&mut buf).await?;
+        let value = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Event {
+            transaction_id,
+            request_pattern,
+            key,
+            value,
+        })
+    }
+
+    async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Err> {
+        let mut buf = [0; 8];
+        data.read_exact(&mut buf).await?;
+        let transaction_id = u64::from_be_bytes(buf);
+
+        let mut buf = [0; 1];
+        data.read_exact(&mut buf).await?;
+        let error_code = buf[0];
+
+        let mut buf = [0; 4];
+        data.read_exact(&mut buf).await?;
+        let metadata_length = u32::from_be_bytes(buf);
+
+        let mut buf = vec![0u8; metadata_length as usize];
+        data.read_exact(&mut buf).await?;
+        let metadata = String::from_utf8_lossy(&buf).to_string();
+
+        Ok(Err {
+            transaction_id,
+            error_code,
+            metadata,
+        })
+    }
+}
+
+#[cfg(feature = "async")]
+pub use nonblocking::*;
+
 #[cfg(not(feature = "async"))]
 mod blocking {
 
