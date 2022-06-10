@@ -17,6 +17,7 @@ graphql = [
     "openssl",
 ]
 tcp = []
+async = []
 
 [dependencies]
 tokio = { version = "1.19.2", features = ["full"] }
