@@ -1,26 +1,24 @@
 use crate::Connection;
 use anyhow::Result;
 use async_trait::async_trait;
-use std::{env, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     spawn,
-    sync::{
-        mpsc::{self, UnboundedSender},
-        RwLock,
-    },
+    sync::mpsc::{self, UnboundedSender},
 };
-use worterbuch::codec::{
-    encode_get_message, encode_set_message, encode_subscribe_message, read_message, Get, Message,
-    Set, Subscribe,
+use worterbuch::{
+    codec::{
+        encode_get_message, encode_set_message, encode_subscribe_message, read_message, Get,
+        Message, Set, Subscribe,
+    },
+    config::Config,
 };
 
 #[derive(Clone)]
 pub struct TcpConnection {
     cmd_tx: UnboundedSender<Message>,
     counter: u64,
-    latest_ticket: Arc<RwLock<u64>>,
 }
 
 #[async_trait]
@@ -55,23 +53,12 @@ impl Connection for TcpConnection {
         }))?;
         Ok(i)
     }
-
-    async fn wait_for_ticket(&self, ticket: u64) {
-        eprintln!("waiting for ticket {ticket} ...");
-        // TODO do this in a more elegant fashion
-        let current = *self.latest_ticket.read().await;
-        while ticket > current {
-            eprintln!("{current}");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
 }
 
 pub async fn connect() -> Result<TcpConnection> {
-    let addr = env::var("WORTERBUCH_ADDR").unwrap_or("127.0.0.1".to_owned());
-    let port = env::var("WORTERBUCH_PORT").unwrap_or("4242".to_owned());
+    let config = Config::new()?;
 
-    let server = TcpStream::connect(format!("{addr}:{port}")).await?;
+    let server = TcpStream::connect(format!("{}:{}", config.bind_addr, config.tcp_port)).await?;
     let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
@@ -87,35 +74,23 @@ pub async fn connect() -> Result<TcpConnection> {
         }
     });
 
-    let (ticket_tx, mut ticket_rx) = tokio::sync::mpsc::unbounded_channel();
-
     spawn(async move {
         loop {
             match read_message(&mut tcp_rx).await {
-                Ok(worterbuch::codec::Message::State(msg)) => {
+                Ok(Some(worterbuch::codec::Message::State(msg))) => {
                     for (key, value) in msg.key_value_pairs {
                         println!("{key} = {value}");
                     }
-                    if let Err(e) = ticket_tx.send(msg.transaction_id) {
-                        eprintln!("error sending ticket: {e}");
-                        break;
-                    }
                 }
-                Ok(worterbuch::codec::Message::Ack(msg)) => {
-                    if let Err(e) = ticket_tx.send(msg.transaction_id) {
-                        eprintln!("error sending ticket: {e}");
-                        break;
-                    }
-                }
-                Ok(worterbuch::codec::Message::Event(msg)) => {
+                Ok(Some(worterbuch::codec::Message::Event(msg))) => {
                     println!("{} = {}", msg.key, msg.value);
                 }
-                Ok(worterbuch::codec::Message::Err(msg)) => {
+                Ok(Some(worterbuch::codec::Message::Err(msg))) => {
                     eprintln!("server error {}: {}", msg.error_code, msg.metadata);
-                    if let Err(e) = ticket_tx.send(msg.transaction_id) {
-                        eprintln!("error sending ticket: {e}");
-                        break;
-                    }
+                }
+                Ok(None) => {
+                    eprintln!("Connection to server lost.");
+                    break;
                 }
                 Err(e) => {
                     eprintln!("error decoding message: {e}");
@@ -125,18 +100,7 @@ pub async fn connect() -> Result<TcpConnection> {
         }
     });
 
-    let con = TcpConnection {
-        cmd_tx,
-        counter: 1,
-        latest_ticket: Arc::default(),
-    };
-
-    let latest_ticket = con.latest_ticket.clone();
-    spawn(async move {
-        while let Some(ticket) = ticket_rx.recv().await {
-            *latest_ticket.write().await = ticket;
-        }
-    });
+    let con = TcpConnection { cmd_tx, counter: 1 };
 
     Ok(con)
 }

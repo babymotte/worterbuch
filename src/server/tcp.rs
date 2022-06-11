@@ -1,4 +1,4 @@
-use crate::{config::Config, worterbuch::Worterbuch};
+use crate::worterbuch::Worterbuch;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::{
@@ -11,6 +11,7 @@ use worterbuch::{
     codec::{
         encode_ack_message, encode_state_message, read_message, Ack, Get, Set, State, Subscribe,
     },
+    config::Config,
     error::{DecodeError, EncodeError},
 };
 
@@ -18,7 +19,7 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
     log::info!("Starting TCP Server...");
 
     let bind_addr = config.bind_addr;
-    let port = config.port;
+    let port = config.tcp_port;
 
     let server = TcpListener::bind((bind_addr, port)).await?;
 
@@ -32,14 +33,18 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
 async fn serve(mut client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result<()> {
     loop {
         match read_message(&mut client).await {
-            Ok(worterbuch::codec::Message::Get(msg)) => {
+            Ok(Some(worterbuch::codec::Message::Get(msg))) => {
                 get(msg, worterbuch.clone(), &mut client).await?
             }
-            Ok(worterbuch::codec::Message::Set(msg)) => {
+            Ok(Some(worterbuch::codec::Message::Set(msg))) => {
                 set(msg, worterbuch.clone(), &mut client).await?
             }
-            Ok(worterbuch::codec::Message::Subscribe(msg)) => {
+            Ok(Some(worterbuch::codec::Message::Subscribe(msg))) => {
                 subscribe(msg, worterbuch.clone(), &mut client).await
+            }
+            Ok(None) => {
+                // client disconnected
+                break;
             }
             Err(e) => {
                 log::error!("error decoding message: {e}");
@@ -100,14 +105,14 @@ async fn set(msg: Set, worterbuch: Arc<RwLock<Worterbuch>>, client: &mut TcpStre
     Ok(())
 }
 
-async fn subscribe(msg: Subscribe, worterbuch: Arc<RwLock<Worterbuch>>, client: &mut TcpStream) {
+async fn subscribe(_msg: Subscribe, _worterbuch: Arc<RwLock<Worterbuch>>, _client: &mut TcpStream) {
     todo!()
 }
 
-async fn handle_encode_error(e: EncodeError, client: &mut TcpStream) -> Result<()> {
+async fn handle_encode_error(_e: EncodeError, _client: &mut TcpStream) -> Result<()> {
     todo!()
 }
 
-async fn handle_store_error(e: anyhow::Error, client: &mut TcpStream) -> Result<()> {
+async fn handle_store_error(_e: anyhow::Error, _client: &mut TcpStream) -> Result<()> {
     todo!()
 }

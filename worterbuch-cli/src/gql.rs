@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
 use serde_json::Value;
-use std::{env, sync::Arc, time::Duration};
-use tokio::{spawn, sync::RwLock};
+use std::env;
+use tokio::spawn;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{self, protocol::Message},
@@ -19,7 +19,6 @@ const SUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"qu
 pub struct GqlConnection {
     cmd_tx: UnboundedSender<Command>,
     counter: u64,
-    latest_ticket: Arc<RwLock<u64>>,
 }
 
 #[async_trait]
@@ -47,21 +46,12 @@ impl Connection for GqlConnection {
             .unbounded_send(Command::Subscrube(key.to_owned(), i))?;
         Ok(i)
     }
-
-    async fn wait_for_ticket(&self, ticket: u64) {
-        // TODO do this in a more elegant fashion
-        let current = *self.latest_ticket.read().await;
-        while ticket > current {
-            eprintln!("{current}");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
 }
 
 pub async fn connect() -> Result<GqlConnection> {
     let proto = env::var("WORTERBUCH_PROTO").unwrap_or("ws".to_owned());
     let addr = env::var("WORTERBUCH_ADDR").unwrap_or("127.0.0.1".to_owned());
-    let port = env::var("WORTERBUCH_PORT").unwrap_or("4242".to_owned());
+    let port = env::var("WORTERBUCH_GRAPHQL_PORT").unwrap_or("4243".to_owned());
 
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 
@@ -72,10 +62,8 @@ pub async fn connect() -> Result<GqlConnection> {
 
     spawn(cmd_rx.map(encode_ws_message).forward(write));
 
-    let (ticket_tx, mut ticket_rx) = tokio::sync::mpsc::unbounded_channel();
-
     spawn(async move {
-        let mut messages = read.map(move |m| decode_ws_message(m, ticket_tx.clone()));
+        let mut messages = read.map(decode_ws_message);
         while let Some(msg) = messages.next().await {
             match msg {
                 Ok(Some(msg)) => println!("{msg}"),
@@ -87,18 +75,7 @@ pub async fn connect() -> Result<GqlConnection> {
 
     cmd_tx.unbounded_send(Command::Init)?;
 
-    let con = GqlConnection {
-        cmd_tx,
-        counter: 0,
-        latest_ticket: Arc::default(),
-    };
-
-    let latest_ticket = con.latest_ticket.clone();
-    spawn(async move {
-        while let Some(ticket) = ticket_rx.recv().await {
-            *latest_ticket.write().await = ticket;
-        }
-    });
+    let con = GqlConnection { cmd_tx, counter: 0 };
 
     Ok(con)
 }
@@ -124,10 +101,7 @@ fn encode_ws_message(cmd: Command) -> tungstenite::Result<Message> {
     Ok(Message::Text(txt))
 }
 
-fn decode_ws_message(
-    message: tungstenite::Result<Message>,
-    tickets: tokio::sync::mpsc::UnboundedSender<u64>,
-) -> Result<Option<String>> {
+fn decode_ws_message(message: tungstenite::Result<Message>) -> Result<Option<String>> {
     let msg = message?;
 
     match msg {
@@ -144,8 +118,6 @@ fn decode_ws_message(
                         .expect("id must be a string in json")
                         .parse()
                         .expect("id must represent a u64");
-                    eprintln!("received {id}");
-                    tickets.send(id)?;
                 }
             }
 
@@ -177,7 +149,7 @@ fn decode_ws_message(
 
                             Ok(Some(values.join("\n")))
                         }
-                    } else if let Some(subscribe) = data.get("subscribe") {
+                    } else if let Some(_subscribe) = data.get("subscribe") {
                         println!("{json}");
                         todo!()
                     } else {

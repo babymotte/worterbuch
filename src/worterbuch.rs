@@ -1,11 +1,26 @@
+use std::fmt::Display;
+
 use crate::{
-    config::Config,
-    store::Store,
+    store::{Store, StoreStats},
     subscribers::{Subscriber, Subscribers},
 };
 use anyhow::{Context, Error, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
 use tokio::sync::broadcast::{channel, Receiver};
+use worterbuch::config::Config;
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Stats {
+    store_stats: StoreStats,
+}
+
+impl Display for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = serde_json::to_string(self).expect("serialization cannot fail");
+        write!(f, "{str}")
+    }
+}
 
 #[derive(Default)]
 pub struct Worterbuch {
@@ -133,6 +148,12 @@ impl Worterbuch {
             );
         }
         Ok(imported_values)
+    }
+
+    pub fn stats(&self) -> Stats {
+        Stats {
+            store_stats: self.store.stats(),
+        }
     }
 
     fn notify_subscribers(

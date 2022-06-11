@@ -7,7 +7,9 @@ pub struct Config {
     pub separator: char,
     pub wildcard: char,
     pub multi_wildcard: char,
-    pub port: u16,
+    pub tcp_port: u16,
+    #[cfg(feature = "graphql")]
+    pub graphql_port: u16,
     pub bind_addr: IpAddr,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
@@ -25,6 +27,15 @@ impl Config {
 
         if let Ok(val) = env::var("WORTERBUCH_MULTI_WILDCARD") {
             self.multi_wildcard = to_char(val).context("multi-wildcard must be a single char")?;
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
+            self.tcp_port = val.parse().context("port must be an integer")?;
+        }
+
+        #[cfg(feature = "graphql")]
+        if let Ok(val) = env::var("WORTERBUCH_GRAPHQL_PORT") {
+            self.graphql_port = val.parse().context("port must be an integer")?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
@@ -62,7 +73,9 @@ impl Default for Config {
             separator: '/',
             wildcard: '?',
             multi_wildcard: '#',
-            port: 4242,
+            tcp_port: 4242,
+            #[cfg(feature = "graphql")]
+            graphql_port: 4243,
             bind_addr: [127, 0, 0, 1].into(),
             cert_path: None,
             key_path: None,

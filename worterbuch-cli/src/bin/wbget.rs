@@ -12,14 +12,10 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "graphql"))]
     let mut con = worterbuch_cli::tcp::connect().await?;
 
-    let mut ticket = 0;
-
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(key)) = lines.next_line().await {
-        ticket = con.get(&key)?;
+        con.get(&key)?;
     }
-
-    con.wait_for_ticket(ticket).await;
 
     Ok(())
 }

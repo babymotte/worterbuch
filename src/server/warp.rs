@@ -1,5 +1,4 @@
 use crate::{
-    config::Config,
     server::graphql::{self, Context},
     worterbuch::Worterbuch,
 };
@@ -8,6 +7,7 @@ use juniper_warp::subscriptions::serve_graphql_ws;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use warp::Filter;
+use worterbuch::config::Config;
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server...");
@@ -40,7 +40,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
 
     let routes = graphql.or(graphql_ws).or(graphiql);
 
-    let port = config.port;
+    let port = config.graphql_port;
     let bind_addr = config.bind_addr;
     let cert_path = &config.cert_path;
     let key_path = &config.key_path;

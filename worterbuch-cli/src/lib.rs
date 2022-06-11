@@ -12,7 +12,6 @@ pub trait Connection {
     fn set(&mut self, key: &str, value: &str) -> Result<u64>;
     fn get(&mut self, key: &str) -> Result<u64>;
     fn subscribe(&mut self, key: &str) -> Result<u64>;
-    async fn wait_for_ticket(&self, ticket: u64);
 }
 
 pub enum Command {

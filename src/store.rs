@@ -44,6 +44,11 @@ impl Node {
 }
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StoreStats {
+    num_entries: usize,
+}
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Store {
     data: Node,
 }
@@ -229,6 +234,16 @@ impl Store {
             .merge(other.data, None, &mut insertions, &path, separator);
         insertions
     }
+
+    pub fn stats(&self) -> StoreStats {
+        let num_entries = self.count_entries();
+
+        StoreStats { num_entries }
+    }
+
+    fn count_entries(&self) -> usize {
+        count_children(&self.data)
+    }
 }
 
 fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
@@ -242,6 +257,21 @@ fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
     }
     string
 }
+
+fn count_children(node: &Node) -> usize {
+    let mut count = 0;
+
+    if node.v.is_some() {
+        count += 1;
+    }
+
+    for child in node.t.values() {
+        count += count_children(child);
+    }
+
+    count
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

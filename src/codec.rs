@@ -242,9 +242,14 @@ mod nonblocking {
     use crate::error::{DecodeError, DecodeResult};
     use tokio::io::AsyncReadExt;
 
-    pub async fn read_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Message> {
+    pub async fn read_message(
+        mut data: impl AsyncReadExt + Unpin,
+    ) -> DecodeResult<Option<Message>> {
         let mut buf = [0];
-        data.read_exact(&mut buf).await?;
+        if let Err(e) = data.read_exact(&mut buf).await {
+            log::debug!("client disconnected: {e}");
+            return Ok(None);
+        }
         match buf[0] {
             // client messages
             GET => read_get_message(data).await.map(Message::Get),
@@ -258,6 +263,7 @@ mod nonblocking {
             // undefined
             _ => Err(DecodeError::UndefinedType(buf[0])),
         }
+        .map(Some)
     }
 
     async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Get> {

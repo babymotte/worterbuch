@@ -1,12 +1,11 @@
-mod config;
 mod repl;
 mod server;
 mod store;
 mod subscribers;
-mod utils;
 mod worterbuch;
 
-use crate::{config::Config, repl::repl, worterbuch::Worterbuch};
+use crate::{repl::repl, worterbuch::Worterbuch};
+use ::worterbuch::config::Config;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::{
@@ -30,7 +29,7 @@ async fn main() -> Result<()> {
     let worterbuch = Arc::new(RwLock::new(worterbuch));
 
     #[cfg(feature = "graphql")]
-    spawn(server::warp::start(worterbuch.clone(), config));
+    spawn(server::warp::start(worterbuch.clone(), config.clone()));
 
     spawn(server::tcp::start(worterbuch.clone(), config));
 

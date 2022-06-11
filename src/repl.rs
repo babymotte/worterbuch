@@ -23,6 +23,7 @@ const LOAD: &str = "load";
 const EXPORT: &str = "export";
 const QUIT: &str = "quit";
 const EXIT: &str = "exit";
+const STATS: &str = "stats";
 
 pub async fn repl(worterbuch: Arc<RwLock<Worterbuch>>) {
     let (tx, mut rx) = unbounded_channel();
@@ -56,6 +57,7 @@ async fn interpret(line: String, worterbuch: &RwLock<Worterbuch>) -> Result<()> 
         Some(GET) => get(split, worterbuch).await,
         Some(SUBSCRIBE) => subscribe(split, worterbuch).await,
         Some(LOAD) => load(split, worterbuch).await,
+        Some(STATS) => print_stats(worterbuch).await,
         Some(EXPORT) => export(split, worterbuch).await,
         Some(QUIT) | Some(EXIT) => quit(),
         Some(cmd) => {
@@ -182,6 +184,14 @@ async fn export<'s>(
         "Dumped all values to {}",
         fs::canonicalize(&path).await?.as_os_str().to_string_lossy()
     );
+
+    Ok(())
+}
+
+async fn print_stats(worterbuch: &RwLock<Worterbuch>) -> Result<()> {
+    let wb = worterbuch.read().await;
+    let stats = wb.stats();
+    eprintln!("{stats}");
 
     Ok(())
 }
