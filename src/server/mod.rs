@@ -1,8 +1,10 @@
 #[cfg(feature = "graphql")]
-pub mod graphql;
-
+pub mod gql_warp;
 #[cfg(feature = "graphql")]
-pub mod warp;
-
-#[cfg(feature = "async")]
+pub mod graphql;
+#[cfg(feature = "tcp")]
 pub mod tcp;
+#[cfg(feature = "ws")]
+pub mod ws;
+#[cfg(feature = "ws")]
+pub mod ws_warp;

@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     let worterbuch = Arc::new(RwLock::new(worterbuch));
 
     #[cfg(feature = "graphql")]
-    spawn(server::warp::start(worterbuch.clone(), config.clone()));
+    spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));
 
     #[cfg(feature = "tcp")]
     spawn(server::tcp::start(worterbuch.clone(), config));
