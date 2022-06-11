@@ -26,6 +26,10 @@ impl Subscriber {
         self.tx.send(message)?;
         Ok(())
     }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
 }
 
 #[derive(Default)]
@@ -107,6 +111,21 @@ impl Subscribers {
         }
 
         current.subscribers.push(subscriber);
+    }
+
+    pub fn unsubscribe(&mut self, pattern: &[&str], subscription: Uuid) {
+        let mut current = &mut self.data;
+
+        for elem in pattern {
+            if let Some(node) = current.tree.get_mut(*elem) {
+                current = node;
+            } else {
+                log::warn!("No subscriber found for pattern {:?}", pattern);
+                return;
+            }
+        }
+
+        current.subscribers.retain(|s| s.id != subscription);
     }
 
     pub fn remove_subscriber(&mut self, subscriber: Subscriber) {

@@ -8,6 +8,7 @@ use anyhow::{Context, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use uuid::Uuid;
 use worterbuch::config::Config;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -115,7 +116,7 @@ impl Worterbuch {
     pub fn subscribe(
         &mut self,
         key_pattern: String,
-    ) -> Result<UnboundedReceiver<(String, String)>> {
+    ) -> Result<(UnboundedReceiver<(String, String)>, Uuid)> {
         let path: Vec<&str> = key_pattern.split(self.config.separator).collect();
         let matches = self.get_all(&key_pattern)?;
         let (tx, rx) = unbounded_channel();
@@ -123,11 +124,12 @@ impl Worterbuch {
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
         );
+        let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
         for item in matches {
             tx.send(item)?;
         }
-        Ok(rx)
+        Ok((rx, subscription))
     }
 
     pub fn export(&self) -> Result<Value> {
@@ -151,6 +153,11 @@ impl Worterbuch {
             );
         }
         Ok(imported_values)
+    }
+
+    pub fn unsubscribe(&mut self, key_pattern: &str, subscription: Uuid) {
+        let pattern: Vec<&str> = key_pattern.split(self.config.separator).collect();
+        self.subscribers.unsubscribe(&pattern, subscription);
     }
 
     pub fn stats(&self) -> Stats {

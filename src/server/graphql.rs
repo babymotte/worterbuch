@@ -79,7 +79,7 @@ impl Subscription {
         let mut worterbuch = context.database.write().await;
         let rx = worterbuch.subscribe(pattern.clone());
         let stream = async_stream::stream! {
-            if let Ok(mut rx) = rx {
+            if let Ok((mut rx, _)) = rx {
                 loop {
                     match rx.recv().await {
                         Some(event) => {

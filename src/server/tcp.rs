@@ -10,6 +10,7 @@ use tokio::{
         RwLock,
     },
 };
+use uuid::Uuid;
 use worterbuch::{
     codec::{
         encode_ack_message, encode_event_message, encode_state_message, read_message, Ack, Event,
@@ -20,7 +21,7 @@ use worterbuch::{
 };
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
-    log::info!("Starting TCP Server...");
+    log::info!("Starting TCP Server …");
 
     let bind_addr = config.bind_addr;
     let port = config.tcp_port;
@@ -48,16 +49,20 @@ async fn serve(client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result
         }
     });
 
+    let mut subscriptions = Vec::new();
+
     loop {
         match read_message(&mut client_read).await {
             Ok(Some(worterbuch::codec::Message::Get(msg))) => {
-                get(msg, worterbuch.clone(), tx.clone()).await?
+                get(msg, worterbuch.clone(), tx.clone()).await?;
             }
             Ok(Some(worterbuch::codec::Message::Set(msg))) => {
-                set(msg, worterbuch.clone(), tx.clone()).await?
+                set(msg, worterbuch.clone(), tx.clone()).await?;
             }
             Ok(Some(worterbuch::codec::Message::Subscribe(msg))) => {
-                subscribe(msg, worterbuch.clone(), tx.clone()).await?
+                if let Some(subs) = subscribe(msg, worterbuch.clone(), tx.clone()).await? {
+                    subscriptions.push(subs);
+                }
             }
             Ok(None) => {
                 // client disconnected
@@ -74,7 +79,10 @@ async fn serve(client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result
         }
     }
 
-    // TODO clean up any subscribers created by this client from worterbuch
+    let mut wb = worterbuch.write().await;
+    for subs in subscriptions {
+        wb.unsubscribe(&subs.0, subs.1);
+    }
 
     Ok(())
 }
@@ -136,14 +144,15 @@ async fn subscribe(
     msg: Subscribe,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> Result<Option<(String, Uuid)>> {
+    let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
-    let mut rx = match wb.subscribe(msg.request_pattern.clone()) {
+    let (mut rx, subscription) = match wb.subscribe(msg.request_pattern.clone()) {
         Ok(rx) => rx,
         Err(e) => {
             handle_store_error(e, client).await?;
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -158,12 +167,14 @@ async fn subscribe(
 
     let transaction_id = msg.transaction_id;
     let request_pattern = msg.request_pattern;
+    let request_pattern_recv = request_pattern.clone();
 
     spawn(async move {
+        log::debug!("Receiving events for subscription {subscription} …");
         while let Some((key, value)) = rx.recv().await {
             let event = Event {
                 transaction_id: transaction_id.clone(),
-                request_pattern: request_pattern.clone(),
+                request_pattern: request_pattern_recv.clone(),
                 key,
                 value,
             };
@@ -182,10 +193,13 @@ async fn subscribe(
                 }
             }
         }
-        // TODO unregister subscriber from worterbuch
+
+        let mut wb = wb_unsub.write().await;
+        log::debug!("No more events, ending subscription {subscription}.");
+        wb.unsubscribe(&request_pattern_recv, subscription);
     });
 
-    Ok(())
+    Ok(Some((request_pattern, subscription)))
 }
 
 async fn handle_encode_error(_e: EncodeError, _client: UnboundedSender<Vec<u8>>) -> Result<()> {

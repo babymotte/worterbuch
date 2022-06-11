@@ -10,7 +10,7 @@ use warp::Filter;
 use worterbuch::config::Config;
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
-    log::info!("Starting Web Server...");
+    log::info!("Starting Web Server …");
 
     let graphiql = warp::get()
         .and(warp::path("graphiql"))
@@ -51,7 +51,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     if let (Some(cert_path), Some(key_path)) = (cert_path, key_path) {
         log::info!("Using TLS certificate {}", cert_path);
         log::info!("Using TLS private key {}", key_path);
-        log::info!("Starting web server with TLS...");
+        log::info!("Starting web server with TLS …");
 
         server
             .tls()
@@ -60,7 +60,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
             .run(addr)
             .await;
     } else {
-        log::info!("Starting web server without TLS...");
+        log::info!("Starting web server without TLS …");
         server.run(addr).await;
     }
 
