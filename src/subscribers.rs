@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
-use tokio::sync::broadcast::Sender;
+use std::collections::HashMap;
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 type Subs = Vec<Subscriber>;
@@ -10,12 +9,12 @@ type Tree = HashMap<String, Node>;
 #[derive(Clone)]
 pub struct Subscriber {
     pattern: Vec<String>,
-    tx: Sender<(String, String)>,
+    tx: UnboundedSender<(String, String)>,
     id: Uuid,
 }
 
 impl Subscriber {
-    pub fn new(pattern: Vec<String>, tx: Sender<(String, String)>) -> Subscriber {
+    pub fn new(pattern: Vec<String>, tx: UnboundedSender<(String, String)>) -> Subscriber {
         Subscriber {
             pattern,
             tx,
@@ -136,13 +135,13 @@ impl Subscribers {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tokio::sync::broadcast::channel;
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn get_subscribers() {
         let mut subscribers = Subscribers::default();
 
-        let (tx, _rx) = channel(1);
+        let (tx, _rx) = unbounded_channel();
         let pattern = vec!["test", "?", "b", "#"];
         let subscriber = Subscriber::new(
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),

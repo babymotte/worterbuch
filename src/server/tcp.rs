@@ -160,7 +160,7 @@ async fn subscribe(
     let request_pattern = msg.request_pattern;
 
     spawn(async move {
-        while let Ok((key, value)) = rx.recv().await {
+        while let Some((key, value)) = rx.recv().await {
             let event = Event {
                 transaction_id: transaction_id.clone(),
                 request_pattern: request_pattern.clone(),

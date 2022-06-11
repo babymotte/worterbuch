@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{Context, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
-use tokio::sync::broadcast::{channel, Receiver};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use worterbuch::config::Config;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -112,10 +112,13 @@ impl Worterbuch {
         }
     }
 
-    pub fn subscribe(&mut self, key_pattern: String) -> Result<Receiver<(String, String)>> {
+    pub fn subscribe(
+        &mut self,
+        key_pattern: String,
+    ) -> Result<UnboundedReceiver<(String, String)>> {
         let path: Vec<&str> = key_pattern.split(self.config.separator).collect();
         let matches = self.get_all(&key_pattern)?;
-        let (tx, rx) = channel(100 + matches.len() * 2);
+        let (tx, rx) = unbounded_channel();
         let subscriber = Subscriber::new(
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
@@ -168,7 +171,12 @@ impl Worterbuch {
             .subscribers
             .get_subscribers(&path, &wildcard, &multi_wildcard);
 
-        log::debug!("Calling {} subscribers.", subscribers.len());
+        log::debug!(
+            "Calling {} subscribers: {} = {}",
+            subscribers.len(),
+            key.as_ref(),
+            value
+        );
         for subscriber in subscribers {
             if let Err(e) = subscriber.send((key.as_ref().to_owned(), value.to_owned())) {
                 log::debug!("Error calling subscriber: {e}");
