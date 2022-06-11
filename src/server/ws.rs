@@ -1,12 +1,13 @@
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     spawn,
     sync::{mpsc, RwLock},
 };
 use warp::{
+    addr::remote,
     ws::{Message, Ws},
     Filter,
 };
@@ -17,14 +18,16 @@ use super::async_common::process_incoming_message;
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");
 
-    let ws = warp::ws().map(move |ws: Ws| {
-        let worterbuch = worterbuch.clone();
-        ws.on_upgrade(|websocket| async move {
-            if let Err(e) = serve(websocket, worterbuch.clone()).await {
-                log::error!("Error in WS connection: {e}");
-            }
-        })
-    });
+    let ws = warp::ws()
+        .and(remote())
+        .map(move |ws: Ws, remote: Option<SocketAddr>| {
+            let worterbuch = worterbuch.clone();
+            ws.on_upgrade(move |websocket| async move {
+                if let Err(e) = serve(websocket, worterbuch.clone(), remote.clone()).await {
+                    log::error!("Error in WS connection: {e}");
+                }
+            })
+        });
 
     let routes = ws;
 
@@ -55,7 +58,11 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Web server stopped.");
 }
 
-async fn serve(websocket: warp::ws::WebSocket, worterbuch: Arc<RwLock<Worterbuch>>) -> Result<()> {
+async fn serve(
+    websocket: warp::ws::WebSocket,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    remote_addr: Option<SocketAddr>,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_write, mut client_read) = websocket.split();
@@ -72,6 +79,7 @@ async fn serve(websocket: warp::ws::WebSocket, worterbuch: Arc<RwLock<Worterbuch
 
     let mut subscriptions = Vec::new();
 
+    log::debug!("Receiving messages from client {remote_addr:?} …");
     loop {
         if let Some(Ok(incoming_msg)) = client_read.next().await {
             if incoming_msg.is_binary() {
@@ -87,8 +95,11 @@ async fn serve(websocket: warp::ws::WebSocket, worterbuch: Arc<RwLock<Worterbuch
                     break;
                 }
             }
+        } else {
+            break;
         }
     }
+    log::debug!("No more messages from {remote_addr:?}, closing connection.");
 
     let mut wb = worterbuch.write().await;
     for subs in subscriptions {

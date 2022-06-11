@@ -1,6 +1,6 @@
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -25,11 +25,15 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
     loop {
         let conn = server.accept().await?;
         log::debug!("Client connected from {}", conn.1);
-        spawn(serve(conn.0, worterbuch.clone()));
+        spawn(serve(conn.0, worterbuch.clone(), conn.1));
     }
 }
 
-async fn serve(client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result<()> {
+async fn serve(
+    client: TcpStream,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    remote_addr: SocketAddr,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_read, mut client_write) = client.into_split();
@@ -45,6 +49,7 @@ async fn serve(client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result
 
     let mut subscriptions = Vec::new();
 
+    log::debug!("Receiving messages from client {remote_addr} …");
     loop {
         if !process_incoming_message(
             &mut client_read,
@@ -57,6 +62,7 @@ async fn serve(client: TcpStream, worterbuch: Arc<RwLock<Worterbuch>>) -> Result
             break;
         }
     }
+    log::debug!("No more messages from {remote_addr}, closing connection.");
 
     let mut wb = worterbuch.write().await;
     for subs in subscriptions {

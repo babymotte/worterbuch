@@ -75,6 +75,8 @@ pub async fn connect() -> Result<WsConnection> {
                     eprintln!("failed to send tcp message: {e}");
                     break;
                 }
+            }else {
+                break;
             }
         }
     });
