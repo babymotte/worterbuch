@@ -82,7 +82,7 @@ impl Subscription {
             if let Ok(mut rx) = rx {
                 loop {
                     match rx.recv().await {
-                        Ok(event) => {
+                        Some(event) => {
                             let event = Event{
                                 pattern: pattern.clone(),
                                 key: event.0,
@@ -90,10 +90,10 @@ impl Subscription {
                             };
                             yield Ok(event)
                         },
-                        Err(e) => {
+                        None => {
                             yield Err(FieldError::new(
-                                e.to_string(),
-                                graphql_value!(e.to_string()),
+                                "no more data",
+                                graphql_value!("no more data"),
                             ));
                             break;
                         },
