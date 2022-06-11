@@ -1,7 +1,28 @@
 use anyhow::Result;
 use std::{env, time::Duration};
 use tokio::time::sleep;
+#[cfg(feature = "graphql")]
+use worterbuch_cli::gql::GqlConnection;
+#[cfg(feature = "tcp")]
+use worterbuch_cli::tcp::TcpConnection;
+#[cfg(feature = "ws")]
+use worterbuch_cli::ws::WsConnection;
 use worterbuch_cli::Connection;
+
+#[cfg(feature = "tcp")]
+async fn connect() -> Result<TcpConnection> {
+    worterbuch_cli::tcp::connect().await
+}
+
+#[cfg(feature = "ws")]
+async fn connect() -> Result<WsConnection> {
+    worterbuch_cli::ws::connect().await
+}
+
+#[cfg(feature = "graphql")]
+async fn connect() -> Result<GqlConnection> {
+    worterbuch_cli::gql::connect().await
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,11 +38,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    #[cfg(feature = "graphql")]
-    let mut con = worterbuch_cli::gql::connect().await?;
-
-    #[cfg(not(feature = "graphql"))]
-    let mut con = worterbuch_cli::tcp::connect().await?;
+    let mut con = connect().await?;
 
     con.subscribe(&request_pattern)?;
 

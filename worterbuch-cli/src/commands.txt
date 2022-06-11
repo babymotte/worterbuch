@@ -1,5 +1,0 @@
-{"type":"connection_init","payload":{}}
-
-{"id":"1","type":"start","payload":{"query":"subscription {all(pattern: \"my/topic/#\") {pattern key value}}","variables":null}}
-
-{"id":"2","type":"start","payload":{"query":"query {get(pattern: \"my/topic/#\") {pattern key value}}","variables":null}}

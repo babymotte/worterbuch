@@ -1,4 +1,3 @@
-use super::common::process_incoming_message;
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -12,6 +11,8 @@ use warp::{
     Filter,
 };
 use worterbuch::config::Config;
+
+use super::async_common::process_incoming_message;
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");

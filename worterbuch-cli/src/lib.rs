@@ -3,9 +3,10 @@ use async_trait::async_trait;
 
 #[cfg(feature = "graphql")]
 pub mod gql;
-
-#[cfg(not(feature = "graphql"))]
+#[cfg(feature = "tcp")]
 pub mod tcp;
+#[cfg(feature = "ws")]
+pub mod ws;
 
 #[async_trait]
 pub trait Connection {

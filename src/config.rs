@@ -12,6 +12,8 @@ pub struct Config {
     pub graphql_port: u16,
     #[cfg(feature = "web")]
     pub web_port: u16,
+    #[cfg(feature = "web")]
+    pub proto: String,
     pub bind_addr: IpAddr,
     #[cfg(feature = "web")]
     pub cert_path: Option<String>,
@@ -31,6 +33,16 @@ impl Config {
 
         if let Ok(val) = env::var("WORTERBUCH_MULTI_WILDCARD") {
             self.multi_wildcard = to_char(val).context("multi-wildcard must be a single char")?;
+        }
+
+        #[cfg(feature = "web")]
+        if let Ok(val) = env::var("WORTERBUCH_PROTO") {
+            self.proto = val;
+        }
+
+        #[cfg(feature = "web")]
+        if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
+            self.tcp_port = val.parse().context("port must be an integer")?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
@@ -68,6 +80,8 @@ impl Default for Config {
             graphql_port: 4243,
             #[cfg(feature = "web")]
             web_port: 8080,
+            #[cfg(feature = "web")]
+            proto: "ws".to_owned(),
             bind_addr: [127, 0, 0, 1].into(),
             #[cfg(feature = "web")]
             cert_path: None,
