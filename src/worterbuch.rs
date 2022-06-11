@@ -60,24 +60,6 @@ impl Worterbuch {
         Ok(())
     }
 
-    // pub fn get(&self, key: impl AsRef<str>) -> Result<Option<&str>> {
-    //     let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
-
-    //     let wildcard = self.config.wildcard.to_string();
-    //     let has_wildcard = path.contains(&wildcard.as_str());
-
-    //     let multi_wildcard = self.config.multi_wildcard.to_string();
-    //     let has_multi_wildcard = path.last() == Some(&multi_wildcard.as_str());
-
-    //     if has_multi_wildcard || has_wildcard {
-    //         return Err(Error::msg(
-    //             "cannot get a single value from a pattern containing wildcards",
-    //         ));
-    //     }
-
-    //     Ok(self.store.get(&path))
-    // }
-
     pub fn get_all<'a>(&self, key: impl AsRef<str>) -> Result<Vec<(String, String)>> {
         let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
 
