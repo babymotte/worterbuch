@@ -10,8 +10,12 @@ pub struct Config {
     pub tcp_port: u16,
     #[cfg(feature = "graphql")]
     pub graphql_port: u16,
+    #[cfg(feature = "web")]
+    pub web_port: u16,
     pub bind_addr: IpAddr,
+    #[cfg(feature = "web")]
     pub cert_path: Option<String>,
+    #[cfg(feature = "web")]
     pub key_path: Option<String>,
 }
 
@@ -46,20 +50,6 @@ impl Config {
         Ok(())
     }
 
-    // fn load_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
-    //     todo!(
-    //         "loading config from file {:?} not implemented yet",
-    //         path.as_ref()
-    //     )
-    // }
-
-    // pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-    //     let mut config = Config::default();
-    //     config.load_file(path)?;
-    //     config.load_env()?;
-    //     Ok(config)
-    // }
-
     pub fn new() -> Result<Self> {
         let mut config = Config::default();
         config.load_env()?;
@@ -76,8 +66,12 @@ impl Default for Config {
             tcp_port: 4242,
             #[cfg(feature = "graphql")]
             graphql_port: 4243,
+            #[cfg(feature = "web")]
+            web_port: 8080,
             bind_addr: [127, 0, 0, 1].into(),
+            #[cfg(feature = "web")]
             cert_path: None,
+            #[cfg(feature = "web")]
             key_path: None,
         }
     }

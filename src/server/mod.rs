@@ -6,5 +6,5 @@ pub mod graphql;
 pub mod tcp;
 #[cfg(feature = "ws")]
 pub mod ws;
-#[cfg(feature = "ws")]
-pub mod ws_warp;
+
+mod common;

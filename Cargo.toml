@@ -10,7 +10,7 @@ default = ["tcp", "ws"]
 async = []
 tcp = ["async"]
 web = ["async", "warp", "openssl"]
-ws = ["web"]
+ws = ["web", "futures-util", "futures"]
 graphql = [
     "web",
     "juniper",
@@ -39,6 +39,7 @@ warp = { version = "0.3.2", features = ["tls"], optional = true }
 futures = { version = "0.3.21", optional = true }
 async-stream = { version = "0.3", optional = true }
 openssl = { version = "0.10.38", features = ["vendored"], optional = true }
+futures-util = { version = "0.3.21", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4.2"

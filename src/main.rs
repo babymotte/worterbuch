@@ -32,7 +32,10 @@ async fn main() -> Result<()> {
     spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));
 
     #[cfg(feature = "tcp")]
-    spawn(server::tcp::start(worterbuch.clone(), config));
+    spawn(server::tcp::start(worterbuch.clone(), config.clone()));
+
+    #[cfg(feature = "ws")]
+    spawn(server::ws::start(worterbuch.clone(), config.clone()));
 
     spawn(repl(worterbuch));
 

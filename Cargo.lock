@@ -1849,6 +1849,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "futures",
+ "futures-util",
  "juniper",
  "juniper_graphql_ws",
  "juniper_warp",
