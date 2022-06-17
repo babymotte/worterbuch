@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn subscribe(request_pattern: String, con: &mut TcpConnection) -> Result<()> {
+async fn subscribe<C: Connection>(request_pattern: String, con: &mut C) -> Result<()> {
     con.subscribe(&request_pattern)?;
     Ok(())
 }

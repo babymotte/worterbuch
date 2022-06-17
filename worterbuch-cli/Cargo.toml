@@ -10,12 +10,12 @@ default = ["tcp"]
 tcp = ["worterbuch/tcp"]
 ws = ["worterbuch/ws", "tokio-tungstenite", "futures-util"]
 graphql = [
-    "tokio-tungstenite",
-    "url",
-    "futures-util",
-    "futures-channel",
-    "serde",
-    "serde_json",
+  "tokio-tungstenite",
+  "url",
+  "futures-util",
+  "futures-channel",
+  "serde",
+  "serde_json",
 ]
 
 [dependencies]
@@ -28,8 +28,8 @@ async-trait = "0.1.56"
 tokio-tungstenite = { version = "0.17.1", optional = true }
 url = { version = "2.2.2", optional = true }
 futures-util = { version = "0.3.21", default-features = false, features = [
-    "sink",
-    "std",
+  "sink",
+  "std",
 ], optional = true }
 futures-channel = { version = "0.3.21", optional = true }
 serde = { version = "1.0.137", features = ["derive"], optional = true }
