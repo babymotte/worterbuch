@@ -207,19 +207,25 @@ async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult
     data.read_exact(&mut buf).await?;
     let value_length = ValueLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; key_length as usize];
-    data.read_exact(&mut buf).await?;
-    let key = Key::from_utf8_lossy(&buf).to_string();
+    if key_length == 0 {
+        Ok(State {
+            transaction_id,
+            key_value: None,
+        })
+    } else {
+        let mut buf = vec![0u8; key_length as usize];
+        data.read_exact(&mut buf).await?;
+        let key = Key::from_utf8_lossy(&buf).to_string();
 
-    let mut buf = vec![0u8; value_length as usize];
-    data.read_exact(&mut buf).await?;
-    let value = Value::from_utf8_lossy(&buf).to_string();
+        let mut buf = vec![0u8; value_length as usize];
+        data.read_exact(&mut buf).await?;
+        let value = Value::from_utf8_lossy(&buf).to_string();
 
-    Ok(State {
-        transaction_id,
-        key,
-        value,
-    })
+        Ok(State {
+            transaction_id,
+            key_value: Some((key, value)),
+        })
+    }
 }
 
 async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Err> {
@@ -248,9 +254,9 @@ async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<E
 
 #[cfg(test)]
 mod test {
-    use crate::codec::encode_set_message;
 
     use super::*;
+    use crate::codec::encode_set_message;
 
     #[test]
     fn get_message_is_read_correctly() {
@@ -429,8 +435,28 @@ mod test {
             result,
             Message::State(State {
                 transaction_id: 42,
-                key: "1/2/3".to_owned(),
-                value: "4".to_owned()
+                key_value: Some(("1/2/3".to_owned(), "4".to_owned()))
+            })
+        )
+    }
+
+    #[test]
+    fn empty_state_message_is_read_correctly() {
+        let data = [
+            STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000,
+        ];
+
+        let result = tokio_test::block_on(read_message(&data[..]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            Message::State(State {
+                transaction_id: 42,
+                key_value: None
             })
         )
     }
@@ -471,5 +497,99 @@ mod test {
         let decoded = tokio_test::block_on(read_message(&*data)).unwrap().unwrap();
 
         assert_eq!(Message::Set(msg), decoded);
+    }
+
+    #[test]
+    fn message_sequence_read_successful() {
+        let data = [
+            PSTA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
+            0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
+            0b00000000, 0b00010100, 0b00000000, 0b00000000, 0b00000000, 0b00011000, b'w', b'h',
+            b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'?', b'/', b'#', b'w',
+            b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'c', b'h', b'i',
+            b'c', b'k', b'e', b'n', b'/', b'c', b'r', b'o', b's', b's', b'/', b't', b'h', b'e',
+            b'/', b'r', b'o', b'a', b'd', b'y', b'e', b'a', b'h', b',', b' ', b't', b'h', b'a',
+            b't', b' ', b'w', b'a', b's', b' ', b'm', b'e', b',', b' ', b'I', b' ', b'g', b'u',
+            b'e', b's', b's', b'w', b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e',
+            b'/', b'd', b'o', b'g', b's', b'/', b'o', b'u', b't', b'W', b'h', b'o', b'?', b' ',
+            b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?',
+            b' ', b'W', b'h', b'o', b'?', STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000000, 0b00000000, 0b00101010, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000000, 0b00000000, ACK, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00101010, PSTA, 0b11111111,
+            0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000, 0b00000010, 0b00000000,
+            0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010, 0b00000000, 0b00010100,
+            0b00000000, 0b00000000, 0b00000000, 0b00011000, b'w', b'h', b'o', b'/', b'l', b'e',
+            b't', b'/', b't', b'h', b'e', b'/', b'?', b'/', b'#', b'w', b'h', b'o', b'/', b'l',
+            b'e', b't', b'/', b't', b'h', b'e', b'/', b'c', b'h', b'i', b'c', b'k', b'e', b'n',
+            b'/', b'c', b'r', b'o', b's', b's', b'/', b't', b'h', b'e', b'/', b'r', b'o', b'a',
+            b'd', b'y', b'e', b'a', b'h', b',', b' ', b't', b'h', b'a', b't', b' ', b'w', b'a',
+            b's', b' ', b'm', b'e', b',', b' ', b'I', b' ', b'g', b'u', b'e', b's', b's', b'w',
+            b'h', b'o', b'/', b'l', b'e', b't', b'/', b't', b'h', b'e', b'/', b'd', b'o', b'g',
+            b's', b'/', b'o', b'u', b't', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?',
+            b' ', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o', b'?', b' ', b'W', b'h', b'o',
+            b'?',
+        ];
+
+        let mut messages = Vec::new();
+
+        tokio_test::block_on(async {
+            let mut data = AsyncReadExt::take(&data[..], data.len() as u64);
+            messages.push(read_message(&mut data).await.unwrap());
+            messages.push(read_message(&mut data).await.unwrap());
+            messages.push(read_message(&mut data).await.unwrap());
+            messages.push(read_message(&mut data).await.unwrap());
+            messages.push(read_message(&mut data).await.unwrap());
+        });
+
+        assert_eq!(
+            messages[0],
+            Some(Message::PState(PState {
+                transaction_id: u64::MAX,
+                request_pattern: "who/let/the/?/#".to_owned(),
+                key_value_pairs: vec![
+                    (
+                        "who/let/the/chicken/cross/the/road".to_owned(),
+                        "yeah, that was me, I guess".to_owned()
+                    ),
+                    (
+                        "who/let/the/dogs/out".to_owned(),
+                        "Who? Who? Who? Who? Who?".to_owned()
+                    )
+                ]
+            }))
+        );
+
+        assert_eq!(
+            messages[1],
+            Some(Message::State(State {
+                transaction_id: 42,
+                key_value: None
+            }))
+        );
+
+        assert_eq!(messages[2], Some(Message::Ack(Ack { transaction_id: 42 })));
+
+        assert_eq!(
+            messages[3],
+            Some(Message::PState(PState {
+                transaction_id: u64::MAX,
+                request_pattern: "who/let/the/?/#".to_owned(),
+                key_value_pairs: vec![
+                    (
+                        "who/let/the/chicken/cross/the/road".to_owned(),
+                        "yeah, that was me, I guess".to_owned()
+                    ),
+                    (
+                        "who/let/the/dogs/out".to_owned(),
+                        "Who? Who? Who? Who? Who?".to_owned()
+                    )
+                ]
+            }))
+        );
+
+        assert_eq!(messages[4], None);
     }
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
+use worterbuch::codec::KeyValuePairs;
 
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<String, Node>;
@@ -9,12 +10,12 @@ type Tree = HashMap<String, Node>;
 #[derive(Clone)]
 pub struct Subscriber {
     pattern: Vec<String>,
-    tx: UnboundedSender<(String, String)>,
+    tx: UnboundedSender<KeyValuePairs>,
     id: Uuid,
 }
 
 impl Subscriber {
-    pub fn new(pattern: Vec<String>, tx: UnboundedSender<(String, String)>) -> Subscriber {
+    pub fn new(pattern: Vec<String>, tx: UnboundedSender<KeyValuePairs>) -> Subscriber {
         Subscriber {
             pattern,
             tx,
@@ -22,8 +23,8 @@ impl Subscriber {
         }
     }
 
-    pub fn send(&self, message: (String, String)) -> Result<()> {
-        self.tx.send(message)?;
+    pub fn send(&self, event: KeyValuePairs) -> Result<()> {
+        self.tx.send(event)?;
         Ok(())
     }
 

@@ -1,7 +1,8 @@
 use std::{fmt, io, string::FromUtf8Error};
 
 use crate::codec::{
-    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, RequestPatternLength, ValueLength,
+    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, RequestPattern, RequestPatternLength,
+    ValueLength,
 };
 
 #[derive(Debug)]
@@ -17,8 +18,8 @@ impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DecodeError::UndefinedType(mtype) => write!(f, "undefined message type: {mtype})",),
-            DecodeError::IoError(e) => write!(f, "{e}"),
-            DecodeError::FromUtf8Error(e) => write!(f, "{e}"),
+            DecodeError::IoError(e) => e.fmt(f),
+            DecodeError::FromUtf8Error(e) => e.fmt(f),
         }
     }
 }
@@ -82,7 +83,7 @@ impl fmt::Display for EncodeError {
                 len,
                 NumKeyValuePairs::MAX
             ),
-            EncodeError::IoError(ioe) => write!(f, "{ioe}"),
+            EncodeError::IoError(ioe) => ioe.fmt(f),
         }
     }
 }
@@ -94,3 +95,38 @@ impl From<io::Error> for EncodeError {
 }
 
 pub type EncodeResult<T> = std::result::Result<T, EncodeError>;
+
+#[derive(Debug)]
+pub enum WorterbuchError {
+    IllegalWildcard(RequestPattern),
+    IllegalMultiWildcard(RequestPattern),
+    MultiWildcardAtIllegalPosition(RequestPattern),
+    Other(anyhow::Error),
+}
+
+impl std::error::Error for WorterbuchError {}
+
+impl fmt::Display for WorterbuchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WorterbuchError::IllegalWildcard(rp) => {
+                write!(f, "Key contains illegal wildcard: {rp}")
+            }
+            WorterbuchError::IllegalMultiWildcard(rp) => {
+                write!(f, "Key contains illegal multi-wildcard: {rp}")
+            }
+            WorterbuchError::MultiWildcardAtIllegalPosition(rp) => {
+                write!(f, "Key contains multi-wildcard at illegal position: {rp}")
+            }
+            WorterbuchError::Other(e) => e.fmt(f),
+        }
+    }
+}
+
+impl From<anyhow::Error> for WorterbuchError {
+    fn from(e: anyhow::Error) -> Self {
+        WorterbuchError::Other(e)
+    }
+}
+
+pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;

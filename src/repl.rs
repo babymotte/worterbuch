@@ -110,7 +110,7 @@ async fn get<'s>(
 
     let wb = worterbuch.write().await;
 
-    let result = wb.get_all(key)?;
+    let result = wb.pget(key)?;
 
     for val in result {
         eprintln!("{}={}", val.0, val.1);

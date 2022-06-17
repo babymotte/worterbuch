@@ -16,7 +16,8 @@ pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type Key = String;
 pub type Value = String;
-pub type KeyValuePairs = Vec<(String, String)>;
+pub type KeyValuePair = (Key, Value);
+pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type ErrorCode = u8;
 pub type MetaData = String;
 
@@ -98,8 +99,7 @@ pub struct Ack {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct State {
     pub transaction_id: TransactionId,
-    pub key: Key,
-    pub value: Value,
+    pub key_value: Option<KeyValuePair>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -208,16 +208,21 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
-    let key_length = get_key_length(&msg.key)?;
-    let value_length = get_value_length(&msg.value)?;
+    let (key_length, value_length) = match &msg.key_value {
+        Some((key, value)) => (get_key_length(key)?, get_value_length(value)?),
+        None => (0, 0),
+    };
 
     let mut buf = vec![STA];
 
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(key_length.to_be_bytes());
     buf.extend(value_length.to_be_bytes());
-    buf.extend(msg.key.as_bytes());
-    buf.extend(msg.value.as_bytes());
+
+    if let Some((key, value)) = &msg.key_value {
+        buf.extend(key.as_bytes());
+        buf.extend(value.as_bytes());
+    }
 
     Ok(buf)
 }
@@ -417,14 +422,29 @@ mod test {
     fn state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key: "1/2/3".to_owned(),
-            value: "4".to_owned(),
+            key_value: Some(("1/2/3".to_owned(), "4".to_owned())),
         };
 
         let data = vec![
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
             0b00000001, b'1', b'/', b'2', b'/', b'3', b'4',
+        ];
+
+        assert_eq!(data, encode_state_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn empty_state_message_is_encoded_correctly() {
+        let msg = State {
+            transaction_id: 42,
+            key_value: None,
+        };
+
+        let data = vec![
+            STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000,
         ];
 
         assert_eq!(data, encode_state_message(&msg).unwrap());

@@ -1,6 +1,5 @@
 use anyhow::Result;
-use std::{env, time::Duration};
-use tokio::time::sleep;
+use tokio::io::{AsyncBufReadExt, BufReader};
 #[cfg(feature = "graphql")]
 use worterbuch_cli::gql::GqlConnection;
 #[cfg(feature = "tcp")]
@@ -28,25 +27,12 @@ async fn connect() -> Result<GqlConnection> {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let patterns: Vec<String> = env::args().skip(1).collect();
-
-    if patterns.is_empty() {
-        eprintln!("no subscription pattern specified");
-        return Ok(());
-    }
-
     let mut con = connect().await?;
 
-    for pattern in patterns {
-        subscribe(pattern, &mut con).await?;
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(key)) = lines.next_line().await {
+        con.pget(&key)?;
     }
 
-    loop {
-        sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn subscribe(request_pattern: String, con: &mut TcpConnection) -> Result<()> {
-    con.subscribe(&request_pattern)?;
     Ok(())
 }
