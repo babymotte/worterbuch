@@ -2,19 +2,21 @@
 
 Wörterbuch follows a client/server model. All data is stored on the server, clients can manipulate or query that data, very similar to how a database works. The server exposes a TCP port clients can connect to. Optionally the server can also provide a WebSocket to which clients can connect, e.g. because their security policy does not allow raw TCP connections (e.g. web applications).
 
-Within a SESSION a client can make an arbitrary number of GET, SET and SUBSCRIBE requests to query or update data on the server.
+Within a SESSION a client can make an arbitrary number of GET, PGET, SET, SUBSCRIBE and PSUBSCRIBE requests to query or update data on the server.
 
 ## Term definitions
 
 - MESSAGE: a set of bytes transferred between the client and the server. Every message must follow the specifications defined in [Message Format](#message-format)
 - CLIENT MESSAGE: a MESSAGE sent to the server by the client. Can be GET, SET or SUBSCRIBE:
-  - GET: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a REQUEST PATTERN.
-  - SET: a CLIENT MESSAGE that contains a unique TRANSACTION ID, a KEY and a VALUE.
-  - SUBSCRIBE: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a REQUEST PATTERN.
+  - GET: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a KEY.
+  - PGET: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a REQUEST PATTERN.
+  - SET: a CLIENT MESSAGE that contains a unique TRANSACTION ID and at least one KEY/VALUE pair.
+  - SUBSCRIBE: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a KEY.
+  - PSUBSCRIBE: a CLIENT MESSAGE that contains a unique TRANSACTION ID and a REQUEST PATTERN.
 - SERVER MESSAGE: a MESSAGE sent to the client by the SERVER. Can be STATE, ACK, ERR or EVENT:
-  - STATE: a SERVER MESSAGE that is a response to a GET message containing the original message's TRANSACTION ID and REQUEST PATTERN plus and KEY/VALUE pairs matching the REQUEST PATTERN.
-  - ACK: a SERVER MESSAGE that is a response to a SET or SUBSCRIBE message containing the original message's TRANSACTION ID.
-  - EVENT: a SERVER MESSAGE that is the result of a SUBSCRIPTION created by a SUBSCRIBE message. EVENT messages will be sent immediately after a SUBSCRIPTION is made for every existing KEY matching the SUBSCRIPTION's REQUEST PATTERN plus whenever a matching KEY's value is SET.
+  - STATE: a SERVER MESSAGE that transports exactly one KEY/VALUE pair from the server to the client. This will be either a response to a GET or the result of a SET message if there are KEY SUBSCRIPTIONs matching the SET key. Immediately after a SUBSCRIPTION is made an according STATE event will be issued containing all matching KEY/VALUE pairs, if any.
+  - PSTATE: a SERVER MESSAGE that transports at least one KEY/VALUE pair from the server to the client. This will be either a response to a PGET message or the result of a SET message if there are PATTERN SUBSCRIPTIONs matching the SET key. Immediately after a PATTERN SUBSCRIPTION is made an according STATE event will be issued containing all matching KEY/VALUE pairs, if any.
+  - ACK: a SERVER MESSAGE that is a response to a SET, SUBSCRIBE or PSUBSCRIBE message containing the original message's TRANSACTION ID.
   - ERR: a server message that is a response to a GET, SET or SUBSCRIBE message and indicates that something went wrong on the server side. It contains the original message's TRANSACTION ID, an ERROR CODE and some ERROR CODE specific metadata.
 - ERROR CODE: an unsigned byte used to identify a specific server side error, see [Errors](#errors)
 - SESSION: a session is initiated by the client implicitly by connecting to the server's TCP port. The session implicitly ends with the client disconnecting from the server.
@@ -33,7 +35,11 @@ Within a SESSION a client can make an arbitrary number of GET, SET and SUBSCRIBE
 
 ### GET
 
-A GET message is sent by the client to the server in order to query values. It contains a TRANSACTION ID and a REQUEST PATTERN. When the server receives a GET message it will collect all its stored KEY/VALUE pairs whose KEY matches the REQUEST PATTERN and send them back to the client in a STATE message using the GET message's TRANSACTION ID. GET messages are one shot actions, they will return a snapshot of the server's current state and never trigger more than one response message from the server.
+A GET message is sent by the client to the server in order to query a value. It contains a TRANSACTION ID and a KEY. When the server receives a GET message it will look up the provided KEY's VALUE and send it back to the client in a STATE message using the GET message's TRANSACTION ID. GET messages are one shot actions, they will return a snapshot of the server's current state and never trigger more than one response message from the server. KEYs used in a GET request are not allowed to contain any wildcards.
+
+### PGET
+
+A PGET message is sent by the client to the server in order to query values. It contains a TRANSACTION ID and a REQUEST PATTERN. When the server receives a PGET message it will collect all its stored KEY/VALUE pairs whose KEY matches the REQUEST PATTERN and send them back to the client in a STATE message using the GET message's TRANSACTION ID. GET messages are one shot actions, they will return a snapshot of the server's current state and never trigger more than one response message from the server.
 
 ### SET
 
@@ -41,6 +47,14 @@ A SET message is sent by the client to the server in order to update a KEY's val
 
 
 ### SUBSCRIBE
+
+A SUBSCRIBE message is sent by the client to the server in order to establish a SUBSCRIPTION. It contains a TRANSACTION ID and a KEY. The server will acknowledge the subscription by sending an ACK message containing the SUBSCRIBE message's TRANSACTION ID. It will then look up the contained KEY's VALUE and send a STATE message to the client, containing the SUBSCRIPTION's REQUEST PATTERN, the KEY, the VALUE and the SUBSCRIBE message's TRANSACTION ID. Then it will register an internal listener that watches for any SET messages whose KEY matches the SUBSCRIPTION's REQUEST PATTERN and for each send an additional EVENT message containing the SUBSCRIPTION's REQUEST PATTERN, the SET message's KEY and VALUE and the SUBSCRIBE message's TRANSACTION ID.
+
+A SUBSCRIPTION is a long term contract between the client and the server causing the server to send any number of EVENT messages to the client and the SUBSCRIBE message's TRANSACTION ID will be included in every EVENT message resulting from it.
+
+Currently there is no other way to stop an ongoing SUBSCRIPTION other than closing the connection. This may be added at a later time if use cases arise.
+
+### PSUBSCRIBE
 
 A SUBSCRIBE message is sent by the client to the server in order to establish a SUBSCRIPTION. It contains a TRANSACTION ID and a REQUEST PATTERN. The server will acknowledge the subscription by sending an ACK message containing the SUBSCRIBE message's TRANSACTION ID. It will then collect any KEY/VALUE pairs from its store whose KEY matches the REQUEST PATTERN and for each of them send an EVENT message to the client, containing theSUBSCRIPTION's REQUEST PATTERN, the KEY, the VALUE and the SUBSCRIBE message's TRANSACTION ID. Then it will register an internal listener that watches for any SET messages whose KEY matches the SUBSCRIPTION's REQUEST PATTERN and for each send an additional EVENT message containing the SUBSCRIPTION's REQUEST PATTERN, the SET message's KEY and VALUE and the SUBSCRIBE message's TRANSACTION ID.
 

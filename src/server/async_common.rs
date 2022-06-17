@@ -9,8 +9,8 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch::{
     codec::{
-        encode_ack_message, encode_event_message, encode_state_message, read_message, Ack, Event,
-        Get, Set, State, Subscribe,
+        encode_ack_message, encode_pstate_message, encode_state_message, read_message, Ack, PGet,
+        PState, PSubscribe, Set, State,
     },
     error::{DecodeError, EncodeError},
 };
@@ -22,13 +22,13 @@ pub async fn process_incoming_message(
     subscriptions: &mut Vec<(String, Uuid)>,
 ) -> Result<bool> {
     match read_message(msg).await {
-        Ok(Some(worterbuch::codec::Message::Get(msg))) => {
+        Ok(Some(worterbuch::codec::Message::PGet(msg))) => {
             get(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(Some(worterbuch::codec::Message::Set(msg))) => {
             set(msg, worterbuch.clone(), tx.clone()).await?;
         }
-        Ok(Some(worterbuch::codec::Message::Subscribe(msg))) => {
+        Ok(Some(worterbuch::codec::Message::PSubscribe(msg))) => {
             if let Some(subs) = subscribe(msg, worterbuch.clone(), tx.clone()).await? {
                 subscriptions.push(subs);
             }
@@ -51,7 +51,7 @@ pub async fn process_incoming_message(
 }
 
 async fn get(
-    msg: Get,
+    msg: PGet,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
 ) -> Result<()> {
@@ -65,13 +65,13 @@ async fn get(
         }
     };
 
-    let response = State {
+    let response = PState {
         transaction_id: msg.transaction_id,
         request_pattern: msg.request_pattern,
         key_value_pairs: values,
     };
 
-    match encode_state_message(&response) {
+    match encode_pstate_message(&response) {
         Ok(data) => client.send(data)?,
         Err(e) => handle_encode_error(e, client).await?,
     }
@@ -104,7 +104,7 @@ async fn set(
 }
 
 async fn subscribe(
-    msg: Subscribe,
+    msg: PSubscribe,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
 ) -> Result<Option<(String, Uuid)>> {
@@ -135,13 +135,12 @@ async fn subscribe(
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription} …");
         while let Some((key, value)) = rx.recv().await {
-            let event = Event {
+            let event = State {
                 transaction_id: transaction_id.clone(),
-                request_pattern: request_pattern_recv.clone(),
                 key,
                 value,
             };
-            match encode_event_message(&event) {
+            match encode_state_message(&event) {
                 Ok(data) => {
                     if let Err(e) = client.clone().send(data) {
                         log::error!("Error sending message to client: {e}");

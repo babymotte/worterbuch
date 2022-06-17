@@ -29,27 +29,37 @@ pub type NumKeyValuePairs = u32;
 pub const GET: MessageType = 0b00000000;
 pub const SET: MessageType = 0b00000001;
 pub const SUB: MessageType = 0b00000010;
+pub const PGET: MessageType = 0b00000011;
+pub const PSUB: MessageType = 0b00000100;
 
-pub const STA: MessageType = 0b10000000;
+pub const PSTA: MessageType = 0b10000000;
 pub const ACK: MessageType = 0b10000001;
-pub const EVE: MessageType = 0b10000010;
+pub const STA: MessageType = 0b10000010;
 pub const ERR: MessageType = 0b10000011;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Message {
     // client messages
     Get(Get),
+    PGet(PGet),
     Set(Set),
     Subscribe(Subscribe),
+    PSubscribe(PSubscribe),
     // server messages
-    State(State),
+    PState(PState),
     Ack(Ack),
-    Event(Event),
+    State(State),
     Err(Err),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Get {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PGet {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
@@ -64,11 +74,17 @@ pub struct Set {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Subscribe {
     pub transaction_id: TransactionId,
+    pub key: RequestPattern,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PSubscribe {
+    pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct State {
+pub struct PState {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub key_value_pairs: KeyValuePairs,
@@ -80,9 +96,8 @@ pub struct Ack {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Event {
+pub struct State {
     pub transaction_id: TransactionId,
-    pub request_pattern: RequestPattern,
     pub key: Key,
     pub value: Value,
 }
@@ -95,9 +110,21 @@ pub struct Err {
 }
 
 pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
-    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let key_length = get_key_length(&msg.key)?;
 
     let mut buf = vec![GET];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(key_length.to_be_bytes());
+    buf.extend(msg.key.as_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_pget_message(msg: &PGet) -> EncodeResult<Vec<u8>> {
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+
+    let mut buf = vec![PGET];
 
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
@@ -122,9 +149,21 @@ pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
-    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+    let key_length = get_key_length(&msg.key)?;
 
     let mut buf = vec![SUB];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(key_length.to_be_bytes());
+    buf.extend(msg.key.as_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_psubscribe_message(msg: &PSubscribe) -> EncodeResult<Vec<u8>> {
+    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+
+    let mut buf = vec![PSUB];
 
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
@@ -133,11 +172,11 @@ pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
     Ok(buf)
 }
 
-pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
+pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
     let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
     let num_key_val_pairs = get_num_key_val_pairs(&msg.key_value_pairs)?;
 
-    let mut buf = vec![STA];
+    let mut buf = vec![PSTA];
 
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
@@ -168,18 +207,15 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
     Ok(buf)
 }
 
-pub fn encode_event_message(msg: &Event) -> EncodeResult<Vec<u8>> {
-    let request_pattern_length = get_request_pattern_length(&msg.request_pattern)?;
+pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     let key_length = get_key_length(&msg.key)?;
     let value_length = get_value_length(&msg.value)?;
 
-    let mut buf = vec![EVE];
+    let mut buf = vec![STA];
 
     buf.extend(msg.transaction_id.to_be_bytes());
-    buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(key_length.to_be_bytes());
     buf.extend(value_length.to_be_bytes());
-    buf.extend(msg.request_pattern.as_bytes());
     buf.extend(msg.key.as_bytes());
     buf.extend(msg.value.as_bytes());
 
@@ -252,7 +288,7 @@ mod test {
     fn get_message_is_encoded_correctly() {
         let msg = Get {
             transaction_id: 4,
-            request_pattern: "trolo".to_owned(),
+            key: "trolo".to_owned(),
         };
 
         let data = vec![
@@ -261,6 +297,21 @@ mod test {
         ];
 
         assert_eq!(data, encode_get_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn pget_message_is_encoded_correctly() {
+        let msg = PGet {
+            transaction_id: 4,
+            request_pattern: "trolo".to_owned(),
+        };
+
+        let data = vec![
+            PGET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
+        ];
+
+        assert_eq!(data, encode_pget_message(&msg).unwrap());
     }
 
     #[test]
@@ -284,7 +335,7 @@ mod test {
     fn subscribe_message_is_encoded_correctly() {
         let msg = Subscribe {
             transaction_id: 5536684732567,
-            request_pattern: "let/me/?/you/its/features".to_owned(),
+            key: "let/me/?/you/its/features".to_owned(),
         };
 
         let data = vec![
@@ -298,8 +349,25 @@ mod test {
     }
 
     #[test]
-    fn state_message_is_encoded_correctly() {
-        let msg = State {
+    fn psubscribe_message_is_encoded_correctly() {
+        let msg = PSubscribe {
+            transaction_id: 5536684732567,
+            request_pattern: "let/me/?/you/its/features".to_owned(),
+        };
+
+        let data = vec![
+            PSUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
+            0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
+            b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
+            b't', b'u', b'r', b'e', b's',
+        ];
+
+        assert_eq!(data, encode_psubscribe_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn pstate_message_is_encoded_correctly() {
+        let msg = PState {
             transaction_id: u64::MAX,
             request_pattern: "who/let/the/?/#".to_owned(),
             key_value_pairs: vec![
@@ -315,7 +383,7 @@ mod test {
         };
 
         let data = vec![
-            STA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
+            PSTA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
             0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
             0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
             0b00000000, 0b00010100, 0b00000000, 0b00000000, 0b00000000, 0b00011000, b'w', b'h',
@@ -330,7 +398,7 @@ mod test {
             b' ', b'W', b'h', b'o', b'?',
         ];
 
-        assert_eq!(data, encode_state_message(&msg).unwrap());
+        assert_eq!(data, encode_pstate_message(&msg).unwrap());
     }
 
     #[test]
@@ -346,22 +414,20 @@ mod test {
     }
 
     #[test]
-    fn event_message_is_encoded_correctly() {
-        let msg = Event {
+    fn state_message_is_encoded_correctly() {
+        let msg = State {
             transaction_id: 42,
-            request_pattern: "1/2/3".to_owned(),
             key: "1/2/3".to_owned(),
             value: "4".to_owned(),
         };
 
         let data = vec![
-            EVE, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-            0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000101, 0b00000000,
-            0b00000000, 0b00000000, 0b00000001, b'1', b'/', b'2', b'/', b'3', b'1', b'/', b'2',
-            b'/', b'3', b'4',
+            STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
+            0b00000001, b'1', b'/', b'2', b'/', b'3', b'4',
         ];
 
-        assert_eq!(data, encode_event_message(&msg).unwrap());
+        assert_eq!(data, encode_state_message(&msg).unwrap());
     }
 
     #[test]
