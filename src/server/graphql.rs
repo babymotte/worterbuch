@@ -41,9 +41,9 @@ impl Query {
     }
 
     /// Gets all values matching the given key pattern.
-    async fn get(&self, pattern: String, context: &Context) -> FieldResult<Vec<Event>> {
+    async fn pget(&self, pattern: String, context: &Context) -> FieldResult<Vec<Event>> {
         let worterbuch = context.database.read().await;
-        let result = worterbuch.get_all(&pattern)?;
+        let result = worterbuch.pget(&pattern)?;
         let result = result
             .into_iter()
             .map(|s| Event {
@@ -53,6 +53,21 @@ impl Query {
             })
             .collect();
         Ok(result)
+    }
+
+    /// Get the value of the given key.
+    async fn get(&self, key: String, context: &Context) -> FieldResult<Event> {
+        let worterbuch = context.database.read().await;
+        let result = worterbuch.get(&key)?;
+        if let Some((key, value)) = result {
+            Ok(Event {
+                pattern: key.clone(),
+                key,
+                value,
+            })
+        } else {
+            Err(FieldError::new("no data", graphql_value!("no data")))
+        }
     }
 }
 
@@ -74,21 +89,56 @@ pub(crate) struct Subscription;
 
 #[graphql_subscription(context = Context)]
 impl Subscription {
-    /// Subscribe to key/value changes.
-    async fn all(&self, pattern: String, context: &Context) -> EventStream {
+    /// Subscribe to key/value changes matching a pattern.
+    async fn psubscribe(&self, pattern: String, context: &Context) -> EventStream {
         let mut worterbuch = context.database.write().await;
-        let rx = worterbuch.subscribe(pattern.clone());
+        let rx = worterbuch.psubscribe(pattern.clone());
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
                 loop {
                     match rx.recv().await {
                         Some(event) => {
-                            let event = Event{
-                                pattern: pattern.clone(),
-                                key: event.0,
-                                value: event.1,
-                            };
-                            yield Ok(event)
+                            for (key,value) in event {
+                                let event = Event{
+                                    pattern: pattern.clone(),
+                                    key,
+                                    value,
+                                };
+                                yield Ok(event)
+                            }
+                        },
+                        None => {
+                            yield Err(FieldError::new(
+                                "no more data",
+                                graphql_value!("no more data"),
+                            ));
+                            break;
+                        },
+                    }
+                }
+                log::warn!("subscription ended");
+            }
+        };
+        Box::pin(stream)
+    }
+
+    /// Subscribe to key/value changes of a key.
+    async fn subscribe(&self, key: String, context: &Context) -> EventStream {
+        let mut worterbuch = context.database.write().await;
+        let rx = worterbuch.subscribe(key.clone());
+        let stream = async_stream::stream! {
+            if let Ok((mut rx, _)) = rx {
+                loop {
+                    match rx.recv().await {
+                        Some(event) => {
+                            for (key,value) in event {
+                                let event = Event{
+                                    pattern: key.clone(),
+                                    key,
+                                    value,
+                                };
+                                yield Ok(event)
+                            }
                         },
                         None => {
                             yield Err(FieldError::new(
