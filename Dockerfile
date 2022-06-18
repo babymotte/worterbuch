@@ -5,7 +5,7 @@ WORKDIR /src/worterbuch
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --release
 COPY . .
-RUN cargo build --release --features graphql
+RUN cargo build --release --features tcp,ws,graphql
 
 FROM debian
 WORKDIR /app
