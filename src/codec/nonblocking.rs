@@ -1,45 +1,59 @@
 use super::{
-    Ack, Err, Get, Key, KeyLength, Message, MetaData, MetaDataLength, NumKeyValuePairs, PGet,
-    PState, PSubscribe, RequestPattern, RequestPatternLength, Set, State, Subscribe, TransactionId,
-    Value, ValueLength, ACK, ERR, GET, PGET, PSTA, PSUB, SET, STA, SUB,
+    Ack, ClientMessage as CM, Err, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
+    NumKeyValuePairs, PGet, PState, PSubscribe, Path, PathLength, RequestPattern,
+    RequestPatternLength, ServerMessage as SM, Set, State, Subscribe, TransactionId, Value,
+    ValueLength, ACK, ERR, ERROR_CODE_BYTES, EXP, GET, IMP, KEY_LENGTH_BYTES,
+    METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES, PGET, PSTA, PSUB,
+    REQUEST_PATTERN_LENGTH_BYTES, SET, STA, SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
 };
 use crate::error::{DecodeError, DecodeResult};
 use tokio::io::AsyncReadExt;
 
-pub async fn read_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Option<Message>> {
+pub async fn read_client_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Option<CM>> {
     let mut buf = [0];
     if let Err(e) = data.read_exact(&mut buf).await {
         log::debug!("client disconnected: {e}");
         return Ok(None);
     }
     match buf[0] {
-        // client messages
-        GET => read_get_message(data).await.map(Message::Get),
-        PGET => read_pget_message(data).await.map(Message::PGet),
-        SET => read_set_message(data).await.map(Message::Set),
-        SUB => read_subscribe_message(data).await.map(Message::Subscribe),
-        PSUB => read_psubscribe_message(data).await.map(Message::PSubscribe),
-        // server messages
-        PSTA => read_pstate_message(data).await.map(Message::PState),
-        ACK => read_ack_message(data).await.map(Message::Ack),
-        STA => read_state_message(data).await.map(Message::State),
-        ERR => read_err_message(data).await.map(Message::Err),
-        // undefined
+        GET => read_get_message(data).await.map(CM::Get),
+        PGET => read_pget_message(data).await.map(CM::PGet),
+        SET => read_set_message(data).await.map(CM::Set),
+        SUB => read_subscribe_message(data).await.map(CM::Subscribe),
+        PSUB => read_psubscribe_message(data).await.map(CM::PSubscribe),
+        EXP => read_export_message(data).await.map(CM::Export),
+        IMP => read_import_message(data).await.map(CM::Import),
+        _ => Err(DecodeError::UndefinedType(buf[0])),
+    }
+    .map(Some)
+}
+
+pub async fn read_server_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Option<SM>> {
+    let mut buf = [0];
+    if let Err(e) = data.read_exact(&mut buf).await {
+        log::debug!("client disconnected: {e}");
+        return Ok(None);
+    }
+    match buf[0] {
+        PSTA => read_pstate_message(data).await.map(SM::PState),
+        ACK => read_ack_message(data).await.map(SM::Ack),
+        STA => read_state_message(data).await.map(SM::State),
+        ERR => read_err_message(data).await.map(SM::Err),
         _ => Err(DecodeError::UndefinedType(buf[0])),
     }
     .map(Some)
 }
 
 async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Get> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let key_length = KeyLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; key_length as usize];
+    let mut buf = vec![0; key_length as usize];
     data.read_exact(&mut buf).await?;
     let key = Key::from_utf8_lossy(&buf).to_string();
 
@@ -50,15 +64,15 @@ async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<G
 }
 
 async fn read_pget_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PGet> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; REQUEST_PATTERN_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let request_pattern_length = RequestPatternLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; request_pattern_length as usize];
+    let mut buf = vec![0; request_pattern_length as usize];
     data.read_exact(&mut buf).await?;
     let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
@@ -69,23 +83,23 @@ async fn read_pget_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<
 }
 
 async fn read_set_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Set> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let key_length = KeyLength::from_be_bytes(buf);
 
-    let mut buf = [0; 4];
+    let mut buf = [0; VALUE_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let value_length = ValueLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; key_length as usize];
+    let mut buf = vec![0; key_length as usize];
     data.read_exact(&mut buf).await?;
     let key = Key::from_utf8_lossy(&buf).to_string();
 
-    let mut buf = vec![0u8; value_length as usize];
+    let mut buf = vec![0; value_length as usize];
     data.read_exact(&mut buf).await?;
     let value = Value::from_utf8_lossy(&buf).to_string();
 
@@ -97,15 +111,15 @@ async fn read_set_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<S
 }
 
 async fn read_subscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Subscribe> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let key_length = RequestPatternLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; key_length as usize];
+    let mut buf = vec![0; key_length as usize];
     data.read_exact(&mut buf).await?;
     let key = RequestPattern::from_utf8_lossy(&buf).to_string();
 
@@ -116,15 +130,15 @@ async fn read_subscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeRe
 }
 
 async fn read_psubscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PSubscribe> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; REQUEST_PATTERN_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let request_pattern_length = RequestPatternLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; request_pattern_length as usize];
+    let mut buf = vec![0; request_pattern_length as usize];
     data.read_exact(&mut buf).await?;
     let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
@@ -135,44 +149,44 @@ async fn read_psubscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeR
 }
 
 async fn read_pstate_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PState> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; REQUEST_PATTERN_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let request_pattern_length = RequestPatternLength::from_be_bytes(buf);
 
-    let mut buf = [0; 4];
+    let mut buf = [0; NUM_KEY_VALUE_PAIRS_BYTES];
     data.read_exact(&mut buf).await?;
     let num_key_val_pairs = NumKeyValuePairs::from_be_bytes(buf);
 
     let mut key_value_lengths = Vec::new();
 
     for _ in 0..num_key_val_pairs {
-        let mut buf = [0; 2];
+        let mut buf = [0; KEY_LENGTH_BYTES];
         data.read_exact(&mut buf).await?;
         let key_length = KeyLength::from_be_bytes(buf);
 
-        let mut buf = [0; 4];
+        let mut buf = [0; VALUE_LENGTH_BYTES];
         data.read_exact(&mut buf).await?;
         let value_length = ValueLength::from_be_bytes(buf);
 
         key_value_lengths.push((key_length, value_length));
     }
 
-    let mut buf = vec![0u8; request_pattern_length as usize];
+    let mut buf = vec![0; request_pattern_length as usize];
     data.read_exact(&mut buf).await?;
     let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
     let mut key_value_pairs = Vec::new();
 
     for (key_length, value_length) in key_value_lengths {
-        let mut buf = vec![0u8; key_length as usize];
+        let mut buf = vec![0; key_length as usize];
         data.read_exact(&mut buf).await?;
         let key = Key::from_utf8(buf)?;
 
-        let mut buf = vec![0u8; value_length as usize];
+        let mut buf = vec![0; value_length as usize];
         data.read_exact(&mut buf).await?;
         let value = Value::from_utf8_lossy(&buf).to_string();
 
@@ -187,7 +201,7 @@ async fn read_pstate_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResul
 }
 
 async fn read_ack_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Ack> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
@@ -195,15 +209,15 @@ async fn read_ack_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<A
 }
 
 async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<State> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let key_length = KeyLength::from_be_bytes(buf);
 
-    let mut buf = [0; 4];
+    let mut buf = [0; VALUE_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let value_length = ValueLength::from_be_bytes(buf);
 
@@ -213,11 +227,11 @@ async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult
             key_value: None,
         })
     } else {
-        let mut buf = vec![0u8; key_length as usize];
+        let mut buf = vec![0; key_length as usize];
         data.read_exact(&mut buf).await?;
         let key = Key::from_utf8_lossy(&buf).to_string();
 
-        let mut buf = vec![0u8; value_length as usize];
+        let mut buf = vec![0; value_length as usize];
         data.read_exact(&mut buf).await?;
         let value = Value::from_utf8_lossy(&buf).to_string();
 
@@ -229,19 +243,19 @@ async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult
 }
 
 async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Err> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 1];
+    let mut buf = [0; ERROR_CODE_BYTES];
     data.read_exact(&mut buf).await?;
     let error_code = buf[0];
 
-    let mut buf = [0; 4];
+    let mut buf = [0; METADATA_LENGTH_BYTES];
     data.read_exact(&mut buf).await?;
     let metadata_length = MetaDataLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; metadata_length as usize];
+    let mut buf = vec![0; metadata_length as usize];
     data.read_exact(&mut buf).await?;
     let metadata = MetaData::from_utf8_lossy(&buf).to_string();
 
@@ -249,6 +263,44 @@ async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<E
         transaction_id,
         error_code,
         metadata,
+    })
+}
+
+async fn read_export_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Export> {
+    let mut buf = [0; TRANSACTION_ID_BYTES];
+    data.read_exact(&mut buf).await?;
+    let transaction_id = TransactionId::from_be_bytes(buf);
+
+    let mut buf = [0; PATH_LENGTH_BYTES];
+    data.read_exact(&mut buf).await?;
+    let path_length = PathLength::from_be_bytes(buf);
+
+    let mut buf = vec![0; path_length as usize];
+    data.read_exact(&mut buf).await?;
+    let path = Path::from_utf8_lossy(&buf).to_string();
+
+    Ok(Export {
+        transaction_id,
+        path,
+    })
+}
+
+async fn read_import_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Import> {
+    let mut buf = [0; TRANSACTION_ID_BYTES];
+    data.read_exact(&mut buf).await?;
+    let transaction_id = TransactionId::from_be_bytes(buf);
+
+    let mut buf = [0; PATH_LENGTH_BYTES];
+    data.read_exact(&mut buf).await?;
+    let path_length = PathLength::from_be_bytes(buf);
+
+    let mut buf = vec![0; path_length as usize];
+    data.read_exact(&mut buf).await?;
+    let path = Path::from_utf8_lossy(&buf).to_string();
+
+    Ok(Import {
+        transaction_id,
+        path,
     })
 }
 
@@ -265,13 +317,13 @@ mod test {
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_client_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::Get(Get {
+            CM::Get(Get {
                 transaction_id: 4,
                 key: "trolo".to_owned()
             })
@@ -285,13 +337,13 @@ mod test {
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_client_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::PGet(PGet {
+            CM::PGet(PGet {
                 transaction_id: 4,
                 request_pattern: "trolo".to_owned()
             })
@@ -306,13 +358,13 @@ mod test {
             0b00000011, b'y', b'o', b'/', b'm', b'a', b'm', b'a', b'f', b'a', b't',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_client_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::Set(Set {
+            CM::Set(Set {
                 transaction_id: 0,
                 key: "yo/mama".to_owned(),
                 value: "fat".to_owned()
@@ -329,13 +381,13 @@ mod test {
             b't', b'u', b'r', b'e', b's',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_client_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::Subscribe(Subscribe {
+            CM::Subscribe(Subscribe {
                 transaction_id: 5536684732567,
                 key: "let/me/?/you/its/features".to_owned()
             })
@@ -351,15 +403,57 @@ mod test {
             b't', b'u', b'r', b'e', b's',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_client_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::PSubscribe(PSubscribe {
+            CM::PSubscribe(PSubscribe {
                 transaction_id: 5536684732567,
                 request_pattern: "let/me/?/you/its/features".to_owned()
+            })
+        )
+    }
+
+    #[test]
+    fn export_message_is_read_correctly() {
+        let data = [
+            EXP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
+            b't', b'o', b'/', b'f', b'i', b'l', b'e',
+        ];
+
+        let result = tokio_test::block_on(read_client_message(&data[..]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CM::Export(Export {
+                transaction_id: 42,
+                path: "/path/to/file".to_owned(),
+            })
+        )
+    }
+
+    #[test]
+    fn import_message_is_read_correctly() {
+        let data = [
+            IMP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
+            b't', b'o', b'/', b'f', b'i', b'l', b'e',
+        ];
+
+        let result = tokio_test::block_on(read_client_message(&data[..]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CM::Import(Import {
+                transaction_id: 42,
+                path: "/path/to/file".to_owned(),
             })
         )
     }
@@ -382,13 +476,13 @@ mod test {
             b' ', b'W', b'h', b'o', b'?',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_server_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::PState(PState {
+            SM::PState(PState {
                 transaction_id: u64::MAX,
                 request_pattern: "who/let/the/?/#".to_owned(),
                 key_value_pairs: vec![
@@ -412,11 +506,11 @@ mod test {
             0b00000000, 0b00101010,
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_server_message(&data[..]))
             .unwrap()
             .unwrap();
 
-        assert_eq!(result, Message::Ack(Ack { transaction_id: 42 }))
+        assert_eq!(result, SM::Ack(Ack { transaction_id: 42 }))
     }
 
     #[test]
@@ -427,13 +521,13 @@ mod test {
             0b00000001, b'1', b'/', b'2', b'/', b'3', b'4',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_server_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::State(State {
+            SM::State(State {
                 transaction_id: 42,
                 key_value: Some(("1/2/3".to_owned(), "4".to_owned()))
             })
@@ -448,13 +542,13 @@ mod test {
             0b00000000,
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_server_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::State(State {
+            SM::State(State {
                 transaction_id: 42,
                 key_value: None
             })
@@ -470,13 +564,13 @@ mod test {
             b'!', b'!', b'!',
         ];
 
-        let result = tokio_test::block_on(read_message(&data[..]))
+        let result = tokio_test::block_on(read_server_message(&data[..]))
             .unwrap()
             .unwrap();
 
         assert_eq!(
             result,
-            Message::Err(Err {
+            SM::Err(Err {
                 transaction_id: 42,
                 error_code: 5,
                 metadata: "THIS IS METAAA!!!".to_owned()
@@ -494,9 +588,11 @@ mod test {
 
         let data = encode_set_message(&msg).unwrap();
 
-        let decoded = tokio_test::block_on(read_message(&*data)).unwrap().unwrap();
+        let decoded = tokio_test::block_on(read_client_message(&*data))
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(Message::Set(msg), decoded);
+        assert_eq!(CM::Set(msg), decoded);
     }
 
     #[test]
@@ -537,16 +633,16 @@ mod test {
 
         tokio_test::block_on(async {
             let mut data = AsyncReadExt::take(&data[..], data.len() as u64);
-            messages.push(read_message(&mut data).await.unwrap());
-            messages.push(read_message(&mut data).await.unwrap());
-            messages.push(read_message(&mut data).await.unwrap());
-            messages.push(read_message(&mut data).await.unwrap());
-            messages.push(read_message(&mut data).await.unwrap());
+            messages.push(read_server_message(&mut data).await.unwrap());
+            messages.push(read_server_message(&mut data).await.unwrap());
+            messages.push(read_server_message(&mut data).await.unwrap());
+            messages.push(read_server_message(&mut data).await.unwrap());
+            messages.push(read_server_message(&mut data).await.unwrap());
         });
 
         assert_eq!(
             messages[0],
-            Some(Message::PState(PState {
+            Some(SM::PState(PState {
                 transaction_id: u64::MAX,
                 request_pattern: "who/let/the/?/#".to_owned(),
                 key_value_pairs: vec![
@@ -564,17 +660,17 @@ mod test {
 
         assert_eq!(
             messages[1],
-            Some(Message::State(State {
+            Some(SM::State(State {
                 transaction_id: 42,
                 key_value: None
             }))
         );
 
-        assert_eq!(messages[2], Some(Message::Ack(Ack { transaction_id: 42 })));
+        assert_eq!(messages[2], Some(SM::Ack(Ack { transaction_id: 42 })));
 
         assert_eq!(
             messages[3],
-            Some(Message::PState(PState {
+            Some(SM::PState(PState {
                 transaction_id: u64::MAX,
                 request_pattern: "who/let/the/?/#".to_owned(),
                 key_value_pairs: vec![

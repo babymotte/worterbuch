@@ -1,8 +1,8 @@
 use std::{fmt, io, string::FromUtf8Error};
 
 use crate::codec::{
-    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, RequestPattern, RequestPatternLength,
-    ValueLength,
+    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, PathLength, RequestPattern,
+    RequestPatternLength, ValueLength,
 };
 
 #[derive(Debug)]
@@ -44,6 +44,7 @@ pub enum EncodeError {
     KeyTooLong(usize),
     ValueTooLong(usize),
     MetaDataTooLong(usize),
+    PathTooLong(usize),
     TooManyKeyValuePairs(usize),
     IoError(io::Error),
 }
@@ -77,6 +78,12 @@ impl fmt::Display for EncodeError {
                 len,
                 MetaDataLength::MAX
             ),
+            EncodeError::PathTooLong(len) => write!(
+                f,
+                "path is too long : {} bytes (max {} bytes allowed)",
+                len,
+                PathLength::MAX
+            ),
             EncodeError::TooManyKeyValuePairs(len) => write!(
                 f,
                 "too many key/value pairs: {} (max {} allowed)",
@@ -101,6 +108,7 @@ pub enum WorterbuchError {
     IllegalWildcard(RequestPattern),
     IllegalMultiWildcard(RequestPattern),
     MultiWildcardAtIllegalPosition(RequestPattern),
+    IoError(io::Error),
     Other(anyhow::Error),
 }
 
@@ -118,8 +126,15 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::MultiWildcardAtIllegalPosition(rp) => {
                 write!(f, "Key contains multi-wildcard at illegal position: {rp}")
             }
+            WorterbuchError::IoError(e) => e.fmt(f),
             WorterbuchError::Other(e) => e.fmt(f),
         }
+    }
+}
+
+impl From<io::Error> for WorterbuchError {
+    fn from(e: io::Error) -> Self {
+        WorterbuchError::IoError(e)
     }
 }
 

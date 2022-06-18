@@ -11,4 +11,5 @@ FROM debian
 WORKDIR /app
 COPY --from=worterbuch-builder /src/worterbuch/target/release/worterbuch .
 COPY cert cert/
+VOLUME [ "/data" ]
 CMD ["./worterbuch"]

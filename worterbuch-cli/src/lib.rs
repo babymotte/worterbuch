@@ -15,6 +15,8 @@ pub trait Connection {
     fn pget(&mut self, key: &str) -> Result<u64>;
     fn subscribe(&mut self, key: &str) -> Result<u64>;
     fn psubscribe(&mut self, key: &str) -> Result<u64>;
+    fn export(&mut self, key: &str) -> Result<u64>;
+    fn import(&mut self, key: &str) -> Result<u64>;
 }
 
 pub enum Command {

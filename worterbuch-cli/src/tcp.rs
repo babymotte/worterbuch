@@ -9,15 +9,17 @@ use tokio::{
 };
 use worterbuch::{
     codec::{
-        encode_get_message, encode_pget_message, encode_psubscribe_message, encode_set_message,
-        encode_subscribe_message, read_message, Get, Message, PGet, PSubscribe, Set, Subscribe,
+        encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
+        encode_psubscribe_message, encode_set_message, encode_subscribe_message,
+        read_server_message, ClientMessage as CM, Export, Get, Import, PGet, PSubscribe,
+        ServerMessage as SM, Set, Subscribe,
     },
     config::Config,
 };
 
 #[derive(Clone)]
 pub struct TcpConnection {
-    cmd_tx: UnboundedSender<Message>,
+    cmd_tx: UnboundedSender<CM>,
     counter: u64,
 }
 
@@ -26,7 +28,7 @@ impl Connection for TcpConnection {
     fn set(&mut self, key: &str, value: &str) -> Result<u64> {
         let i = self.counter;
         self.counter += 1;
-        self.cmd_tx.send(Message::Set(Set {
+        self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
             key: key.to_owned(),
             value: value.to_owned(),
@@ -37,7 +39,7 @@ impl Connection for TcpConnection {
     fn get(&mut self, key: &str) -> Result<u64> {
         let i = self.counter;
         self.counter += 1;
-        self.cmd_tx.send(Message::Get(Get {
+        self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
             key: key.to_owned(),
         }))?;
@@ -47,7 +49,7 @@ impl Connection for TcpConnection {
     fn pget(&mut self, key: &str) -> Result<u64> {
         let i = self.counter;
         self.counter += 1;
-        self.cmd_tx.send(Message::PGet(PGet {
+        self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
             request_pattern: key.to_owned(),
         }))?;
@@ -57,7 +59,7 @@ impl Connection for TcpConnection {
     fn subscribe(&mut self, key: &str) -> Result<u64> {
         let i = self.counter;
         self.counter += 1;
-        self.cmd_tx.send(Message::Subscribe(Subscribe {
+        self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
             key: key.to_owned(),
         }))?;
@@ -67,9 +69,29 @@ impl Connection for TcpConnection {
     fn psubscribe(&mut self, request_pattern: &str) -> Result<u64> {
         let i = self.counter;
         self.counter += 1;
-        self.cmd_tx.send(Message::PSubscribe(PSubscribe {
+        self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
             request_pattern: request_pattern.to_owned(),
+        }))?;
+        Ok(i)
+    }
+
+    fn export(&mut self, path: &str) -> Result<u64> {
+        let i = self.counter;
+        self.counter += 1;
+        self.cmd_tx.send(CM::Export(Export {
+            transaction_id: i,
+            path: path.to_owned(),
+        }))?;
+        Ok(i)
+    }
+
+    fn import(&mut self, path: &str) -> Result<u64> {
+        let i = self.counter;
+        self.counter += 1;
+        self.cmd_tx.send(CM::Import(Import {
+            transaction_id: i,
+            path: path.to_owned(),
         }))?;
         Ok(i)
     }
@@ -85,10 +107,15 @@ pub async fn connect() -> Result<TcpConnection> {
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
-            if let Ok(Some(data)) = encode_message(&msg) {
-                if let Err(e) = tcp_tx.write_all(&data).await {
-                    eprintln!("failed to send tcp message: {e}");
-                    break;
+            match encode_message(&msg) {
+                Ok(data) => {
+                    if let Err(e) = tcp_tx.write_all(&data).await {
+                        eprintln!("failed to send tcp message: {e}");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error encoding message: {e}");
                 }
             }
         }
@@ -96,20 +123,20 @@ pub async fn connect() -> Result<TcpConnection> {
 
     spawn(async move {
         loop {
-            match read_message(&mut tcp_rx).await {
-                Ok(Some(worterbuch::codec::Message::PState(msg))) => {
+            match read_server_message(&mut tcp_rx).await {
+                Ok(Some(SM::PState(msg))) => {
                     for (key, value) in msg.key_value_pairs {
                         println!("{key} = {value}");
                     }
                 }
-                Ok(Some(worterbuch::codec::Message::State(msg))) => {
+                Ok(Some(SM::State(msg))) => {
                     if let Some((key, value)) = msg.key_value {
                         println!("{} = {}", key, value);
                     } else {
                         println!("No result.");
                     }
                 }
-                Ok(Some(worterbuch::codec::Message::Err(msg))) => {
+                Ok(Some(SM::Err(msg))) => {
                     eprintln!("server error {}: {}", msg.error_code, msg.metadata);
                 }
                 Ok(None) => {
@@ -129,13 +156,14 @@ pub async fn connect() -> Result<TcpConnection> {
     Ok(con)
 }
 
-fn encode_message(msg: &Message) -> Result<Option<Vec<u8>>> {
+fn encode_message(msg: &CM) -> Result<Vec<u8>> {
     match msg {
-        Message::Get(msg) => Ok(Some(encode_get_message(msg)?)),
-        Message::PGet(msg) => Ok(Some(encode_pget_message(msg)?)),
-        Message::Set(msg) => Ok(Some(encode_set_message(msg)?)),
-        Message::Subscribe(msg) => Ok(Some(encode_subscribe_message(msg)?)),
-        Message::PSubscribe(msg) => Ok(Some(encode_psubscribe_message(msg)?)),
-        _ => Ok(None),
+        CM::Get(msg) => Ok(encode_get_message(msg)?),
+        CM::PGet(msg) => Ok(encode_pget_message(msg)?),
+        CM::Set(msg) => Ok(encode_set_message(msg)?),
+        CM::Subscribe(msg) => Ok(encode_subscribe_message(msg)?),
+        CM::PSubscribe(msg) => Ok(encode_psubscribe_message(msg)?),
+        CM::Export(msg) => Ok(encode_export_message(msg)?),
+        CM::Import(msg) => Ok(encode_import_message(msg)?),
     }
 }

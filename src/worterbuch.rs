@@ -7,10 +7,14 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+};
 use uuid::Uuid;
 use worterbuch::{
-    codec::KeyValuePairs,
+    codec::{KeyValuePairs, Path},
     config::Config,
     error::{WorterbuchError, WorterbuchResult},
 };
@@ -179,6 +183,26 @@ impl Worterbuch {
             );
         }
         Ok(imported_values)
+    }
+
+    pub async fn export_to_file(&self, path: &Path) -> WorterbuchResult<()> {
+        log::info!("Exporting to {path} …");
+        let json = self.export()?;
+        let mut file = File::create(path).await?;
+        file.write_all(json.to_string().as_bytes()).await?;
+        log::info!("Done.");
+        Ok(())
+    }
+
+    pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {
+        log::info!("Importing from {path} …");
+        let mut file = File::open(path).await?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents).await?;
+        let json = String::from_utf8_lossy(&contents).to_string();
+        self.import(&json)?;
+        log::info!("Done.");
+        Ok(())
     }
 
     pub fn unsubscribe(&mut self, key_pattern: &str, subscription: Uuid) {

@@ -20,6 +20,14 @@ PSUBSCRIBE
 
 1 Type | 8 Transaction ID | 2 Request Pattern Length | n Request Pattern
 
+EXPORT
+
+1 Type | 8 Transaction ID | 2 Path Lenght | n Path
+
+IMPORT
+
+1 Type | 8 Transaction ID | 2 Path Lenght | n Path
+
 
 -----------------------------
 

@@ -9,8 +9,8 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch::{
     codec::{
-        encode_ack_message, encode_pstate_message, encode_state_message, read_message, Ack, Get,
-        PGet, PState, PSubscribe, Set, State, Subscribe,
+        encode_ack_message, encode_pstate_message, encode_state_message, read_client_message, Ack,
+        ClientMessage as CM, Export, Get, Import, PGet, PState, PSubscribe, Set, State, Subscribe,
     },
     error::{DecodeError, EncodeError, WorterbuchError},
 };
@@ -21,26 +21,28 @@ pub async fn process_incoming_message(
     tx: UnboundedSender<Vec<u8>>,
     subscriptions: &mut Vec<(String, Uuid)>,
 ) -> Result<bool> {
-    match read_message(msg).await {
-        Ok(Some(worterbuch::codec::Message::Get(msg))) => {
+    match read_client_message(msg).await {
+        Ok(Some(CM::Get(msg))) => {
             get(msg, worterbuch.clone(), tx.clone()).await?;
         }
-        Ok(Some(worterbuch::codec::Message::PGet(msg))) => {
+        Ok(Some(CM::PGet(msg))) => {
             pget(msg, worterbuch.clone(), tx.clone()).await?;
         }
-        Ok(Some(worterbuch::codec::Message::Set(msg))) => {
+        Ok(Some(CM::Set(msg))) => {
             set(msg, worterbuch.clone(), tx.clone()).await?;
         }
-        Ok(Some(worterbuch::codec::Message::Subscribe(msg))) => {
+        Ok(Some(CM::Subscribe(msg))) => {
             if let Some(subs) = subscribe(msg, worterbuch.clone(), tx.clone()).await? {
                 subscriptions.push(subs);
             }
         }
-        Ok(Some(worterbuch::codec::Message::PSubscribe(msg))) => {
+        Ok(Some(CM::PSubscribe(msg))) => {
             if let Some(subs) = psubscribe(msg, worterbuch.clone(), tx.clone()).await? {
                 subscriptions.push(subs);
             }
         }
+        Ok(Some(CM::Export(msg))) => export(msg, worterbuch.clone(), tx.clone()).await?,
+        Ok(Some(CM::Import(msg))) => import(msg, worterbuch.clone(), tx.clone()).await?,
         Ok(None) => {
             // client disconnected
             return Ok(false);
@@ -52,7 +54,6 @@ pub async fn process_incoming_message(
             }
             // TODO send special ERR message
         }
-        _ => { /* ignore server messages */ }
     }
 
     Ok(true)
@@ -261,6 +262,61 @@ async fn psubscribe(
     });
 
     Ok(Some((request_pattern_out, subscription)))
+}
+
+async fn export(
+    msg: Export,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<Vec<u8>>,
+) -> Result<()> {
+    log::info!("export");
+    let wb = worterbuch.read().await;
+    match wb.export_to_file(&msg.path).await {
+        Ok(()) => {
+            let response = Ack {
+                transaction_id: msg.transaction_id,
+            };
+
+            match encode_ack_message(&response) {
+                Ok(data) => client.send(data)?,
+                Err(e) => handle_encode_error(e, client.clone()).await?,
+            }
+        }
+        Err(e) => {
+            handle_store_error(e, client).await?;
+            return Ok(());
+        }
+    }
+
+    Ok(())
+}
+
+async fn import(
+    msg: Import,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<Vec<u8>>,
+) -> Result<()> {
+    log::info!("import");
+    let mut wb = worterbuch.write().await;
+
+    match wb.import_from_file(&msg.path).await {
+        Ok(()) => {
+            let response = Ack {
+                transaction_id: msg.transaction_id,
+            };
+
+            match encode_ack_message(&response) {
+                Ok(data) => client.send(data)?,
+                Err(e) => handle_encode_error(e, client.clone()).await?,
+            }
+        }
+        Err(e) => {
+            handle_store_error(e, client).await?;
+            return Ok(());
+        }
+    }
+
+    Ok(())
 }
 
 async fn handle_encode_error(_e: EncodeError, _client: UnboundedSender<Vec<u8>>) -> Result<()> {

@@ -20,6 +20,8 @@ pub type KeyValuePair = (Key, Value);
 pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type ErrorCode = u8;
 pub type MetaData = String;
+pub type PathLength = u16;
+pub type Path = String;
 
 pub type RequestPatternLength = u16;
 pub type KeyLength = u16;
@@ -32,21 +34,36 @@ pub const SET: MessageType = 0b00000001;
 pub const SUB: MessageType = 0b00000010;
 pub const PGET: MessageType = 0b00000011;
 pub const PSUB: MessageType = 0b00000100;
+pub const EXP: MessageType = 0b00000101;
+pub const IMP: MessageType = 0b00000110;
 
 pub const PSTA: MessageType = 0b10000000;
 pub const ACK: MessageType = 0b10000001;
 pub const STA: MessageType = 0b10000010;
 pub const ERR: MessageType = 0b10000011;
 
+pub const TRANSACTION_ID_BYTES: usize = 8;
+pub const REQUEST_PATTERN_LENGTH_BYTES: usize = 2;
+pub const KEY_LENGTH_BYTES: usize = 2;
+pub const VALUE_LENGTH_BYTES: usize = 4;
+pub const NUM_KEY_VALUE_PAIRS_BYTES: usize = 4;
+pub const ERROR_CODE_BYTES: usize = 1;
+pub const METADATA_LENGTH_BYTES: usize = 4;
+pub const PATH_LENGTH_BYTES: usize = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Message {
-    // client messages
+pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
     Set(Set),
     Subscribe(Subscribe),
     PSubscribe(PSubscribe),
-    // server messages
+    Export(Export),
+    Import(Import),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ServerMessage {
     PState(PState),
     Ack(Ack),
     State(State),
@@ -109,6 +126,18 @@ pub struct Err {
     pub metadata: MetaData,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Export {
+    pub transaction_id: TransactionId,
+    pub path: Path,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Import {
+    pub transaction_id: TransactionId,
+    pub path: Path,
+}
+
 pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
     let key_length = get_key_length(&msg.key)?;
 
@@ -168,6 +197,30 @@ pub fn encode_psubscribe_message(msg: &PSubscribe) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(msg.request_pattern.as_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_export_message(msg: &Export) -> EncodeResult<Vec<u8>> {
+    let path_length = get_path_length(&msg.path)?;
+
+    let mut buf = vec![EXP];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(path_length.to_be_bytes());
+    buf.extend(msg.path.as_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_import_message(msg: &Import) -> EncodeResult<Vec<u8>> {
+    let path_length = get_path_length(&msg.path)?;
+
+    let mut buf = vec![IMP];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
+    buf.extend(path_length.to_be_bytes());
+    buf.extend(msg.path.as_bytes());
 
     Ok(buf)
 }
@@ -282,6 +335,15 @@ fn get_metadata_length(string: &str) -> EncodeResult<MetaDataLength> {
         Err(EncodeError::MetaDataTooLong(length))
     } else {
         Ok(length as MetaDataLength)
+    }
+}
+
+fn get_path_length(string: &str) -> EncodeResult<PathLength> {
+    let length = string.len();
+    if length > PathLength::MAX as usize {
+        Err(EncodeError::PathTooLong(length))
+    } else {
+        Ok(length as PathLength)
     }
 }
 
@@ -466,5 +528,37 @@ mod test {
         ];
 
         assert_eq!(data, encode_err_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn export_message_is_encoded_correctly() {
+        let msg = Export {
+            transaction_id: 42,
+            path: "/path/to/file".to_owned(),
+        };
+
+        let data = vec![
+            EXP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
+            b't', b'o', b'/', b'f', b'i', b'l', b'e',
+        ];
+
+        assert_eq!(data, encode_export_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn import_message_is_encoded_correctly() {
+        let msg = Import {
+            transaction_id: 42,
+            path: "/path/to/file".to_owned(),
+        };
+
+        let data = vec![
+            IMP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
+            b't', b'o', b'/', b'f', b'i', b'l', b'e',
+        ];
+
+        assert_eq!(data, encode_import_message(&msg).unwrap());
     }
 }
