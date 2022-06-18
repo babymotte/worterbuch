@@ -75,10 +75,12 @@ The first byte of a message encodes its message type:
 0000 0000 = GET
 0000 0001 = SET
 0000 0010 = SUBSCRIBE
+0000 0011 = PGET
+0000 0100 = PSUBSCRIBE
 
-1000 0000 = STATE
+1000 0000 = PSTATE
 1000 0001 = ACK
-1000 0010 = EVENT
+1000 0010 = STATE
 1000 0011 = ERR
 ```
 The remaining variants are left free for potential future extension of the protocol.
