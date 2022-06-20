@@ -19,6 +19,8 @@ jobs:
         override: true
     - uses: davidB/rust-cargo-make@v1
     - uses: actions/checkout@v3
+    - name: Docker login
+      run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
     - name: Build Dockerfile
       run: cargo make docker
     
