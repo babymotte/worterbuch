@@ -1,19 +1,20 @@
 mod error;
+#[cfg(not(feature = "docker"))]
 mod repl;
 mod server;
 mod store;
 mod subscribers;
 mod worterbuch;
 
-use crate::{repl::repl, worterbuch::Worterbuch};
+#[cfg(not(feature = "docker"))]
+use crate::repl::repl;
+use crate::worterbuch::Worterbuch;
 use anyhow::Result;
 use libworterbuch::config::Config;
 use std::sync::Arc;
-use tokio::{
-    signal::unix::{signal, SignalKind},
-    spawn,
-    sync::RwLock,
-};
+#[cfg(feature = "docker")]
+use tokio::signal::unix::{signal, SignalKind};
+use tokio::{spawn, sync::RwLock};
 
 #[cfg(not(feature = "multithreaded"))]
 #[tokio::main(flavor = "current_thread")]
@@ -51,11 +52,16 @@ async fn run() -> Result<()> {
     #[cfg(feature = "ws")]
     spawn(server::ws::start(worterbuch.clone(), config.clone()));
 
-    spawn(repl(worterbuch));
+    #[cfg(feature = "docker")]
+    {
+        let mut signal = signal(SignalKind::terminate())?;
+        signal.recv().await;
+    }
 
-    let mut signal = signal(SignalKind::terminate())?;
-
-    signal.recv().await;
+    #[cfg(not(feature = "docker"))]
+    {
+        repl(worterbuch).await;
+    }
 
     Ok(())
 }

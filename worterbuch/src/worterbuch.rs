@@ -209,6 +209,7 @@ impl Worterbuch {
         self.subscribers.unsubscribe(&pattern, subscription);
     }
 
+    #[cfg(not(feature = "docker"))]
     pub fn stats(&self) -> Stats {
         Stats {
             store_stats: self.store.stats(),

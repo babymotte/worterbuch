@@ -235,12 +235,14 @@ impl Store {
         insertions
     }
 
+    #[cfg(not(feature = "docker"))]
     pub fn stats(&self) -> StoreStats {
         let num_entries = self.count_entries();
 
         StoreStats { num_entries }
     }
 
+    #[cfg(not(feature = "docker"))]
     fn count_entries(&self) -> usize {
         count_children(&self.data)
     }
@@ -258,6 +260,7 @@ fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
     string
 }
 
+#[cfg(not(feature = "docker"))]
 fn count_children(node: &Node) -> usize {
     let mut count = 0;
 

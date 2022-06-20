@@ -9,6 +9,7 @@ edition = "2021"
 default = ["tcp", "ws"]
 multithreaded = []
 async = []
+docker = []
 tcp = ["async"]
 web = ["async", "warp", "openssl", "libworterbuch/web"]
 ws = ["web", "futures-util", "futures"]
