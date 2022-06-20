@@ -20,7 +20,7 @@ graphql = [
 ]
 
 [dependencies]
-worterbuch = { path = ".." }
+worterbuch = { path = "../worterbuch" }
 tokio = { version = "1.19.2", features = ["full"] }
 dotenv = "0.15.0"
 anyhow = "1.0.57"

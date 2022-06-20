@@ -1,0 +1,5 @@
+[tasks.install]
+command = "cargo"
+args = ["install", "--path", ".", "--features", "tcp"]
+
+[tasks.docker]

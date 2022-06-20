@@ -1,0 +1,14 @@
+[tasks.install]
+command = "cargo"
+args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]
+
+[tasks.docker-build]
+command = "docker"
+args = ["build", "-t", "babymotte/worterbuch:latest", "."]
+
+[tasks.docker-publish]
+command = "docker"
+args = ["push", "babymotte/worterbuch:latest"]
+
+[tasks.docker]
+dependencies = ["docker-build", "docker-publish"]

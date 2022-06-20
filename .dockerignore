@@ -1,4 +1,0 @@
-/target/*
-/worterbuch-cli/*
-.dockerignore
-/data/*
