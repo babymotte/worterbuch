@@ -2,6 +2,10 @@
 command = "cargo"
 args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]
 
+[tasks.docker-login]
+command = "docker"
+args = ["login", "-u", "${DOCKERHUB_USERNAME}", "-p", "${DOCKERHUB_PASSWORD}"]
+
 [tasks.docker-build]
 command = "docker"
 args = [
@@ -25,4 +29,4 @@ args = ["push", "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}"]
 dependencies = ["docker-push-latest", "docker-push-versioned"]
 
 [tasks.docker]
-dependencies = ["docker-build", "docker-push"]
+dependencies = ["docker-login", "docker-build", "docker-push"]
