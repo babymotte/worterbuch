@@ -4,11 +4,25 @@ args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]
 
 [tasks.docker-build]
 command = "docker"
-args = ["build", "-t", "babymotte/worterbuch:latest", "."]
+args = [
+  "build",
+  "-t",
+  "babymotte/worterbuch:latest",
+  "-t",
+  "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}",
+  "..",
+]
 
-[tasks.docker-publish]
+[tasks.docker-push-latest]
 command = "docker"
 args = ["push", "babymotte/worterbuch:latest"]
 
+[tasks.docker-push-versioned]
+command = "docker"
+args = ["push", "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}"]
+
+[tasks.docker-push]
+dependencies = ["docker-push-latest", "docker-push-versioned"]
+
 [tasks.docker]
-dependencies = ["docker-build", "docker-publish"]
+dependencies = ["docker-build", "docker-push"]
