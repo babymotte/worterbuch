@@ -3,7 +3,7 @@ WORKDIR /src
 RUN cargo new --lib worterbuch
 WORKDIR /src/worterbuch
 COPY . .
-RUN cargo build --release
+RUN cargo test --release
 RUN cargo build -p worterbuch --release --features tcp,ws,graphql
 RUN cargo build -p worterbuch-cli --release --features tcp
 
