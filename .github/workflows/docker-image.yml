@@ -20,7 +20,7 @@ jobs:
     - uses: davidB/rust-cargo-make@v1
     - uses: actions/checkout@v3
     - name: Docker login
-      run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+      run: echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
     - name: Build Dockerfile
       run: cargo make docker
     
