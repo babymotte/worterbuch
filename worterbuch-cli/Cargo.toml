@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["tcp"]
+default = ["client"]
+client = ["worterbuch/client", "tcp"]
 tcp = ["worterbuch/tcp"]
 ws = ["worterbuch/ws", "tokio-tungstenite", "futures-util"]
 graphql = [

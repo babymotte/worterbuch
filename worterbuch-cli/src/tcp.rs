@@ -100,7 +100,12 @@ impl Connection for TcpConnection {
 pub async fn connect() -> Result<TcpConnection> {
     let config = Config::new()?;
 
-    let server = TcpStream::connect(format!("{}:{}", config.bind_addr, config.tcp_port)).await?;
+    let host_addr = config.host_addr;
+    let port = config.tcp_port;
+
+    eprintln!("Server address: {:?}:{:?}", host_addr, port);
+
+    let server = TcpStream::connect(format!("{host_addr}:{port}")).await?;
     let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();

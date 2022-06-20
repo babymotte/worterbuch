@@ -1,3 +1,4 @@
 /target
 .env
 props.json
+/data

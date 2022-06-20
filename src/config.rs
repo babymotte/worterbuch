@@ -1,6 +1,8 @@
 use crate::utils::to_char;
 use anyhow::{Context, Result};
-use std::{env, net::IpAddr};
+use std::env;
+#[cfg(feature = "server")]
+use std::net::IpAddr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -14,11 +16,14 @@ pub struct Config {
     pub web_port: u16,
     #[cfg(feature = "web")]
     pub proto: String,
+    #[cfg(feature = "server")]
     pub bind_addr: IpAddr,
     #[cfg(feature = "web")]
     pub cert_path: Option<String>,
     #[cfg(feature = "web")]
     pub key_path: Option<String>,
+    #[cfg(feature = "client")]
+    pub host_addr: String,
 }
 
 impl Config {
@@ -54,9 +59,15 @@ impl Config {
             self.graphql_port = val.parse().context("port must be an integer")?;
         }
 
+        #[cfg(feature = "server")]
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
             let ip: IpAddr = val.parse()?;
             self.bind_addr = ip;
+        }
+
+        #[cfg(feature = "client")]
+        if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
+            self.host_addr = val;
         }
 
         Ok(())
@@ -82,11 +93,14 @@ impl Default for Config {
             web_port: 8080,
             #[cfg(feature = "web")]
             proto: "ws".to_owned(),
+            #[cfg(feature = "server")]
             bind_addr: [127, 0, 0, 1].into(),
             #[cfg(feature = "web")]
             cert_path: None,
             #[cfg(feature = "web")]
             key_path: None,
+            #[cfg(feature = "client")]
+            host_addr: "localhost".to_owned(),
         }
     }
 }
