@@ -9,7 +9,6 @@ mod blocking;
 pub use blocking::*;
 
 use crate::error::{EncodeError, EncodeResult};
-use serde::{Deserialize, Serialize};
 
 pub type MessageType = u8;
 pub type TransactionId = u64;
@@ -51,7 +50,7 @@ pub const ERROR_CODE_BYTES: usize = 1;
 pub const METADATA_LENGTH_BYTES: usize = 4;
 pub const PATH_LENGTH_BYTES: usize = 2;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
@@ -62,7 +61,7 @@ pub enum ClientMessage {
     Import(Import),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ServerMessage {
     PState(PState),
     Ack(Ack),
@@ -70,69 +69,69 @@ pub enum ServerMessage {
     Err(Err),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Get {
     pub transaction_id: TransactionId,
     pub key: Key,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PGet {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Set {
     pub transaction_id: TransactionId,
     pub key: Key,
     pub value: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Subscribe {
     pub transaction_id: TransactionId,
     pub key: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PState {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub key_value_pairs: KeyValuePairs,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Ack {
     pub transaction_id: TransactionId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct State {
     pub transaction_id: TransactionId,
     pub key_value: Option<KeyValuePair>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Err {
     pub transaction_id: TransactionId,
     pub error_code: ErrorCode,
     pub metadata: MetaData,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Export {
     pub transaction_id: TransactionId,
     pub path: Path,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Import {
     pub transaction_id: TransactionId,
     pub path: Path,

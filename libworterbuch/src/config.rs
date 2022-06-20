@@ -1,5 +1,4 @@
-use crate::utils::to_char;
-use anyhow::{Context, Result};
+use crate::error::{ConfigError, ConfigResult};
 use std::env;
 #[cfg(feature = "server")]
 use std::net::IpAddr;
@@ -27,17 +26,17 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load_env(&mut self) -> Result<()> {
+    pub fn load_env(&mut self) -> ConfigResult<()> {
         if let Ok(val) = env::var("WORTERBUCH_SEPARATOR") {
-            self.separator = to_char(val).context("separator must be a single char")?;
+            self.separator = to_separator(val)?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_WILDCARD") {
-            self.wildcard = to_char(val).context("wildcard must be a single char")?;
+            self.wildcard = to_wildcard(val)?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_MULTI_WILDCARD") {
-            self.multi_wildcard = to_char(val).context("multi-wildcard must be a single char")?;
+            self.multi_wildcard = to_multi_wildcard(val)?;
         }
 
         #[cfg(feature = "web")]
@@ -47,21 +46,21 @@ impl Config {
 
         #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
-            self.tcp_port = val.parse().context("port must be an integer")?;
+            self.tcp_port = val.parse().map_err(ConfigError::InvalidPort)?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
-            self.tcp_port = val.parse().context("port must be an integer")?;
+            self.tcp_port = val.parse().map_err(ConfigError::InvalidPort)?;
         }
 
         #[cfg(feature = "graphql")]
         if let Ok(val) = env::var("WORTERBUCH_GRAPHQL_PORT") {
-            self.graphql_port = val.parse().context("port must be an integer")?;
+            self.graphql_port = val.parse().map_err(ConfigError::InvalidPort)?;
         }
 
         #[cfg(feature = "server")]
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
-            let ip: IpAddr = val.parse()?;
+            let ip: IpAddr = val.parse().map_err(ConfigError::InvalidAddr)?;
             self.bind_addr = ip;
         }
 
@@ -73,7 +72,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn new() -> Result<Self> {
+    pub fn new() -> ConfigResult<Self> {
         let mut config = Config::default();
         config.load_env()?;
         Ok(config)
@@ -101,6 +100,45 @@ impl Default for Config {
             key_path: None,
             #[cfg(feature = "client")]
             host_addr: "localhost".to_owned(),
+        }
+    }
+}
+
+fn to_separator(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidSeparator(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidSeparator(str.to_owned()))
+        }
+    }
+}
+
+fn to_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidWildcard(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidWildcard(str.to_owned()))
+        }
+    }
+}
+
+fn to_multi_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
         }
     }
 }

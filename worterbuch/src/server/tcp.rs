@@ -1,5 +1,6 @@
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
+use libworterbuch::config::Config;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
@@ -10,7 +11,6 @@ use tokio::{
         RwLock,
     },
 };
-use worterbuch::config::Config;
 
 use super::async_common::process_incoming_message;
 

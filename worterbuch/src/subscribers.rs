@@ -1,8 +1,8 @@
 use anyhow::Result;
+use libworterbuch::codec::KeyValuePairs;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use worterbuch::codec::KeyValuePairs;
 
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<String, Node>;

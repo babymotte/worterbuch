@@ -4,10 +4,10 @@ use crate::{
 };
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
+use libworterbuch::config::Config;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use warp::Filter;
-use worterbuch::config::Config;
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");

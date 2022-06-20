@@ -702,6 +702,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 
 [[package]]
+name = "libworterbuch"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1884,12 +1893,12 @@ dependencies = [
  "juniper",
  "juniper_graphql_ws",
  "juniper_warp",
+ "libworterbuch",
  "log",
  "openssl",
  "serde",
  "serde_json",
  "tokio",
- "tokio-test",
  "uuid 1.1.2",
  "warp",
 ]
@@ -1903,10 +1912,10 @@ dependencies = [
  "dotenv",
  "futures-channel",
  "futures-util",
+ "libworterbuch",
  "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.17.1",
  "url",
- "worterbuch",
 ]

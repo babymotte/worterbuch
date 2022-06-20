@@ -1,3 +1,4 @@
+mod error;
 mod repl;
 mod server;
 mod store;
@@ -5,8 +6,8 @@ mod subscribers;
 mod worterbuch;
 
 use crate::{repl::repl, worterbuch::Worterbuch};
-use ::worterbuch::config::Config;
 use anyhow::Result;
+use libworterbuch::config::Config;
 use std::sync::Arc;
 use tokio::{
     signal::unix::{signal, SignalKind},
