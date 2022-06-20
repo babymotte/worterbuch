@@ -103,8 +103,6 @@ pub async fn connect() -> Result<TcpConnection> {
     let host_addr = config.host_addr;
     let port = config.tcp_port;
 
-    eprintln!("Server address: {:?}:{:?}", host_addr, port);
-
     let server = TcpStream::connect(format!("{host_addr}:{port}")).await?;
     let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
