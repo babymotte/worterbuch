@@ -1,6 +1,5 @@
-use std::{env, time::Duration};
-
 use anyhow::Result;
+use std::env;
 #[cfg(feature = "graphql")]
 use worterbuch_cli::gql::GqlConnection;
 #[cfg(feature = "tcp")]
@@ -38,9 +37,11 @@ async fn main() -> Result<()> {
         }
     };
 
+    let mut acks = con.acks();
+
     con.import(&path)?;
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    acks.recv().await?;
 
     Ok(())
 }

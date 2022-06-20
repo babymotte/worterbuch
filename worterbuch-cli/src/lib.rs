@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use tokio::sync::broadcast;
 
 #[cfg(feature = "graphql")]
 pub mod gql;
@@ -17,6 +18,7 @@ pub trait Connection {
     fn psubscribe(&mut self, key: &str) -> Result<u64>;
     fn export(&mut self, key: &str) -> Result<u64>;
     fn import(&mut self, key: &str) -> Result<u64>;
+    fn acks(&mut self) -> broadcast::Receiver<u64>;
 }
 
 pub enum Command {

@@ -5,7 +5,10 @@ use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
     spawn,
-    sync::mpsc::{self, UnboundedSender},
+    sync::{
+        broadcast,
+        mpsc::{self, UnboundedSender},
+    },
 };
 use worterbuch::{
     codec::{
@@ -21,6 +24,7 @@ use worterbuch::{
 pub struct TcpConnection {
     cmd_tx: UnboundedSender<CM>,
     counter: u64,
+    ack_tx: broadcast::Sender<u64>,
 }
 
 #[async_trait]
@@ -95,6 +99,10 @@ impl Connection for TcpConnection {
         }))?;
         Ok(i)
     }
+
+    fn acks(&mut self) -> broadcast::Receiver<u64> {
+        self.ack_tx.subscribe()
+    }
 }
 
 pub async fn connect() -> Result<TcpConnection> {
@@ -107,6 +115,8 @@ pub async fn connect() -> Result<TcpConnection> {
     let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+    let (ack_tx, ack_rx) = broadcast::channel(1_000);
+    let ack_tx_rcv = ack_tx.clone();
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
@@ -122,6 +132,8 @@ pub async fn connect() -> Result<TcpConnection> {
                 }
             }
         }
+        // make sure initial rx is not dropped as long as stdin is read
+        drop(ack_rx);
     });
 
     spawn(async move {
@@ -131,6 +143,9 @@ pub async fn connect() -> Result<TcpConnection> {
                     for (key, value) in msg.key_value_pairs {
                         println!("{key} = {value}");
                     }
+                    if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
+                        eprintln!("Error forwarding ack: {e}");
+                    }
                 }
                 Ok(Some(SM::State(msg))) => {
                     if let Some((key, value)) = msg.key_value {
@@ -138,9 +153,20 @@ pub async fn connect() -> Result<TcpConnection> {
                     } else {
                         println!("No result.");
                     }
+                    if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
+                        eprintln!("Error forwarding ack: {e}");
+                    }
+                }
+                Ok(Some(SM::Ack(msg))) => {
+                    if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
+                        eprintln!("Error forwarding ack: {e}");
+                    }
                 }
                 Ok(Some(SM::Err(msg))) => {
                     eprintln!("server error {}: {}", msg.error_code, msg.metadata);
+                    if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
+                        eprintln!("Error forwarding ack: {e}");
+                    }
                 }
                 Ok(None) => {
                     eprintln!("Connection to server lost.");
@@ -149,12 +175,15 @@ pub async fn connect() -> Result<TcpConnection> {
                 Err(e) => {
                     eprintln!("error decoding message: {e}");
                 }
-                _ => { /* ignore client messages */ }
             }
         }
     });
 
-    let con = TcpConnection { cmd_tx, counter: 1 };
+    let con = TcpConnection {
+        cmd_tx,
+        counter: 1,
+        ack_tx,
+    };
 
     Ok(con)
 }

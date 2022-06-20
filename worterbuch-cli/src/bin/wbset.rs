@@ -1,5 +1,14 @@
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    spawn,
+    time::sleep,
+};
 #[cfg(feature = "graphql")]
 use worterbuch_cli::gql::GqlConnection;
 #[cfg(feature = "tcp")]
@@ -29,18 +38,40 @@ async fn main() -> Result<()> {
 
     let mut con = connect().await?;
 
+    let mut trans_id = 0;
+    let acked = Arc::new(Mutex::new(0));
+    let acked_recv = acked.clone();
+
+    let mut acks = con.acks();
+
+    spawn(async move {
+        while let Ok(tid) = acks.recv().await {
+            let mut acked = acked_recv.lock().expect("mutex is poisoned");
+            if tid > *acked {
+                *acked = tid;
+            }
+        }
+    });
+
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(index) = line.find('=') {
             let key = &line[..index];
             let val = &line[index + 1..];
-            con.set(key, val)?;
+            trans_id = con.set(key, val)?;
         } else {
             eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
         }
     }
 
-    // TODO keep TCP connection open until all requests have been ACKed
+    loop {
+        let acked = *acked.lock().expect("mutex is poisoned");
+        if acked < trans_id {
+            sleep(Duration::from_millis(100)).await;
+        } else {
+            break;
+        }
+    }
 
     Ok(())
 }
