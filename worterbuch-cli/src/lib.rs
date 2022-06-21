@@ -18,12 +18,3 @@ pub trait Connection {
     fn import(&mut self, path: &str) -> Result<u64>;
     fn acks(&mut self) -> broadcast::Receiver<u64>;
 }
-
-pub enum Command {
-    Init,
-    Get(String, u64),
-    PGet(String, u64),
-    Set(String, String, u64),
-    Subscrube(String, u64),
-    PSubscrube(String, u64),
-}

@@ -16,6 +16,7 @@ default = ["tcp"]
 tcp = ["libworterbuch/tcp"]
 ws = ["libworterbuch/ws", "tokio-tungstenite", "futures-util"]
 graphql = [
+  "libworterbuch/graphql",
   "tokio-tungstenite",
   "url",
   "futures-util",

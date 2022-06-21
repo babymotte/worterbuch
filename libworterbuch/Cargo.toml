@@ -20,10 +20,10 @@ default = ["async", "client", "tcp"]
 client = []
 server = []
 tcp = []
-ws = []
+ws = ["web"]
+graphql = ["web"]
 async = []
 web = []
-graphql = []
 
 [dev-dependencies]
 tokio-test = "0.4.2"
