@@ -2,8 +2,8 @@ use crate::Connection;
 use anyhow::Result;
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
+use libworterbuch::config::Config;
 use serde_json::Value;
-use std::env;
 use tokio::{
     spawn,
     sync::broadcast::{self, Sender},
@@ -91,9 +91,11 @@ impl Connection for GqlConnection {
 }
 
 pub async fn connect() -> Result<GqlConnection> {
-    let proto = env::var("WORTERBUCH_PROTO").unwrap_or("ws".to_owned());
-    let addr = env::var("WORTERBUCH_ADDR").unwrap_or("127.0.0.1".to_owned());
-    let port = env::var("WORTERBUCH_GRAPHQL_PORT").unwrap_or("4243".to_owned());
+    let config = Config::new()?;
+
+    let proto = &config.proto;
+    let addr = config.host_addr;
+    let port = config.web_port;
 
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 

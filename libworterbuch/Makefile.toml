@@ -1,0 +1,33 @@
+[tasks.test-server-async]
+command = "cargo"
+args = [
+  "test",
+  "--no-default-features",
+  "--features",
+  "server,async,tcp,ws,graphql",
+]
+
+[tasks.test-server-sync]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "server,tcp,ws,graphql"]
+
+[tasks.test-client-async]
+command = "cargo"
+args = [
+  "test",
+  "--no-default-features",
+  "--features",
+  "client,async,tcp,ws,graphql",
+]
+
+[tasks.test-client-sync]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "client,tcp,ws,graphql"]
+
+[tasks.test-features]
+dependencies = [
+  "test-server-async",
+  "test-server-sync",
+  "test-client-async",
+  "test-client-sync",
+]

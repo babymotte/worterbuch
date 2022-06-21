@@ -7,7 +7,6 @@ description = "Command line clients for Wörterbuch."
 repository = "https://github.com/babymotte/worterbuch"
 readme = "README.md"
 license = "MIT"
-license-file = "../LICENSE"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 

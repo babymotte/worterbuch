@@ -1,3 +1,19 @@
+[tasks.test-multi-threaded]
+command = "cargo"
+args = [
+  "test",
+  "--no-default-features",
+  "--features",
+  "tcp,ws,graphql,async,multithreaded",
+]
+
+[tasks.test-single-threaded]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "tcp,ws,graphql,async"]
+
+[tasks.test-features]
+dependencies = ["test-multi-threaded", "test-single-threaded"]
+
 [tasks.install]
 command = "cargo"
 args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]

@@ -1,5 +1,21 @@
+[tasks.test-tcp]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "tcp"]
+
+[tasks.test-ws]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "ws"]
+
+[tasks.test-graphql]
+command = "cargo"
+args = ["test", "--no-default-features", "--features", "graphql"]
+
+[tasks.test-features]
+dependencies = ["test-tcp", "test-ws", "test-graphql"]
+
 [tasks.install]
 command = "cargo"
 args = ["install", "--path", ".", "--features", "tcp"]
+dependencies = ["test-tcp"]
 
 [tasks.docker]

@@ -105,7 +105,7 @@ pub async fn connect() -> Result<WsConnection> {
     let config = Config::new()?;
 
     let proto = config.proto.clone();
-    let addr = config.bind_addr;
+    let addr = config.host_addr;
     let port = config.web_port;
 
     let (server, _) = connect_async(format!("{proto}://{addr}:{port}")).await?;
