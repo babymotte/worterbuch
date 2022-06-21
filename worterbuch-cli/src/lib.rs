@@ -14,8 +14,8 @@ pub trait Connection {
     fn pget(&mut self, key: &str) -> Result<u64>;
     fn subscribe(&mut self, key: &str) -> Result<u64>;
     fn psubscribe(&mut self, key: &str) -> Result<u64>;
-    fn export(&mut self, key: &str) -> Result<u64>;
-    fn import(&mut self, key: &str) -> Result<u64>;
+    fn export(&mut self, path: &str) -> Result<u64>;
+    fn import(&mut self, path: &str) -> Result<u64>;
     fn acks(&mut self) -> broadcast::Receiver<u64>;
 }
 
