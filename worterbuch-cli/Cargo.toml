@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Command line clients for Wörterbuch."
@@ -25,7 +25,7 @@ graphql = [
 ]
 
 [dependencies]
-libworterbuch = { version = "0.1.0" }
+libworterbuch = { path = "../libworterbuch" }
 tokio = { version = "1.19.2", features = ["full"] }
 dotenv = "0.15.0"
 anyhow = "1.0.57"
