@@ -2,8 +2,14 @@
 name = "worterbuch-cli"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
+description = "Command line clients for Wörterbuch."
+repository = "https://github.com/babymotte/worterbuch"
+readme = "README.md"
+license = "MIT"
+license-file = "../LICENSE"
+keywords = ["message", "broker", "data", "base", "pubsub"]
+categories = ["database", "command-line-utilities"]
 
 [features]
 default = ["tcp"]
@@ -23,7 +29,6 @@ libworterbuch = { path = "../libworterbuch" }
 tokio = { version = "1.19.2", features = ["full"] }
 dotenv = "0.15.0"
 anyhow = "1.0.57"
-async-trait = "0.1.56"
 
 tokio-tungstenite = { version = "0.17.1", optional = true }
 url = { version = "2.2.2", optional = true }

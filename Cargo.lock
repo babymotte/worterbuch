@@ -1908,7 +1908,6 @@ name = "worterbuch-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "dotenv",
  "futures-channel",
  "futures-util",

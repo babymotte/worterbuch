@@ -2,8 +2,14 @@
 name = "worterbuch"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
+description = "A message broker / database hybrid."
+repository = "https://github.com/babymotte/worterbuch"
+readme = "../README.md"
+license = "MIT"
+license-file = "../LICENSE"
+keywords = ["message", "broker", "data", "base", "pubsub"]
+categories = ["database-implementations"]
 
 [features]
 default = ["tcp", "ws"]

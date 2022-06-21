@@ -1,6 +1,5 @@
 use crate::Connection;
 use anyhow::Result;
-use async_trait::async_trait;
 use libworterbuch::{
     codec::{
         encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
@@ -27,7 +26,6 @@ pub struct TcpConnection {
     ack_tx: broadcast::Sender<u64>,
 }
 
-#[async_trait]
 impl Connection for TcpConnection {
     fn set(&mut self, key: &str, value: &str) -> Result<u64> {
         let i = self.counter;
