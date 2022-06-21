@@ -19,6 +19,5 @@ COPY --from=worterbuch-builder /src/worterbuch/target/release/wbsub .
 COPY --from=worterbuch-builder /src/worterbuch/target/release/wbpsub .
 COPY --from=worterbuch-builder /src/worterbuch/target/release/wbimp .
 COPY --from=worterbuch-builder /src/worterbuch/target/release/wbexp .
-COPY cert cert/
 VOLUME [ "/data" ]
 CMD ["./worterbuch"]
