@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use crate::Connection;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -20,14 +22,22 @@ use tokio_tungstenite::{connect_async, tungstenite};
 #[derive(Clone)]
 pub struct WsConnection {
     cmd_tx: UnboundedSender<CM>,
-    counter: u64,
-    ack_tx: broadcast::Sender<u64>,
+    result_tx: broadcast::Sender<SM>,
+    counter: Arc<Mutex<u64>>,
+}
+
+impl WsConnection {
+    fn inc_counter(&mut self) -> u64 {
+        let mut counter = self.counter.lock().expect("poisoned counter mutex");
+        let i = *counter;
+        *counter += 1;
+        i
+    }
 }
 
 impl Connection for WsConnection {
     fn set(&mut self, key: &str, value: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
             key: key.to_owned(),
@@ -37,8 +47,7 @@ impl Connection for WsConnection {
     }
 
     fn get(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
             key: key.to_owned(),
@@ -47,8 +56,7 @@ impl Connection for WsConnection {
     }
 
     fn pget(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
             request_pattern: key.to_owned(),
@@ -57,8 +65,7 @@ impl Connection for WsConnection {
     }
 
     fn subscribe(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
             key: key.to_owned(),
@@ -67,8 +74,7 @@ impl Connection for WsConnection {
     }
 
     fn psubscribe(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
             request_pattern: key.to_owned(),
@@ -77,8 +83,7 @@ impl Connection for WsConnection {
     }
 
     fn export(&mut self, path: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::Export(Export {
             transaction_id: i,
             path: path.to_owned(),
@@ -87,8 +92,7 @@ impl Connection for WsConnection {
     }
 
     fn import(&mut self, path: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx.send(CM::Import(Import {
             transaction_id: i,
             path: path.to_owned(),
@@ -96,8 +100,8 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn acks(&mut self) -> broadcast::Receiver<u64> {
-        self.ack_tx.subscribe()
+    fn responses(&mut self) -> broadcast::Receiver<SM> {
+        self.result_tx.subscribe()
     }
 }
 
@@ -112,8 +116,8 @@ pub async fn connect() -> Result<WsConnection> {
     let (mut ws_tx, mut ws_rx) = server.split();
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
-    let (ack_tx, ack_rx) = broadcast::channel(1_000);
-    let ack_tx_rcv = ack_tx.clone();
+    let (result_tx, result_rx) = broadcast::channel(1_000);
+    let result_tx_recv = result_tx.clone();
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
@@ -128,7 +132,7 @@ pub async fn connect() -> Result<WsConnection> {
             }
         }
         // make sure initial rx is not dropped as long as stdin is read
-        drop(ack_rx);
+        drop(result_rx);
     });
 
     spawn(async move {
@@ -137,33 +141,9 @@ pub async fn connect() -> Result<WsConnection> {
                 if incoming_msg.is_binary() {
                     let data = incoming_msg.into_data();
                     match read_server_message(&*data).await {
-                        Ok(Some(SM::PState(msg))) => {
-                            for (key, value) in msg.key_value_pairs {
-                                println!("{key} = {value}");
-                            }
-                            if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
-                                eprintln!("Error forwarding ack: {e}");
-                            }
-                        }
-                        Ok(Some(SM::State(msg))) => {
-                            if let Some((key, value)) = msg.key_value {
-                                println!("{} = {}", key, value);
-                            } else {
-                                println!("No result.");
-                            }
-                            if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
-                                eprintln!("Error forwarding ack: {e}");
-                            }
-                        }
-                        Ok(Some(SM::Ack(msg))) => {
-                            if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
-                                eprintln!("Error forwarding ack: {e}");
-                            }
-                        }
-                        Ok(Some(SM::Err(msg))) => {
-                            eprintln!("server error {}: {}", msg.error_code, msg.metadata);
-                            if let Err(e) = ack_tx_rcv.send(msg.transaction_id) {
-                                eprintln!("Error forwarding ack: {e}");
+                        Ok(Some(msg)) => {
+                            if let Err(e) = result_tx_recv.send(msg) {
+                                eprintln!("Error forwarding server message: {e}");
                             }
                         }
                         Ok(None) => {
@@ -171,7 +151,7 @@ pub async fn connect() -> Result<WsConnection> {
                             break;
                         }
                         Err(e) => {
-                            eprintln!("error decoding message: {e}");
+                            eprintln!("Error decoding message: {e}");
                         }
                     }
                 }
@@ -181,8 +161,8 @@ pub async fn connect() -> Result<WsConnection> {
 
     let con = WsConnection {
         cmd_tx,
-        counter: 1,
-        ack_tx,
+        result_tx,
+        counter: Arc::default(),
     };
 
     Ok(con)

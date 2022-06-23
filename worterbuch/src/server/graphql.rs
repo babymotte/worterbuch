@@ -1,6 +1,7 @@
 use crate::worterbuch::Worterbuch;
 use futures::Stream;
 use juniper::{graphql_object, graphql_subscription, graphql_value, FieldError, FieldResult};
+use libworterbuch::codec::KeyValuePair;
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -48,8 +49,8 @@ impl Query {
             .into_iter()
             .map(|s| Event {
                 pattern: pattern.clone(),
-                key: s.0,
-                value: s.1,
+                key: s.key,
+                value: s.value,
             })
             .collect();
         Ok(result)
@@ -98,7 +99,7 @@ impl Subscription {
                 loop {
                     match rx.recv().await {
                         Some(event) => {
-                            for (key,value) in event {
+                            for KeyValuePair{ key, value } in event {
                                 let event = Event{
                                     pattern: pattern.clone(),
                                     key,
@@ -131,7 +132,7 @@ impl Subscription {
                 loop {
                     match rx.recv().await {
                         Some(event) => {
-                            for (key,value) in event {
+                            for KeyValuePair{ key, value } in event {
                                 let event = Event{
                                     pattern: key.clone(),
                                     key,

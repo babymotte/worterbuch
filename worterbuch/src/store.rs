@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use libworterbuch::codec::KeyValuePair;
 use serde::{Deserialize, Serialize};
 
 type Value = Option<String>;
@@ -70,12 +71,7 @@ impl Store {
     }
 
     /// retrieve values for a key containing at least one single-level wildcard but no multi-level wildcard
-    pub fn get_matches(
-        &self,
-        path: &[&str],
-        wildcard: &str,
-        separator: &str,
-    ) -> Vec<(String, String)> {
+    pub fn get_matches(&self, path: &[&str], wildcard: &str, separator: &str) -> Vec<KeyValuePair> {
         let mut matches = Vec::new();
         let traversed = vec![];
         self.collect_matches(
@@ -95,7 +91,7 @@ impl Store {
         current_node: &Node,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &[&'p str],
-        matches: &mut Vec<(String, String)>,
+        matches: &mut Vec<KeyValuePair>,
         wildcard: &str,
         separator: &str,
         children: bool,
@@ -135,13 +131,13 @@ impl Store {
         } else {
             if let Some(val) = &current.v {
                 let key = traversed_path.join(separator);
-                matches.push((key, val.to_owned()));
+                matches.push((key, val.to_owned()).into());
             }
         }
     }
 
     /// retrieve values for a key ending with a multi-level wildcard but no single level wildcard
-    pub fn get_children(&self, path: &[&str], separator: &str) -> Vec<(String, String)> {
+    pub fn get_children(&self, path: &[&str], separator: &str) -> Vec<KeyValuePair> {
         let mut children = Vec::new();
         let traversed = vec![];
         self.collect_children(&self.data, traversed, path, &mut children, separator);
@@ -153,7 +149,7 @@ impl Store {
         current_node: &Node,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &[&'p str],
-        matches: &mut Vec<(String, String)>,
+        matches: &mut Vec<KeyValuePair>,
         separator: &str,
     ) {
         let mut current = current_node;
@@ -177,7 +173,7 @@ impl Store {
         &self,
         current: &Node,
         traversed_path: Vec<&str>,
-        matches: &mut Vec<(String, String)>,
+        matches: &mut Vec<KeyValuePair>,
         separator: &str,
     ) {
         for (key, node) in &current.t {
@@ -186,7 +182,7 @@ impl Store {
 
             if let Some(val) = &node.v {
                 let key = traversed_path.join(separator);
-                matches.push((key, val.to_owned()));
+                matches.push((key, val.to_owned()).into());
             }
 
             self.collect_all_children(node, traversed_path, matches, separator);
@@ -199,7 +195,7 @@ impl Store {
         path: &[&str],
         wildcard: &str,
         separator: &str,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<KeyValuePair> {
         let mut matches = Vec::new();
         let traversed = vec![];
         self.collect_matches(
@@ -312,48 +308,48 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()))
+            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()))
+            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
             .is_some());
 
         let res = store.get_matches(&vec!["trolo", "?", "b"], "?", "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()))
+            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()))
+            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
             .is_some());
 
         let res = store.get_matches(&vec!["?", "a", "b"], "?", "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()))
+            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()))
+            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
             .is_some());
 
         let res = store.get_matches(&vec!["?", "?", "b"], "?", "/");
         assert_eq!(res.len(), 3);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()))
+            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()))
+            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()))
+            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
             .is_some());
     }
 
@@ -378,57 +374,57 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()))
+            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()))
+            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
             .is_some());
 
         let res = store.get_children(&vec!["trolo"], "/");
         assert_eq!(res.len(), 4);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()))
+            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()))
+            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()))
+            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()))
+            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()).into())
             .is_some());
 
         let res = store.get_children(&vec![], "/");
         assert_eq!(res.len(), 6);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()))
+            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()))
+            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()))
+            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()))
+            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()))
+            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()))
+            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()).into())
             .is_some());
     }
 }

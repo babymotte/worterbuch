@@ -706,6 +706,7 @@ name = "libworterbuch"
 version = "0.1.1"
 dependencies = [
  "log",
+ "serde",
  "tokio",
  "tokio-test",
 ]

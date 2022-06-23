@@ -7,6 +7,7 @@ pub use nonblocking::*;
 mod blocking;
 #[cfg(not(feature = "async"))]
 pub use blocking::*;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{EncodeError, EncodeResult};
 
@@ -15,7 +16,6 @@ pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type Key = String;
 pub type Value = String;
-pub type KeyValuePair = (Key, Value);
 pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type ErrorCode = u8;
 pub type MetaData = String;
@@ -50,7 +50,8 @@ pub const ERROR_CODE_BYTES: usize = 1;
 pub const METADATA_LENGTH_BYTES: usize = 4;
 pub const PATH_LENGTH_BYTES: usize = 2;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
@@ -61,7 +62,8 @@ pub enum ClientMessage {
     Import(Import),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ServerMessage {
     PState(PState),
     Ack(Ack),
@@ -69,69 +71,104 @@ pub enum ServerMessage {
     Err(Err),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl ServerMessage {
+    pub fn transaction_id(&self) -> u64 {
+        match self {
+            ServerMessage::PState(msg) => msg.transaction_id,
+            ServerMessage::Ack(msg) => msg.transaction_id,
+            ServerMessage::State(msg) => msg.transaction_id,
+            ServerMessage::Err(msg) => msg.transaction_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValuePair {
+    pub key: Key,
+    pub value: Value,
+}
+
+impl From<(String, String)> for KeyValuePair {
+    fn from((key, value): (String, String)) -> Self {
+        KeyValuePair { key, value }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Get {
     pub transaction_id: TransactionId,
     pub key: Key,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PGet {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Set {
     pub transaction_id: TransactionId,
     pub key: Key,
     pub value: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Subscribe {
     pub transaction_id: TransactionId,
     pub key: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PState {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub key_value_pairs: KeyValuePairs,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Ack {
     pub transaction_id: TransactionId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct State {
     pub transaction_id: TransactionId,
     pub key_value: Option<KeyValuePair>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Err {
     pub transaction_id: TransactionId,
     pub error_code: ErrorCode,
     pub metadata: MetaData,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Export {
     pub transaction_id: TransactionId,
     pub path: Path,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Import {
     pub transaction_id: TransactionId,
     pub path: Path,
@@ -234,7 +271,7 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(num_key_val_pairs.to_be_bytes());
 
-    for (key, value) in &msg.key_value_pairs {
+    for KeyValuePair { key, value } in &msg.key_value_pairs {
         let key_length = get_key_length(&key)?;
         let value_length = get_value_length(&value)?;
         buf.extend(key_length.to_be_bytes());
@@ -243,7 +280,7 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
 
     buf.extend(msg.request_pattern.as_bytes());
 
-    for (key, value) in &msg.key_value_pairs {
+    for KeyValuePair { key, value } in &msg.key_value_pairs {
         buf.extend(key.as_bytes());
         buf.extend(value.as_bytes());
     }
@@ -261,7 +298,7 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     let (key_length, value_length) = match &msg.key_value {
-        Some((key, value)) => (get_key_length(key)?, get_value_length(value)?),
+        Some(KeyValuePair { key, value }) => (get_key_length(key)?, get_value_length(value)?),
         None => (0, 0),
     };
 
@@ -271,7 +308,7 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     buf.extend(key_length.to_be_bytes());
     buf.extend(value_length.to_be_bytes());
 
-    if let Some((key, value)) = &msg.key_value {
+    if let Some(KeyValuePair { key, value }) = &msg.key_value {
         buf.extend(key.as_bytes());
         buf.extend(value.as_bytes());
     }
@@ -319,7 +356,7 @@ fn get_value_length(string: &str) -> EncodeResult<ValueLength> {
     }
 }
 
-fn get_num_key_val_pairs(pairs: &[(String, String)]) -> EncodeResult<NumKeyValuePairs> {
+fn get_num_key_val_pairs(pairs: &KeyValuePairs) -> EncodeResult<NumKeyValuePairs> {
     let length = pairs.len();
     if length > NumKeyValuePairs::MAX as usize {
         Err(EncodeError::TooManyKeyValuePairs(length))
@@ -440,11 +477,13 @@ mod test {
                 (
                     "who/let/the/chicken/cross/the/road".to_owned(),
                     "yeah, that was me, I guess".to_owned(),
-                ),
+                )
+                    .into(),
                 (
                     "who/let/the/dogs/out".to_owned(),
                     "Who? Who? Who? Who? Who?".to_owned(),
-                ),
+                )
+                    .into(),
             ],
         };
 
@@ -483,7 +522,7 @@ mod test {
     fn state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key_value: Some(("1/2/3".to_owned(), "4".to_owned())),
+            key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into()),
         };
 
         let data = vec![

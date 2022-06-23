@@ -37,11 +37,11 @@ async fn main() -> Result<()> {
         }
     };
 
-    let mut acks = con.acks();
+    let mut responses = con.responses();
 
     con.import(&path)?;
 
-    acks.recv().await?;
+    responses.recv().await?;
 
     Ok(())
 }

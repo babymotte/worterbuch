@@ -113,7 +113,7 @@ async fn get<'s>(
     let result = wb.pget(key)?;
 
     for val in result {
-        eprintln!("{}={}", val.0, val.1);
+        eprintln!("{}={}", val.key, val.value);
     }
 
     Ok(())

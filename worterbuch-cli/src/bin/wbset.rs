@@ -42,10 +42,11 @@ async fn main() -> Result<()> {
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut acks = con.acks();
+    let mut responses = con.responses();
 
     spawn(async move {
-        while let Ok(tid) = acks.recv().await {
+        while let Ok(msg) = responses.recv().await {
+            let tid = msg.transaction_id();
             let mut acked = acked_recv.lock().expect("mutex is poisoned");
             if tid > *acked {
                 *acked = tid;

@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use libworterbuch::{
-    codec::{KeyValuePairs, Path},
+    codec::{KeyValuePair, KeyValuePairs, Path},
     config::Config,
 };
 use serde::{Deserialize, Serialize};
@@ -88,7 +88,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<Vec<(String, String)>> {
+    pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<Vec<KeyValuePair>> {
         let path: Vec<&str> = pattern.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -117,7 +117,7 @@ impl Worterbuch {
         } else {
             let value = self.store.get(&path);
             let values = value
-                .map(|v| vec![(pattern.as_ref().to_owned(), v.to_owned())])
+                .map(|v| vec![(pattern.as_ref().to_owned(), v.to_owned()).into()])
                 .unwrap_or_else(|| vec![]);
             Ok(values)
         }
@@ -137,7 +137,7 @@ impl Worterbuch {
         let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
         if let Some((key, value)) = matches {
-            tx.send(vec![(key, value)])
+            tx.send(vec![(key, value).into()])
                 .expect("rx is neither closed nor dropped");
         }
         Ok((rx, subscription))
@@ -235,7 +235,9 @@ impl Worterbuch {
             value
         );
         for subscriber in subscribers {
-            if let Err(e) = subscriber.send(vec![(key.as_ref().to_owned(), value.to_owned())]) {
+            if let Err(e) =
+                subscriber.send(vec![(key.as_ref().to_owned(), value.to_owned()).into()])
+            {
                 log::debug!("Error calling subscriber: {e}");
                 self.subscribers.remove_subscriber(subscriber)
             }

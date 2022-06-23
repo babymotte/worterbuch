@@ -3,7 +3,8 @@ use anyhow::Result;
 use libworterbuch::{
     codec::{
         encode_ack_message, encode_pstate_message, encode_state_message, read_client_message, Ack,
-        ClientMessage as CM, Export, Get, Import, PGet, PState, PSubscribe, Set, State, Subscribe,
+        ClientMessage as CM, Export, Get, Import, KeyValuePair, PGet, PState, PSubscribe, Set,
+        State, Subscribe,
     },
     error::{DecodeError, EncodeError},
 };
@@ -67,7 +68,7 @@ async fn get(
     let wb = worterbuch.read().await;
 
     let key_value = match wb.get(&msg.key) {
-        Ok(key_value) => key_value,
+        Ok(key_value) => key_value.map(KeyValuePair::from),
         Err(e) => {
             handle_store_error(e, client.clone()).await?;
             return Ok(());
@@ -95,7 +96,7 @@ async fn pget(
     let wb = worterbuch.read().await;
 
     let values = match wb.pget(&msg.request_pattern) {
-        Ok(values) => values,
+        Ok(values) => values.into_iter().map(KeyValuePair::from).collect(),
         Err(e) => {
             handle_store_error(e, client.clone()).await?;
             return Ok(());
@@ -172,10 +173,10 @@ async fn subscribe(
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription} …");
         while let Some(kvs) = rx.recv().await {
-            for (key, value) in kvs {
+            for key_value_pair in kvs {
                 let event = State {
                     transaction_id: transaction_id.clone(),
-                    key_value: Some((key, value)),
+                    key_value: Some(key_value_pair),
                 };
                 match encode_state_message(&event) {
                     Ok(data) => {

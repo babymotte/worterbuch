@@ -23,6 +23,7 @@ web = []
 [dependencies]
 log = "0.4.17"
 tokio = { version = "1.19.2", optional = true }
+serde = { version = "1.0.137", features = ["derive"] }
 
 [dev-dependencies]
 tokio-test = "0.4.2"

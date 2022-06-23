@@ -190,7 +190,7 @@ async fn read_pstate_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResul
         data.read_exact(&mut buf).await?;
         let value = Value::from_utf8_lossy(&buf).to_string();
 
-        key_value_pairs.push((key, value));
+        key_value_pairs.push((key, value).into());
     }
 
     Ok(PState {
@@ -237,7 +237,7 @@ async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult
 
         Ok(State {
             transaction_id,
-            key_value: Some((key, value)),
+            key_value: Some((key, value).into()),
         })
     }
 }
@@ -489,11 +489,13 @@ mod test {
                     (
                         "who/let/the/chicken/cross/the/road".to_owned(),
                         "yeah, that was me, I guess".to_owned()
-                    ),
+                    )
+                        .into(),
                     (
                         "who/let/the/dogs/out".to_owned(),
                         "Who? Who? Who? Who? Who?".to_owned()
                     )
+                        .into()
                 ]
             })
         )
@@ -529,7 +531,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: Some(("1/2/3".to_owned(), "4".to_owned()))
+                key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into())
             })
         )
     }
@@ -649,11 +651,13 @@ mod test {
                     (
                         "who/let/the/chicken/cross/the/road".to_owned(),
                         "yeah, that was me, I guess".to_owned()
-                    ),
+                    )
+                        .into(),
                     (
                         "who/let/the/dogs/out".to_owned(),
                         "Who? Who? Who? Who? Who?".to_owned()
                     )
+                        .into()
                 ]
             }))
         );
@@ -677,11 +681,13 @@ mod test {
                     (
                         "who/let/the/chicken/cross/the/road".to_owned(),
                         "yeah, that was me, I guess".to_owned()
-                    ),
+                    )
+                        .into(),
                     (
                         "who/let/the/dogs/out".to_owned(),
                         "Who? Who? Who? Who? Who?".to_owned()
                     )
+                        .into()
                 ]
             }))
         );

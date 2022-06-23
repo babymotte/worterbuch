@@ -1,4 +1,5 @@
 use anyhow::Result;
+use libworterbuch::codec::ServerMessage as SM;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -14,7 +15,10 @@ use worterbuch_cli::gql::GqlConnection;
 use worterbuch_cli::tcp::TcpConnection;
 #[cfg(feature = "ws")]
 use worterbuch_cli::ws::WsConnection;
-use worterbuch_cli::Connection;
+use worterbuch_cli::{
+    utils::{print_err, print_pstate, print_state},
+    Connection,
+};
 
 #[cfg(feature = "tcp")]
 async fn connect() -> Result<TcpConnection> {
@@ -41,13 +45,22 @@ async fn main() -> Result<()> {
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut acks = con.acks();
+    let mut responses = con.responses();
+
+    let json = true;
 
     spawn(async move {
-        while let Ok(tid) = acks.recv().await {
+        while let Ok(msg) = responses.recv().await {
+            let tid = msg.transaction_id();
             let mut acked = acked_recv.lock().expect("mutex is poisoned");
             if tid > *acked {
                 *acked = tid;
+            }
+            match msg {
+                SM::PState(msg) => print_pstate(&msg, json),
+                SM::State(msg) => print_state(&msg, json),
+                SM::Err(msg) => print_err(&msg, json),
+                SM::Ack(_) => {}
             }
         }
     });

@@ -2,11 +2,12 @@ use crate::Connection;
 use anyhow::Result;
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
-use libworterbuch::config::Config;
+use libworterbuch::{codec::ServerMessage as SM, config::Config};
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 use tokio::{
     spawn,
-    sync::broadcast::{self, Sender},
+    sync::broadcast::{self},
 };
 use tokio_tungstenite::{
     connect_async,
@@ -24,69 +25,71 @@ const EXPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query
 
 pub struct GqlConnection {
     cmd_tx: UnboundedSender<Command>,
-    counter: u64,
-    ack_tx: broadcast::Sender<u64>,
+    result_tx: broadcast::Sender<SM>,
+    counter: Arc<Mutex<u64>>,
+}
+
+impl GqlConnection {
+    fn inc_counter(&mut self) -> u64 {
+        let mut counter = self.counter.lock().expect("poisoned counter mutex");
+        let i = *counter;
+        *counter += 1;
+        i
+    }
 }
 
 impl Connection for GqlConnection {
     fn get(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Get(key.to_owned(), i))?;
         Ok(i)
     }
 
     fn pget(&mut self, pattern: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::PGet(pattern.to_owned(), i))?;
         Ok(i)
     }
 
     fn set(&mut self, key: &str, value: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Set(key.to_owned(), value.to_owned(), i))?;
         Ok(i)
     }
 
     fn subscribe(&mut self, key: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Subscrube(key.to_owned(), i))?;
         Ok(i)
     }
 
     fn psubscribe(&mut self, pattern: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::PSubscrube(pattern.to_owned(), i))?;
         Ok(i)
     }
 
     fn export(&mut self, path: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Export(path.to_owned(), i))?;
         Ok(i)
     }
 
     fn import(&mut self, path: &str) -> Result<u64> {
-        let i = self.counter;
-        self.counter += 1;
+        let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Import(path.to_owned(), i))?;
         Ok(i)
     }
 
-    fn acks(&mut self) -> tokio::sync::broadcast::Receiver<u64> {
-        self.ack_tx.subscribe()
+    fn responses(&mut self) -> broadcast::Receiver<SM> {
+        self.result_tx.subscribe()
     }
 }
 
@@ -100,8 +103,8 @@ pub async fn connect() -> Result<GqlConnection> {
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded();
-    let (ack_tx, ack_rx) = broadcast::channel(1_000);
-    let ack_tx_rcv = ack_tx.clone();
+    let (result_tx, result_rx) = broadcast::channel(1_000);
+    let result_tx_recv = result_tx.clone();
 
     let (ws_stream, _) = connect_async(url).await?;
     let (write, read) = ws_stream.split();
@@ -111,16 +114,25 @@ pub async fn connect() -> Result<GqlConnection> {
             eprintln!("Error forwarding commands: {e}");
         }
         // make sure initial rx is not dropped as long as stdin is read
-        drop(ack_rx);
+        drop(result_rx);
     });
 
     spawn(async move {
-        let mut messages = read.map(|msg| decode_ws_message(msg, ack_tx_rcv.clone()));
+        let mut messages = read.map(decode_ws_message);
         while let Some(msg) = messages.next().await {
             match msg {
-                Ok(Some(msg)) => println!("{msg}"),
-                Err(e) => eprintln!("error decoding message: {e}"),
-                _ => {}
+                Ok(Some(msg)) => {
+                    if let Err(e) = result_tx_recv.send(msg) {
+                        eprintln!("Error forwarding server message: {e}");
+                    }
+                }
+                Ok(None) => {
+                    eprintln!("Connection to server lost.");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Error decoding message: {e}");
+                }
             }
         }
     });
@@ -129,8 +141,8 @@ pub async fn connect() -> Result<GqlConnection> {
 
     let con = GqlConnection {
         cmd_tx,
-        counter: 0,
-        ack_tx,
+        counter: Arc::default(),
+        result_tx,
     };
 
     Ok(con)
@@ -173,87 +185,14 @@ fn encode_ws_message(cmd: Command) -> tungstenite::Result<Message> {
     Ok(Message::Text(txt))
 }
 
-fn decode_ws_message(
-    message: tungstenite::Result<Message>,
-    ack_tx: Sender<u64>,
-) -> Result<Option<String>> {
+fn decode_ws_message(message: tungstenite::Result<Message>) -> Result<Option<SM>> {
     let msg = message?;
 
     match msg {
         // TODO decode json and extract relevant values
         Message::Text(json) => {
-            let json: Value = serde_json::from_str(&json)?;
-
-            if let Some(tp) = json.get("type") {
-                if tp.as_str().expect("type must be a string") == "complete" {
-                    let id: u64 = json
-                        .get("id")
-                        .expect("id must be present")
-                        .as_str()
-                        .expect("id must be a string in json")
-                        .parse()
-                        .expect("id must represent a u64");
-                    if let Err(e) = ack_tx.send(id) {
-                        eprintln!("Error forwarding ack: {e}");
-                    }
-                }
-            }
-
-            if let Some(payload) = json.get("payload") {
-                if let Some(data) = payload.get("data") {
-                    if let Some(_) = data.get("set") {
-                        Ok(None)
-                    } else if let Some(get) = data.get("get") {
-                        Ok(Some(format!(
-                            "{} = {}",
-                            get.get("key")
-                                .expect("key must be present")
-                                .as_str()
-                                .expect("key must be a string"),
-                            get.get("value")
-                                .expect("value must be present")
-                                .as_str()
-                                .expect("value must be a string")
-                        )))
-                    } else if let Some(get) = data.get("pget") {
-                        let results = get.as_array().expect("get must return an array");
-                        if results.is_empty() {
-                            Ok(None)
-                        } else {
-                            let values: Vec<String> = results
-                                .iter()
-                                .map(|res| {
-                                    format!(
-                                        "{} = {}",
-                                        res.get("key")
-                                            .expect("key must be present")
-                                            .as_str()
-                                            .expect("key must be a string"),
-                                        res.get("value")
-                                            .expect("value must be present")
-                                            .as_str()
-                                            .expect("value must be a string")
-                                    )
-                                })
-                                .collect();
-
-                            Ok(Some(values.join("\n")))
-                        }
-                    } else if let Some(_subscribe) = data.get("subscribe") {
-                        println!("{json}");
-                        todo!()
-                    } else if let Some(_subscribe) = data.get("psubscribe") {
-                        println!("{json}");
-                        todo!()
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(None)
-            }
+            let _json: Value = serde_json::from_str(&json)?;
+            todo!();
         }
         _ => Ok(None),
     }

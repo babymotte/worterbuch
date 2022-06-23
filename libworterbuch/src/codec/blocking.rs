@@ -64,7 +64,7 @@ fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
         data.read_exact(&mut buf)?;
         let value = String::from_utf8_lossy(&buf).to_string();
 
-        key_value_pairs.push((key, value));
+        key_value_pairs.push((key, value).into());
     }
 
     Ok(PState {
@@ -106,7 +106,7 @@ fn read_event_message(mut data: impl Read) -> DecodeResult<State> {
 
         Ok(State {
             transaction_id,
-            key_value: Some((key, value)),
+            key_value: Some((key, value).into()),
         })
     } else {
         Ok(State {
@@ -464,11 +464,13 @@ mod test {
                     (
                         "who/let/the/chicken/cross/the/road".to_owned(),
                         "yeah, that was me, I guess".to_owned()
-                    ),
+                    )
+                        .into(),
                     (
                         "who/let/the/dogs/out".to_owned(),
                         "Who? Who? Who? Who? Who?".to_owned()
                     )
+                        .into()
                 ]
             })
         )
@@ -500,7 +502,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: Some(("1/2/3".to_owned(), "4".to_owned()))
+                key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into())
             })
         )
     }
