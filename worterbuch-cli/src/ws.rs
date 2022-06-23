@@ -1,17 +1,13 @@
-use std::sync::{Arc, Mutex};
-
 use crate::Connection;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use libworterbuch::{
-    codec::{
-        encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
-        encode_psubscribe_message, encode_set_message, encode_subscribe_message,
-        read_server_message, ClientMessage as CM, Export, Get, Import, PGet, PSubscribe,
-        ServerMessage as SM, Set, Subscribe,
-    },
-    config::Config,
+use libworterbuch::codec::{
+    encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
+    encode_psubscribe_message, encode_set_message, encode_subscribe_message, read_server_message,
+    ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
+    Subscribe,
 };
+use std::sync::{Arc, Mutex};
 use tokio::{
     spawn,
     sync::broadcast,
@@ -105,13 +101,7 @@ impl Connection for WsConnection {
     }
 }
 
-pub async fn connect() -> Result<WsConnection> {
-    let config = Config::new()?;
-
-    let proto = config.proto.clone();
-    let addr = config.host_addr;
-    let port = config.web_port;
-
+pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<WsConnection> {
     let (server, _) = connect_async(format!("{proto}://{addr}:{port}")).await?;
     let (mut ws_tx, mut ws_rx) = server.split();
 

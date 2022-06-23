@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Arg;
 use libworterbuch::codec::ServerMessage as SM;
 use std::{
     sync::{Arc, Mutex},
@@ -16,38 +17,51 @@ use worterbuch_cli::tcp::TcpConnection;
 #[cfg(feature = "ws")]
 use worterbuch_cli::ws::WsConnection;
 use worterbuch_cli::{
-    utils::{print_err, print_pstate, print_state},
+    utils::{app, print_err, print_pstate, print_state},
     Connection,
 };
 
 #[cfg(feature = "tcp")]
-async fn connect() -> Result<TcpConnection> {
-    worterbuch_cli::tcp::connect().await
+async fn connect(proto: &str, host: &str, port: u16) -> Result<TcpConnection> {
+    worterbuch_cli::tcp::connect(proto, host, port).await
 }
 
 #[cfg(feature = "ws")]
-async fn connect() -> Result<WsConnection> {
-    worterbuch_cli::ws::connect().await
+async fn connect(proto: &str, host: &str, port: u16) -> Result<WsConnection> {
+    worterbuch_cli::ws::connect(proto, host, port).await
 }
 
 #[cfg(feature = "graphql")]
-async fn connect() -> Result<GqlConnection> {
-    worterbuch_cli::gql::connect().await
+async fn connect(proto: &str, host: &str, port: u16) -> Result<GqlConnection> {
+    worterbuch_cli::gql::connect(proto, host, port).await
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let mut con = connect().await?;
+    let (matches, proto, host_addr, port, json) = app(
+        "wbget",
+        "Get values for keys from a Wörterbuch.",
+        true,
+        vec![Arg::with_name("KEYS")
+            .multiple(true)
+            .help(
+                r#"Keys to be fetched from Wörterbuch in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line."#,
+            )
+            .takes_value(true)
+            .required(false)],
+    )?;
+
+    let keys = matches.get_many::<String>("KEYS");
+
+    let mut con = connect(&proto, &host_addr, port).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
     let mut responses = con.responses();
-
-    let json = true;
 
     spawn(async move {
         while let Ok(msg) = responses.recv().await {
@@ -65,9 +79,15 @@ async fn main() -> Result<()> {
         }
     });
 
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(key)) = lines.next_line().await {
-        trans_id = con.get(&key)?;
+    if let Some(keys) = keys {
+        for key in keys {
+            trans_id = con.get(key)?;
+        }
+    } else {
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        while let Ok(Some(key)) = lines.next_line().await {
+            trans_id = con.get(&key)?;
+        }
     }
 
     loop {

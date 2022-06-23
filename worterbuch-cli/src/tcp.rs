@@ -1,15 +1,11 @@
 use crate::Connection;
 use anyhow::Result;
-use libworterbuch::{
-    codec::{
-        encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
-        encode_psubscribe_message, encode_set_message, encode_subscribe_message,
-        read_server_message, ClientMessage as CM, Export, Get, Import, PGet, PSubscribe,
-        ServerMessage as SM, Set, Subscribe,
-    },
-    config::Config,
+use libworterbuch::codec::{
+    encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
+    encode_psubscribe_message, encode_set_message, encode_subscribe_message, read_server_message,
+    ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
+    Subscribe,
 };
-use std::sync::{Arc, Mutex};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -20,18 +16,16 @@ use tokio::{
     },
 };
 
-#[derive(Clone)]
 pub struct TcpConnection {
     cmd_tx: UnboundedSender<CM>,
     result_tx: broadcast::Sender<SM>,
-    counter: Arc<Mutex<u64>>,
+    counter: u64,
 }
 
 impl TcpConnection {
     fn inc_counter(&mut self) -> u64 {
-        let mut counter = self.counter.lock().expect("poisoned counter mutex");
-        let i = *counter;
-        *counter += 1;
+        let i = self.counter;
+        self.counter += 1;
         i
     }
 }
@@ -106,12 +100,7 @@ impl Connection for TcpConnection {
     }
 }
 
-pub async fn connect() -> Result<TcpConnection> {
-    let config = Config::new()?;
-
-    let host_addr = config.host_addr;
-    let port = config.tcp_port;
-
+pub async fn connect(_proto: &str, host_addr: &str, port: u16) -> Result<TcpConnection> {
     let server = TcpStream::connect(format!("{host_addr}:{port}")).await?;
     let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
@@ -159,7 +148,7 @@ pub async fn connect() -> Result<TcpConnection> {
     let con = TcpConnection {
         cmd_tx,
         result_tx,
-        counter: Arc::default(),
+        counter: 1,
     };
 
     Ok(con)

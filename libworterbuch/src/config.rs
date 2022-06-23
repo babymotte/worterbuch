@@ -8,6 +8,7 @@ pub struct Config {
     pub separator: char,
     pub wildcard: char,
     pub multi_wildcard: char,
+    #[cfg(feature = "tcp")]
     pub tcp_port: u16,
     #[cfg(feature = "graphql")]
     pub graphql_port: u16,

@@ -2,7 +2,7 @@ use crate::Connection;
 use anyhow::Result;
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
-use libworterbuch::{codec::ServerMessage as SM, config::Config};
+use libworterbuch::codec::ServerMessage as SM;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::{
@@ -93,13 +93,7 @@ impl Connection for GqlConnection {
     }
 }
 
-pub async fn connect() -> Result<GqlConnection> {
-    let config = Config::new()?;
-
-    let proto = &config.proto;
-    let addr = config.host_addr;
-    let port = config.web_port;
-
+pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<GqlConnection> {
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded();
