@@ -729,10 +729,15 @@ checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 name = "libworterbuch"
 version = "0.1.1"
 dependencies = [
+ "futures-channel",
+ "futures-util",
  "log",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-test",
+ "tokio-tungstenite 0.17.1",
+ "url",
 ]
 
 [[package]]
@@ -1953,12 +1958,8 @@ dependencies = [
  "anyhow",
  "clap",
  "dotenv",
- "futures-channel",
- "futures-util",
  "libworterbuch",
  "serde",
  "serde_json",
  "tokio",
- "tokio-tungstenite 0.17.1",
- "url",
 ]

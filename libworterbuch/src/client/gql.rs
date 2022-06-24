@@ -1,8 +1,6 @@
-use crate::Connection;
-use anyhow::Result;
+use crate::{codec::ServerMessage as SM, error::ConnectionResult, client::Connection};
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
-use libworterbuch::codec::ServerMessage as SM;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::{
@@ -39,49 +37,49 @@ impl GqlConnection {
 }
 
 impl Connection for GqlConnection {
-    fn get(&mut self, key: &str) -> Result<u64> {
+    fn get(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Get(key.to_owned(), i))?;
         Ok(i)
     }
 
-    fn pget(&mut self, pattern: &str) -> Result<u64> {
+    fn pget(&mut self, pattern: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::PGet(pattern.to_owned(), i))?;
         Ok(i)
     }
 
-    fn set(&mut self, key: &str, value: &str) -> Result<u64> {
+    fn set(&mut self, key: &str, value: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Set(key.to_owned(), value.to_owned(), i))?;
         Ok(i)
     }
 
-    fn subscribe(&mut self, key: &str) -> Result<u64> {
+    fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Subscrube(key.to_owned(), i))?;
         Ok(i)
     }
 
-    fn psubscribe(&mut self, pattern: &str) -> Result<u64> {
+    fn psubscribe(&mut self, pattern: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::PSubscrube(pattern.to_owned(), i))?;
         Ok(i)
     }
 
-    fn export(&mut self, path: &str) -> Result<u64> {
+    fn export(&mut self, path: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Export(path.to_owned(), i))?;
         Ok(i)
     }
 
-    fn import(&mut self, path: &str) -> Result<u64> {
+    fn import(&mut self, path: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx
             .unbounded_send(Command::Import(path.to_owned(), i))?;
@@ -93,7 +91,7 @@ impl Connection for GqlConnection {
     }
 }
 
-pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<GqlConnection> {
+pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<GqlConnection> {
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded();
@@ -179,7 +177,7 @@ fn encode_ws_message(cmd: Command) -> tungstenite::Result<Message> {
     Ok(Message::Text(txt))
 }
 
-fn decode_ws_message(message: tungstenite::Result<Message>) -> Result<Option<SM>> {
+fn decode_ws_message(message: tungstenite::Result<Message>) -> ConnectionResult<Option<SM>> {
     let msg = message?;
 
     match msg {

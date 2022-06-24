@@ -15,9 +15,8 @@ default = ["tcp", "ws"]
 multithreaded = []
 async = []
 docker = []
-tcp = ["async"]
-web = ["async", "warp", "openssl", "libworterbuch/web"]
-ws = ["web", "futures-util", "futures"]
+tcp = ["libworterbuch/tcp", "async"]
+ws = ["libworterbuch/ws", "web", "futures-util", "futures"]
 graphql = [
   "libworterbuch/graphql",
   "web",
@@ -27,6 +26,7 @@ graphql = [
   "futures",
   "async-stream",
 ]
+web = ["async", "warp", "openssl"]
 
 [dependencies]
 libworterbuch = { path = "../libworterbuch", features = ["server"] }

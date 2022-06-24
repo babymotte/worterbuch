@@ -174,6 +174,18 @@ pub struct Import {
     pub path: Path,
 }
 
+pub fn encode_message(msg: &ClientMessage) -> EncodeResult<Vec<u8>> {
+    match msg {
+        ClientMessage::Get(msg) => encode_get_message(msg),
+        ClientMessage::PGet(msg) => encode_pget_message(msg),
+        ClientMessage::Set(msg) => encode_set_message(msg),
+        ClientMessage::Subscribe(msg) => encode_subscribe_message(msg),
+        ClientMessage::PSubscribe(msg) => encode_psubscribe_message(msg),
+        ClientMessage::Export(msg) => encode_export_message(msg),
+        ClientMessage::Import(msg) => encode_import_message(msg),
+    }
+}
+
 pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
     let key_length = get_key_length(&msg.key)?;
 

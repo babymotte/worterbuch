@@ -47,9 +47,10 @@ impl Config {
 
         #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
-            self.tcp_port = val.parse().map_err(ConfigError::InvalidPort)?;
+            self.web_port = val.parse().map_err(ConfigError::InvalidPort)?;
         }
 
+        #[cfg(feature = "tcp")]
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
             self.tcp_port = val.parse().map_err(ConfigError::InvalidPort)?;
         }
@@ -86,6 +87,7 @@ impl Default for Config {
             separator: '/',
             wildcard: '?',
             multi_wildcard: '#',
+            #[cfg(feature = "tcp")]
             tcp_port: 4242,
             #[cfg(feature = "graphql")]
             graphql_port: 4243,

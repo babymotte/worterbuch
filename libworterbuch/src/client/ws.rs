@@ -1,12 +1,12 @@
-use crate::Connection;
-use anyhow::Result;
-use futures_util::{SinkExt, StreamExt};
-use libworterbuch::codec::{
-    encode_export_message, encode_get_message, encode_import_message, encode_pget_message,
-    encode_psubscribe_message, encode_set_message, encode_subscribe_message, read_server_message,
-    ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
-    Subscribe,
+use crate::error::ConnectionResult;
+use crate::{
+    client::Connection,
+    codec::{
+        encode_message, read_server_message, ClientMessage as CM, Export, Get, Import, PGet,
+        PSubscribe, ServerMessage as SM, Set, Subscribe,
+    },
 };
+use futures_util::{SinkExt, StreamExt};
 use std::sync::{Arc, Mutex};
 use tokio::{
     spawn,
@@ -32,7 +32,7 @@ impl WsConnection {
 }
 
 impl Connection for WsConnection {
-    fn set(&mut self, key: &str, value: &str) -> Result<u64> {
+    fn set(&mut self, key: &str, value: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
@@ -42,7 +42,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn get(&mut self, key: &str) -> Result<u64> {
+    fn get(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
@@ -51,7 +51,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn pget(&mut self, key: &str) -> Result<u64> {
+    fn pget(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
@@ -60,7 +60,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn subscribe(&mut self, key: &str) -> Result<u64> {
+    fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
@@ -69,7 +69,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn psubscribe(&mut self, key: &str) -> Result<u64> {
+    fn psubscribe(&mut self, key: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
@@ -78,7 +78,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn export(&mut self, path: &str) -> Result<u64> {
+    fn export(&mut self, path: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Export(Export {
             transaction_id: i,
@@ -87,7 +87,7 @@ impl Connection for WsConnection {
         Ok(i)
     }
 
-    fn import(&mut self, path: &str) -> Result<u64> {
+    fn import(&mut self, path: &str) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Import(Import {
             transaction_id: i,
@@ -101,7 +101,7 @@ impl Connection for WsConnection {
     }
 }
 
-pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<WsConnection> {
+pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<WsConnection> {
     let (server, _) = connect_async(format!("{proto}://{addr}:{port}")).await?;
     let (mut ws_tx, mut ws_rx) = server.split();
 
@@ -111,7 +111,7 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<WsConnection>
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
-            if let Ok(Some(data)) = encode_message(&msg) {
+            if let Ok(Some(data)) = encode_message(&msg).map(Some) {
                 let msg = tungstenite::Message::Binary(data);
                 if let Err(e) = ws_tx.send(msg).await {
                     eprintln!("failed to send tcp message: {e}");
@@ -156,16 +156,4 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> Result<WsConnection>
     };
 
     Ok(con)
-}
-
-fn encode_message(msg: &CM) -> Result<Option<Vec<u8>>> {
-    match msg {
-        CM::Get(msg) => Ok(Some(encode_get_message(msg)?)),
-        CM::PGet(msg) => Ok(Some(encode_pget_message(msg)?)),
-        CM::Set(msg) => Ok(Some(encode_set_message(msg)?)),
-        CM::Subscribe(msg) => Ok(Some(encode_subscribe_message(msg)?)),
-        CM::PSubscribe(msg) => Ok(Some(encode_psubscribe_message(msg)?)),
-        CM::Export(msg) => Ok(Some(encode_export_message(msg)?)),
-        CM::Import(msg) => Ok(Some(encode_import_message(msg)?)),
-    }
 }

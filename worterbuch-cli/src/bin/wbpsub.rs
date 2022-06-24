@@ -1,37 +1,19 @@
 use anyhow::Result;
 use clap::Arg;
-use libworterbuch::codec::ServerMessage as SM;
+#[cfg(feature = "graphql")]
+use libworterbuch::client::gql::connect;
+#[cfg(feature = "tcp")]
+use libworterbuch::client::tcp::connect;
+#[cfg(feature = "ws")]
+use libworterbuch::client::ws::connect;
+use libworterbuch::{client::Connection, codec::ServerMessage as SM};
 use std::time::Duration;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     spawn,
     time::sleep,
 };
-#[cfg(feature = "graphql")]
-use worterbuch_cli::gql::GqlConnection;
-#[cfg(feature = "tcp")]
-use worterbuch_cli::tcp::TcpConnection;
-#[cfg(feature = "ws")]
-use worterbuch_cli::ws::WsConnection;
-use worterbuch_cli::{
-    utils::{app, print_err, print_pstate, print_state},
-    Connection,
-};
-
-#[cfg(feature = "tcp")]
-async fn connect(proto: &str, host: &str, port: u16) -> Result<TcpConnection> {
-    worterbuch_cli::tcp::connect(proto, host, port).await
-}
-
-#[cfg(feature = "ws")]
-async fn connect(proto: &str, host: &str, port: u16) -> Result<WsConnection> {
-    worterbuch_cli::ws::connect(proto, host, port).await
-}
-
-#[cfg(feature = "graphql")]
-async fn connect(proto: &str, host: &str, port: u16) -> Result<GqlConnection> {
-    worterbuch_cli::gql::connect(proto, host, port).await
-}
+use worterbuch_cli::{app, print_err, print_pstate, print_state};
 
 #[tokio::main]
 async fn main() -> Result<()> {
