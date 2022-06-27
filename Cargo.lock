@@ -1934,6 +1934,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-stream",
+ "clap",
  "dotenv",
  "env_logger",
  "futures",

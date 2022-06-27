@@ -9,6 +9,7 @@ mod worterbuch;
 use crate::repl::repl;
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
+use clap::App;
 use libworterbuch::config::Config;
 use std::sync::Arc;
 #[cfg(feature = "docker")]
@@ -20,8 +21,7 @@ use tokio::{spawn, sync::RwLock};
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
-    log::info!("Starting single-threaded instance of Wörterbuch …");
-    run().await
+    run("Starting Wörterbuch in single-threaded mode …").await
 }
 
 #[cfg(feature = "multithreaded")]
@@ -29,13 +29,19 @@ async fn main() -> Result<()> {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
-    log::info!("Starting multi-threaded instance of Wörterbuch …");
-    run().await
+    run("Starting Wörterbuch in multi-threaded mode …").await
 }
 
-async fn run() -> Result<()> {
+async fn run(msg: &str) -> Result<()> {
     let config = Config::new()?;
 
+    App::new("worterbuch")
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("An in-memory data base / message broker hybrid")
+        .get_matches();
+
+    log::info!("{msg}");
     log::debug!("Separator: {}", config.separator);
     log::debug!("Wildcard: {}", config.wildcard);
     log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
