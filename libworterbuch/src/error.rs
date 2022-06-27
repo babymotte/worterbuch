@@ -1,6 +1,6 @@
 use crate::codec::{
-    KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, PathLength, RequestPatternLength,
-    ValueLength,
+    ErrorCode, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs, PathLength,
+    RequestPattern, RequestPatternLength, ValueLength,
 };
 use std::{fmt, io, net::AddrParseError, num::ParseIntError, string::FromUtf8Error};
 
@@ -9,6 +9,8 @@ pub enum DecodeError {
     UndefinedType(MessageType),
     IoError(io::Error),
     FromUtf8Error(FromUtf8Error),
+    UndefinedErrorCode(ErrorCode),
+    SerDeError(serde_json::Error),
 }
 
 impl std::error::Error for DecodeError {}
@@ -19,6 +21,10 @@ impl fmt::Display for DecodeError {
             DecodeError::UndefinedType(mtype) => write!(f, "undefined message type: {mtype})",),
             DecodeError::IoError(e) => e.fmt(f),
             DecodeError::FromUtf8Error(e) => e.fmt(f),
+            DecodeError::SerDeError(e) => e.fmt(f),
+            DecodeError::UndefinedErrorCode(error_code) => {
+                write!(f, "undefined error code: {error_code})",)
+            }
         }
     }
 }
@@ -32,6 +38,12 @@ impl From<io::Error> for DecodeError {
 impl From<FromUtf8Error> for DecodeError {
     fn from(e: FromUtf8Error) -> Self {
         DecodeError::FromUtf8Error(e)
+    }
+}
+
+impl From<serde_json::Error> for DecodeError {
+    fn from(e: serde_json::Error) -> Self {
+        DecodeError::SerDeError(e)
     }
 }
 
@@ -136,8 +148,66 @@ impl fmt::Display for ConfigError {
 
 pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
 
+pub trait Context<T, E: std::error::Error> {
+    fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError>;
+}
+
+#[derive(Debug)]
+pub enum WorterbuchError {
+    IllegalWildcard(RequestPattern),
+    IllegalMultiWildcard(RequestPattern),
+    MultiWildcardAtIllegalPosition(RequestPattern),
+    IoError(io::Error, MetaData),
+    SerDeError(serde_json::Error, MetaData),
+    Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
+}
+
+impl std::error::Error for WorterbuchError {}
+
+impl fmt::Display for WorterbuchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WorterbuchError::IllegalWildcard(rp) => {
+                write!(f, "Key contains illegal wildcard: {rp}")
+            }
+            WorterbuchError::IllegalMultiWildcard(rp) => {
+                write!(f, "Key contains illegal multi-wildcard: {rp}")
+            }
+            WorterbuchError::MultiWildcardAtIllegalPosition(rp) => {
+                write!(f, "Key contains multi-wildcard at illegal position: {rp}")
+            }
+            WorterbuchError::IoError(e, meta) => write!(f, "{meta}: {e}"),
+            WorterbuchError::SerDeError(e, meta) => write!(f, "{meta}: {e}"),
+            WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),
+        }
+    }
+}
+
+impl<T> Context<T, io::Error> for Result<T, io::Error> {
+    fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError> {
+        self.map_err(|e| WorterbuchError::IoError(e, metadata()))
+    }
+}
+
+impl<T> Context<T, serde_json::Error> for Result<T, serde_json::Error> {
+    fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError> {
+        self.map_err(|e| WorterbuchError::SerDeError(e, metadata()))
+    }
+}
+
+impl<T, V: fmt::Debug + 'static + Send + Sync> Context<T, SendError<V>>
+    for Result<T, SendError<V>>
+{
+    fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError> {
+        self.map_err(|e| WorterbuchError::Other(Box::new(e), metadata()))
+    }
+}
+
+pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
+
 #[cfg(feature = "client")]
 pub use client::*;
+use tokio::sync::mpsc::error::SendError;
 #[cfg(feature = "client")]
 mod client {
     use super::EncodeError;

@@ -16,7 +16,7 @@ client = []
 server = []
 tcp = ["async", "tokio/net"]
 ws = ["async", "web"]
-graphql = ["async", "web", "futures-channel", "serde_json", "url"]
+graphql = ["async", "web", "futures-channel", "url"]
 async = ["tokio/io-util"]
 web = ["futures-util", "tokio-tungstenite"]
 
@@ -24,8 +24,8 @@ web = ["futures-util", "tokio-tungstenite"]
 log = "0.4.17"
 tokio = { version = "1.19.2" }
 serde = { version = "1.0.137", features = ["derive"] }
+serde_json = { version = "1.0.81" }
 
-serde_json = { version = "1.0.81", optional = true }
 futures-util = { version = "0.3.21", default-features = false, features = [
     "sink",
     "std",

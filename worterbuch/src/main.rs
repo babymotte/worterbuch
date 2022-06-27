@@ -1,4 +1,3 @@
-mod error;
 #[cfg(not(feature = "docker"))]
 mod repl;
 mod server;

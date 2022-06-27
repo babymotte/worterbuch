@@ -1,12 +1,11 @@
 use crate::{
-    error::{WorterbuchError, WorterbuchResult},
     store::{Store, StoreStats},
     subscribers::{Subscriber, Subscribers},
 };
-use anyhow::{Context, Result};
 use libworterbuch::{
     codec::{KeyValuePair, KeyValuePairs, Path},
     config::Config,
+    error::{Context, WorterbuchError, WorterbuchResult},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
@@ -160,14 +159,16 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&self) -> Result<Value> {
-        let value = to_value(&self.store)?;
+    pub fn export(&self) -> WorterbuchResult<Value> {
+        let value = to_value(&self.store)
+            .context(|| format!("Error generating JSON from worterbuch store during export"))?;
         Ok(value)
     }
 
-    pub fn import(&mut self, json: &str) -> Result<Vec<(String, String)>> {
+    pub fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, String)>> {
         log::debug!("Parsing store data …");
-        let store: Store = from_str(json).context("Parsing JSON failed")?;
+        let store: Store =
+            from_str(json).context(|| format!("Error parsing JSON during import"))?;
         log::debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store, self.config.separator);
 
@@ -187,17 +188,25 @@ impl Worterbuch {
     pub async fn export_to_file(&self, path: &Path) -> WorterbuchResult<()> {
         log::info!("Exporting to {path} …");
         let json = self.export()?;
-        let mut file = File::create(path).await?;
-        file.write_all(json.to_string().as_bytes()).await?;
+        let mut file = File::create(path)
+            .await
+            .context(|| format!("Error creating file {path}"))?;
+        file.write_all(json.to_string().as_bytes())
+            .await
+            .context(|| format!("Error writing to file {path}"))?;
         log::info!("Done.");
         Ok(())
     }
 
     pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {
         log::info!("Importing from {path} …");
-        let mut file = File::open(path).await?;
+        let mut file = File::open(path)
+            .await
+            .context(|| format!("Error opening file {path:?}"))?;
         let mut contents = Vec::new();
-        file.read_to_end(&mut contents).await?;
+        file.read_to_end(&mut contents)
+            .await
+            .context(|| format!("Error reading file {path}"))?;
         let json = String::from_utf8_lossy(&contents).to_string();
         self.import(&json)?;
         log::info!("Done.");

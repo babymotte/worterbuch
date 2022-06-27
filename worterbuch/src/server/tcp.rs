@@ -1,6 +1,6 @@
 use crate::worterbuch::Worterbuch;
 use anyhow::Result;
-use libworterbuch::config::Config;
+use libworterbuch::{config::Config, error::WorterbuchResult};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
@@ -33,7 +33,7 @@ async fn serve(
     client: TcpStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_read, mut client_write) = client.into_split();

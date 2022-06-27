@@ -5,11 +5,10 @@ pub use nonblocking::*;
 
 #[cfg(not(feature = "async"))]
 mod blocking;
+use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
 #[cfg(not(feature = "async"))]
 pub use blocking::*;
 use serde::{Deserialize, Serialize};
-
-use crate::error::{EncodeError, EncodeResult};
 
 pub type MessageType = u8;
 pub type TransactionId = u64;
@@ -41,6 +40,13 @@ pub const ACK: MessageType = 0b10000001;
 pub const STA: MessageType = 0b10000010;
 pub const ERR: MessageType = 0b10000011;
 
+pub const ILLEGAL_WILDCARD: ErrorCode = 0b00000000;
+pub const ILLEGAL_MULTI_WILDCARD: ErrorCode = 0b00000001;
+pub const MULTI_WILDCARD_AT_ILLEGAL_POSITION: ErrorCode = 0b00000010;
+pub const IO_ERROR: ErrorCode = 0b00000011;
+pub const SERDE_ERROR: ErrorCode = 0b00000100;
+pub const OTHER: ErrorCode = 0b11111111;
+
 pub const TRANSACTION_ID_BYTES: usize = 8;
 pub const REQUEST_PATTERN_LENGTH_BYTES: usize = 2;
 pub const KEY_LENGTH_BYTES: usize = 2;
@@ -49,6 +55,46 @@ pub const NUM_KEY_VALUE_PAIRS_BYTES: usize = 4;
 pub const ERROR_CODE_BYTES: usize = 1;
 pub const METADATA_LENGTH_BYTES: usize = 4;
 pub const PATH_LENGTH_BYTES: usize = 2;
+
+impl From<&WorterbuchError> for ErrorCode {
+    fn from(e: &WorterbuchError) -> Self {
+        match e {
+            WorterbuchError::IllegalWildcard(_) => ILLEGAL_WILDCARD,
+            WorterbuchError::IllegalMultiWildcard(_) => ILLEGAL_MULTI_WILDCARD,
+            WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
+                MULTI_WILDCARD_AT_ILLEGAL_POSITION
+            }
+            WorterbuchError::IoError(_, _) => IO_ERROR,
+            WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
+            WorterbuchError::Other(_, _) => OTHER,
+        }
+    }
+}
+
+impl TryFrom<&Err> for Option<WorterbuchError> {
+    type Error = DecodeError;
+
+    fn try_from(value: &Err) -> Result<Self, Self::Error> {
+        let Err {
+            error_code,
+            metadata,
+            ..
+        } = value;
+        match error_code {
+            &ILLEGAL_WILDCARD => Ok(Some(WorterbuchError::IllegalWildcard(
+                serde_json::from_str(&metadata)?,
+            ))),
+            &ILLEGAL_MULTI_WILDCARD => Ok(Some(WorterbuchError::IllegalMultiWildcard(
+                serde_json::from_str(&metadata)?,
+            ))),
+            &MULTI_WILDCARD_AT_ILLEGAL_POSITION => Ok(Some(
+                WorterbuchError::MultiWildcardAtIllegalPosition(serde_json::from_str(&metadata)?),
+            )),
+            &IO_ERROR | &SERDE_ERROR | &OTHER => Ok(None),
+            _ => Err(DecodeError::UndefinedErrorCode(*error_code)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

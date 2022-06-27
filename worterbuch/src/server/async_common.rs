@@ -1,13 +1,13 @@
-use crate::{error::WorterbuchError, worterbuch::Worterbuch};
-use anyhow::Result;
+use crate::worterbuch::Worterbuch;
 use libworterbuch::{
     codec::{
-        encode_ack_message, encode_pstate_message, encode_state_message, read_client_message, Ack,
-        ClientMessage as CM, Export, Get, Import, KeyValuePair, PGet, PState, PSubscribe, Set,
-        State, Subscribe,
+        encode_ack_message, encode_err_message, encode_pstate_message, encode_state_message,
+        read_client_message, Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, Import,
+        KeyValuePair, MetaData, PGet, PState, PSubscribe, Set, State, Subscribe,
     },
-    error::{DecodeError, EncodeError},
+    error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
 };
+use serde::Serialize;
 use std::sync::Arc;
 use tokio::{
     io::AsyncReadExt,
@@ -21,7 +21,7 @@ pub async fn process_incoming_message(
     worterbuch: Arc<RwLock<Worterbuch>>,
     tx: UnboundedSender<Vec<u8>>,
     subscriptions: &mut Vec<(String, Uuid)>,
-) -> Result<bool> {
+) -> WorterbuchResult<bool> {
     match read_client_message(msg).await {
         Ok(Some(CM::Get(msg))) => {
             get(msg, worterbuch.clone(), tx.clone()).await?;
@@ -64,13 +64,13 @@ async fn get(
     msg: Get,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
     let key_value = match wb.get(&msg.key) {
         Ok(key_value) => key_value.map(KeyValuePair::from),
         Err(e) => {
-            handle_store_error(e, client.clone()).await?;
+            handle_store_error(e, client.clone(), msg.transaction_id).await?;
             return Ok(());
         }
     };
@@ -81,7 +81,12 @@ async fn get(
     };
 
     match encode_state_message(&response) {
-        Ok(data) => client.send(data)?,
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending STATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
         Err(e) => handle_encode_error(e, client).await?,
     }
 
@@ -92,13 +97,13 @@ async fn pget(
     msg: PGet,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
     let values = match wb.pget(&msg.request_pattern) {
         Ok(values) => values.into_iter().map(KeyValuePair::from).collect(),
         Err(e) => {
-            handle_store_error(e, client.clone()).await?;
+            handle_store_error(e, client.clone(), msg.transaction_id).await?;
             return Ok(());
         }
     };
@@ -110,7 +115,12 @@ async fn pget(
     };
 
     match encode_pstate_message(&response) {
-        Ok(data) => client.send(data)?,
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending PSTATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
         Err(e) => handle_encode_error(e, client).await?,
     }
 
@@ -121,11 +131,11 @@ async fn set(
     msg: Set,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
 
     if let Err(e) = wb.set(msg.key, msg.value) {
-        handle_store_error(e, client).await?;
+        handle_store_error(e, client, msg.transaction_id).await?;
         return Ok(());
     }
 
@@ -134,7 +144,12 @@ async fn set(
     };
 
     match encode_ack_message(&response) {
-        Ok(data) => client.send(data)?,
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
         Err(e) => handle_encode_error(e, client).await?,
     }
 
@@ -145,14 +160,14 @@ async fn subscribe(
     msg: Subscribe,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<Option<(String, Uuid)>> {
+) -> WorterbuchResult<Option<(String, Uuid)>> {
     let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
     let (mut rx, subscription) = match wb.subscribe(msg.key.clone()) {
         Ok(rx) => rx,
         Err(e) => {
-            handle_store_error(e, client).await?;
+            handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(None);
         }
     };
@@ -162,7 +177,12 @@ async fn subscribe(
     };
 
     match encode_ack_message(&response) {
-        Ok(data) => client.send(data)?,
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
         Err(e) => handle_encode_error(e, client.clone()).await?,
     }
 
@@ -181,13 +201,13 @@ async fn subscribe(
                 match encode_state_message(&event) {
                     Ok(data) => {
                         if let Err(e) = client.clone().send(data) {
-                            log::error!("Error sending message to client: {e}");
+                            log::error!("Error sending STATE message to client: {e}");
                             break;
                         }
                     }
                     Err(e) => {
                         if let Err(e) = handle_encode_error(e, client.clone()).await {
-                            log::error!("Error sending message to client: {e}");
+                            log::error!("Error sending ERROR message to client: {e}");
                             break;
                         }
                     }
@@ -207,14 +227,14 @@ async fn psubscribe(
     msg: PSubscribe,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<Option<(String, Uuid)>> {
+) -> WorterbuchResult<Option<(String, Uuid)>> {
     let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
     let (mut rx, subscription) = match wb.psubscribe(msg.request_pattern.clone()) {
         Ok(rx) => rx,
         Err(e) => {
-            handle_store_error(e, client).await?;
+            handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(None);
         }
     };
@@ -224,7 +244,12 @@ async fn psubscribe(
     };
 
     match encode_ack_message(&response) {
-        Ok(data) => client.send(data)?,
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
         Err(e) => handle_encode_error(e, client.clone()).await?,
     }
 
@@ -244,13 +269,13 @@ async fn psubscribe(
             match encode_pstate_message(&event) {
                 Ok(data) => {
                     if let Err(e) = client.clone().send(data) {
-                        log::error!("Error sending message to client: {e}");
+                        log::error!("Error sending STATE message to client: {e}");
                         break;
                     }
                 }
                 Err(e) => {
                     if let Err(e) = handle_encode_error(e, client.clone()).await {
-                        log::error!("Error sending message to client: {e}");
+                        log::error!("Error sending ERROR message to client: {e}");
                         break;
                     }
                 }
@@ -269,7 +294,7 @@ async fn export(
     msg: Export,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     log::info!("export");
     let wb = worterbuch.read().await;
     match wb.export_to_file(&msg.path).await {
@@ -279,12 +304,17 @@ async fn export(
             };
 
             match encode_ack_message(&response) {
-                Ok(data) => client.send(data)?,
+                Ok(data) => client.send(data).context(|| {
+                    format!(
+                        "Error sending ACK message for transaction ID {}",
+                        msg.transaction_id
+                    )
+                })?,
                 Err(e) => handle_encode_error(e, client.clone()).await?,
             }
         }
         Err(e) => {
-            handle_store_error(e, client).await?;
+            handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(());
         }
     }
@@ -296,7 +326,7 @@ async fn import(
     msg: Import,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     log::info!("import");
     let mut wb = worterbuch.write().await;
 
@@ -307,12 +337,17 @@ async fn import(
             };
 
             match encode_ack_message(&response) {
-                Ok(data) => client.send(data)?,
+                Ok(data) => client.send(data).context(|| {
+                    format!(
+                        "Error sending ACK message for transaction ID {}",
+                        msg.transaction_id
+                    )
+                })?,
                 Err(e) => handle_encode_error(e, client.clone()).await?,
             }
         }
         Err(e) => {
-            handle_store_error(e, client).await?;
+            handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(());
         }
     }
@@ -320,10 +355,72 @@ async fn import(
     Ok(())
 }
 
-async fn handle_encode_error(_e: EncodeError, _client: UnboundedSender<Vec<u8>>) -> Result<()> {
+async fn handle_encode_error(
+    _e: EncodeError,
+    _client: UnboundedSender<Vec<u8>>,
+) -> WorterbuchResult<()> {
     todo!()
 }
 
-async fn handle_store_error(_e: WorterbuchError, _client: UnboundedSender<Vec<u8>>) -> Result<()> {
-    todo!()
+async fn handle_store_error(
+    e: WorterbuchError,
+    client: UnboundedSender<Vec<u8>>,
+    transaction_id: u64,
+) -> WorterbuchResult<()> {
+    let error_code = ErrorCode::from(&e);
+    let err_msg = match e {
+        WorterbuchError::IllegalWildcard(pattern) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
+        },
+        WorterbuchError::IllegalMultiWildcard(pattern) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
+        },
+        WorterbuchError::MultiWildcardAtIllegalPosition(pattern) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
+        },
+        WorterbuchError::IoError(e, meta) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
+                .expect("failed to serialize metadata"),
+        },
+        WorterbuchError::SerDeError(e, meta) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
+                .expect("failed to serialize metadata"),
+        },
+        WorterbuchError::Other(e, meta) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string::<Meta>(&(&e, meta).into())
+                .expect("failed to serialize metadata"),
+        },
+    };
+    let msg = encode_err_message(&err_msg)
+        .expect(&format!("failed to encode error message: {err_msg:?}"));
+    client
+        .send(msg)
+        .context(|| format!("Error sending ERR message to client"))
+}
+
+#[derive(Serialize)]
+struct Meta {
+    cause: String,
+    meta: MetaData,
+}
+
+impl From<(&Box<dyn std::error::Error + Send + Sync>, MetaData)> for Meta {
+    fn from(e: (&Box<dyn std::error::Error + Send + Sync>, MetaData)) -> Self {
+        Meta {
+            cause: e.0.to_string(),
+            meta: e.1,
+        }
+    }
 }

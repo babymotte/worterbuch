@@ -1,5 +1,5 @@
 use crate::worterbuch::Worterbuch;
-use anyhow::{Context, Result};
+use libworterbuch::error::{Context, WorterbuchResult};
 use std::{
     io::{self, BufRead},
     path::Path,
@@ -33,23 +33,24 @@ pub async fn repl(worterbuch: Arc<RwLock<Worterbuch>>) {
 
     while let Some(line) = rx.recv().await {
         if let Err(e) = interpret(line, &worterbuch).await {
-            log::error!("{e}: {}", e.root_cause());
+            log::error!("{e}");
         }
     }
 }
 
-fn read(tx: UnboundedSender<String>) -> Result<()> {
+fn read(tx: UnboundedSender<String>) -> WorterbuchResult<()> {
     for line in io::stdin().lock().lines() {
-        let line = line.context("Failed read line.")?;
+        let line = line.context(|| format!("Error reading line from stdin"))?;
         if !line.trim().is_empty() {
-            tx.send(line).context("Failed to send read line.")?;
+            tx.send(line)
+                .context(|| format!("Error forwarding REPL command to worterbuch"))?;
         }
     }
 
     Ok(())
 }
 
-async fn interpret(line: String, worterbuch: &RwLock<Worterbuch>) -> Result<()> {
+async fn interpret(line: String, worterbuch: &RwLock<Worterbuch>) -> WorterbuchResult<()> {
     let mut split = line.split(" ");
 
     match split.next() {
@@ -71,7 +72,7 @@ async fn interpret(line: String, worterbuch: &RwLock<Worterbuch>) -> Result<()> 
 async fn set<'s>(
     mut split: impl Iterator<Item = &'s str>,
     worterbuch: &RwLock<Worterbuch>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let key = split.next();
 
     if key.is_none() {
@@ -98,7 +99,7 @@ async fn set<'s>(
 async fn get<'s>(
     mut split: impl Iterator<Item = &'s str>,
     worterbuch: &RwLock<Worterbuch>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let key = split.next();
 
     if key.is_none() {
@@ -122,14 +123,14 @@ async fn get<'s>(
 async fn subscribe<'s>(
     _split: impl Iterator<Item = &'s str>,
     _worterbuch: &RwLock<Worterbuch>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     todo!()
 }
 
 async fn load<'s>(
     mut split: impl Iterator<Item = &'s str>,
     worterbuch: &RwLock<Worterbuch>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let filename = split.next();
 
     if filename.is_none() {
@@ -139,11 +140,22 @@ async fn load<'s>(
 
     let filename = filename.expect("we checked this for none").to_owned();
     let path = Path::new(&filename);
-    let contents = fs::read_to_string(path).await?;
+    let contents = fs::read_to_string(path)
+        .await
+        .context(|| format!("Error reading db file {}", path.to_string_lossy()))?;
 
     log::debug!(
         "Read file {}",
-        fs::canonicalize(&path).await?.as_os_str().to_string_lossy()
+        fs::canonicalize(&path)
+            .await
+            .context(|| {
+                format!(
+                    "Error canonicalizing db file path {}",
+                    path.to_string_lossy()
+                )
+            })?
+            .as_os_str()
+            .to_string_lossy()
     );
 
     log::debug!("Acquiring write lock on store …");
@@ -154,7 +166,16 @@ async fn load<'s>(
     eprintln!(
         "Imported {} key/value pairs from {}",
         result.len(),
-        fs::canonicalize(&path).await?.as_os_str().to_string_lossy()
+        fs::canonicalize(&path)
+            .await
+            .context(|| {
+                format!(
+                    "Error canonicalizing db file path {}",
+                    path.to_string_lossy()
+                )
+            })?
+            .as_os_str()
+            .to_string_lossy()
     );
 
     Ok(())
@@ -163,7 +184,7 @@ async fn load<'s>(
 async fn export<'s>(
     mut split: impl Iterator<Item = &'s str>,
     worterbuch: &RwLock<Worterbuch>,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let filename = split.next();
 
     if filename.is_none() {
@@ -178,17 +199,30 @@ async fn export<'s>(
 
     let json = wb.export()?;
 
-    let mut file = File::create(path).await?;
-    file.write_all(json.to_string().as_bytes()).await?;
+    let mut file = File::create(path)
+        .await
+        .context(|| format!("Error creating db file {}", path.to_string_lossy()))?;
+    file.write_all(json.to_string().as_bytes())
+        .await
+        .context(|| format!("Error writing db file {}", path.to_string_lossy()))?;
     eprintln!(
         "Dumped all values to {}",
-        fs::canonicalize(&path).await?.as_os_str().to_string_lossy()
+        fs::canonicalize(&path)
+            .await
+            .context(|| {
+                format!(
+                    "Error canonicalizing db file path {}",
+                    path.to_string_lossy()
+                )
+            })?
+            .as_os_str()
+            .to_string_lossy()
     );
 
     Ok(())
 }
 
-async fn print_stats(worterbuch: &RwLock<Worterbuch>) -> Result<()> {
+async fn print_stats(worterbuch: &RwLock<Worterbuch>) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
     let stats = wb.stats();
     eprintln!("{stats}");
@@ -196,6 +230,6 @@ async fn print_stats(worterbuch: &RwLock<Worterbuch>) -> Result<()> {
     Ok(())
 }
 
-fn quit() -> Result<(), anyhow::Error> {
+fn quit() -> WorterbuchResult<()> {
     process::exit(0)
 }
