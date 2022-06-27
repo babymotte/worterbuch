@@ -31,3 +31,5 @@ dependencies = [
   "test-client-graphql",
   "test-client-sync",
 ]
+
+[tasks.docker]
