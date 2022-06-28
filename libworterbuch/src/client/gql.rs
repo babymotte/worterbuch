@@ -1,4 +1,4 @@
-use crate::{codec::ServerMessage as SM, error::ConnectionResult, client::Connection};
+use crate::{client::Connection, codec::ServerMessage as SM, error::ConnectionResult};
 use futures_channel::mpsc::{self, UnboundedSender};
 use futures_util::StreamExt;
 use serde_json::Value;

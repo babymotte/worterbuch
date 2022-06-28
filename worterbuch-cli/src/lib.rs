@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{App, Arg, ArgMatches};
 use libworterbuch::{
     codec::{Err, KeyValuePair, PState, State},
-    config::Config,
+    client::config::Config,
 };
 
 pub fn print_pstate(msg: &PState, json: bool) {
@@ -56,6 +56,7 @@ pub fn app<'help>(
     include_json: bool,
     args: Vec<Arg<'help>>,
 ) -> Result<(ArgMatches, String, String, u16, bool)> {
+
     let config = Config::new()?;
 
     let mut app = App::new(name)
@@ -68,20 +69,9 @@ pub fn app<'help>(
 
     let matches = app.get_matches();
 
-    #[cfg(feature = "web")]
     let default_proto = config.proto;
-
-    #[cfg(not(feature = "web"))]
-    let default_proto = "".to_owned();
-
     let default_host_addr = config.host_addr;
-
-    #[cfg(feature = "tcp")]
-    let default_port = config.tcp_port;
-    #[cfg(feature = "ws")]
-    let default_port = config.web_port;
-    #[cfg(feature = "graphql")]
-    let default_port = config.graphql_port;
+    let default_port = config.port;
 
     let proto = default_proto;
     let host_addr = matches

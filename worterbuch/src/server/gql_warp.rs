@@ -1,10 +1,10 @@
 use crate::{
+    config::Config,
     server::graphql::{self, Context},
     worterbuch::Worterbuch,
 };
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
-use libworterbuch::config::Config;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use warp::Filter;

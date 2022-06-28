@@ -1,7 +1,8 @@
-use crate::error::{ConfigError, ConfigResult};
-use std::env;
 #[cfg(feature = "server")]
 use std::net::IpAddr;
+use std::{env, net::IpAddr};
+
+use libworterbuch::error::{ConfigError, ConfigResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -16,14 +17,11 @@ pub struct Config {
     pub web_port: u16,
     #[cfg(feature = "web")]
     pub proto: String,
-    #[cfg(feature = "server")]
     pub bind_addr: IpAddr,
     #[cfg(feature = "web")]
     pub cert_path: Option<String>,
     #[cfg(feature = "web")]
     pub key_path: Option<String>,
-    #[cfg(feature = "client")]
-    pub host_addr: String,
 }
 
 impl Config {
@@ -47,28 +45,22 @@ impl Config {
 
         #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
-            self.web_port = val.parse().map_err(ConfigError::InvalidPort)?;
+            self.web_port = val.parse()?;
         }
 
         #[cfg(feature = "tcp")]
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
-            self.tcp_port = val.parse().map_err(ConfigError::InvalidPort)?;
+            self.tcp_port = val.parse()?;
         }
 
         #[cfg(feature = "graphql")]
         if let Ok(val) = env::var("WORTERBUCH_GRAPHQL_PORT") {
-            self.graphql_port = val.parse().map_err(ConfigError::InvalidPort)?;
+            self.graphql_port = val.parse()?;
         }
 
-        #[cfg(feature = "server")]
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
-            let ip: IpAddr = val.parse().map_err(ConfigError::InvalidAddr)?;
+            let ip: IpAddr = val.parse()?;
             self.bind_addr = ip;
-        }
-
-        #[cfg(feature = "client")]
-        if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
-            self.host_addr = val;
         }
 
         Ok(())
@@ -95,14 +87,11 @@ impl Default for Config {
             web_port: 8080,
             #[cfg(feature = "web")]
             proto: "ws".to_owned(),
-            #[cfg(feature = "server")]
             bind_addr: [127, 0, 0, 1].into(),
             #[cfg(feature = "web")]
             cert_path: None,
             #[cfg(feature = "web")]
             key_path: None,
-            #[cfg(feature = "client")]
-            host_addr: "localhost".to_owned(),
         }
     }
 }

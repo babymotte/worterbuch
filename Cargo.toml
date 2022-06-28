@@ -1,3 +1,6 @@
 [workspace]
 
 members = ["libworterbuch", "worterbuch", "worterbuch-cli"]
+
+[patch.crates-io]
+libworterbuch = { path = "./libworterbuch" }

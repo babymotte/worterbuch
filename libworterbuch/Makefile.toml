@@ -1,35 +1,14 @@
-[tasks.test-server]
+[tasks.test-all-async]
 command = "cargo"
-args = ["test", "--no-default-features", "--features", "server,tcp,ws,graphql"]
+args = ["test", "--no-default-features", "--features", "tcp,ws,graphql"]
 
-[tasks.test-server-sync]
+[tasks.test-sync]
 command = "cargo"
-args = ["test", "--no-default-features", "--features", "server"]
-
-[tasks.test-client-tcp]
-command = "cargo"
-args = ["test", "--no-default-features", "--features", "client,tcp"]
-
-[tasks.test-client-ws]
-command = "cargo"
-args = ["test", "--no-default-features", "--features", "client,ws"]
-
-[tasks.test-client-graphql]
-command = "cargo"
-args = ["test", "--no-default-features", "--features", "client,graphql"]
-
-[tasks.test-client-sync]
-command = "cargo"
-args = ["test", "--no-default-features", "--features", "client"]
+args = ["test", "--no-default-features"]
 
 [tasks.test-features]
-dependencies = [
-  "test-server",
-  "test-server-sync",
-  "test-client-tcp",
-  "test-client-ws",
-  "test-client-graphql",
-  "test-client-sync",
-]
+dependencies = ["test-all-async", "test-sync"]
 
 [tasks.docker]
+
+[tasks.install]

@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Arg;
 #[cfg(feature = "graphql")]
-use libworterbuch::client::gql::connect;
+use libworterbuch::client::gql;
 #[cfg(feature = "tcp")]
-use libworterbuch::client::tcp::connect;
+use libworterbuch::client::tcp;
 #[cfg(feature = "ws")]
-use libworterbuch::client::ws::connect;
+use libworterbuch::client::ws;
 use libworterbuch::{client::Connection, codec::ServerMessage as SM};
 use std::time::Duration;
 use tokio::{
@@ -34,7 +34,13 @@ async fn main() -> Result<()> {
 
     let keys = matches.get_many::<String>("KEYS");
 
-    let mut con = connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "tcp")]
+    let mut con = tcp::connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "ws")]
+    let mut con = ws::connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "graphql")]
+    let mut con = gql::connect(&proto, &host_addr, port).await?;
+
     let mut responses = con.responses();
 
     spawn(async move {

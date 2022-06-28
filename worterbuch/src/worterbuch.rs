@@ -1,10 +1,10 @@
 use crate::{
+    config::Config,
     store::{Store, StoreStats},
     subscribers::{Subscriber, Subscribers},
 };
 use libworterbuch::{
     codec::{KeyValuePair, KeyValuePairs, Path},
-    config::Config,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 use serde::{Deserialize, Serialize};

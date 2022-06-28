@@ -11,9 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
 [features]
-default = ["client", "tcp"]
-client = []
-server = []
+default = []
 tcp = ["async", "tokio/net"]
 ws = ["async", "web"]
 graphql = ["async", "web", "futures-channel", "url"]
@@ -22,7 +20,7 @@ web = ["futures-util", "tokio-tungstenite"]
 
 [dependencies]
 log = "0.4.17"
-tokio = { version = "1.19.2" }
+tokio = { version = "1.19.2", features = ["sync", "rt"] }
 serde = { version = "1.0.137", features = ["derive"] }
 serde_json = { version = "1.0.81" }
 

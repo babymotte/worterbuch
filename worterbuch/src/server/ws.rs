@@ -1,8 +1,7 @@
 use super::async_common::process_incoming_message;
-use crate::worterbuch::Worterbuch;
+use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
-use libworterbuch::config::Config;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     spawn,

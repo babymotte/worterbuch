@@ -17,6 +17,8 @@ dependencies = ["test-multi-threaded", "test-single-threaded"]
 [tasks.install]
 command = "cargo"
 args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]
+dependencies = ["test-single-threaded"]
+
 
 [tasks.docker-build]
 command = "docker"

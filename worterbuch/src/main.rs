@@ -1,3 +1,4 @@
+mod config;
 #[cfg(not(feature = "docker"))]
 mod repl;
 mod server;
@@ -7,10 +8,9 @@ mod worterbuch;
 
 #[cfg(not(feature = "docker"))]
 use crate::repl::repl;
-use crate::worterbuch::Worterbuch;
+use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use clap::App;
-use libworterbuch::config::Config;
 use std::sync::Arc;
 #[cfg(feature = "docker")]
 use tokio::signal::unix::{signal, SignalKind};

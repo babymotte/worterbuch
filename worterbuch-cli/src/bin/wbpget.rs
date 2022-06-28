@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Arg;
 #[cfg(feature = "graphql")]
-use libworterbuch::client::gql::connect;
+use libworterbuch::client::gql;
 #[cfg(feature = "tcp")]
-use libworterbuch::client::tcp::connect;
+use libworterbuch::client::tcp;
 #[cfg(feature = "ws")]
-use libworterbuch::client::ws::connect;
+use libworterbuch::client::ws;
 use libworterbuch::{client::Connection, codec::ServerMessage as SM};
 use std::{
     sync::{Arc, Mutex},
@@ -37,7 +37,12 @@ async fn main() -> Result<()> {
 
     let patterns = matches.get_many::<String>("PATTERNS");
 
-    let mut con = connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "tcp")]
+    let mut con = tcp::connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "ws")]
+    let mut con = ws::connect(&proto, &host_addr, port).await?;
+    #[cfg(feature = "graphql")]
+    let mut con = gql::connect(&proto, &host_addr, port).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));

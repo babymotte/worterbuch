@@ -1,6 +1,6 @@
-use crate::worterbuch::Worterbuch;
+use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
-use libworterbuch::{config::Config, error::WorterbuchResult};
+use libworterbuch::error::WorterbuchResult;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
