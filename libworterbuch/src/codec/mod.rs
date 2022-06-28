@@ -1,13 +1,14 @@
+#[cfg(not(feature = "async"))]
+mod blocking;
 #[cfg(feature = "async")]
 mod nonblocking;
+
+#[cfg(not(feature = "async"))]
+pub use blocking::*;
 #[cfg(feature = "async")]
 pub use nonblocking::*;
 
-#[cfg(not(feature = "async"))]
-mod blocking;
 use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
-#[cfg(not(feature = "async"))]
-pub use blocking::*;
 use serde::{Deserialize, Serialize};
 
 pub type MessageType = u8;
