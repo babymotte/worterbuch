@@ -43,4 +43,4 @@ args = ["push", "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}"]
 dependencies = ["docker-push-latest", "docker-push-versioned"]
 
 [tasks.docker]
-dependencies = ["docker-build", "docker-push"]
+dependencies = ["docker-build"]
