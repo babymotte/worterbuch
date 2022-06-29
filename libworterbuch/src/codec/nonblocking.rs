@@ -7,9 +7,9 @@ use super::{
     REQUEST_PATTERN_LENGTH_BYTES, SET, STA, SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
 };
 use crate::error::{DecodeError, DecodeResult};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
-pub async fn read_client_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Option<CM>> {
+pub async fn read_client_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Option<CM>> {
     let mut buf = [0];
     if let Err(e) = data.read_exact(&mut buf).await {
         log::debug!("client disconnected: {e}");
@@ -28,7 +28,7 @@ pub async fn read_client_message(mut data: impl AsyncReadExt + Unpin) -> DecodeR
     .map(Some)
 }
 
-pub async fn read_server_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Option<SM>> {
+pub async fn read_server_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Option<SM>> {
     let mut buf = [0];
     if let Err(e) = data.read_exact(&mut buf).await {
         log::debug!("client disconnected: {e}");
@@ -44,7 +44,7 @@ pub async fn read_server_message(mut data: impl AsyncReadExt + Unpin) -> DecodeR
     .map(Some)
 }
 
-async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Get> {
+async fn read_get_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Get> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -63,7 +63,7 @@ async fn read_get_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<G
     })
 }
 
-async fn read_pget_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PGet> {
+async fn read_pget_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<PGet> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -82,7 +82,7 @@ async fn read_pget_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<
     })
 }
 
-async fn read_set_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Set> {
+async fn read_set_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Set> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -110,7 +110,7 @@ async fn read_set_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<S
     })
 }
 
-async fn read_subscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Subscribe> {
+async fn read_subscribe_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Subscribe> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -129,7 +129,7 @@ async fn read_subscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeRe
     })
 }
 
-async fn read_psubscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PSubscribe> {
+async fn read_psubscribe_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<PSubscribe> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -148,7 +148,7 @@ async fn read_psubscribe_message(mut data: impl AsyncReadExt + Unpin) -> DecodeR
     })
 }
 
-async fn read_pstate_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<PState> {
+async fn read_pstate_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<PState> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -200,7 +200,7 @@ async fn read_pstate_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResul
     })
 }
 
-async fn read_ack_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Ack> {
+async fn read_ack_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Ack> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -208,7 +208,7 @@ async fn read_ack_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<A
     Ok(Ack { transaction_id })
 }
 
-async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<State> {
+async fn read_state_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<State> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -242,7 +242,7 @@ async fn read_state_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult
     }
 }
 
-async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Err> {
+async fn read_err_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Err> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -266,7 +266,7 @@ async fn read_err_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<E
     })
 }
 
-async fn read_export_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Export> {
+async fn read_export_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Export> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
@@ -285,7 +285,7 @@ async fn read_export_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResul
     })
 }
 
-async fn read_import_message(mut data: impl AsyncReadExt + Unpin) -> DecodeResult<Import> {
+async fn read_import_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Import> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf).await?;
     let transaction_id = TransactionId::from_be_bytes(buf);
