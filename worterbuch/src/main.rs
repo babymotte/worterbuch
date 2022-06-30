@@ -48,9 +48,9 @@ async fn run(msg: &str) -> Result<()> {
     log::debug!("Wildcard: {}", config.wildcard);
     log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
 
-    let restore_from_persistence = config.persistent_data;
+    let use_persistence = config.use_persistence;
 
-    let worterbuch = if restore_from_persistence {
+    let worterbuch = if use_persistence {
         persistence::load(config.clone()).await?
     } else {
         Worterbuch::with_config(config.clone())
@@ -59,7 +59,9 @@ async fn run(msg: &str) -> Result<()> {
     let worterbuch = Arc::new(RwLock::new(worterbuch));
     let worterbuch_pers = worterbuch.clone();
 
-    spawn(persistence::periodic(worterbuch_pers, config_pers));
+    if use_persistence {
+        spawn(persistence::periodic(worterbuch_pers, config_pers));
+    }
 
     #[cfg(feature = "graphql")]
     spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));
@@ -81,7 +83,9 @@ async fn run(msg: &str) -> Result<()> {
         repl(worterbuch.clone()).await;
     }
 
-    persistence::once(worterbuch.clone(), config.clone()).await?;
+    if use_persistence {
+        persistence::once(worterbuch.clone(), config.clone()).await?;
+    }
 
     Ok(())
 }

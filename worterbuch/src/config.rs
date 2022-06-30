@@ -25,7 +25,7 @@ pub struct Config {
     pub cert_path: Option<String>,
     #[cfg(feature = "web")]
     pub key_path: Option<String>,
-    pub persistent_data: bool,
+    pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub data_dir: Path,
 }
@@ -69,7 +69,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_USE_PERSISTENCE") {
-            self.persistent_data = val.to_lowercase() == "true";
+            self.use_persistence = val.to_lowercase() == "true";
         }
 
         if let Ok(val) = env::var("WORTERBUCH_PERSISTENCE_INTERVAL") {
@@ -110,7 +110,7 @@ impl Default for Config {
             cert_path: None,
             #[cfg(feature = "web")]
             key_path: None,
-            persistent_data: false,
+            use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
         }
