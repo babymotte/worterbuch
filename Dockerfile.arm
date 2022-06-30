@@ -1,0 +1,10 @@
+FROM messense/rust-musl-cross:armv7-musleabihf AS worterbuch-builder-arm
+WORKDIR /src/worterbuch
+COPY . .
+RUN cargo build -p worterbuch --release --features docker,tcp,ws,graphql
+
+FROM --platform=linux/arm scratch
+WORKDIR /app
+COPY --from=worterbuch-builder-arm /src/worterbuch/target/armv7-unknown-linux-musleabihf/release/worterbuch .
+VOLUME [ "/data" ]
+CMD ["./worterbuch"]

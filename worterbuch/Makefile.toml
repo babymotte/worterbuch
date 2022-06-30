@@ -19,28 +19,38 @@ command = "cargo"
 args = ["install", "--path", ".", "--features", "tcp,ws,graphql"]
 dependencies = ["test-single-threaded"]
 
-
 [tasks.docker-build]
 command = "docker"
 args = [
   "build",
   "-t",
-  "babymotte/worterbuch:latest",
-  "-t",
   "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}",
   "..",
 ]
 
-[tasks.docker-push-latest]
+[tasks.docker-build-arm]
 command = "docker"
-args = ["push", "babymotte/worterbuch:latest"]
+args = [
+  "build",
+  "-t",
+  "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}-armv7",
+  "-f",
+  "../Dockerfile.arm",
+  "..",
+]
 
-[tasks.docker-push-versioned]
+[tasks.docker-push]
 command = "docker"
 args = ["push", "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}"]
 
-[tasks.docker-push]
-dependencies = ["docker-push-latest", "docker-push-versioned"]
+[tasks.docker-push-arm]
+command = "docker"
+args = ["push", "babymotte/worterbuch:${CARGO_MAKE_PROJECT_VERSION}-armv7"]
 
 [tasks.docker]
-dependencies = ["docker-build"]
+dependencies = [
+  # "docker-build",
+  "docker-build-arm",
+  # "docker-push",
+  "docker-push-arm",
+]
