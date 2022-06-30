@@ -12,10 +12,9 @@ categories = ["database"]
 
 [features]
 default = []
-tcp = ["async", "tokio/net"]
-ws = ["async", "web"]
-graphql = ["async", "web", "futures-channel", "url"]
-async = ["tokio/io-util"]
+tcp = ["tokio/net"]
+ws = ["web"]
+graphql = ["web", "futures-channel", "url"]
 web = ["futures-util", "tokio-tungstenite"]
 
 [dependencies]

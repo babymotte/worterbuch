@@ -1,4 +1,4 @@
-use super::async_common::process_incoming_message;
+use super::common::process_incoming_message;
 use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};

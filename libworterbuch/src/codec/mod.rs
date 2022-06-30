@@ -1,11 +1,4 @@
-#[cfg(not(feature = "async"))]
-mod blocking;
-#[cfg(feature = "async")]
 mod nonblocking;
-
-#[cfg(not(feature = "async"))]
-pub use blocking::*;
-#[cfg(feature = "async")]
 pub use nonblocking::*;
 
 use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};

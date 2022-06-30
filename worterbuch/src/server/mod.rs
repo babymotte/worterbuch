@@ -1,5 +1,4 @@
-#[cfg(feature = "async")]
-mod async_common;
+mod common;
 #[cfg(feature = "graphql")]
 pub mod gql_warp;
 #[cfg(feature = "graphql")]

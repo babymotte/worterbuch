@@ -1,3 +1,4 @@
+use super::common::process_incoming_message;
 use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use libworterbuch::error::WorterbuchResult;
@@ -11,8 +12,6 @@ use tokio::{
         RwLock,
     },
 };
-
-use super::async_common::process_incoming_message;
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
     log::info!("Starting TCP Server …");

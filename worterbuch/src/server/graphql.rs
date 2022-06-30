@@ -34,7 +34,7 @@ impl PEvent {
 
 pub(crate) struct Event {
     key: String,
-    value: Option<String>,
+    value: String,
 }
 
 #[graphql_object(context = Context)]
@@ -43,8 +43,8 @@ impl Event {
         &self.key
     }
 
-    pub fn value(&self) -> Option<&str> {
-        self.value.as_deref()
+    pub fn value(&self) -> &str {
+        &self.value
     }
 }
 
@@ -63,11 +63,10 @@ impl Query {
         let result = worterbuch.pget(&pattern)?;
         let result = result
             .into_iter()
-            .filter(|s| s.value.is_some())
             .map(|s| PEvent {
                 pattern: pattern.clone(),
                 key: s.key,
-                value: s.value.expect("checked by filter"),
+                value: s.value,
             })
             .collect();
         Ok(result)
@@ -110,14 +109,12 @@ impl Subscription {
                     match rx.recv().await {
                         Some(event) => {
                             for KeyValuePair{ key, value } in event {
-                                if let Some(value) = value {
-                                    let event = PEvent{
-                                        pattern: pattern.clone(),
-                                        key,
-                                        value,
-                                    };
-                                    yield Ok(event)
-                                }
+                                let event = PEvent{
+                                    pattern: pattern.clone(),
+                                    key,
+                                    value,
+                                };
+                                yield Ok(event)
                             }
                         },
                         None => {
