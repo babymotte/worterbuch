@@ -36,7 +36,6 @@ async fn main() -> Result<()> {
 async fn run(msg: &str) -> Result<()> {
     let config = Config::new()?;
     let config_pers = config.clone();
-    let config_ppers = config.clone();
 
     App::new("worterbuch")
         .version(env!("CARGO_PKG_VERSION"))
@@ -49,11 +48,16 @@ async fn run(msg: &str) -> Result<()> {
     log::debug!("Wildcard: {}", config.wildcard);
     log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
 
-    // let restore_from_persistence = config.persistent_data;
+    let restore_from_persistence = config.persistent_data;
 
-    let worterbuch = Arc::new(RwLock::new(Worterbuch::with_config(config.clone())));
+    let worterbuch = if restore_from_persistence {
+        persistence::load(config.clone()).await?
+    } else {
+        Worterbuch::with_config(config.clone())
+    };
+
+    let worterbuch = Arc::new(RwLock::new(worterbuch));
     let worterbuch_pers = worterbuch.clone();
-    let worterbuch_ppers = worterbuch.clone();
 
     spawn(persistence::periodic(worterbuch_pers, config_pers));
 
@@ -74,10 +78,10 @@ async fn run(msg: &str) -> Result<()> {
 
     #[cfg(not(feature = "docker"))]
     {
-        repl(worterbuch).await;
+        repl(worterbuch.clone()).await;
     }
 
-    persistence::once(worterbuch_ppers, config_ppers).await?;
+    persistence::once(worterbuch.clone(), config.clone()).await?;
 
     Ok(())
 }

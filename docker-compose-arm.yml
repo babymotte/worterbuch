@@ -13,6 +13,8 @@ services:
     environment:
       - RUST_LOG=info
       - WORTERBUCH_BIND_ADDRESS=0.0.0.0
+      - WORTERBUCH_DATA_DIR=/data
+      - WORTERBUCH_PERSISTENCE_INTERVAL=5
     volumes:
       - ./data:/data
     logging:

@@ -61,14 +61,14 @@ impl Config {
 
         #[cfg(feature = "graphql")]
         if let Ok(val) = env::var("WORTERBUCH_GRAPHQL_PORT") {
-            self.graphql_port = val.parse()?;
+            self.graphql_port = val.parse().as_port()?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
             self.bind_addr = val.parse()?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_PERSISTENT_DATA") {
+        if let Ok(val) = env::var("WORTERBUCH_USE_PERSISTENCE") {
             self.persistent_data = val.to_lowercase() == "true";
         }
 
@@ -111,8 +111,7 @@ impl Default for Config {
             #[cfg(feature = "web")]
             key_path: None,
             persistent_data: false,
-            // TODO increase default persistence period
-            persistence_interval: Duration::from_secs(5),
+            persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
         }
     }
