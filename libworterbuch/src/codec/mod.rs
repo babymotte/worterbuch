@@ -46,6 +46,7 @@ pub const ILLEGAL_MULTI_WILDCARD: ErrorCode = 0b00000001;
 pub const MULTI_WILDCARD_AT_ILLEGAL_POSITION: ErrorCode = 0b00000010;
 pub const IO_ERROR: ErrorCode = 0b00000011;
 pub const SERDE_ERROR: ErrorCode = 0b00000100;
+pub const NO_SUCH_VALUE: ErrorCode = 0b00000101;
 pub const OTHER: ErrorCode = 0b11111111;
 
 pub const TRANSACTION_ID_BYTES: usize = 8;
@@ -65,6 +66,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
                 MULTI_WILDCARD_AT_ILLEGAL_POSITION
             }
+            WorterbuchError::NoSuchValue(_) => NO_SUCH_VALUE,
             WorterbuchError::IoError(_, _) => IO_ERROR,
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
             WorterbuchError::Other(_, _) => OTHER,
@@ -133,29 +135,20 @@ impl ServerMessage {
 #[serde(rename_all = "camelCase")]
 pub struct KeyValuePair {
     pub key: Key,
-    pub value: Option<Value>,
+    pub value: Value,
 }
 
 impl From<(String, String)> for KeyValuePair {
     fn from((key, value): (String, String)) -> Self {
-        KeyValuePair {
-            key,
-            value: Some(value),
-        }
-    }
-}
-
-impl From<(String, Option<String>)> for KeyValuePair {
-    fn from((key, value): (String, Option<String>)) -> Self {
         KeyValuePair { key, value }
     }
 }
 
-impl From<(&str, Option<&str>)> for KeyValuePair {
-    fn from((key, value): (&str, Option<&str>)) -> Self {
+impl From<(&str, &str)> for KeyValuePair {
+    fn from((key, value): (&str, &str)) -> Self {
         KeyValuePair {
             key: key.to_owned(),
-            value: value.map(ToOwned::to_owned),
+            value: value.to_owned(),
         }
     }
 }
@@ -350,10 +343,7 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
 
     for KeyValuePair { key, value } in &msg.key_value_pairs {
         let key_length = get_key_length(&key)?;
-        let value_length = match value {
-            Some(value) => get_value_length(&value)?,
-            None => 0,
-        };
+        let value_length = get_value_length(&value)?;
         buf.extend(key_length.to_be_bytes());
         buf.extend(value_length.to_be_bytes());
     }
@@ -362,9 +352,7 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
 
     for KeyValuePair { key, value } in &msg.key_value_pairs {
         buf.extend(key.as_bytes());
-        if let Some(value) = value {
-            buf.extend(value.as_bytes());
-        }
+        buf.extend(value.as_bytes());
     }
 
     Ok(buf)
@@ -381,10 +369,7 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     let KeyValuePair { key, value } = &msg.key_value;
     let key_length = get_key_length(key)?;
-    let value_length = match value {
-        Some(value) => get_value_length(value)?,
-        None => 0,
-    };
+    let value_length = get_value_length(value)?;
 
     let mut buf = vec![STA];
 
@@ -393,9 +378,7 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     buf.extend(value_length.to_be_bytes());
 
     buf.extend(key.as_bytes());
-    if let Some(value) = value {
-        buf.extend(value.as_bytes());
-    }
+    buf.extend(value.as_bytes());
 
     Ok(buf)
 }
@@ -606,7 +589,7 @@ mod test {
     fn state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key_value: ("1/2/3", Some("4")).into(),
+            key_value: ("1/2/3", "4").into(),
         };
 
         let data = vec![
@@ -622,7 +605,7 @@ mod test {
     fn empty_state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key_value: ("1/2/3", None).into(),
+            key_value: ("1/2/3", "").into(),
         };
 
         let data = vec![

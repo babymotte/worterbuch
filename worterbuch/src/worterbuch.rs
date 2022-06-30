@@ -44,7 +44,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, Option<String>)> {
+    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, String)> {
         let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -61,10 +61,13 @@ impl Worterbuch {
             ));
         }
 
-        let value = self.store.get(&path);
-        let key_value = (key.as_ref().to_owned(), value.map(|v| v.to_owned()));
-
-        Ok(key_value)
+        match self.store.get(&path) {
+            Some(value) => {
+                let key_value = (key.as_ref().to_owned(), value.to_owned());
+                Ok(key_value)
+            }
+            None => Err(WorterbuchError::NoSuchValue(key.as_ref().to_owned())),
+        }
     }
 
     pub fn set(&mut self, key: impl AsRef<str>, value: String) -> WorterbuchResult<()> {
@@ -127,7 +130,11 @@ impl Worterbuch {
         key: String,
     ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, Uuid)> {
         let path: Vec<&str> = key.split(self.config.separator).collect();
-        let matches = self.get(&key)?;
+        let matches = match self.get(&key) {
+            Ok((key, value)) => Some((key, value)),
+            Err(WorterbuchError::NoSuchValue(_)) => None,
+            Err(e) => return Err(e),
+        };
         let (tx, rx) = unbounded_channel();
         let subscriber = Subscriber::new(
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
@@ -135,7 +142,7 @@ impl Worterbuch {
         );
         let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
-        if let (key, Some(value)) = matches {
+        if let Some((key, value)) = matches {
             tx.send(vec![(key, value).into()])
                 .expect("rx is neither closed nor dropped");
         }

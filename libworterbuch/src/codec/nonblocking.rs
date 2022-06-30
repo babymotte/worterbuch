@@ -225,21 +225,14 @@ async fn read_state_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<St
     data.read_exact(&mut buf).await?;
     let key = Key::from_utf8_lossy(&buf).to_string();
 
-    if value_length != 0 {
-        let mut buf = vec![0; value_length as usize];
-        data.read_exact(&mut buf).await?;
-        let value = Value::from_utf8_lossy(&buf).to_string();
+    let mut buf = vec![0; value_length as usize];
+    data.read_exact(&mut buf).await?;
+    let value = Value::from_utf8_lossy(&buf).to_string();
 
-        Ok(State {
-            transaction_id,
-            key_value: (key, Some(value)).into(),
-        })
-    } else {
-        Ok(State {
-            transaction_id,
-            key_value: (key, None).into(),
-        })
-    }
+    Ok(State {
+        transaction_id,
+        key_value: (key, value).into(),
+    })
 }
 
 async fn read_err_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Err> {
@@ -531,7 +524,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: ("1/2/3", Some("4")).into()
+                key_value: ("1/2/3", "4").into()
             })
         )
     }
@@ -552,7 +545,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: ("1/2/3", None).into()
+                key_value: ("1/2/3", "").into()
             })
         )
     }
@@ -666,7 +659,7 @@ mod test {
             messages[1],
             Some(SM::State(State {
                 transaction_id: 42,
-                key_value: ("", None).into()
+                key_value: ("", "").into()
             }))
         );
 

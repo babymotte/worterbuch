@@ -384,6 +384,12 @@ async fn handle_store_error(
             transaction_id,
             metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
         },
+        WorterbuchError::NoSuchValue(key) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(&format!("no value for key '{key}'"))
+                .expect("failed to serialize error message"),
+        },
         WorterbuchError::IoError(e, meta) => Err {
             error_code,
             transaction_id,

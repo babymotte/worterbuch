@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::{App, Arg, ArgMatches};
 use libworterbuch::{
-    codec::{Err, KeyValuePair, PState, State},
     client::config::Config,
+    codec::{Err, KeyValuePair, PState, State},
 };
 
 pub fn print_pstate(msg: &PState, json: bool) {
@@ -15,7 +15,7 @@ pub fn print_pstate(msg: &PState, json: bool) {
         }
     } else {
         for KeyValuePair { key, value } in &msg.key_value_pairs {
-            println!("{key}={}", value.as_deref().unwrap_or("[no value]"));
+            println!("{key}={value}");
         }
     }
 }
@@ -29,11 +29,8 @@ pub fn print_state(msg: &State, json: bool) {
             }
         }
     } else {
-        if let KeyValuePair { key, value: Some(value )} = &msg.key_value {
-            println!("{}={}", key, value);
-        } else {
-            eprintln!("No result.");
-        }
+        let KeyValuePair { key, value } = &msg.key_value;
+        println!("{key}={value}");
     }
 }
 
@@ -56,7 +53,6 @@ pub fn app<'help>(
     include_json: bool,
     args: Vec<Arg<'help>>,
 ) -> Result<(ArgMatches, String, String, u16, bool)> {
-
     let config = Config::new()?;
 
     let mut app = App::new(name)
@@ -83,7 +79,11 @@ pub fn app<'help>(
         .map(ToOwned::to_owned)
         .unwrap_or(default_port);
 
-    let json = if include_json {matches.is_present("JSON")} else {false};
+    let json = if include_json {
+        matches.is_present("JSON")
+    } else {
+        false
+    };
 
     Ok((matches, proto, host_addr, port, json))
 }
@@ -102,7 +102,6 @@ fn default_args<'help>(include_json: bool) -> Vec<Arg<'help>> {
             .help("The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.")
             .takes_value(true)
             .required(false),
-        
     ];
 
     if include_json {
@@ -112,7 +111,7 @@ fn default_args<'help>(include_json: bool) -> Vec<Arg<'help>> {
                 .long("json")
                 .help("Output data in JSON format instead of '[key]=[value]' pairs.")
                 .takes_value(false)
-                .required(false)
+                .required(false),
         );
     }
 

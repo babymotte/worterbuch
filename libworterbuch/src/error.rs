@@ -1,5 +1,5 @@
 use crate::codec::{
-    ErrorCode, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs, PathLength,
+    ErrorCode, Key, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs, PathLength,
     RequestPattern, RequestPatternLength, ValueLength,
 };
 #[cfg(feature = "graphql")]
@@ -176,6 +176,7 @@ pub enum WorterbuchError {
     IllegalWildcard(RequestPattern),
     IllegalMultiWildcard(RequestPattern),
     MultiWildcardAtIllegalPosition(RequestPattern),
+    NoSuchValue(Key),
     IoError(io::Error, MetaData),
     SerDeError(serde_json::Error, MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
@@ -195,6 +196,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::MultiWildcardAtIllegalPosition(rp) => {
                 write!(f, "Key contains multi-wildcard at illegal position: {rp}")
             }
+            WorterbuchError::NoSuchValue(key) => write!(f, "no value for key '{key}'"),
             WorterbuchError::IoError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::SerDeError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),
