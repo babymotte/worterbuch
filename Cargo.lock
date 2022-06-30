@@ -1277,6 +1277,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55deaec60f81eefe3cce0dc50bda92d6d8e88f2a27df7c5033b42afeb1ed2676"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.10.3",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1939,6 +1950,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-util",
+ "hex",
  "juniper",
  "juniper_graphql_ws",
  "juniper_warp",
@@ -1947,6 +1959,7 @@ dependencies = [
  "openssl",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "uuid 1.1.2",
  "warp",

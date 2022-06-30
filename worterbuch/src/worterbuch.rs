@@ -9,6 +9,7 @@ use libworterbuch::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
+use sha2::{Digest, Sha256};
 use std::fmt::Display;
 use tokio::{
     fs::File,
@@ -192,17 +193,20 @@ impl Worterbuch {
         Ok(imported_values)
     }
 
-    pub async fn export_to_file(&self, path: &Path) -> WorterbuchResult<()> {
-        log::info!("Exporting to {path} …");
-        let json = self.export()?;
-        let mut file = File::create(path)
+    pub async fn export_to_file(&self, file: &mut File) -> WorterbuchResult<Vec<u8>> {
+        log::debug!("Exporting to {file:?} …");
+        let json = self.export()?.to_string();
+        let json_bytes = json.as_bytes();
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"hello world");
+        let result = hasher.finalize();
+
+        file.write_all(json_bytes)
             .await
-            .context(|| format!("Error creating file {path}"))?;
-        file.write_all(json.to_string().as_bytes())
-            .await
-            .context(|| format!("Error writing to file {path}"))?;
-        log::info!("Done.");
-        Ok(())
+            .context(|| format!("Error writing to file {file:?}"))?;
+        log::debug!("Done.");
+        Ok(result.as_slice().to_owned())
     }
 
     pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {

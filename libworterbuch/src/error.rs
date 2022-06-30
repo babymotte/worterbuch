@@ -128,6 +128,7 @@ pub enum ConfigError {
     InvalidMultiWildcard(String),
     InvalidPort(ParseIntError),
     InvalidAddr(AddrParseError),
+    InvalidInterval(ParseIntError),
 }
 
 impl std::error::Error for ConfigError {}
@@ -149,13 +150,22 @@ impl fmt::Display for ConfigError {
             ),
             ConfigError::InvalidPort(e) => write!(f, "invalid port: {e}"),
             ConfigError::InvalidAddr(e) => write!(f, "invalid address: {e}"),
+            ConfigError::InvalidInterval(e) => write!(f, "invalid port: {e}"),
         }
     }
 }
 
-impl From<ParseIntError> for ConfigError {
-    fn from(e: ParseIntError) -> Self {
-        ConfigError::InvalidPort(e)
+pub trait ConfigIntContext<I> {
+    fn as_port(self) -> Result<I, ConfigError>;
+    fn as_interval(self) -> Result<I, ConfigError>;
+}
+
+impl<I> ConfigIntContext<I> for Result<I, ParseIntError> {
+    fn as_port(self) -> Result<I, ConfigError> {
+        self.map_err(ConfigError::InvalidPort)
+    }
+    fn as_interval(self) -> Result<I, ConfigError> {
+        self.map_err(ConfigError::InvalidInterval)
     }
 }
 

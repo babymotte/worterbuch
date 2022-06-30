@@ -39,6 +39,8 @@ serde = { version = "1.0.137", features = ["derive"] }
 serde_json = "1.0.81"
 uuid = { version = "1.1.1", features = ["v4"] }
 clap = "3.2.6"
+sha2 = "0.10.2"
+hex = "0.4.3"
 
 juniper = { version = "0.15.9", optional = true }
 juniper_graphql_ws = { version = "0.3.0", optional = true }

@@ -1,4 +1,4 @@
-use crate::error::ConfigResult;
+use crate::error::{ConfigIntContext, ConfigResult};
 use std::env;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +19,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
-            self.port = val.parse()?;
+            self.port = val.parse().as_port()?;
         }
 
         Ok(())

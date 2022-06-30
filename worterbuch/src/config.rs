@@ -1,8 +1,11 @@
 #[cfg(feature = "server")]
 use std::net::IpAddr;
-use std::{env, net::IpAddr};
+use std::{env, net::IpAddr, time::Duration};
 
-use libworterbuch::error::{ConfigError, ConfigResult};
+use libworterbuch::{
+    codec::Path,
+    error::{ConfigError, ConfigIntContext, ConfigResult},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -22,6 +25,9 @@ pub struct Config {
     pub cert_path: Option<String>,
     #[cfg(feature = "web")]
     pub key_path: Option<String>,
+    pub persistent_data: bool,
+    pub persistence_interval: Duration,
+    pub data_dir: Path,
 }
 
 impl Config {
@@ -45,12 +51,12 @@ impl Config {
 
         #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
-            self.web_port = val.parse()?;
+            self.web_port = val.parse().as_port()?;
         }
 
         #[cfg(feature = "tcp")]
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
-            self.tcp_port = val.parse()?;
+            self.tcp_port = val.parse().as_port()?;
         }
 
         #[cfg(feature = "graphql")]
@@ -59,8 +65,20 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
-            let ip: IpAddr = val.parse()?;
-            self.bind_addr = ip;
+            self.bind_addr = val.parse()?;
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_PERSISTENT_DATA") {
+            self.persistent_data = val.to_lowercase() == "true";
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_PERSISTENCE_INTERVAL") {
+            let secs = val.parse().as_interval()?;
+            self.persistence_interval = Duration::from_secs(secs);
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_DATA_DIR") {
+            self.data_dir = val;
         }
 
         Ok(())
@@ -92,6 +110,10 @@ impl Default for Config {
             cert_path: None,
             #[cfg(feature = "web")]
             key_path: None,
+            persistent_data: false,
+            // TODO increase default persistence period
+            persistence_interval: Duration::from_secs(5),
+            data_dir: "./data".into(),
         }
     }
 }

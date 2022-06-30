@@ -10,6 +10,7 @@ use libworterbuch::{
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::{
+    fs::File,
     io::AsyncReadExt,
     spawn,
     sync::{mpsc::UnboundedSender, RwLock},
@@ -297,8 +298,11 @@ async fn export(
 ) -> WorterbuchResult<()> {
     log::info!("export");
     let wb = worterbuch.read().await;
-    match wb.export_to_file(&msg.path).await {
-        Ok(()) => {
+    let mut file = File::create(&msg.path)
+        .await
+        .context(|| format!("Error creating file {}", &msg.path))?;
+    match wb.export_to_file(&mut file).await {
+        Ok(_) => {
             let response = Ack {
                 transaction_id: msg.transaction_id,
             };

@@ -1,4 +1,5 @@
 mod config;
+mod persistence;
 #[cfg(not(feature = "docker"))]
 mod repl;
 mod server;
@@ -34,6 +35,8 @@ async fn main() -> Result<()> {
 
 async fn run(msg: &str) -> Result<()> {
     let config = Config::new()?;
+    let config_pers = config.clone();
+    let config_ppers = config.clone();
 
     App::new("worterbuch")
         .version(env!("CARGO_PKG_VERSION"))
@@ -46,7 +49,13 @@ async fn run(msg: &str) -> Result<()> {
     log::debug!("Wildcard: {}", config.wildcard);
     log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
 
+    // let restore_from_persistence = config.persistent_data;
+
     let worterbuch = Arc::new(RwLock::new(Worterbuch::with_config(config.clone())));
+    let worterbuch_pers = worterbuch.clone();
+    let worterbuch_ppers = worterbuch.clone();
+
+    spawn(persistence::periodic(worterbuch_pers, config_pers));
 
     #[cfg(feature = "graphql")]
     spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));
@@ -67,6 +76,8 @@ async fn run(msg: &str) -> Result<()> {
     {
         repl(worterbuch).await;
     }
+
+    persistence::once(worterbuch_ppers, config_ppers).await?;
 
     Ok(())
 }
