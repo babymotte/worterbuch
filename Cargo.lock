@@ -727,7 +727,7 @@ checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 
 [[package]]
 name = "libworterbuch"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -1930,7 +1930,7 @@ checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 
 [[package]]
 name = "worterbuch"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1954,7 +1954,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
