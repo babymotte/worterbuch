@@ -102,7 +102,8 @@ impl Connection for WsConnection {
 }
 
 pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<WsConnection> {
-    let (server, _) = connect_async(format!("{proto}://{addr}:{port}")).await?;
+    let url = format!("{proto}://{addr}:{port}");
+    let (server, _) = connect_async(url).await?;
     let (mut ws_tx, mut ws_rx) = server.split();
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();

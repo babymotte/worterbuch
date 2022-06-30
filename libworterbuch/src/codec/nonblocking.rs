@@ -221,23 +221,23 @@ async fn read_state_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<St
     data.read_exact(&mut buf).await?;
     let value_length = ValueLength::from_be_bytes(buf);
 
-    if key_length == 0 {
-        Ok(State {
-            transaction_id,
-            key_value: None,
-        })
-    } else {
-        let mut buf = vec![0; key_length as usize];
-        data.read_exact(&mut buf).await?;
-        let key = Key::from_utf8_lossy(&buf).to_string();
+    let mut buf = vec![0; key_length as usize];
+    data.read_exact(&mut buf).await?;
+    let key = Key::from_utf8_lossy(&buf).to_string();
 
+    if value_length != 0 {
         let mut buf = vec![0; value_length as usize];
         data.read_exact(&mut buf).await?;
         let value = Value::from_utf8_lossy(&buf).to_string();
 
         Ok(State {
             transaction_id,
-            key_value: Some((key, value).into()),
+            key_value: (key, Some(value)).into(),
+        })
+    } else {
+        Ok(State {
+            transaction_id,
+            key_value: (key, None).into(),
         })
     }
 }
@@ -531,7 +531,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into())
+                key_value: ("1/2/3", Some("4")).into()
             })
         )
     }
@@ -540,8 +540,8 @@ mod test {
     fn empty_state_message_is_read_correctly() {
         let data = [
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-            0b00000000, 0b00101010, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-            0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, b'1', b'/', b'2', b'/', b'3',
         ];
 
         let result = tokio_test::block_on(read_server_message(&data[..]))
@@ -552,7 +552,7 @@ mod test {
             result,
             SM::State(State {
                 transaction_id: 42,
-                key_value: None
+                key_value: ("1/2/3", None).into()
             })
         )
     }
@@ -666,7 +666,7 @@ mod test {
             messages[1],
             Some(SM::State(State {
                 transaction_id: 42,
-                key_value: None
+                key_value: ("", None).into()
             }))
         );
 

@@ -73,9 +73,13 @@ async fn main() -> Result<()> {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<KeyValuePair>(&line) {
-                Ok(KeyValuePair { key, value }) => {
+                Ok(KeyValuePair {
+                    key,
+                    value: Some(value),
+                }) => {
                     trans_id = con.set(&key, &value)?;
                 }
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("Error parsing json: {e}");
                 }

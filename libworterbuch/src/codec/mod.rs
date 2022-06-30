@@ -133,12 +133,30 @@ impl ServerMessage {
 #[serde(rename_all = "camelCase")]
 pub struct KeyValuePair {
     pub key: Key,
-    pub value: Value,
+    pub value: Option<Value>,
 }
 
 impl From<(String, String)> for KeyValuePair {
     fn from((key, value): (String, String)) -> Self {
+        KeyValuePair {
+            key,
+            value: Some(value),
+        }
+    }
+}
+
+impl From<(String, Option<String>)> for KeyValuePair {
+    fn from((key, value): (String, Option<String>)) -> Self {
         KeyValuePair { key, value }
+    }
+}
+
+impl From<(&str, Option<&str>)> for KeyValuePair {
+    fn from((key, value): (&str, Option<&str>)) -> Self {
+        KeyValuePair {
+            key: key.to_owned(),
+            value: value.map(ToOwned::to_owned),
+        }
     }
 }
 
@@ -196,7 +214,7 @@ pub struct Ack {
 #[serde(rename_all = "camelCase")]
 pub struct State {
     pub transaction_id: TransactionId,
-    pub key_value: Option<KeyValuePair>,
+    pub key_value: KeyValuePair,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -332,7 +350,10 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
 
     for KeyValuePair { key, value } in &msg.key_value_pairs {
         let key_length = get_key_length(&key)?;
-        let value_length = get_value_length(&value)?;
+        let value_length = match value {
+            Some(value) => get_value_length(&value)?,
+            None => 0,
+        };
         buf.extend(key_length.to_be_bytes());
         buf.extend(value_length.to_be_bytes());
     }
@@ -341,7 +362,9 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
 
     for KeyValuePair { key, value } in &msg.key_value_pairs {
         buf.extend(key.as_bytes());
-        buf.extend(value.as_bytes());
+        if let Some(value) = value {
+            buf.extend(value.as_bytes());
+        }
     }
 
     Ok(buf)
@@ -356,9 +379,11 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
-    let (key_length, value_length) = match &msg.key_value {
-        Some(KeyValuePair { key, value }) => (get_key_length(key)?, get_value_length(value)?),
-        None => (0, 0),
+    let KeyValuePair { key, value } = &msg.key_value;
+    let key_length = get_key_length(key)?;
+    let value_length = match value {
+        Some(value) => get_value_length(value)?,
+        None => 0,
     };
 
     let mut buf = vec![STA];
@@ -367,8 +392,8 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     buf.extend(key_length.to_be_bytes());
     buf.extend(value_length.to_be_bytes());
 
-    if let Some(KeyValuePair { key, value }) = &msg.key_value {
-        buf.extend(key.as_bytes());
+    buf.extend(key.as_bytes());
+    if let Some(value) = value {
         buf.extend(value.as_bytes());
     }
 
@@ -581,7 +606,7 @@ mod test {
     fn state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into()),
+            key_value: ("1/2/3", Some("4")).into(),
         };
 
         let data = vec![
@@ -597,13 +622,13 @@ mod test {
     fn empty_state_message_is_encoded_correctly() {
         let msg = State {
             transaction_id: 42,
-            key_value: None,
+            key_value: ("1/2/3", None).into(),
         };
 
         let data = vec![
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-            0b00000000, 0b00101010, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
-            0b00000000,
+            0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, b'1', b'/', b'2', b'/', b'3',
         ];
 
         assert_eq!(data, encode_state_message(&msg).unwrap());

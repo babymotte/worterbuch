@@ -114,7 +114,7 @@ async fn get<'s>(
     let result = wb.pget(key)?;
 
     for val in result {
-        eprintln!("{}={}", val.key, val.value);
+        eprintln!("{}={:?}", val.key, val.value);
     }
 
     Ok(())

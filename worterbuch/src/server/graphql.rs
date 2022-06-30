@@ -11,14 +11,14 @@ pub(crate) struct Context {
 }
 impl juniper::Context for Context {}
 
-pub(crate) struct Event {
+pub(crate) struct PEvent {
     pattern: String,
     key: String,
     value: String,
 }
 
 #[graphql_object(context = Context)]
-impl Event {
+impl PEvent {
     pub fn pattern(&self) -> &str {
         &self.pattern
     }
@@ -32,6 +32,22 @@ impl Event {
     }
 }
 
+pub(crate) struct Event {
+    key: String,
+    value: Option<String>,
+}
+
+#[graphql_object(context = Context)]
+impl Event {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+}
+
 pub(crate) struct Query;
 
 #[graphql_object(context = Context)]
@@ -42,15 +58,16 @@ impl Query {
     }
 
     /// Gets all values matching the given key pattern.
-    async fn pget(&self, pattern: String, context: &Context) -> FieldResult<Vec<Event>> {
+    async fn pget(&self, pattern: String, context: &Context) -> FieldResult<Vec<PEvent>> {
         let worterbuch = context.database.read().await;
         let result = worterbuch.pget(&pattern)?;
         let result = result
             .into_iter()
-            .map(|s| Event {
+            .filter(|s| s.value.is_some())
+            .map(|s| PEvent {
                 pattern: pattern.clone(),
                 key: s.key,
-                value: s.value,
+                value: s.value.expect("checked by filter"),
             })
             .collect();
         Ok(result)
@@ -59,16 +76,8 @@ impl Query {
     /// Get the value of the given key.
     async fn get(&self, key: String, context: &Context) -> FieldResult<Event> {
         let worterbuch = context.database.read().await;
-        let result = worterbuch.get(&key)?;
-        if let Some((key, value)) = result {
-            Ok(Event {
-                pattern: key.clone(),
-                key,
-                value,
-            })
-        } else {
-            Err(FieldError::new("no data", graphql_value!("no data")))
-        }
+        let (key, value) = worterbuch.get(&key)?;
+        Ok(Event { key, value })
     }
 }
 
@@ -84,6 +93,7 @@ impl Mutation {
     }
 }
 
+type PEventStream = Pin<Box<dyn Stream<Item = Result<PEvent, FieldError>> + Send>>;
 type EventStream = Pin<Box<dyn Stream<Item = Result<Event, FieldError>> + Send>>;
 
 pub(crate) struct Subscription;
@@ -91,7 +101,7 @@ pub(crate) struct Subscription;
 #[graphql_subscription(context = Context)]
 impl Subscription {
     /// Subscribe to key/value changes matching a pattern.
-    async fn psubscribe(&self, pattern: String, context: &Context) -> EventStream {
+    async fn psubscribe(&self, pattern: String, context: &Context) -> PEventStream {
         let mut worterbuch = context.database.write().await;
         let rx = worterbuch.psubscribe(pattern.clone());
         let stream = async_stream::stream! {
@@ -100,12 +110,14 @@ impl Subscription {
                     match rx.recv().await {
                         Some(event) => {
                             for KeyValuePair{ key, value } in event {
-                                let event = Event{
-                                    pattern: pattern.clone(),
-                                    key,
-                                    value,
-                                };
-                                yield Ok(event)
+                                if let Some(value) = value {
+                                    let event = PEvent{
+                                        pattern: pattern.clone(),
+                                        key,
+                                        value,
+                                    };
+                                    yield Ok(event)
+                                }
                             }
                         },
                         None => {
@@ -134,7 +146,6 @@ impl Subscription {
                         Some(event) => {
                             for KeyValuePair{ key, value } in event {
                                 let event = Event{
-                                    pattern: key.clone(),
                                     key,
                                     value,
                                 };

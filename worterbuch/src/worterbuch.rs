@@ -44,7 +44,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<Option<(String, String)>> {
+    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, Option<String>)> {
         let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -62,7 +62,7 @@ impl Worterbuch {
         }
 
         let value = self.store.get(&path);
-        let key_value = value.map(|v| (key.as_ref().to_owned(), v.to_owned()));
+        let key_value = (key.as_ref().to_owned(), value.map(|v| v.to_owned()));
 
         Ok(key_value)
     }
@@ -135,7 +135,7 @@ impl Worterbuch {
         );
         let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
-        if let Some((key, value)) = matches {
+        if let (key, Some(value)) = matches {
             tx.send(vec![(key, value).into()])
                 .expect("rx is neither closed nor dropped");
         }

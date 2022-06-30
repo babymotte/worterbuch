@@ -15,7 +15,7 @@ pub fn print_pstate(msg: &PState, json: bool) {
         }
     } else {
         for KeyValuePair { key, value } in &msg.key_value_pairs {
-            println!("{key}={value}");
+            println!("{key}={}", value.as_deref().unwrap_or("[no value]"));
         }
     }
 }
@@ -29,7 +29,7 @@ pub fn print_state(msg: &State, json: bool) {
             }
         }
     } else {
-        if let Some(KeyValuePair { key, value }) = &msg.key_value {
+        if let KeyValuePair { key, value: Some(value )} = &msg.key_value {
             println!("{}={}", key, value);
         } else {
             eprintln!("No result.");

@@ -68,7 +68,7 @@ async fn get(
     let wb = worterbuch.read().await;
 
     let key_value = match wb.get(&msg.key) {
-        Ok(key_value) => key_value.map(KeyValuePair::from),
+        Ok(key_value) => key_value.into(),
         Err(e) => {
             handle_store_error(e, client.clone(), msg.transaction_id).await?;
             return Ok(());
@@ -193,10 +193,10 @@ async fn subscribe(
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription} …");
         while let Some(kvs) = rx.recv().await {
-            for key_value_pair in kvs {
+            for key_value in kvs {
                 let event = State {
                     transaction_id: transaction_id.clone(),
-                    key_value: Some(key_value_pair),
+                    key_value,
                 };
                 match encode_state_message(&event) {
                     Ok(data) => {
