@@ -14,10 +14,13 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-latest
+            ext: ""
           - target: x86_64-pc-windows-msvc
             image: windows-latest
+            ext: ".exe"
           - target: x86_64-apple-darwin
             image: macos-latest
+            ext: ""
 
     steps:
       - name: Checkout
@@ -33,20 +36,17 @@ jobs:
       - name: Build
         run: cargo build --all --release
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v3
         with:
-          files: |
-            target/release/worterbuch
-            target/release/wbget
-            target/release/wbpget
-            target/release/wbset
-            target/release/wbsub
-            target/release/wbpsub
-            target/release/wbimp
-            target/release/wbexp
-            target/release/wbsend
-            README.md
-            LICENSE
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: worterbuch-${{ matrix.target }}
+          path: |
+            target/release/worterbuch${{ matrix.ext }}
+            target/release/wbget${{ matrix.ext }}
+            target/release/wbpget${{ matrix.ext }}
+            target/release/wbset${{ matrix.ext }}
+            target/release/wbsub${{ matrix.ext }}
+            target/release/wbpsub${{ matrix.ext }}
+            target/release/wbimp${{ matrix.ext }}
+            target/release/wbexp${{ matrix.ext }}
+            target/release/wbsend${{ matrix.ext }}
