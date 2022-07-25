@@ -37,11 +37,10 @@ jobs:
       - name: Build
         run: cargo build --all --release
 
-      - name: Upload Binaries
-        uses: actions/upload-artifact@v3
+      - name: Package Binaries
+        uses: vimtor/action-zip@v1
         with:
-          name: worterbuch-${{ matrix.target }}
-          path: |
+          files: |
             target/release/worterbuch${{ matrix.ext }}
             target/release/wbget${{ matrix.ext }}
             target/release/wbpget${{ matrix.ext }}
@@ -51,10 +50,7 @@ jobs:
             target/release/wbimp${{ matrix.ext }}
             target/release/wbexp${{ matrix.ext }}
             target/release/wbsend${{ matrix.ext }}
-      - name: Download Binaries
-        uses: actions/download-artifact@v3
-        with:
-          name: worterbuch-${{ matrix.target }}
+          dest: worterbuch-${{ matrix.target }}.zip
 
       - name: Release
         uses: softprops/action-gh-release@v1
