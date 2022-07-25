@@ -1,8 +1,9 @@
 name: Release binary artifacts
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   build:
@@ -50,3 +51,12 @@ jobs:
             target/release/wbimp${{ matrix.ext }}
             target/release/wbexp${{ matrix.ext }}
             target/release/wbsend${{ matrix.ext }}
+      - name: Download Binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: worterbuch-${{ matrix.target }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: worterbuch-${{ matrix.target }}.zip
