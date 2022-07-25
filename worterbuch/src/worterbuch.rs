@@ -34,6 +34,7 @@ pub struct Worterbuch {
     config: Config,
     store: Store,
     subscribers: Subscribers,
+    len: usize,
 }
 
 impl Worterbuch {
@@ -46,11 +47,17 @@ impl Worterbuch {
 
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
         let store: Store = from_str(json).context(|| format!("Error parsing JSON"))?;
+        let len = store.count_entries();
         Ok(Worterbuch {
             config,
             store,
+            len,
             ..Default::default()
         })
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
     }
 
     pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, String)> {
@@ -92,11 +99,17 @@ impl Worterbuch {
             return Err(WorterbuchError::IllegalWildcard(key.as_ref().to_owned()));
         }
 
-        self.store.insert(&path, value.clone());
+        if self.store.insert(&path, value.clone()) {
+            self.increment_len(1);
+        }
 
         self.notify_subscribers(path, wildcard, multi_wildcard, key.as_ref(), &value);
 
         Ok(())
+    }
+
+    fn increment_len(&mut self, increment: usize) {
+        self.len += increment;
     }
 
     pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<Vec<KeyValuePair>> {
@@ -198,6 +211,9 @@ impl Worterbuch {
                 val,
             );
         }
+
+        self.increment_len(imported_values.len());
+
         Ok(imported_values)
     }
 

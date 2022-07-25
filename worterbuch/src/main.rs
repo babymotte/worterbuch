@@ -3,13 +3,14 @@ mod persistence;
 #[cfg(not(feature = "docker"))]
 mod repl;
 mod server;
+mod stats;
 mod store;
 mod subscribers;
 mod worterbuch;
 
 #[cfg(not(feature = "docker"))]
 use crate::repl::repl;
-use crate::{config::Config, worterbuch::Worterbuch};
+use crate::{config::Config, stats::track_stats, worterbuch::Worterbuch};
 use anyhow::Result;
 use clap::App;
 use std::sync::Arc;
@@ -58,10 +59,13 @@ async fn run(msg: &str) -> Result<()> {
 
     let worterbuch = Arc::new(RwLock::new(worterbuch));
     let worterbuch_pers = worterbuch.clone();
+    let worterbuch_uptime = worterbuch.clone();
 
     if use_persistence {
         spawn(persistence::periodic(worterbuch_pers, config_pers));
     }
+
+    spawn(track_stats(worterbuch_uptime));
 
     #[cfg(feature = "graphql")]
     spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));

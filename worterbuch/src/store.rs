@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use libworterbuch::codec::KeyValuePair;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 type Value = Option<String>;
 type Tree = HashMap<String, Node>;
@@ -210,7 +209,7 @@ impl Store {
         matches
     }
 
-    pub fn insert(&mut self, path: &[&str], value: String) {
+    pub fn insert(&mut self, path: &[&str], value: String) -> bool {
         let mut current = &mut self.data;
 
         for elem in path {
@@ -220,7 +219,11 @@ impl Store {
             current = current.t.get_mut(*elem).expect("we know this exists");
         }
 
-        current.v = Some(value)
+        let inserted = current.v.is_none();
+
+        current.v = Some(value);
+
+        inserted
     }
 
     pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, String)> {
@@ -238,8 +241,7 @@ impl Store {
         StoreStats { num_entries }
     }
 
-    #[cfg(not(feature = "docker"))]
-    fn count_entries(&self) -> usize {
+    pub fn count_entries(&self) -> usize {
         count_children(&self.data)
     }
 }
@@ -256,7 +258,6 @@ fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
     string
 }
 
-#[cfg(not(feature = "docker"))]
 fn count_children(node: &Node) -> usize {
     let mut count = 0;
 
