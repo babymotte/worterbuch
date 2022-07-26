@@ -8,8 +8,8 @@ pub mod ws;
 
 use super::error::ConnectionResult;
 use crate::codec::{
-    ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
-    Subscribe, Value, NO_SUCH_VALUE,
+    ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM,
+    Set, Subscribe, Value, NO_SUCH_VALUE,
 };
 use tokio::{
     spawn,
@@ -140,7 +140,7 @@ impl Connection {
         Ok(response)
     }
 
-    pub async fn pget_values(&mut self, pattern: &str) -> ConnectionResult<Option<Vec<Value>>> {
+    pub async fn pget_values(&mut self, pattern: &str) -> ConnectionResult<Option<KeyValuePairs>> {
         let (tx, rx) = oneshot::channel();
 
         let mut subscr = self.responses();
@@ -159,13 +159,7 @@ impl Connection {
                 if tid == i {
                     match msg {
                         SM::PState(pstate) => {
-                            value = Some(
-                                pstate
-                                    .key_value_pairs
-                                    .into_iter()
-                                    .map(|kv| kv.value)
-                                    .collect(),
-                            );
+                            value = Some(pstate.key_value_pairs);
                         }
                         SM::Err(msg) => {
                             if msg.error_code != NO_SUCH_VALUE {
