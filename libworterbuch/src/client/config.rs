@@ -1,4 +1,4 @@
-use crate::error::{ConfigIntContext, ConfigResult};
+use crate::error::{ConfigError, ConfigIntContext, ConfigResult};
 use std::env;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -6,6 +6,9 @@ pub struct Config {
     pub proto: String,
     pub host_addr: String,
     pub port: u16,
+    pub separator: char,
+    pub wildcard: char,
+    pub multi_wildcard: char,
 }
 
 impl Config {
@@ -20,6 +23,18 @@ impl Config {
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
             self.port = val.parse().as_port()?;
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_SEPARATOR") {
+            self.separator = to_separator(val)?;
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_WILDCARD") {
+            self.wildcard = to_wildcard(val)?;
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_MULTI_WILDCARD") {
+            self.multi_wildcard = to_multi_wildcard(val)?;
         }
 
         Ok(())
@@ -56,6 +71,48 @@ impl Default for Config {
             proto: _proto,
             host_addr,
             port: _port,
+            separator: '/',
+            wildcard: '?',
+            multi_wildcard: '#',
+        }
+    }
+}
+
+fn to_separator(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidSeparator(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidSeparator(str.to_owned()))
+        }
+    }
+}
+
+fn to_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidWildcard(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidWildcard(str.to_owned()))
+        }
+    }
+}
+
+fn to_multi_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
+    let str = str.as_ref();
+    if str.len() != 1 {
+        Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
+    } else {
+        if let Some(ch) = str.chars().next() {
+            Ok(ch)
+        } else {
+            Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
         }
     }
 }
