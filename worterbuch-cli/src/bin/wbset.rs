@@ -6,7 +6,7 @@ use libworterbuch::client::gql;
 use libworterbuch::client::tcp;
 #[cfg(feature = "ws")]
 use libworterbuch::client::ws;
-use libworterbuch::{client::Connection, codec::KeyValuePair};
+use libworterbuch::codec::KeyValuePair;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -18,7 +18,7 @@ use tokio::{
 };
 use worterbuch_cli::app;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
