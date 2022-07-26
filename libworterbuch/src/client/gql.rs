@@ -1,11 +1,19 @@
-use crate::{client::Connection, codec::ServerMessage as SM, error::ConnectionResult};
-use futures_channel::mpsc::{self, UnboundedSender};
-use futures_util::StreamExt;
+use crate::{
+    client::Connection,
+    codec::{
+        ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
+        Subscribe,
+    },
+    error::ConnectionResult,
+};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
 use tokio::{
     spawn,
-    sync::broadcast::{self},
+    sync::{
+        broadcast::{self},
+        mpsc,
+    },
 };
 use tokio_tungstenite::{
     connect_async,
@@ -21,90 +29,30 @@ const PSUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"q
 const IMPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {import(path: \"$path\")}","variables":null}}"#;
 const EXPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {export(path: \"$path\")}","variables":null}}"#;
 
-pub struct GqlConnection {
-    cmd_tx: UnboundedSender<Command>,
-    result_tx: broadcast::Sender<SM>,
-    counter: Arc<Mutex<u64>>,
-}
-
-impl GqlConnection {
-    fn inc_counter(&mut self) -> u64 {
-        let mut counter = self.counter.lock().expect("poisoned counter mutex");
-        let i = *counter;
-        *counter += 1;
-        i
-    }
-}
-
-impl Connection for GqlConnection {
-    fn get(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::Get(key.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn pget(&mut self, pattern: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::PGet(pattern.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn set(&mut self, key: &str, value: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::Set(key.to_owned(), value.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::Subscrube(key.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn psubscribe(&mut self, pattern: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::PSubscrube(pattern.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn export(&mut self, path: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::Export(path.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn import(&mut self, path: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx
-            .unbounded_send(Command::Import(path.to_owned(), i))?;
-        Ok(i)
-    }
-
-    fn responses(&mut self) -> broadcast::Receiver<SM> {
-        self.result_tx.subscribe()
-    }
-}
-
-pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<GqlConnection> {
+pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Connection> {
     let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
 
-    let (cmd_tx, cmd_rx) = mpsc::unbounded();
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
     let (result_tx, result_rx) = broadcast::channel(1_000);
     let result_tx_recv = result_tx.clone();
 
     let (ws_stream, _) = connect_async(url).await?;
-    let (write, read) = ws_stream.split();
+    let (mut write, read) = ws_stream.split();
 
-    spawn(async {
-        if let Err(e) = cmd_rx.map(encode_ws_message).forward(write).await {
-            eprintln!("Error forwarding commands: {e}");
+    spawn(async move {
+        let init = Message::Text(INIT_MSG_TEMPLATE.to_owned());
+        if let Err(e) = write.send(init).await {
+            log::error!("Error sending WS message: {e}");
+            return;
         }
+        while let Some(cmd) = cmd_rx.recv().await {
+            let msg = encode_ws_message(cmd);
+            if let Err(e) = write.send(msg).await {
+                log::error!("Error sending WS message: {e}");
+                return;
+            }
+        }
+
         // make sure initial rx is not dropped as long as stdin is read
         drop(result_rx);
     });
@@ -129,52 +77,65 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Gql
         }
     });
 
-    cmd_tx.unbounded_send(Command::Init)?;
-
-    let con = GqlConnection {
-        cmd_tx,
-        counter: Arc::default(),
-        result_tx,
-    };
-
-    Ok(con)
+    Ok(Connection::new(cmd_tx, result_tx))
 }
 
-fn encode_ws_message(cmd: Command) -> tungstenite::Result<Message> {
+fn encode_ws_message(cmd: CM) -> Message {
     let txt = match cmd {
-        Command::Init => INIT_MSG_TEMPLATE.to_owned(),
-        Command::Get(k, i) => GET_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$key", &k)
+        CM::Get(Get {
+            transaction_id,
+            key,
+        }) => GET_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$key", &key)
             .to_owned(),
-        Command::PGet(p, i) => PGET_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$pattern", &p)
+        CM::PGet(PGet {
+            transaction_id,
+            request_pattern,
+        }) => PGET_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$pattern", &request_pattern)
             .to_owned(),
-        Command::Set(k, v, i) => SET_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$key", &k)
-            .replace("$val", &v)
+        CM::Set(Set {
+            transaction_id,
+            key,
+            value,
+        }) => SET_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$key", &key)
+            .replace("$val", &value)
             .to_owned(),
-        Command::Subscrube(k, i) => SUBSCRIBE_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$key", &k)
+        CM::Subscribe(Subscribe {
+            transaction_id,
+            key,
+        }) => SUBSCRIBE_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$key", &key)
             .to_owned(),
-        Command::PSubscrube(p, i) => PSUBSCRIBE_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$pattern", &p)
+        CM::PSubscribe(PSubscribe {
+            transaction_id,
+            request_pattern,
+        }) => PSUBSCRIBE_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$pattern", &request_pattern)
             .to_owned(),
-        Command::Import(p, i) => IMPORT_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$path", &p)
+        CM::Import(Import {
+            transaction_id,
+            path,
+        }) => IMPORT_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$path", &path)
             .to_owned(),
-        Command::Export(p, i) => EXPORT_MSG_TEMPLATE
-            .replace("$i", &i.to_string())
-            .replace("$path", &p)
+        CM::Export(Export {
+            transaction_id,
+            path,
+        }) => EXPORT_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
+            .replace("$path", &path)
             .to_owned(),
     };
 
-    Ok(Message::Text(txt))
+    Message::Text(txt)
 }
 
 fn decode_ws_message(message: tungstenite::Result<Message>) -> ConnectionResult<Option<SM>> {
@@ -188,15 +149,4 @@ fn decode_ws_message(message: tungstenite::Result<Message>) -> ConnectionResult<
         }
         _ => Ok(None),
     }
-}
-
-enum Command {
-    Init,
-    Get(String, u64),
-    PGet(String, u64),
-    Set(String, String, u64),
-    Subscrube(String, u64),
-    PSubscrube(String, u64),
-    Import(String, u64),
-    Export(String, u64),
 }

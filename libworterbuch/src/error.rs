@@ -5,7 +5,7 @@ use crate::codec::{
 #[cfg(feature = "graphql")]
 use futures_channel::mpsc::TrySendError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError, string::FromUtf8Error};
-use tokio::sync::mpsc::error::SendError;
+use tokio::sync::{mpsc::error::SendError, oneshot};
 #[cfg(feature = "web")]
 use tokio_tungstenite::tungstenite;
 #[cfg(feature = "graphql")]
@@ -248,6 +248,7 @@ pub enum ConnectionError {
     JsonError(serde_json::Error),
     #[cfg(feature = "graphql")]
     ParseError(ParseError),
+    RecvError(oneshot::error::RecvError),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -265,6 +266,7 @@ impl fmt::Display for ConnectionError {
             Self::TrySendError(e) => fmt::Display::fmt(&e, f),
             #[cfg(feature = "graphql")]
             Self::ParseError(e) => fmt::Display::fmt(&e, f),
+            Self::RecvError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
@@ -314,5 +316,11 @@ impl From<serde_json::Error> for ConnectionError {
 impl<T: 'static + Send + Sync> From<TrySendError<T>> for ConnectionError {
     fn from(e: TrySendError<T>) -> Self {
         ConnectionError::TrySendError(Box::new(e))
+    }
+}
+
+impl From<oneshot::error::RecvError> for ConnectionError {
+    fn from(e: oneshot::error::RecvError) -> Self {
+        ConnectionError::RecvError(e)
     }
 }

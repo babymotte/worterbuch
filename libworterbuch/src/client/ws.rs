@@ -1,107 +1,13 @@
 use crate::error::ConnectionResult;
 use crate::{
     client::Connection,
-    codec::{
-        encode_message, read_server_message, ClientMessage as CM, Export, Get, Import, PGet,
-        PSubscribe, ServerMessage as SM, Set, Subscribe,
-    },
+    codec::{encode_message, read_server_message},
 };
 use futures_util::{SinkExt, StreamExt};
-use std::sync::{Arc, Mutex};
-use tokio::{
-    spawn,
-    sync::broadcast,
-    sync::mpsc::{self, UnboundedSender},
-};
+use tokio::{spawn, sync::broadcast, sync::mpsc};
 use tokio_tungstenite::{connect_async, tungstenite};
 
-#[derive(Clone)]
-pub struct WsConnection {
-    cmd_tx: UnboundedSender<CM>,
-    result_tx: broadcast::Sender<SM>,
-    counter: Arc<Mutex<u64>>,
-}
-
-impl WsConnection {
-    fn inc_counter(&mut self) -> u64 {
-        let mut counter = self.counter.lock().expect("poisoned counter mutex");
-        let i = *counter;
-        *counter += 1;
-        i
-    }
-}
-
-impl Connection for WsConnection {
-    fn set(&mut self, key: &str, value: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Set(Set {
-            transaction_id: i,
-            key: key.to_owned(),
-            value: value.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn get(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Get(Get {
-            transaction_id: i,
-            key: key.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn pget(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::PGet(PGet {
-            transaction_id: i,
-            request_pattern: key.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Subscribe(Subscribe {
-            transaction_id: i,
-            key: key.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn psubscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::PSubscribe(PSubscribe {
-            transaction_id: i,
-            request_pattern: key.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn export(&mut self, path: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Export(Export {
-            transaction_id: i,
-            path: path.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn import(&mut self, path: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Import(Import {
-            transaction_id: i,
-            path: path.to_owned(),
-        }))?;
-        Ok(i)
-    }
-
-    fn responses(&mut self) -> broadcast::Receiver<SM> {
-        self.result_tx.subscribe()
-    }
-}
-
-pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<WsConnection> {
+pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Connection> {
     let url = format!("{proto}://{addr}:{port}");
     let (server, _) = connect_async(url).await?;
     let (mut ws_tx, mut ws_rx) = server.split();
@@ -150,11 +56,5 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<WsC
         }
     });
 
-    let con = WsConnection {
-        cmd_tx,
-        result_tx,
-        counter: Arc::default(),
-    };
-
-    Ok(con)
+    Ok(Connection::new(cmd_tx, result_tx))
 }
