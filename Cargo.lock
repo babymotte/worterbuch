@@ -729,8 +729,10 @@ checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 name = "libworterbuch"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "futures-channel",
  "futures-util",
+ "libworterbuch",
  "log",
  "serde",
  "serde_json",
