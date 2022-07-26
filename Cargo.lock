@@ -730,6 +730,7 @@ name = "libworterbuch"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "env_logger",
  "futures-channel",
  "futures-util",
  "libworterbuch",

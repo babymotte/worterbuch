@@ -249,6 +249,7 @@ pub enum ConnectionError {
     #[cfg(feature = "graphql")]
     ParseError(ParseError),
     RecvError(oneshot::error::RecvError),
+    WorterbuchError(WorterbuchError),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -267,6 +268,7 @@ impl fmt::Display for ConnectionError {
             #[cfg(feature = "graphql")]
             Self::ParseError(e) => fmt::Display::fmt(&e, f),
             Self::RecvError(e) => fmt::Display::fmt(&e, f),
+            Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }

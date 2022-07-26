@@ -9,7 +9,7 @@ pub mod ws;
 use super::error::ConnectionResult;
 use crate::codec::{
     ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
-    Subscribe, Value,
+    Subscribe, Value, NO_SUCH_VALUE,
 };
 use tokio::{
     spawn,
@@ -122,7 +122,9 @@ impl Connection {
                             value = Some(state.key_value.value);
                         }
                         SM::Err(msg) => {
-                            log::error!("Error getting value of {owned_key}: {msg:?}");
+                            if msg.error_code != NO_SUCH_VALUE {
+                                log::error!("Error getting value of {owned_key}: {msg:?}");
+                            }
                         }
                         _ => { /* ignore */ }
                     }
@@ -166,7 +168,9 @@ impl Connection {
                             );
                         }
                         SM::Err(msg) => {
-                            log::error!("Error getting values for {owned_pattern}: {msg:?}");
+                            if msg.error_code != NO_SUCH_VALUE {
+                                log::error!("Error getting values for {owned_pattern}: {msg:?}");
+                            }
                         }
                         _ => { /* ignore */ }
                     }

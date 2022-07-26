@@ -2,6 +2,7 @@ use libworterbuch::client::{config::Config, tcp};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let config = Config::new()?;
 
     let mut con = tcp::connect(&config.proto, &config.host_addr, config.port).await?;
