@@ -4,8 +4,8 @@ RUN cargo new --lib worterbuch
 WORKDIR /src/worterbuch
 COPY . .
 RUN cargo test -p libworterbuch --release --all-features
-RUN cargo test -p worterbuch --release --all-features
-RUN cargo test -p worterbuch-cli --release --all-features
+RUN cargo test -p worterbuch --release --features docker,tcp,ws,graphql
+RUN cargo test -p worterbuch-cli --release --features tcp
 RUN cargo build -p worterbuch --release --features docker,tcp,ws,graphql
 RUN cargo build -p worterbuch-cli --release --features tcp
 
