@@ -454,12 +454,12 @@ fn get_path_length(string: &str) -> EncodeResult<PathLength> {
 #[cfg(feature = "wasm")]
 pub mod wasm {
     use super::*;
+    use wasm_bindgen::JsValue;
 
     #[wasm_bindgen]
-    pub fn encode_message(msg: &str) -> Result<Vec<u8>, String> {
-        let client_message: ClientMessage =
-            serde_json::from_str(&msg).map_err(|e| e.to_string())?;
-        super::encode_message(&client_message).map_err(|e| e.to_string())
+    pub fn encode_message(msg: &JsValue) -> Result<Vec<u8>, String> {
+        let cm = msg.into_serde().map_err(|e| e.to_string())?;
+        super::encode_message(&cm).map_err(|e| e.to_string())
     }
 }
 

@@ -293,18 +293,19 @@ fn read_export_message(mut data: impl Read) -> DecodeResult<Export> {
 
 #[cfg(feature = "wasm")]
 pub mod wasm {
-    use wasm_bindgen::prelude::wasm_bindgen;
+    use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
     #[wasm_bindgen]
-    pub fn read_client_message(mut data: &[u8]) -> Result<String, String> {
-        super::read_client_message(data)
-            .map_err(|e| e.to_string())
-            .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
+    pub fn read_client_message(data: &[u8]) -> Result<JsValue, String> {
+        let data: Vec<u8> = data.to_vec();
+        let cm = super::read_client_message(&*data).map_err(|e| e.to_string())?;
+        JsValue::from_serde(&cm).map_err(|e| e.to_string())
     }
 
     #[wasm_bindgen]
-    pub fn read_server_message(mut data: &[u8]) -> Result<String, String> {
-        super::read_server_message(data)
+    pub fn read_server_message(data: &[u8]) -> Result<String, String> {
+        let data: Vec<u8> = data.to_vec();
+        super::read_server_message(&*data)
             .map_err(|e| e.to_string())
             .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
     }

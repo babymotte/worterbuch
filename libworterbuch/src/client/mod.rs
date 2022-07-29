@@ -1,9 +1,9 @@
 pub mod config;
-#[cfg(feature = "graphql")]
+#[cfg(all(feature = "graphql", not(feature = "blocking")))]
 pub mod gql;
-#[cfg(feature = "tcp")]
+#[cfg(all(feature = "tcp", not(feature = "blocking")))]
 pub mod tcp;
-#[cfg(feature = "ws")]
+#[cfg(all(feature = "ws", not(feature = "blocking")))]
 pub mod ws;
 
 use super::error::ConnectionResult;
