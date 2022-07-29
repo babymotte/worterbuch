@@ -49,6 +49,24 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
+        #[cfg(all(feature = "ws", feature = "graphql"))]
+        eprintln!(
+            "Warning: Conflicting features 'ws' and 'graphql' are active, config may be inconsistent!"
+        );
+
+        #[cfg(all(feature = "ws", feature = "tcp"))]
+        eprintln!(
+            "Warning: Conflicting features 'ws' and 'tcp' are active, config may be inconsistent!"
+        );
+
+        #[cfg(all(feature = "graphql", feature = "tcp"))]
+        eprintln!(
+            "Warning: Conflicting features 'graphql' and 'tcp' are active, config may be inconsistent!"
+        );
+
+        #[cfg(feature = "console_error_panic_hook")]
+        console_error_panic_hook::set_once();
+
         #[cfg(any(feature = "ws", feature = "graphql"))]
         let _proto = "ws".to_owned();
         #[cfg(feature = "tcp")]
