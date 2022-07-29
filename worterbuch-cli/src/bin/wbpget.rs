@@ -53,9 +53,11 @@ async fn main() -> Result<()> {
     spawn(async move {
         while let Ok(msg) = responses.recv().await {
             let tid = msg.transaction_id();
-            let mut acked = acked_recv.lock().expect("mutex is poisoned");
-            if tid > *acked {
-                *acked = tid;
+            {
+                let mut acked = acked_recv.lock().expect("mutex is poisoned");
+                if tid > *acked {
+                    *acked = tid;
+                }
             }
             match msg {
                 SM::PState(msg) => print_pstate(&msg, json),
