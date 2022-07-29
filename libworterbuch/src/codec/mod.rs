@@ -9,6 +9,8 @@ pub use blocking::*;
 
 use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::wasm_bindgen;
 
 pub type MessageType = u8;
 pub type TransactionId = u64;
@@ -446,6 +448,18 @@ fn get_path_length(string: &str) -> EncodeResult<PathLength> {
         Err(EncodeError::PathTooLong(length))
     } else {
         Ok(length as PathLength)
+    }
+}
+
+#[cfg(feature = "wasm")]
+pub mod wasm {
+    use super::*;
+
+    #[wasm_bindgen]
+    pub fn encode_message(msg: &str) -> Result<Vec<u8>, String> {
+        let client_message: ClientMessage =
+            serde_json::from_str(&msg).map_err(|e| e.to_string())?;
+        super::encode_message(&client_message).map_err(|e| e.to_string())
     }
 }
 

@@ -2,7 +2,8 @@
 cargo make test-features || exit 1
 cargo test -p libworterbuch --no-default-features || exit 1
 cargo test -p libworterbuch || exit 1
-cargo test -p libworterbuch --all-features || exit 1
+cargo test -p libworterbuch --features tcp,ws,graphql || exit 1
+cargo test -p libworterbuch --features wasm || exit 1
 cargo test -p worterbuch --no-default-features || exit 1
 cargo test -p worterbuch || exit 1
 cargo test -p worterbuch --all-features || exit 1

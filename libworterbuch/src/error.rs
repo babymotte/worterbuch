@@ -326,20 +326,3 @@ impl From<oneshot::error::RecvError> for ConnectionError {
         ConnectionError::RecvError(e)
     }
 }
-
-pub mod wasm {
-    use super::*;
-
-    #[derive(Clone, Debug)]
-    pub struct WasmDecodeError(String);
-
-    impl std::error::Error for WasmDecodeError {}
-
-    impl fmt::Display for WasmDecodeError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-
-    pub type WasmDecodeResult<T> = Result<T, String>;
-}

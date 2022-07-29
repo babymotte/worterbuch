@@ -1,5 +1,3 @@
-use wasm_bindgen::prelude::wasm_bindgen;
-
 use super::{
     ClientMessage as CM, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
     NumKeyValuePairs, PGet, PSubscribe, Path, PathLength, RequestPattern, RequestPatternLength,
@@ -9,24 +7,20 @@ use super::{
 };
 use crate::{
     codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
-    error::{wasm::WasmDecodeResult, DecodeError, DecodeResult},
+    error::{DecodeError, DecodeResult},
 };
 use std::io::Read;
 
-#[wasm_bindgen]
-pub fn read_server_message(mut data: &[u8]) -> WasmDecodeResult<String> {
+pub fn read_server_message(mut data: impl Read) -> DecodeResult<SM> {
     let mut buf = [0];
-    data.read_exact(&mut buf).map_err(|e| e.to_string())?;
-    let msg = match buf[0] {
+    data.read_exact(&mut buf)?;
+    match buf[0] {
         PSTA => read_pstate_message(data).map(SM::PState),
         ACK => read_ack_message(data).map(SM::Ack),
         STA => read_state_message(data).map(SM::State),
         ERR => read_err_message(data).map(SM::Err),
         _ => Err(DecodeError::UndefinedType(buf[0])),
-    };
-
-    msg.map_err(|e| e.to_string())
-        .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
+    }
 }
 
 fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
@@ -140,11 +134,10 @@ fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
     })
 }
 
-#[wasm_bindgen]
-pub fn read_client_message(mut data: &[u8]) -> Result<String, String> {
+pub fn read_client_message(mut data: impl Read) -> DecodeResult<CM> {
     let mut buf = [0];
-    data.read_exact(&mut buf).map_err(|e| e.to_string())?;
-    let msg = match buf[0] {
+    data.read_exact(&mut buf)?;
+    match buf[0] {
         GET => read_get_message(data).map(CM::Get),
         PGET => read_pget_message(data).map(CM::PGet),
         SET => read_set_message(data).map(CM::Set),
@@ -153,10 +146,7 @@ pub fn read_client_message(mut data: &[u8]) -> Result<String, String> {
         EXP => read_export_message(data).map(CM::Export),
         IMP => read_import_message(data).map(CM::Import),
         _ => Err(DecodeError::UndefinedType(buf[0])),
-    };
-
-    msg.map_err(|e| e.to_string())
-        .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
+    }
 }
 
 fn read_get_message(mut data: impl Read) -> DecodeResult<Get> {
@@ -300,6 +290,26 @@ fn read_export_message(mut data: impl Read) -> DecodeResult<Export> {
         path,
     })
 }
+
+#[cfg(feature = "wasm")]
+pub mod wasm {
+    use wasm_bindgen::prelude::wasm_bindgen;
+
+    #[wasm_bindgen]
+    pub fn read_client_message(mut data: &[u8]) -> Result<String, String> {
+        super::read_client_message(data)
+            .map_err(|e| e.to_string())
+            .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn read_server_message(mut data: &[u8]) -> Result<String, String> {
+        super::read_server_message(data)
+            .map_err(|e| e.to_string())
+            .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -316,11 +326,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::Get(Get {
+            CM::Get(Get {
                 transaction_id: 4,
                 key: "trolo".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -335,11 +344,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::PGet(PGet {
+            CM::PGet(PGet {
                 transaction_id: 4,
                 request_pattern: "trolo".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -355,12 +363,11 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::Set(Set {
+            CM::Set(Set {
                 transaction_id: 0,
                 key: "yo/mama".to_owned(),
                 value: "fat".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -377,12 +384,11 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::Subscribe(Subscribe {
+            CM::Subscribe(Subscribe {
                 transaction_id: 5536684732567,
                 // TODO this needs to be rejected!
                 key: "let/me/?/you/its/features".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
     #[test]
@@ -398,11 +404,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::PSubscribe(PSubscribe {
+            CM::PSubscribe(PSubscribe {
                 transaction_id: 5536684732567,
                 request_pattern: "let/me/?/you/its/features".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -418,11 +423,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::Export(Export {
+            CM::Export(Export {
                 transaction_id: 42,
                 path: "/path/to/file".to_owned(),
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -438,11 +442,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&CM::Import(Import {
+            CM::Import(Import {
                 transaction_id: 42,
                 path: "/path/to/file".to_owned(),
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -468,7 +471,7 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&SM::PState(PState {
+            SM::PState(PState {
                 transaction_id: u64::MAX,
                 request_pattern: "who/let/the/?/#".to_owned(),
                 key_value_pairs: vec![
@@ -483,8 +486,7 @@ mod test {
                     )
                         .into()
                 ]
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -497,10 +499,7 @@ mod test {
 
         let result = read_server_message(&data[..]).unwrap();
 
-        assert_eq!(
-            result,
-            serde_json::to_string(&SM::Ack(Ack { transaction_id: 42 })).unwrap()
-        )
+        assert_eq!(result, SM::Ack(Ack { transaction_id: 42 }))
     }
 
     #[test]
@@ -515,11 +514,10 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&SM::State(State {
+            SM::State(State {
                 transaction_id: 42,
                 key_value: ("1/2/3", "4").into()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -536,12 +534,11 @@ mod test {
 
         assert_eq!(
             result,
-            serde_json::to_string(&SM::Err(Err {
+            SM::Err(Err {
                 transaction_id: 42,
                 error_code: 5,
                 metadata: "THIS IS METAAA!!!".to_owned()
-            }))
-            .unwrap()
+            })
         )
     }
 
@@ -557,6 +554,6 @@ mod test {
 
         let decoded = read_client_message(&*data).unwrap();
 
-        assert_eq!(serde_json::to_string(&CM::Set(msg)).unwrap(), decoded);
+        assert_eq!(CM::Set(msg), decoded);
     }
 }
