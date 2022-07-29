@@ -1,5 +1,11 @@
+#[cfg(not(feature = "blocking"))]
 mod nonblocking;
+#[cfg(not(feature = "blocking"))]
 pub use nonblocking::*;
+#[cfg(feature = "blocking")]
+mod blocking;
+#[cfg(feature = "blocking")]
+pub use blocking::*;
 
 use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
 use serde::{Deserialize, Serialize};

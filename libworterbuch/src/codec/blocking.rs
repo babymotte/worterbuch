@@ -1,68 +1,75 @@
+use wasm_bindgen::prelude::wasm_bindgen;
+
 use super::{
-    ClientMessage as CM, Export, Get, Import, Key, KeyLength, PGet, PSubscribe, Path, PathLength,
-    RequestPattern, RequestPatternLength, Set, Subscribe, TransactionId, Value, ValueLength, EXP,
-    GET, IMP, KEY_LENGTH_BYTES, PATH_LENGTH_BYTES, PGET, PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET,
-    SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
+    ClientMessage as CM, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
+    NumKeyValuePairs, PGet, PSubscribe, Path, PathLength, RequestPattern, RequestPatternLength,
+    Set, Subscribe, TransactionId, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET, IMP,
+    KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES, PGET,
+    PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
 };
 use crate::{
     codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
-    error::{DecodeError, DecodeResult},
+    error::{wasm::WasmDecodeResult, DecodeError, DecodeResult},
 };
 use std::io::Read;
 
-pub fn read_server_message(mut data: impl Read) -> DecodeResult<SM> {
+#[wasm_bindgen]
+pub fn read_server_message(mut data: &[u8]) -> WasmDecodeResult<String> {
     let mut buf = [0];
-    data.read_exact(&mut buf)?;
-    match buf[0] {
+    data.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    let msg = match buf[0] {
         PSTA => read_pstate_message(data).map(SM::PState),
         ACK => read_ack_message(data).map(SM::Ack),
-        STA => read_event_message(data).map(SM::State),
+        STA => read_state_message(data).map(SM::State),
         ERR => read_err_message(data).map(SM::Err),
         _ => Err(DecodeError::UndefinedType(buf[0])),
-    }
+    };
+
+    msg.map_err(|e| e.to_string())
+        .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
 }
 
 fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf)?;
-    let transaction_id = u64::from_be_bytes(buf);
+    let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; REQUEST_PATTERN_LENGTH_BYTES];
     data.read_exact(&mut buf)?;
-    let request_pattern_length = u16::from_be_bytes(buf);
+    let request_pattern_length = RequestPatternLength::from_be_bytes(buf);
 
-    let mut buf = [0; 4];
+    let mut buf = [0; NUM_KEY_VALUE_PAIRS_BYTES];
     data.read_exact(&mut buf)?;
-    let num_key_val_pairs = u32::from_be_bytes(buf);
+    let num_key_val_pairs = NumKeyValuePairs::from_be_bytes(buf);
 
     let mut key_value_lengths = Vec::new();
 
     for _ in 0..num_key_val_pairs {
-        let mut buf = [0; 2];
+        let mut buf = [0; KEY_LENGTH_BYTES];
         data.read_exact(&mut buf)?;
-        let key_length = u16::from_be_bytes(buf);
+        let key_length = KeyLength::from_be_bytes(buf);
 
-        let mut buf = [0; 4];
+        let mut buf = [0; VALUE_LENGTH_BYTES];
         data.read_exact(&mut buf)?;
-        let value_length = u32::from_be_bytes(buf);
+        let value_length = ValueLength::from_be_bytes(buf);
 
         key_value_lengths.push((key_length, value_length));
     }
 
-    let mut buf = vec![0u8; request_pattern_length as usize];
+    let mut buf = vec![0; request_pattern_length as usize];
     data.read_exact(&mut buf)?;
-    let request_pattern = String::from_utf8_lossy(&buf).to_string();
+    let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
     let mut key_value_pairs = Vec::new();
 
     for (key_length, value_length) in key_value_lengths {
-        let mut buf = vec![0u8; key_length as usize];
+        let mut buf = vec![0; key_length as usize];
         data.read_exact(&mut buf)?;
-        let key = String::from_utf8(buf)?;
+        let key = Key::from_utf8(buf)?;
 
-        let mut buf = vec![0u8; value_length as usize];
+        let mut buf = vec![0; value_length as usize];
         data.read_exact(&mut buf)?;
-        let value = String::from_utf8_lossy(&buf).to_string();
+        let value = Value::from_utf8_lossy(&buf).to_string();
 
         key_value_pairs.push((key, value).into());
     }
@@ -75,63 +82,56 @@ fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
 }
 
 fn read_ack_message(mut data: impl Read) -> DecodeResult<Ack> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf)?;
-    let transaction_id = u64::from_be_bytes(buf);
+    let transaction_id = TransactionId::from_be_bytes(buf);
 
     Ok(Ack { transaction_id })
 }
 
-fn read_event_message(mut data: impl Read) -> DecodeResult<State> {
-    let mut buf = [0; 8];
+fn read_state_message(mut data: impl Read) -> DecodeResult<State> {
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf)?;
-    let transaction_id = u64::from_be_bytes(buf);
+    let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 2];
+    let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf)?;
-    let key_length = u16::from_be_bytes(buf);
+    let key_length = KeyLength::from_be_bytes(buf);
 
-    let mut buf = [0; 4];
+    let mut buf = [0; VALUE_LENGTH_BYTES];
     data.read_exact(&mut buf)?;
-    let value_length = u32::from_be_bytes(buf);
+    let value_length = ValueLength::from_be_bytes(buf);
 
-    if key_length > 0 {
-        let mut buf = vec![0u8; key_length as usize];
-        data.read_exact(&mut buf)?;
-        let key = String::from_utf8_lossy(&buf).to_string();
+    let mut buf = vec![0; key_length as usize];
+    data.read_exact(&mut buf)?;
+    let key = Key::from_utf8_lossy(&buf).to_string();
 
-        let mut buf = vec![0u8; value_length as usize];
-        data.read_exact(&mut buf)?;
-        let value = String::from_utf8_lossy(&buf).to_string();
+    let mut buf = vec![0; value_length as usize];
+    data.read_exact(&mut buf)?;
+    let value = Value::from_utf8_lossy(&buf).to_string();
 
-        Ok(State {
-            transaction_id,
-            key_value: Some((key, value).into()),
-        })
-    } else {
-        Ok(State {
-            transaction_id,
-            key_value: None,
-        })
-    }
+    Ok(State {
+        transaction_id,
+        key_value: (key, value).into(),
+    })
 }
 
 fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
-    let mut buf = [0; 8];
+    let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf)?;
-    let transaction_id = u64::from_be_bytes(buf);
+    let transaction_id = TransactionId::from_be_bytes(buf);
 
-    let mut buf = [0; 1];
+    let mut buf = [0; ERROR_CODE_BYTES];
     data.read_exact(&mut buf)?;
     let error_code = buf[0];
 
-    let mut buf = [0; 4];
+    let mut buf = [0; METADATA_LENGTH_BYTES];
     data.read_exact(&mut buf)?;
-    let metadata_length = u32::from_be_bytes(buf);
+    let metadata_length = MetaDataLength::from_be_bytes(buf);
 
-    let mut buf = vec![0u8; metadata_length as usize];
+    let mut buf = vec![0; metadata_length as usize];
     data.read_exact(&mut buf)?;
-    let metadata = String::from_utf8_lossy(&buf).to_string();
+    let metadata = MetaData::from_utf8_lossy(&buf).to_string();
 
     Ok(Err {
         transaction_id,
@@ -140,19 +140,23 @@ fn read_err_message(mut data: impl Read) -> DecodeResult<Err> {
     })
 }
 
-pub fn read_client_message(mut data: impl Read) -> DecodeResult<CM> {
+#[wasm_bindgen]
+pub fn read_client_message(mut data: &[u8]) -> Result<String, String> {
     let mut buf = [0];
-    data.read_exact(&mut buf)?;
-    match buf[0] {
+    data.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    let msg = match buf[0] {
         GET => read_get_message(data).map(CM::Get),
         PGET => read_pget_message(data).map(CM::PGet),
         SET => read_set_message(data).map(CM::Set),
         SUB => read_subscribe_message(data).map(CM::Subscribe),
         PSUB => read_psubscribe_message(data).map(CM::PSubscribe),
-        IMP => read_import_message(data).map(CM::Import),
         EXP => read_export_message(data).map(CM::Export),
+        IMP => read_import_message(data).map(CM::Import),
         _ => Err(DecodeError::UndefinedType(buf[0])),
-    }
+    };
+
+    msg.map_err(|e| e.to_string())
+        .and_then(|msg| serde_json::to_string(&msg).map_err(|e| e.to_string()))
 }
 
 fn read_get_message(mut data: impl Read) -> DecodeResult<Get> {
@@ -228,11 +232,11 @@ fn read_subscribe_message(mut data: impl Read) -> DecodeResult<Subscribe> {
 
     let mut buf = [0; KEY_LENGTH_BYTES];
     data.read_exact(&mut buf)?;
-    let key_length = KeyLength::from_be_bytes(buf);
+    let key_length = RequestPatternLength::from_be_bytes(buf);
 
     let mut buf = vec![0; key_length as usize];
     data.read_exact(&mut buf)?;
-    let key = Key::from_utf8_lossy(&buf).to_string();
+    let key = RequestPattern::from_utf8_lossy(&buf).to_string();
 
     Ok(Subscribe {
         transaction_id,
@@ -312,10 +316,11 @@ mod test {
 
         assert_eq!(
             result,
-            CM::Get(Get {
+            serde_json::to_string(&CM::Get(Get {
                 transaction_id: 4,
                 key: "trolo".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -330,10 +335,11 @@ mod test {
 
         assert_eq!(
             result,
-            CM::PGet(PGet {
+            serde_json::to_string(&CM::PGet(PGet {
                 transaction_id: 4,
                 request_pattern: "trolo".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -349,11 +355,12 @@ mod test {
 
         assert_eq!(
             result,
-            CM::Set(Set {
+            serde_json::to_string(&CM::Set(Set {
                 transaction_id: 0,
                 key: "yo/mama".to_owned(),
                 value: "fat".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -370,11 +377,12 @@ mod test {
 
         assert_eq!(
             result,
-            CM::Subscribe(Subscribe {
+            serde_json::to_string(&CM::Subscribe(Subscribe {
                 transaction_id: 5536684732567,
                 // TODO this needs to be rejected!
                 key: "let/me/?/you/its/features".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
     #[test]
@@ -390,10 +398,11 @@ mod test {
 
         assert_eq!(
             result,
-            CM::PSubscribe(PSubscribe {
+            serde_json::to_string(&CM::PSubscribe(PSubscribe {
                 transaction_id: 5536684732567,
                 request_pattern: "let/me/?/you/its/features".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -409,10 +418,11 @@ mod test {
 
         assert_eq!(
             result,
-            CM::Export(Export {
+            serde_json::to_string(&CM::Export(Export {
                 transaction_id: 42,
                 path: "/path/to/file".to_owned(),
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -428,10 +438,11 @@ mod test {
 
         assert_eq!(
             result,
-            CM::Import(Import {
+            serde_json::to_string(&CM::Import(Import {
                 transaction_id: 42,
                 path: "/path/to/file".to_owned(),
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -457,7 +468,7 @@ mod test {
 
         assert_eq!(
             result,
-            SM::PState(PState {
+            serde_json::to_string(&SM::PState(PState {
                 transaction_id: u64::MAX,
                 request_pattern: "who/let/the/?/#".to_owned(),
                 key_value_pairs: vec![
@@ -472,7 +483,8 @@ mod test {
                     )
                         .into()
                 ]
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -485,7 +497,10 @@ mod test {
 
         let result = read_server_message(&data[..]).unwrap();
 
-        assert_eq!(result, SM::Ack(Ack { transaction_id: 42 }))
+        assert_eq!(
+            result,
+            serde_json::to_string(&SM::Ack(Ack { transaction_id: 42 })).unwrap()
+        )
     }
 
     #[test]
@@ -500,10 +515,11 @@ mod test {
 
         assert_eq!(
             result,
-            SM::State(State {
+            serde_json::to_string(&SM::State(State {
                 transaction_id: 42,
-                key_value: Some(("1/2/3".to_owned(), "4".to_owned()).into())
-            })
+                key_value: ("1/2/3", "4").into()
+            }))
+            .unwrap()
         )
     }
 
@@ -520,11 +536,12 @@ mod test {
 
         assert_eq!(
             result,
-            SM::Err(Err {
+            serde_json::to_string(&SM::Err(Err {
                 transaction_id: 42,
                 error_code: 5,
                 metadata: "THIS IS METAAA!!!".to_owned()
-            })
+            }))
+            .unwrap()
         )
     }
 
@@ -540,6 +557,6 @@ mod test {
 
         let decoded = read_client_message(&*data).unwrap();
 
-        assert_eq!(CM::Set(msg), decoded);
+        assert_eq!(serde_json::to_string(&CM::Set(msg)).unwrap(), decoded);
     }
 }
