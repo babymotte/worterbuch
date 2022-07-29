@@ -1,13 +1,13 @@
 use anyhow::Result;
 use clap::Arg;
 #[cfg(feature = "graphql")]
-use libworterbuch::client::gql;
+use libworterbuch::client::gql as wb;
 #[cfg(feature = "tcp")]
-use libworterbuch::client::tcp;
+use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]
-use libworterbuch::client::ws;
+use libworterbuch::client::ws as wb;
 use libworterbuch::codec::ServerMessage as SM;
-use std::time::Duration;
+use std::{process, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     spawn,
@@ -34,12 +34,12 @@ async fn main() -> Result<()> {
 
     let patterns = matches.get_many::<String>("PATTERNS");
 
-    #[cfg(feature = "tcp")]
-    let mut con = tcp::connect(&proto, &host_addr, port).await?;
-    #[cfg(feature = "ws")]
-    let mut con = ws::connect(&proto, &host_addr, port).await?;
-    #[cfg(feature = "graphql")]
-    let mut con = gql::connect(&proto, &host_addr, port).await?;
+    let on_disconnect = async move {
+        eprintln!("Connection to server lost.");
+        process::exit(1);
+    };
+
+    let mut con = wb::connect(&proto, &host_addr, port, on_disconnect).await?;
 
     let mut responses = con.responses();
 

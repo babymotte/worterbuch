@@ -19,6 +19,7 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{self, protocol::Message},
 };
+use std::future::Future;
 
 const INIT_MSG_TEMPLATE: &str = r#"{"type":"connection_init","payload":{}}"#;
 const GET_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"query {get(key: \"$key\") {key value}}","variables":null}}"#;
@@ -29,8 +30,13 @@ const PSUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"q
 const IMPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {import(path: \"$path\")}","variables":null}}"#;
 const EXPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {export(path: \"$path\")}","variables":null}}"#;
 
-pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Connection> {
-    let url = url::Url::parse(&format!("{proto}://{addr}:{port}/ws"))?;
+pub async fn connect<F: Future<Output = ()> + Send + 'static>(
+    proto: &str,
+    host_addr: &str,
+    port: u16,
+    on_disconnect: F,
+) -> ConnectionResult<Connection> {
+    let url = url::Url::parse(&format!("{proto}://{host_addr}:{port}/ws"))?;
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
     let (result_tx, result_rx) = broadcast::channel(1_000);
@@ -63,15 +69,16 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Con
             match msg {
                 Ok(Some(msg)) => {
                     if let Err(e) = result_tx_recv.send(msg) {
-                        eprintln!("Error forwarding server message: {e}");
+                        log::error!("Error forwarding server message: {e}");
                     }
                 }
                 Ok(None) => {
-                    eprintln!("Connection to server lost.");
+                    log::error!("Connection to server lost.");
+                    on_disconnect.await;
                     break;
                 }
                 Err(e) => {
-                    eprintln!("Error decoding message: {e}");
+                    log::error!("Error decoding message: {e}");
                 }
             }
         }

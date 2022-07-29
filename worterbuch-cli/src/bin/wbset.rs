@@ -1,13 +1,14 @@
 use anyhow::Result;
 use clap::Arg;
 #[cfg(feature = "graphql")]
-use libworterbuch::client::gql;
+use libworterbuch::client::gql as wb;
 #[cfg(feature = "tcp")]
-use libworterbuch::client::tcp;
+use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]
-use libworterbuch::client::ws;
+use libworterbuch::client::ws as wb;
 use libworterbuch::codec::KeyValuePair;
 use std::{
+    process,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -46,12 +47,12 @@ async fn main() -> Result<()> {
     let key_value_pairs = matches.get_many::<String>("KEY_VALUE_PAIRS");
     let json = matches.is_present("JSON");
 
-    #[cfg(feature = "tcp")]
-    let mut con = tcp::connect(&proto, &host_addr, port).await?;
-    #[cfg(feature = "ws")]
-    let mut con = ws::connect(&proto, &host_addr, port).await?;
-    #[cfg(feature = "graphql")]
-    let mut con = gql::connect(&proto, &host_addr, port).await?;
+    let on_disconnect = async move {
+        eprintln!("Connection to server lost.");
+        process::exit(1);
+    };
+
+    let mut con = wb::connect(&proto, &host_addr, port, on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));

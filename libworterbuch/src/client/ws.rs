@@ -4,11 +4,17 @@ use crate::{
     codec::{encode_message, read_server_message},
 };
 use futures_util::{SinkExt, StreamExt};
+use std::future::Future;
 use tokio::{spawn, sync::broadcast, sync::mpsc};
 use tokio_tungstenite::{connect_async, tungstenite};
 
-pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Connection> {
-    let url = format!("{proto}://{addr}:{port}");
+pub async fn connect<F: Future<Output = ()> + Send + 'static>(
+    proto: &str,
+    host_addr: &str,
+    port: u16,
+    on_disconnect: F,
+) -> ConnectionResult<Connection> {
+    let url = format!("{proto}://{host_addr}:{port}");
     let (server, _) = connect_async(url).await?;
     let (mut ws_tx, mut ws_rx) = server.split();
 
@@ -21,7 +27,7 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Con
             if let Ok(Some(data)) = encode_message(&msg).map(Some) {
                 let msg = tungstenite::Message::Binary(data);
                 if let Err(e) = ws_tx.send(msg).await {
-                    eprintln!("failed to send tcp message: {e}");
+                    log::error!("failed to send tcp message: {e}");
                     break;
                 }
             } else {
@@ -40,15 +46,16 @@ pub async fn connect(proto: &str, addr: &str, port: u16) -> ConnectionResult<Con
                     match read_server_message(&*data).await {
                         Ok(Some(msg)) => {
                             if let Err(e) = result_tx_recv.send(msg) {
-                                eprintln!("Error forwarding server message: {e}");
+                                log::error!("Error forwarding server message: {e}");
                             }
                         }
                         Ok(None) => {
-                            eprintln!("Connection to server lost.");
+                            log::error!("Connection to server lost.");
+                            on_disconnect.await;
                             break;
                         }
                         Err(e) => {
-                            eprintln!("Error decoding message: {e}");
+                            log::error!("Error decoding message: {e}");
                         }
                     }
                 }
