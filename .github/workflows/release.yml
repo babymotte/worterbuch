@@ -4,9 +4,6 @@ on:
   push:
     tags:
       - "v*.*.*"
-      - "libworterbuch@*.*.*"
-      - "worterbuch@*.*.*"
-      - "worterbuch-cli@*.*.*"
 
 jobs:
   build:
