@@ -1,9 +1,17 @@
-[tasks.test-all-async]
+[tasks.test-default]
 command = "cargo"
-args = ["test", "--no-default-features", "--features", "tcp,ws,graphql"]
+args = ["test"]
+
+[tasks.test-no-default]
+command = "cargo"
+args = ["test", "--no-default-features"]
+
+[tasks.test-all-features]
+command = "cargo"
+args = ["test", "--all-features"]
 
 [tasks.test-features]
-dependencies = ["test-all-async"]
+dependencies = ["test-default", "test-no-default", "test-all-features"]
 
 [tasks.docker]
 

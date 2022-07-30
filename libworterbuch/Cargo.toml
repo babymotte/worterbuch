@@ -10,33 +10,26 @@ license = "MIT"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [features]
 default = []
 tcp = ["tokio/net"]
 ws = ["web"]
 graphql = ["web", "futures-channel", "url"]
 web = ["futures-util", "tokio-tungstenite"]
-wasm = ["blocking", "wasm-bindgen"]
 blocking = []
 
 [dependencies]
 log = "0.4.17"
-tokio = { version = "1.19.2", features = ["sync", "rt", "io-util"] }
-serde = { version = "1.0.137", features = ["derive"] }
-serde_json = { version = "1.0.81" }
+tokio = { version = "1.20.1", features = ["sync", "rt", "io-util"] }
+serde = { version = "1.0.140", features = ["derive"] }
+serde_json = "1.0.82"
 
-wasm-bindgen = { version = "0.2.63", features = [
-    "serde-serialize",
-], optional = true }
 futures-util = { version = "0.3.21", default-features = false, features = [
     "sink",
     "std",
 ], optional = true }
 futures-channel = { version = "0.3.21", optional = true }
-tokio-tungstenite = { version = "0.17.1", optional = true }
+tokio-tungstenite = { version = "0.17.2", optional = true }
 url = { version = "2.2.2", optional = true }
 
 [dev-dependencies]

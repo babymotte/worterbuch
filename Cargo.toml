@@ -1,5 +1,13 @@
 [workspace]
-members = ["libworterbuch", "worterbuch", "worterbuch-cli"]
+members = ["libworterbuch", "worterbuch", "worterbuch-cli", "worterbuch-js"]
 
 [patch.crates-io]
 libworterbuch = { path = "./libworterbuch" }
+
+[profile.release-web]
+inherits = "release"
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"
+strip = true
