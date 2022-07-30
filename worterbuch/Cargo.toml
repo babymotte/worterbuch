@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [features]
-default = ["tcp"]
+default = ["tcp", "ws"]
 multithreaded = []
 async = []
 docker = []
