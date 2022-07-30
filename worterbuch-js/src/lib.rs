@@ -9,7 +9,6 @@ pub fn encode_client_message(msg: &JsValue) -> Result<Vec<u8>, String> {
     libworterbuch::codec::encode_message(&cm).map_err(|e| e.to_string())
 }
 
-// TODO decode directly to JsValue instead of String
 #[wasm_bindgen]
 pub fn decode_server_message(data: &[u8]) -> Result<JsValue, String> {
     libworterbuch::codec::blocking::read_server_message(&*data)
