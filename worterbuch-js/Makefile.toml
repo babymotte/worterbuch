@@ -1,0 +1,6 @@
+[tasks.test-features]
+dependencies = ["test"]
+
+[tasks.docker]
+
+[tasks.install]
