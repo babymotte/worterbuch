@@ -67,14 +67,11 @@ async fn run(msg: &str) -> Result<()> {
 
     spawn(track_stats(worterbuch_uptime));
 
-    #[cfg(feature = "graphql")]
-    spawn(server::gql_warp::start(worterbuch.clone(), config.clone()));
-
     #[cfg(feature = "tcp")]
     spawn(server::tcp::start(worterbuch.clone(), config.clone()));
 
-    #[cfg(feature = "ws")]
-    spawn(server::ws::start(worterbuch.clone(), config.clone()));
+    #[cfg(feature = "web")]
+    spawn(server::web::start(worterbuch.clone(), config.clone()));
 
     #[cfg(feature = "docker")]
     {

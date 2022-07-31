@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [features]
-default = ["tcp", "ws"]
+default = ["tcp", "ws", "explorer"]
 multithreaded = []
 async = []
 docker = []
@@ -26,6 +26,7 @@ graphql = [
   "futures",
   "async-stream",
 ]
+explorer = ["ws"]
 web = ["async", "warp", "openssl"]
 
 [dependencies]
