@@ -21,6 +21,7 @@ export default function App() {
   React.useEffect(() => {
     const socket = new WebSocket(url);
     socket.onopen = (e) => {
+      dataRef.current = new SortedMap();
       const subscrMsg = {
         pSubscribe: { transactionId: 1, requestPattern: topic },
       };
