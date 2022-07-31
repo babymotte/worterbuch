@@ -2053,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-js"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "libworterbuch",
  "serde_json",
