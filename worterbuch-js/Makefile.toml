@@ -4,3 +4,12 @@ dependencies = ["test"]
 [tasks.docker]
 
 [tasks.install]
+
+[tasks.build]
+command = "wasm-pack"
+args = ["build", "--target", "web"]
+
+[tasks.publish]
+command = "wasm-pack"
+args = ["publish", "pkg"]
+dependencies = ["build"]
