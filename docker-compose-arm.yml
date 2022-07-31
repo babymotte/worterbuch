@@ -8,14 +8,7 @@ services:
     restart: always
     ports:
       - 4242:4242
-      - 4243:4243
       - 8080:8080
-    environment:
-      - RUST_LOG=info
-      - WORTERBUCH_BIND_ADDRESS=0.0.0.0
-      - WORTERBUCH_USE_PERSISTENCE=true
-      - WORTERBUCH_DATA_DIR=/data
-      - WORTERBUCH_PERSISTENCE_INTERVAL=5
     volumes:
       - ./data:/data
     logging:

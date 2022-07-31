@@ -2,3 +2,9 @@
 /data/*
 .env
 .dockerignore
+/worterbuch-explorer/node_modules/*
+/worterbuch-explorer/build/*
+/worterbuch-js/pkg/*
+/worterbuch-js/examples/*
+.git/*
+.github/*
