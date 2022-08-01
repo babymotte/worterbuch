@@ -19,7 +19,7 @@ async function start() {
 
 start();
 
-const url = "ws://localhost:8080";
+const url = "ws://localhost:80";
 const topic = "hello/world";
 
 function App() {
@@ -51,7 +51,7 @@ function App() {
     <>
       Could not connect to {url}
       <br />
-      Make sure Wörterbuch is running at localhost:8080 (which is the default
+      Make sure Wörterbuch is running at localhost:80 (which is the default
       port for websocket if not configured otherwise), e.g. by running
       'worterbuch'.
       <p />
