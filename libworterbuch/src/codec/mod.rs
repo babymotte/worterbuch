@@ -112,6 +112,21 @@ pub enum ClientMessage {
     Unsubscribe(Unsubscribe),
 }
 
+impl ClientMessage {
+    pub fn transaction_id(&self) -> TransactionId {
+        match self {
+            ClientMessage::Get(m) => m.transaction_id,
+            ClientMessage::PGet(m) => m.transaction_id,
+            ClientMessage::Set(m) => m.transaction_id,
+            ClientMessage::Subscribe(m) => m.transaction_id,
+            ClientMessage::PSubscribe(m) => m.transaction_id,
+            ClientMessage::Export(m) => m.transaction_id,
+            ClientMessage::Import(m) => m.transaction_id,
+            ClientMessage::Unsubscribe(m) => m.transaction_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ServerMessage {

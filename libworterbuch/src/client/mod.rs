@@ -180,6 +180,11 @@ impl Connection {
         Ok(response)
     }
 
+    pub fn send(&mut self, msg: CM) -> ConnectionResult<()> {
+        self.cmd_tx.send(msg)?;
+        Ok(())
+    }
+
     fn inc_counter(&mut self) -> u64 {
         let i = self.counter;
         self.counter += 1;
