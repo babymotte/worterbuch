@@ -1,5 +1,5 @@
 use anyhow::Result;
-use libworterbuch::codec::KeyValuePairs;
+use libworterbuch::codec::{KeyValuePairs, TransactionId};
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
@@ -7,29 +7,40 @@ use uuid::Uuid;
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<String, Node>;
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct SubscriptionId {
+    client_id: Uuid,
+    transaction_id: TransactionId,
+}
+
+impl SubscriptionId {
+    pub fn new(client_id: Uuid, transaction_id: TransactionId) -> Self {
+        SubscriptionId {
+            client_id,
+            transaction_id,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Subscriber {
     pattern: Vec<String>,
     tx: UnboundedSender<KeyValuePairs>,
-    id: Uuid,
+    id: SubscriptionId,
 }
 
 impl Subscriber {
-    pub fn new(pattern: Vec<String>, tx: UnboundedSender<KeyValuePairs>) -> Subscriber {
-        Subscriber {
-            pattern,
-            tx,
-            id: Uuid::new_v4(),
-        }
+    pub fn new(
+        id: SubscriptionId,
+        pattern: Vec<String>,
+        tx: UnboundedSender<KeyValuePairs>,
+    ) -> Subscriber {
+        Subscriber { pattern, tx, id }
     }
 
     pub fn send(&self, event: KeyValuePairs) -> Result<()> {
         self.tx.send(event)?;
         Ok(())
-    }
-
-    pub fn id(&self) -> &Uuid {
-        &self.id
     }
 }
 
@@ -114,7 +125,7 @@ impl Subscribers {
         current.subscribers.push(subscriber);
     }
 
-    pub fn unsubscribe(&mut self, pattern: &[&str], subscription: Uuid) {
+    pub fn unsubscribe(&mut self, pattern: &[&str], subscription: &SubscriptionId) -> bool {
         let mut current = &mut self.data;
 
         for elem in pattern {
@@ -122,11 +133,22 @@ impl Subscribers {
                 current = node;
             } else {
                 log::warn!("No subscriber found for pattern {:?}", pattern);
-                return;
+                return false;
             }
         }
-
-        current.subscribers.retain(|s| s.id != subscription);
+        let mut removed = false;
+        current.subscribers.retain(|s| {
+            let retain = &s.id != subscription;
+            removed = removed || !retain;
+            if !retain {
+                log::debug!("removing subscription {subscription:?}");
+            }
+            retain
+        });
+        if !removed {
+            log::debug!("no matching subscription found")
+        }
+        removed
     }
 
     pub fn remove_subscriber(&mut self, subscriber: Subscriber) {
@@ -163,7 +185,12 @@ mod test {
 
         let (tx, _rx) = unbounded_channel();
         let pattern = vec!["test", "?", "b", "#"];
+        let id = SubscriptionId {
+            client_id: Uuid::new_v4(),
+            transaction_id: 123,
+        };
         let subscriber = Subscriber::new(
+            id,
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx,
         );

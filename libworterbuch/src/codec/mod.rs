@@ -32,6 +32,7 @@ pub const PGET: MessageType = 0b00000011;
 pub const PSUB: MessageType = 0b00000100;
 pub const EXP: MessageType = 0b00000101;
 pub const IMP: MessageType = 0b00000110;
+pub const USUB: MessageType = 0b00000111;
 
 pub const PSTA: MessageType = 0b10000000;
 pub const ACK: MessageType = 0b10000001;
@@ -44,6 +45,7 @@ pub const MULTI_WILDCARD_AT_ILLEGAL_POSITION: ErrorCode = 0b00000010;
 pub const IO_ERROR: ErrorCode = 0b00000011;
 pub const SERDE_ERROR: ErrorCode = 0b00000100;
 pub const NO_SUCH_VALUE: ErrorCode = 0b00000101;
+pub const NOT_SUBSCRIBED: ErrorCode = 0b00000110;
 pub const OTHER: ErrorCode = 0b11111111;
 
 pub const TRANSACTION_ID_BYTES: usize = 8;
@@ -64,6 +66,7 @@ impl From<&WorterbuchError> for ErrorCode {
                 MULTI_WILDCARD_AT_ILLEGAL_POSITION
             }
             WorterbuchError::NoSuchValue(_) => NO_SUCH_VALUE,
+            WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
             WorterbuchError::IoError(_, _) => IO_ERROR,
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
             WorterbuchError::Other(_, _) => OTHER,
@@ -106,6 +109,7 @@ pub enum ClientMessage {
     PSubscribe(PSubscribe),
     Export(Export),
     Import(Import),
+    Unsubscribe(Unsubscribe),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -229,6 +233,12 @@ pub struct Import {
     pub path: Path,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unsubscribe {
+    pub transaction_id: TransactionId,
+}
+
 pub fn encode_message(msg: &ClientMessage) -> EncodeResult<Vec<u8>> {
     match msg {
         ClientMessage::Get(msg) => encode_get_message(msg),
@@ -238,6 +248,7 @@ pub fn encode_message(msg: &ClientMessage) -> EncodeResult<Vec<u8>> {
         ClientMessage::PSubscribe(msg) => encode_psubscribe_message(msg),
         ClientMessage::Export(msg) => encode_export_message(msg),
         ClientMessage::Import(msg) => encode_import_message(msg),
+        ClientMessage::Unsubscribe(msg) => encode_unsubscribe_message(msg),
     }
 }
 
@@ -389,6 +400,14 @@ pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
     buf.push(msg.error_code);
     buf.extend(metadata_length.to_be_bytes());
     buf.extend(msg.metadata.as_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_unsubscribe_message(msg: &Unsubscribe) -> EncodeResult<Vec<u8>> {
+    let mut buf = vec![USUB];
+
+    buf.extend(msg.transaction_id.to_be_bytes());
 
     Ok(buf)
 }
@@ -674,5 +693,17 @@ mod test {
         ];
 
         assert_eq!(data, encode_import_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn unsubscribe_message_is_encoded_correctly() {
+        let msg = Unsubscribe { transaction_id: 42 };
+
+        let data = vec![
+            USUB, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010,
+        ];
+
+        assert_eq!(data, encode_unsubscribe_message(&msg).unwrap());
     }
 }

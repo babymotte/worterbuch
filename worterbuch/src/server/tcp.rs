@@ -1,7 +1,7 @@
 use super::common::process_incoming_message;
-use crate::{config::Config, worterbuch::Worterbuch};
+use crate::{config::Config, server::common::Subscriptions, worterbuch::Worterbuch};
 use anyhow::Result;
-use libworterbuch::error::WorterbuchResult;
+use libworterbuch::error::{WorterbuchError, WorterbuchResult};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
@@ -12,6 +12,7 @@ use tokio::{
         RwLock,
     },
 };
+use uuid::Uuid;
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
     log::info!("Starting TCP Server …");
@@ -46,11 +47,13 @@ async fn serve(
         }
     });
 
-    let mut subscriptions = Vec::new();
+    let mut subscriptions = Subscriptions::new();
+    let client_id = Uuid::new_v4();
 
     log::debug!("Receiving messages from client {remote_addr} …");
     loop {
         if !process_incoming_message(
+            client_id.clone(),
             &mut client_read,
             worterbuch.clone(),
             tx.clone(),
@@ -64,8 +67,16 @@ async fn serve(
     log::debug!("No more messages from {remote_addr}, closing connection.");
 
     let mut wb = worterbuch.write().await;
-    for subs in subscriptions {
-        wb.unsubscribe(&subs.0, subs.1);
+    for (subscription, pattern) in subscriptions {
+        match wb.unsubscribe(&pattern, &subscription) {
+            Ok(()) => {}
+            Err(WorterbuchError::NotSubscribed) => {
+                log::warn!("Inconsistent subscription state: tracked subscription {subscription:?} is not present on server.");
+            }
+            Err(e) => {
+                log::warn!("Error while unsubscribing: {e}");
+            }
+        }
     }
 
     Ok(())

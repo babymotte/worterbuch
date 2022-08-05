@@ -187,6 +187,7 @@ pub enum WorterbuchError {
     IllegalMultiWildcard(RequestPattern),
     MultiWildcardAtIllegalPosition(RequestPattern),
     NoSuchValue(Key),
+    NotSubscribed,
     IoError(io::Error, MetaData),
     SerDeError(serde_json::Error, MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
@@ -207,6 +208,7 @@ impl fmt::Display for WorterbuchError {
                 write!(f, "Key contains multi-wildcard at illegal position: {rp}")
             }
             WorterbuchError::NoSuchValue(key) => write!(f, "no value for key '{key}'"),
+            WorterbuchError::NotSubscribed => write!(f, "no such subscription"),
             WorterbuchError::IoError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::SerDeError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),

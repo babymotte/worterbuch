@@ -2,12 +2,13 @@ use crate::{
     client::Connection,
     codec::{
         ClientMessage as CM, Export, Get, Import, PGet, PSubscribe, ServerMessage as SM, Set,
-        Subscribe,
+        Subscribe, Unsubscribe,
     },
     error::ConnectionResult,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use std::future::Future;
 use tokio::{
     spawn,
     sync::{
@@ -19,16 +20,16 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{self, protocol::Message},
 };
-use std::future::Future;
 
 const INIT_MSG_TEMPLATE: &str = r#"{"type":"connection_init","payload":{}}"#;
 const GET_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"query {get(key: \"$key\") {key value}}","variables":null}}"#;
 const PGET_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"query {pget(pattern: \"$pattern\") {pattern key value}}","variables":null}}"#;
 const SET_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {set(key: \"$key\" value: \"$val\")}","variables":null}}"#;
-const SUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"subscription {subscribe(key: \"$key\") {key value}}","variables":null}}"#;
-const PSUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"subscription {psubscribe(pattern: \"$pattern\") {pattern key value}}","variables":null}}"#;
+const SUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"subscription {subscribe(transaction_id: \"$i\", key: \"$key\") {key value}}","variables":null}}"#;
+const PSUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"subscription {psubscribe(transaction_id: \"$i\", pattern: \"$pattern\") {pattern key value}}","variables":null}}"#;
 const IMPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {import(path: \"$path\")}","variables":null}}"#;
 const EXPORT_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {export(path: \"$path\")}","variables":null}}"#;
+const UNSUBSCRIBE_MSG_TEMPLATE: &str = r#"{"id":"$i","type":"start","payload":{"query":"mutation {unsubscribe(transaction_id: \"$i\")}","variables":null}}"#;
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     proto: &str,
@@ -139,6 +140,9 @@ fn encode_ws_message(cmd: CM) -> Message {
         }) => EXPORT_MSG_TEMPLATE
             .replace("$i", &transaction_id.to_string())
             .replace("$path", &path)
+            .to_owned(),
+        CM::Unsubscribe(Unsubscribe { transaction_id }) => UNSUBSCRIBE_MSG_TEMPLATE
+            .replace("$i", &transaction_id.to_string())
             .to_owned(),
     };
 

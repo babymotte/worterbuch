@@ -1,10 +1,10 @@
 use crate::{
     config::Config,
     store::{Store, StoreStats},
-    subscribers::{Subscriber, Subscribers},
+    subscribers::{Subscriber, Subscribers, SubscriptionId},
 };
 use libworterbuch::{
-    codec::{KeyValuePair, KeyValuePairs, Path},
+    codec::{KeyValuePair, KeyValuePairs, Path, TransactionId},
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 use serde::{Deserialize, Serialize};
@@ -149,8 +149,10 @@ impl Worterbuch {
 
     pub fn subscribe(
         &mut self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
         key: String,
-    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, Uuid)> {
+    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
         let path: Vec<&str> = key.split(self.config.separator).collect();
         let matches = match self.get(&key) {
             Ok((key, value)) => Some((key, value)),
@@ -158,11 +160,12 @@ impl Worterbuch {
             Err(e) => return Err(e),
         };
         let (tx, rx) = unbounded_channel();
+        let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = Subscriber::new(
+            subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
         );
-        let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
         if let Some((key, value)) = matches {
             tx.send(vec![(key, value).into()])
@@ -173,16 +176,19 @@ impl Worterbuch {
 
     pub fn psubscribe(
         &mut self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
         pattern: String,
-    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, Uuid)> {
+    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
         let path: Vec<&str> = pattern.split(self.config.separator).collect();
         let matches = self.pget(&pattern)?;
         let (tx, rx) = unbounded_channel();
+        let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = Subscriber::new(
+            subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
         );
-        let subscription = subscriber.id().clone();
         self.subscribers.add_subscriber(&path, subscriber);
         tx.send(matches).expect("rx is neither closed nor dropped");
         Ok((rx, subscription))
@@ -244,9 +250,17 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub fn unsubscribe(&mut self, key_pattern: &str, subscription: Uuid) {
+    pub fn unsubscribe(
+        &mut self,
+        key_pattern: &str,
+        subscription: &SubscriptionId,
+    ) -> WorterbuchResult<()> {
         let pattern: Vec<&str> = key_pattern.split(self.config.separator).collect();
-        self.subscribers.unsubscribe(&pattern, subscription);
+        if self.subscribers.unsubscribe(&pattern, subscription) {
+            Ok(())
+        } else {
+            Err(WorterbuchError::NotSubscribed)
+        }
     }
 
     #[cfg(not(feature = "docker"))]

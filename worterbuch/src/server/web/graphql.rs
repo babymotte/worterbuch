@@ -1,15 +1,26 @@
-use crate::worterbuch::Worterbuch;
+use crate::{subscribers::SubscriptionId, worterbuch::Worterbuch};
 use futures::Stream;
 use juniper::{graphql_object, graphql_subscription, graphql_value, FieldError, FieldResult};
-use libworterbuch::codec::KeyValuePair;
+use libworterbuch::codec::{KeyValuePair, TransactionId};
 use std::{pin::Pin, sync::Arc};
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) struct Context {
     pub database: Arc<RwLock<Worterbuch>>,
+    pub client_id: Uuid,
 }
 impl juniper::Context for Context {}
+
+impl Context {
+    pub fn new(database: Arc<RwLock<Worterbuch>>) -> Self {
+        Self {
+            client_id: Uuid::new_v4(),
+            database,
+        }
+    }
+}
 
 pub(crate) struct PEvent {
     pattern: String,
@@ -90,6 +101,19 @@ impl Mutation {
         worterbuch.set(key, value)?;
         Ok("Ok".to_owned())
     }
+
+    /// Cancels an active subscription.
+    async fn unsubscribe(
+        &self,
+        transaction_id: f64,
+        pattern: String,
+        context: &Context,
+    ) -> FieldResult<String> {
+        let mut worterbuch = context.database.write().await;
+        let subscription = SubscriptionId::new(context.client_id, transaction_id as u64);
+        worterbuch.unsubscribe(&pattern, &subscription)?;
+        Ok("Ok".to_owned())
+    }
 }
 
 type PEventStream = Pin<Box<dyn Stream<Item = Result<PEvent, FieldError>> + Send>>;
@@ -100,9 +124,18 @@ pub(crate) struct Subscription;
 #[graphql_subscription(context = Context)]
 impl Subscription {
     /// Subscribe to key/value changes matching a pattern.
-    async fn psubscribe(&self, pattern: String, context: &Context) -> PEventStream {
+    async fn psubscribe(
+        &self,
+        transaction_id: f64,
+        pattern: String,
+        context: &Context,
+    ) -> PEventStream {
         let mut worterbuch = context.database.write().await;
-        let rx = worterbuch.psubscribe(pattern.clone());
+        let rx = worterbuch.psubscribe(
+            context.client_id,
+            transaction_id as TransactionId,
+            pattern.clone(),
+        );
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
                 loop {
@@ -133,9 +166,13 @@ impl Subscription {
     }
 
     /// Subscribe to key/value changes of a key.
-    async fn subscribe(&self, key: String, context: &Context) -> EventStream {
+    async fn subscribe(&self, transaction_id: f64, key: String, context: &Context) -> EventStream {
         let mut worterbuch = context.database.write().await;
-        let rx = worterbuch.subscribe(key.clone());
+        let rx = worterbuch.subscribe(
+            context.client_id,
+            transaction_id as TransactionId,
+            key.clone(),
+        );
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
                 loop {

@@ -54,7 +54,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
 
     #[cfg(feature = "graphql")]
     let (graphql, ws_context, ws_schema) = {
-        let context = Context { database: wb_gql };
+        let context = Context::new(wb_gql);
         let ws_schema = Arc::new(graphql::schema());
         let ws_context = context.clone();
         let graphql_schema = graphql::schema();
@@ -143,6 +143,11 @@ async fn serve_ws(
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: Option<SocketAddr>,
 ) -> Result<()> {
+    use libworterbuch::error::WorterbuchError;
+    use uuid::Uuid;
+
+    use crate::server::common::Subscriptions;
+
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_write, mut client_read) = websocket.split();
@@ -157,7 +162,8 @@ async fn serve_ws(
         }
     });
 
-    let mut subscriptions = Vec::new();
+    let mut subscriptions = Subscriptions::new();
+    let client_id = Uuid::new_v4();
 
     log::debug!("Receiving messages from client {remote_addr:?} …");
     loop {
@@ -165,6 +171,7 @@ async fn serve_ws(
             if incoming_msg.is_binary() {
                 let data = incoming_msg.as_bytes();
                 if !process_incoming_message(
+                    client_id,
                     data,
                     worterbuch.clone(),
                     tx.clone(),
@@ -182,8 +189,16 @@ async fn serve_ws(
     log::debug!("No more messages from {remote_addr:?}, closing connection.");
 
     let mut wb = worterbuch.write().await;
-    for subs in subscriptions {
-        wb.unsubscribe(&subs.0, subs.1);
+    for (subscription, pattern) in subscriptions {
+        match wb.unsubscribe(&pattern, &subscription) {
+            Ok(()) => {
+                log::warn!("Subscription {subscription:?} was not internally cleaned up properly!");
+            }
+            Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+            Err(e) => {
+                log::warn!("Error while unsubscribing: {e}");
+            }
+        }
     }
 
     Ok(())

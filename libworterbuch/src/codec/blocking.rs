@@ -1,9 +1,10 @@
 use super::{
     ClientMessage as CM, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
     NumKeyValuePairs, PGet, PSubscribe, Path, PathLength, RequestPattern, RequestPatternLength,
-    Set, Subscribe, TransactionId, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET, IMP,
-    KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES, PGET,
-    PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
+    Set, Subscribe, TransactionId, Unsubscribe, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET,
+    IMP, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES,
+    PGET, PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, USUB,
+    VALUE_LENGTH_BYTES,
 };
 use crate::{
     codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
@@ -145,6 +146,7 @@ pub fn read_client_message(mut data: impl Read) -> DecodeResult<CM> {
         PSUB => read_psubscribe_message(data).map(CM::PSubscribe),
         EXP => read_export_message(data).map(CM::Export),
         IMP => read_import_message(data).map(CM::Import),
+        USUB => read_unsubscribe_message(data).map(CM::Unsubscribe),
         _ => Err(DecodeError::UndefinedType(buf[0])),
     }
 }
@@ -272,6 +274,14 @@ fn read_import_message(mut data: impl Read) -> DecodeResult<Import> {
     })
 }
 
+fn read_unsubscribe_message(mut data: impl Read) -> DecodeResult<Unsubscribe> {
+    let mut buf = [0; TRANSACTION_ID_BYTES];
+    data.read_exact(&mut buf)?;
+    let transaction_id = TransactionId::from_be_bytes(buf);
+
+    Ok(Unsubscribe { transaction_id })
+}
+
 fn read_export_message(mut data: impl Read) -> DecodeResult<Export> {
     let mut buf = [0; TRANSACTION_ID_BYTES];
     data.read_exact(&mut buf)?;
@@ -294,7 +304,7 @@ fn read_export_message(mut data: impl Read) -> DecodeResult<Export> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::codec::{encode_set_message, GET, SET, SUB};
+    use crate::codec::{encode_set_message, Unsubscribe, GET, SET, SUB, USUB};
 
     #[test]
     fn get_message_is_read_correctly() {
@@ -521,6 +531,18 @@ mod test {
                 metadata: "THIS IS METAAA!!!".to_owned()
             })
         )
+    }
+
+    #[test]
+    fn unsubscribe_message_is_read_correctly() {
+        let data = [
+            USUB, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010,
+        ];
+
+        let result = read_client_message(&data[..]).unwrap();
+
+        assert_eq!(result, CM::Unsubscribe(Unsubscribe { transaction_id: 42 }))
     }
 
     #[test]

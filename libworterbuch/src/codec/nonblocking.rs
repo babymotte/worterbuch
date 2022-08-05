@@ -1,10 +1,10 @@
 use super::{
     Ack, ClientMessage as CM, Err, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
     NumKeyValuePairs, PGet, PState, PSubscribe, Path, PathLength, RequestPattern,
-    RequestPatternLength, ServerMessage as SM, Set, State, Subscribe, TransactionId, Value,
-    ValueLength, ACK, ERR, ERROR_CODE_BYTES, EXP, GET, IMP, KEY_LENGTH_BYTES,
+    RequestPatternLength, ServerMessage as SM, Set, State, Subscribe, TransactionId, Unsubscribe,
+    Value, ValueLength, ACK, ERR, ERROR_CODE_BYTES, EXP, GET, IMP, KEY_LENGTH_BYTES,
     METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES, PGET, PSTA, PSUB,
-    REQUEST_PATTERN_LENGTH_BYTES, SET, STA, SUB, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
+    REQUEST_PATTERN_LENGTH_BYTES, SET, STA, SUB, TRANSACTION_ID_BYTES, USUB, VALUE_LENGTH_BYTES,
 };
 use crate::error::{DecodeError, DecodeResult};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -23,6 +23,7 @@ pub async fn read_client_message(mut data: impl AsyncRead + Unpin) -> DecodeResu
         PSUB => read_psubscribe_message(data).await.map(CM::PSubscribe),
         EXP => read_export_message(data).await.map(CM::Export),
         IMP => read_import_message(data).await.map(CM::Import),
+        USUB => read_unsubscribe_message(data).await.map(CM::Unsubscribe),
         _ => Err(DecodeError::UndefinedType(buf[0])),
     }
     .map(Some)
@@ -297,11 +298,19 @@ async fn read_import_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<I
     })
 }
 
+async fn read_unsubscribe_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Unsubscribe> {
+    let mut buf = [0; TRANSACTION_ID_BYTES];
+    data.read_exact(&mut buf).await?;
+    let transaction_id = TransactionId::from_be_bytes(buf);
+
+    Ok(Unsubscribe { transaction_id })
+}
+
 #[cfg(test)]
 mod test {
 
     use super::*;
-    use crate::codec::encode_set_message;
+    use crate::codec::{encode_set_message, Unsubscribe, USUB};
 
     #[test]
     fn get_message_is_read_correctly() {
@@ -571,6 +580,20 @@ mod test {
                 metadata: "THIS IS METAAA!!!".to_owned()
             })
         )
+    }
+
+    #[test]
+    fn unsubscribe_message_is_read_correctly() {
+        let data = [
+            USUB, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
+            0b00000000, 0b00101010,
+        ];
+
+        let result = tokio_test::block_on(read_client_message(&data[..]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result, CM::Unsubscribe(Unsubscribe { transaction_id: 42 }))
     }
 
     #[test]
