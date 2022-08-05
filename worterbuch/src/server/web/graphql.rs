@@ -1,8 +1,15 @@
 use crate::{subscribers::SubscriptionId, worterbuch::Worterbuch};
 use futures::Stream;
 use juniper::{graphql_object, graphql_subscription, graphql_value, FieldError, FieldResult};
-use libworterbuch::codec::{KeyValuePair, TransactionId};
-use std::{pin::Pin, sync::Arc};
+use libworterbuch::{
+    codec::{KeyValuePair, TransactionId},
+    error::WorterbuchError,
+};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -10,6 +17,8 @@ use uuid::Uuid;
 pub(crate) struct Context {
     pub database: Arc<RwLock<Worterbuch>>,
     pub client_id: Uuid,
+    pub tid: Arc<Mutex<TransactionId>>,
+    pub subscribed_patterns: Arc<Mutex<HashMap<TransactionId, String>>>,
 }
 impl juniper::Context for Context {}
 
@@ -18,7 +27,15 @@ impl Context {
         Self {
             client_id: Uuid::new_v4(),
             database,
+            tid: Arc::new(Mutex::new(1)),
+            subscribed_patterns: Arc::default(),
         }
+    }
+    pub(crate) fn next_tid(&self) -> TransactionId {
+        let mut tidg = self.tid.lock().expect("mutex poisoned");
+        let tid = *tidg;
+        *tidg = tid + 1;
+        tid
     }
 }
 
@@ -103,14 +120,16 @@ impl Mutation {
     }
 
     /// Cancels an active subscription.
-    async fn unsubscribe(
-        &self,
-        transaction_id: f64,
-        pattern: String,
-        context: &Context,
-    ) -> FieldResult<String> {
+    async fn unsubscribe(&self, transaction_id: i32, context: &Context) -> FieldResult<String> {
+        let transaction_id = transaction_id as TransactionId;
         let mut worterbuch = context.database.write().await;
         let subscription = SubscriptionId::new(context.client_id, transaction_id as u64);
+        let pattern = context
+            .subscribed_patterns
+            .lock()
+            .expect("poisoned mutex")
+            .remove(&transaction_id)
+            .ok_or_else(|| WorterbuchError::NotSubscribed)?;
         worterbuch.unsubscribe(&pattern, &subscription)?;
         Ok("Ok".to_owned())
     }
@@ -124,20 +143,22 @@ pub(crate) struct Subscription;
 #[graphql_subscription(context = Context)]
 impl Subscription {
     /// Subscribe to key/value changes matching a pattern.
-    async fn psubscribe(
-        &self,
-        transaction_id: f64,
-        pattern: String,
-        context: &Context,
-    ) -> PEventStream {
+    async fn psubscribe(&self, pattern: String, context: &Context) -> PEventStream {
         let mut worterbuch = context.database.write().await;
-        let rx = worterbuch.psubscribe(
-            context.client_id,
-            transaction_id as TransactionId,
-            pattern.clone(),
-        );
+        let transaction_id = context.next_tid();
+        context
+            .subscribed_patterns
+            .lock()
+            .expect("posoned mutex")
+            .insert(transaction_id, pattern.clone());
+        let rx = worterbuch.psubscribe(context.client_id, transaction_id, pattern.clone());
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
+                yield Ok(PEvent{
+                    pattern: "transactionId".to_owned(),
+                    key: "transactionId".to_owned(),
+                    value: format!("{transaction_id}"),
+                });
                 loop {
                     match rx.recv().await {
                         Some(event) => {
@@ -166,15 +187,21 @@ impl Subscription {
     }
 
     /// Subscribe to key/value changes of a key.
-    async fn subscribe(&self, transaction_id: f64, key: String, context: &Context) -> EventStream {
+    async fn subscribe(&self, key: String, context: &Context) -> EventStream {
         let mut worterbuch = context.database.write().await;
-        let rx = worterbuch.subscribe(
-            context.client_id,
-            transaction_id as TransactionId,
-            key.clone(),
-        );
+        let transaction_id = context.next_tid();
+        context
+            .subscribed_patterns
+            .lock()
+            .expect("posoned mutex")
+            .insert(transaction_id, key.clone());
+        let rx = worterbuch.subscribe(context.client_id, transaction_id, key.clone());
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
+                yield Ok(Event{
+                    key: "transactionId".to_owned(),
+                    value: format!("{transaction_id}"),
+                });
                 loop {
                     match rx.recv().await {
                         Some(event) => {

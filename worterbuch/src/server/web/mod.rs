@@ -32,28 +32,44 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     #[cfg(feature = "graphql")]
     let wb_gql = worterbuch.clone();
 
+    #[cfg(feature = "graphql")]
+    let (graphql_path, graphql_ws_path, graphiql_path) = ("graphql", "graphql-ws", "graphiql");
+
     #[cfg(feature = "ws")]
-    let ws = warp::ws().and(warp::path("ws")).and(remote()).map(
-        move |ws: Ws, remote: Option<SocketAddr>| {
-            let worterbuch = wb_ws.clone();
-            ws.on_upgrade(move |websocket| async move {
-                if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
-                    log::error!("Error in WS connection: {e}");
-                }
-            })
-        },
-    );
+    let ws_path = "ws";
+
+    #[cfg(feature = "explorer")]
+    let explorer_path = "*";
+
+    #[cfg(feature = "ws")]
+    let ws = {
+        log::info!("Mounting ws endpoint at /{ws_path} …");
+        warp::ws().and(warp::path(ws_path)).and(remote()).map(
+            move |ws: Ws, remote: Option<SocketAddr>| {
+                let worterbuch = wb_ws.clone();
+                ws.on_upgrade(move |websocket| async move {
+                    if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
+                        log::error!("Error in WS connection: {e}");
+                    }
+                })
+            },
+        )
+    };
 
     #[cfg(feature = "graphql")]
-    let graphiql = warp::get()
-        .and(warp::path("graphiql"))
-        .and(juniper_warp::graphiql_filter(
-            "/graphql",
-            Some("/graphql-ws"),
-        ));
+    let graphiql = {
+        log::info!("Mounting graphiql endpoint at /{graphiql_path} …");
+        warp::get()
+            .and(warp::path(graphiql_path))
+            .and(juniper_warp::graphiql_filter(
+                "/graphql",
+                Some("/graphql-ws"),
+            ))
+    };
 
     #[cfg(feature = "graphql")]
     let (graphql, ws_context, ws_schema) = {
+        log::info!("Mounting graphql endpoint at /{graphql_path} …");
         let context = Context::new(wb_gql);
         let ws_schema = Arc::new(graphql::schema());
         let ws_context = context.clone();
@@ -61,30 +77,36 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
         let state = warp::any().map(move || context.clone());
         let graphql_filter = juniper_warp::make_graphql_filter(graphql_schema, state.boxed());
         (
-            warp::path("graphql").and(graphql_filter),
+            warp::path(graphql_path).and(graphql_filter),
             ws_context,
             ws_schema,
         )
     };
 
     #[cfg(feature = "graphql")]
-    let graphql_ws = warp::path("graphql-ws")
-        .and(warp::ws())
-        .map(move |ws: warp::ws::Ws| {
-            let graphql_ws_impl = ConnectionConfig::new(ws_context.clone());
-            let ws_schema = ws_schema.clone();
-            ws.on_upgrade(move |websocket| async move {
-                if let Err(e) = serve_graphql_ws(websocket, ws_schema, graphql_ws_impl).await {
-                    println!("Websocket error: {}", e);
-                }
+    let graphql_ws = {
+        log::info!("Mounting graphql-ws endpoint at /{graphql_ws_path} …");
+        warp::path(graphql_ws_path)
+            .and(warp::ws())
+            .map(move |ws: warp::ws::Ws| {
+                let graphql_ws_impl = ConnectionConfig::new(ws_context.clone());
+                let ws_schema = ws_schema.clone();
+                ws.on_upgrade(move |websocket| async move {
+                    if let Err(e) = serve_graphql_ws(websocket, ws_schema, graphql_ws_impl).await {
+                        println!("Websocket error: {}", e);
+                    }
+                })
             })
-        });
+    };
 
     #[cfg(feature = "explorer")]
-    let explorer = warp::fs::dir(
-        env::var("WORTERBUCH_EXPLORER_WEBROOT_PATH")
-            .unwrap_or("../worterbuch-explorer/build".to_owned()),
-    );
+    let explorer = {
+        log::info!("Mounting explorer endpoint at {explorer_path} …");
+        warp::fs::dir(
+            env::var("WORTERBUCH_EXPLORER_WEBROOT_PATH")
+                .unwrap_or("../worterbuch-explorer/build".to_owned()),
+        )
+    };
 
     #[cfg(feature = "ws")]
     let ws_route = ws;
@@ -191,10 +213,10 @@ async fn serve_ws(
     let mut wb = worterbuch.write().await;
     for (subscription, pattern) in subscriptions {
         match wb.unsubscribe(&pattern, &subscription) {
-            Ok(()) => {
-                log::warn!("Subscription {subscription:?} was not internally cleaned up properly!");
+            Ok(()) => {}
+            Err(WorterbuchError::NotSubscribed) => {
+                log::warn!("Inconsistent subscription state: tracked subscription {subscription:?} is not present on server.");
             }
-            Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
             Err(e) => {
                 log::warn!("Error while unsubscribing: {e}");
             }
