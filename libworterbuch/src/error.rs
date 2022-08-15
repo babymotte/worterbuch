@@ -252,6 +252,7 @@ pub enum ConnectionError {
     ParseError(ParseError),
     RecvError(oneshot::error::RecvError),
     WorterbuchError(WorterbuchError),
+    ConfigError(ConfigError),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -271,6 +272,7 @@ impl fmt::Display for ConnectionError {
             Self::ParseError(e) => fmt::Display::fmt(&e, f),
             Self::RecvError(e) => fmt::Display::fmt(&e, f),
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
+            Self::ConfigError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
@@ -326,5 +328,11 @@ impl<T: 'static + Send + Sync> From<TrySendError<T>> for ConnectionError {
 impl From<oneshot::error::RecvError> for ConnectionError {
     fn from(e: oneshot::error::RecvError) -> Self {
         ConnectionError::RecvError(e)
+    }
+}
+
+impl From<ConfigError> for ConnectionError {
+    fn from(e: ConfigError) -> Self {
+        ConnectionError::ConfigError(e)
     }
 }

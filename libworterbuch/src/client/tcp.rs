@@ -11,6 +11,15 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
+use super::config::Config;
+
+pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
+    on_disconnect: F,
+) -> ConnectionResult<Connection> {
+    let config = Config::new()?;
+    connect(&config.proto, &config.host_addr, config.port, on_disconnect).await
+}
+
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     _proto: &str,
     host_addr: &str,
