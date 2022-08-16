@@ -489,6 +489,7 @@ async fn handle_store_error(
             metadata: serde_json::to_string::<Meta>(&(&e, meta).into())
                 .expect("failed to serialize metadata"),
         },
+        WorterbuchError::ServerResponse(_) => panic!("store must not produce this error"),
     };
     let msg = encode_err_message(&err_msg)
         .expect(&format!("failed to encode error message: {err_msg:?}"));

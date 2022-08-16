@@ -69,7 +69,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
             WorterbuchError::IoError(_, _) => IO_ERROR,
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
-            WorterbuchError::Other(_, _) => OTHER,
+            WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
         }
     }
 }

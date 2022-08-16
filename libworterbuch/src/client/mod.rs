@@ -7,20 +7,23 @@ pub mod tcp;
 pub mod ws;
 
 use super::error::ConnectionResult;
-use crate::codec::{
-    ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM,
-    Set, Subscribe, Value, NO_SUCH_VALUE,
+use crate::{
+    codec::{
+        ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe,
+        ServerMessage as SM, Set, Subscribe, Value,
+    },
+    error::{ConnectionError, WorterbuchError},
 };
-use tokio::{
-    spawn,
-    sync::{broadcast, mpsc::UnboundedSender, oneshot},
-};
+use async_stream::stream;
+use futures_core::stream::Stream;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
 #[derive(Clone)]
 pub struct Connection {
     cmd_tx: UnboundedSender<CM>,
     result_tx: broadcast::Sender<SM>,
-    counter: u64,
+    counter: Arc<Mutex<u64>>,
 }
 
 impl Connection {
@@ -28,7 +31,7 @@ impl Connection {
         Self {
             cmd_tx,
             result_tx,
-            counter: 1,
+            counter: Arc::new(Mutex::new(1)),
         }
     }
 
@@ -100,9 +103,7 @@ impl Connection {
         self.result_tx.subscribe()
     }
 
-    pub async fn get_value(&mut self, key: &str) -> ConnectionResult<Option<Value>> {
-        let (tx, rx) = oneshot::channel();
-
+    pub async fn get_value(&mut self, key: &str) -> ConnectionResult<Value> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
@@ -111,38 +112,29 @@ impl Connection {
             key: key.to_owned(),
         }))?;
 
-        let owned_key = key.to_owned();
-        spawn(async move {
-            let mut value = None;
-            while let Ok(msg) = subscr.recv().await {
-                let tid = msg.transaction_id();
-                if tid == i {
-                    match msg {
-                        SM::State(state) => {
-                            value = Some(state.key_value.value);
-                        }
-                        SM::Err(msg) => {
-                            if msg.error_code != NO_SUCH_VALUE {
-                                log::error!("Error getting value of {owned_key}: {msg:?}");
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::State(state) => return Ok(state.key_value.value),
+                            SM::Err(msg) => {
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ))
                             }
+                            _ => { /* ignore */ }
                         }
-                        _ => { /* ignore */ }
                     }
-                    break;
+                    // TODO time out
                 }
-                // TODO time out
+                Err(e) => return Err(e.into()),
             }
-
-            tx.send(value).ok();
-        });
-
-        let response = rx.await?;
-        Ok(response)
+        }
     }
 
-    pub async fn pget_values(&mut self, pattern: &str) -> ConnectionResult<Option<KeyValuePairs>> {
-        let (tx, rx) = oneshot::channel();
-
+    pub async fn pget_values(&mut self, pattern: &str) -> ConnectionResult<KeyValuePairs> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
@@ -151,33 +143,145 @@ impl Connection {
             request_pattern: pattern.to_owned(),
         }))?;
 
-        let owned_pattern = pattern.to_owned();
-        spawn(async move {
-            let mut value = None;
-            while let Ok(msg) = subscr.recv().await {
-                let tid = msg.transaction_id();
-                if tid == i {
-                    match msg {
-                        SM::PState(pstate) => {
-                            value = Some(pstate.key_value_pairs);
-                        }
-                        SM::Err(msg) => {
-                            if msg.error_code != NO_SUCH_VALUE {
-                                log::error!("Error getting values for {owned_pattern}: {msg:?}");
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::PState(pstate) => return Ok(pstate.key_value_pairs),
+                            SM::Err(msg) => {
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ))
                             }
+                            _ => { /* ignore */ }
                         }
-                        _ => { /* ignore */ }
                     }
-                    break;
+                    // TODO time out
                 }
-                // TODO time out
+                Err(e) => return Err(e.into()),
             }
+        }
+    }
 
-            tx.send(value).ok();
-        });
+    pub async fn subscribe_values(
+        &mut self,
+        key: &str,
+    ) -> ConnectionResult<impl Stream<Item = Value>> {
+        let mut subscr = self.responses();
 
-        let response = rx.await?;
-        Ok(response)
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Subscribe(Subscribe {
+            transaction_id: i,
+            key: key.to_owned(),
+        }))?;
+
+        let owned_key = key.to_owned();
+
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::Err(msg) => {
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ))
+                            }
+                            SM::Ack(_) => {
+                                return Ok(stream! {
+                                    while let Ok(msg) = subscr.recv().await {
+                                        let tid = msg.transaction_id();
+                                        if tid == i {
+                                            match msg {
+                                                SM::State(state) => {
+                                                    yield state.key_value.value;
+                                                }
+                                                SM::Err(msg) => {
+                                                    log::error!("Error in subscription of {owned_key}: {msg:?}");
+                                                        break;
+                                                }
+                                                _ => { /* ignore */ }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            _ => { /* ignore */ }
+                        }
+                        break;
+                    }
+                    // TODO time out
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(ConnectionError::WorterbuchError(
+            WorterbuchError::NotSubscribed,
+        ))
+    }
+
+    pub async fn psubscribe_values(
+        &mut self,
+        request_pattern: &str,
+    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+        let mut subscr = self.responses();
+
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::PSubscribe(PSubscribe {
+            transaction_id: i,
+            request_pattern: request_pattern.to_owned(),
+        }))?;
+
+        let owned_pattern = request_pattern.to_owned();
+
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::Err(msg) => {
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ))
+                            }
+                            SM::Ack(_) => {
+                                return Ok(stream! {
+                                    while let Ok(msg) = subscr.recv().await {
+                                        let tid = msg.transaction_id();
+                                        if tid == i {
+                                            match msg {
+                                                SM::PState(pstate) => {
+                                                    yield pstate.key_value_pairs;
+                                                }
+                                                SM::Err(msg) => {
+                                                    log::error!("Error in subscription of {owned_pattern}: {msg:?}");
+                                                    break;
+                                                }
+                                                _ => { /* ignore */ }
+                                            }
+                                        }
+                                        // TODO time out
+                                    }
+                                });
+                            }
+                            _ => { /* ignore */ }
+                        }
+                        break;
+                    }
+                    // TODO time out
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Err(ConnectionError::WorterbuchError(
+            WorterbuchError::NotSubscribed,
+        ))
     }
 
     pub fn send(&mut self, msg: CM) -> ConnectionResult<()> {
@@ -186,8 +290,9 @@ impl Connection {
     }
 
     fn inc_counter(&mut self) -> u64 {
-        let i = self.counter;
-        self.counter += 1;
-        i
+        let mut counter = self.counter.lock().expect("counter mutex poisoned");
+        let current = *counter;
+        *counter += 1;
+        current
     }
 }

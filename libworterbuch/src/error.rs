@@ -1,11 +1,11 @@
 use crate::codec::{
-    ErrorCode, Key, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs, PathLength,
-    RequestPattern, RequestPatternLength, ValueLength,
+    Err, ErrorCode, Key, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs,
+    PathLength, RequestPattern, RequestPatternLength, ValueLength,
 };
 #[cfg(feature = "graphql")]
 use futures_channel::mpsc::TrySendError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError, string::FromUtf8Error};
-use tokio::sync::{mpsc::error::SendError, oneshot};
+use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
 #[cfg(feature = "web")]
 use tokio_tungstenite::tungstenite;
 #[cfg(feature = "graphql")]
@@ -191,6 +191,7 @@ pub enum WorterbuchError {
     IoError(io::Error, MetaData),
     SerDeError(serde_json::Error, MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
+    ServerResponse(Err),
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -212,6 +213,9 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::IoError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::SerDeError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),
+            WorterbuchError::ServerResponse(e) => {
+                write!(f, "error {}: {}", e.error_code, e.metadata)
+            }
         }
     }
 }
@@ -251,6 +255,7 @@ pub enum ConnectionError {
     #[cfg(feature = "graphql")]
     ParseError(ParseError),
     RecvError(oneshot::error::RecvError),
+    BcRecvError(broadcast::error::RecvError),
     WorterbuchError(WorterbuchError),
     ConfigError(ConfigError),
 }
@@ -271,6 +276,7 @@ impl fmt::Display for ConnectionError {
             #[cfg(feature = "graphql")]
             Self::ParseError(e) => fmt::Display::fmt(&e, f),
             Self::RecvError(e) => fmt::Display::fmt(&e, f),
+            Self::BcRecvError(e) => fmt::Display::fmt(&e, f),
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
         }
@@ -328,6 +334,12 @@ impl<T: 'static + Send + Sync> From<TrySendError<T>> for ConnectionError {
 impl From<oneshot::error::RecvError> for ConnectionError {
     fn from(e: oneshot::error::RecvError) -> Self {
         ConnectionError::RecvError(e)
+    }
+}
+
+impl From<broadcast::error::RecvError> for ConnectionError {
+    fn from(e: broadcast::error::RecvError) -> Self {
+        ConnectionError::BcRecvError(e)
     }
 }
 
