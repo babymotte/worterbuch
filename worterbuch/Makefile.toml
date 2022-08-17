@@ -53,3 +53,10 @@ dependencies = [
   # "docker-push",
   "docker-push-arm",
 ]
+
+[tasks.sleep]
+command = "bash"
+args = ["-c", "sleep 10"]
+
+[tasks.publish]
+dependencies = ["sleep"]
