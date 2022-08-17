@@ -64,33 +64,32 @@ impl Connection {
     }
 
     pub fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Subscribe(Subscribe {
-            transaction_id: i,
-            key: key.to_owned(),
-            unique: false,
-        }))?;
-        Ok(i)
+        self.do_subscribe(key, false)
     }
+
     pub fn subscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
+        self.do_subscribe(key, true)
+    }
+
+    fn do_subscribe(&mut self, key: &str, unique: bool) -> Result<u64, ConnectionError> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
             key: key.to_owned(),
-            unique: true,
+            unique,
         }))?;
         Ok(i)
     }
 
     pub fn psubscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        self.do_subscribe(key, false)
+        self.do_psubscribe(key, false)
     }
 
     pub fn psubscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
-        self.do_subscribe(key, true)
+        self.do_psubscribe(key, true)
     }
 
-    fn do_subscribe(&mut self, key: &str, unique: bool) -> ConnectionResult<u64> {
+    fn do_psubscribe(&mut self, key: &str, unique: bool) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
@@ -174,7 +173,9 @@ impl Connection {
                                     WorterbuchError::ServerResponse(msg),
                                 ))
                             }
-                            _ => { /* ignore */ }
+                            msg => {
+                                log::warn!("received unrelated msg with pget tid {tid}: {msg:?}")
+                            }
                         }
                     }
                     // TODO time out
@@ -218,9 +219,10 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
+                                log::warn!("subscription {tid} to key {key} failed");
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
-                                ))
+                                ));
                             }
                             SM::Ack(_) => {
                                 return Ok(stream! {
@@ -235,13 +237,17 @@ impl Connection {
                                                     log::error!("Error in subscription of {owned_key}: {msg:?}");
                                                         break;
                                                 }
-                                                _ => { /* ignore */ }
+                                                msg => log::warn!(
+                                                    "received unrelated msg with subscription tid {tid}: {msg:?}"
+                                                ),
                                             }
                                         }
                                     }
                                 });
                             }
-                            _ => { /* ignore */ }
+                            msg => log::warn!(
+                                "received unrelated msg with subscription tid {tid}: {msg:?}"
+                            ),
                         }
                         break;
                     }
@@ -289,9 +295,12 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
+                                log::warn!(
+                                    "subscription {tid} to pattern {request_pattern} failed"
+                                );
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
-                                ))
+                                ));
                             }
                             SM::Ack(_) => {
                                 return Ok(stream! {
@@ -313,7 +322,9 @@ impl Connection {
                                     }
                                 });
                             }
-                            _ => { /* ignore */ }
+                            msg => log::warn!(
+                                "received unrelated msg with subscription tid {tid}: {msg:?}"
+                            ),
                         }
                         break;
                     }
