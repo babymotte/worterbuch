@@ -23,7 +23,7 @@ export default function App() {
     socket.onopen = (e) => {
       dataRef.current = new SortedMap();
       const subscrMsg = {
-        pSubscribe: { transactionId: 1, requestPattern: topic },
+        pSubscribe: { transactionId: 1, requestPattern: topic, unique: true },
       };
       const buf = encode_client_message(subscrMsg);
       socket.send(buf);
