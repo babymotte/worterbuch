@@ -27,6 +27,7 @@ pub struct Subscriber {
     pattern: Vec<String>,
     tx: UnboundedSender<KeyValuePairs>,
     id: SubscriptionId,
+    unique: bool,
 }
 
 impl Subscriber {
@@ -34,13 +35,23 @@ impl Subscriber {
         id: SubscriptionId,
         pattern: Vec<String>,
         tx: UnboundedSender<KeyValuePairs>,
+        unique: bool,
     ) -> Subscriber {
-        Subscriber { pattern, tx, id }
+        Subscriber {
+            pattern,
+            tx,
+            id,
+            unique,
+        }
     }
 
     pub fn send(&self, event: KeyValuePairs) -> Result<()> {
         self.tx.send(event)?;
         Ok(())
+    }
+
+    pub fn is_unique(&self) -> bool {
+        self.unique
     }
 }
 
@@ -193,6 +204,7 @@ mod test {
             id,
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx,
+            false,
         );
 
         subscribers.add_subscriber(&pattern, subscriber);

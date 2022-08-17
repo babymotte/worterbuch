@@ -116,6 +116,7 @@ fn encode_ws_message(cmd: CM) -> Message {
         CM::Subscribe(Subscribe {
             transaction_id,
             key,
+            unique: _unique,
         }) => SUBSCRIBE_MSG_TEMPLATE
             .replace("$i", &transaction_id.to_string())
             .replace("$key", &key)
@@ -123,6 +124,7 @@ fn encode_ws_message(cmd: CM) -> Message {
         CM::PSubscribe(PSubscribe {
             transaction_id,
             request_pattern,
+            unique: _unique,
         }) => PSUBSCRIBE_MSG_TEMPLATE
             .replace("$i", &transaction_id.to_string())
             .replace("$pattern", &request_pattern)

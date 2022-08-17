@@ -40,7 +40,8 @@ pub async fn process_incoming_message(
         Ok(Some(CM::Subscribe(msg))) => {
             let transaction_id = msg.transaction_id;
             let key = msg.key.clone();
-            if subscribe(msg, client_id, worterbuch.clone(), tx.clone()).await? {
+            let unique = msg.unique;
+            if subscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await? {
                 let subscription_id = SubscriptionId::new(client_id, transaction_id);
                 subscriptions.insert(subscription_id, key);
             }
@@ -48,7 +49,8 @@ pub async fn process_incoming_message(
         Ok(Some(CM::PSubscribe(msg))) => {
             let transaction_id = msg.transaction_id;
             let pattern = msg.request_pattern.clone();
-            if psubscribe(msg, client_id, worterbuch.clone(), tx.clone()).await? {
+            let unique = msg.unique;
+            if psubscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await? {
                 let subscription_id = SubscriptionId::new(client_id, transaction_id);
                 subscriptions.insert(subscription_id, pattern);
             }
@@ -177,18 +179,19 @@ async fn subscribe(
     client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
+    unique: bool,
 ) -> WorterbuchResult<bool> {
     let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
-    let (mut rx, subscription) = match wb.subscribe(client_id, msg.transaction_id, msg.key.clone())
-    {
-        Ok(it) => it,
-        Err(e) => {
-            handle_store_error(e, client, msg.transaction_id).await?;
-            return Ok(false);
-        }
-    };
+    let (mut rx, subscription) =
+        match wb.subscribe(client_id, msg.transaction_id, msg.key.clone(), unique) {
+            Ok(it) => it,
+            Err(e) => {
+                handle_store_error(e, client, msg.transaction_id).await?;
+                return Ok(false);
+            }
+        };
 
     let response = Ack {
         transaction_id: msg.transaction_id,
@@ -254,18 +257,23 @@ async fn psubscribe(
     client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
+    unique: bool,
 ) -> WorterbuchResult<bool> {
     let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
-    let (mut rx, subscription) =
-        match wb.psubscribe(client_id, msg.transaction_id, msg.request_pattern.clone()) {
-            Ok(rx) => rx,
-            Err(e) => {
-                handle_store_error(e, client, msg.transaction_id).await?;
-                return Ok(false);
-            }
-        };
+    let (mut rx, subscription) = match wb.psubscribe(
+        client_id,
+        msg.transaction_id,
+        msg.request_pattern.clone(),
+        unique,
+    ) {
+        Ok(rx) => rx,
+        Err(e) => {
+            handle_store_error(e, client, msg.transaction_id).await?;
+            return Ok(false);
+        }
+    };
 
     let response = Ack {
         transaction_id: msg.transaction_id,

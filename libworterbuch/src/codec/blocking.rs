@@ -3,8 +3,8 @@ use super::{
     NumKeyValuePairs, PGet, PSubscribe, Path, PathLength, RequestPattern, RequestPatternLength,
     Set, Subscribe, TransactionId, Unsubscribe, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET,
     IMP, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES,
-    PGET, PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, USUB,
-    VALUE_LENGTH_BYTES,
+    PGET, PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, UNIQUE_FLAG_BYTES,
+    USUB, VALUE_LENGTH_BYTES,
 };
 use crate::{
     codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
@@ -230,9 +230,14 @@ fn read_subscribe_message(mut data: impl Read) -> DecodeResult<Subscribe> {
     data.read_exact(&mut buf)?;
     let key = RequestPattern::from_utf8_lossy(&buf).to_string();
 
+    let mut buf = vec![0; UNIQUE_FLAG_BYTES];
+    data.read_exact(&mut buf)?;
+    let unique = buf[0] != 0;
+
     Ok(Subscribe {
         transaction_id,
         key,
+        unique,
     })
 }
 
@@ -249,9 +254,14 @@ fn read_psubscribe_message(mut data: impl Read) -> DecodeResult<PSubscribe> {
     data.read_exact(&mut buf)?;
     let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
+    let mut buf = vec![0; UNIQUE_FLAG_BYTES];
+    data.read_exact(&mut buf)?;
+    let unique = buf[0] != 0;
+
     Ok(PSubscribe {
         transaction_id,
         request_pattern,
+        unique,
     })
 }
 
@@ -368,7 +378,7 @@ mod test {
             SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
-            b't', b'u', b'r', b'e', b's',
+            b't', b'u', b'r', b'e', b's', 0b00000000,
         ];
 
         let result = read_client_message(&data[..]).unwrap();
@@ -378,7 +388,8 @@ mod test {
             CM::Subscribe(Subscribe {
                 transaction_id: 5536684732567,
                 // TODO this needs to be rejected!
-                key: "let/me/?/you/its/features".to_owned()
+                key: "let/me/?/you/its/features".to_owned(),
+                unique: false
             })
         )
     }
@@ -388,7 +399,7 @@ mod test {
             PSUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
-            b't', b'u', b'r', b'e', b's',
+            b't', b'u', b'r', b'e', b's', 0b00000001,
         ];
 
         let result = read_client_message(&data[..]).unwrap();
@@ -397,7 +408,8 @@ mod test {
             result,
             CM::PSubscribe(PSubscribe {
                 transaction_id: 5536684732567,
-                request_pattern: "let/me/?/you/its/features".to_owned()
+                request_pattern: "let/me/?/you/its/features".to_owned(),
+                unique: true
             })
         )
     }

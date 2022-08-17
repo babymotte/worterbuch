@@ -99,11 +99,20 @@ impl Worterbuch {
             return Err(WorterbuchError::IllegalWildcard(key.as_ref().to_owned()));
         }
 
-        if self.store.insert(&path, value.clone()) {
+        let (inserted, changed) = self.store.insert(&path, value.clone());
+
+        if inserted {
             self.increment_len(1);
         }
 
-        self.notify_subscribers(path, wildcard, multi_wildcard, key.as_ref(), &value);
+        self.notify_subscribers(
+            path,
+            wildcard,
+            multi_wildcard,
+            key.as_ref(),
+            &value,
+            changed,
+        );
 
         Ok(())
     }
@@ -152,6 +161,7 @@ impl Worterbuch {
         client_id: Uuid,
         transaction_id: TransactionId,
         key: String,
+        unique: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
         let path: Vec<&str> = key.split(self.config.separator).collect();
         let matches = match self.get(&key) {
@@ -165,6 +175,7 @@ impl Worterbuch {
             subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
+            unique,
         );
         self.subscribers.add_subscriber(&path, subscriber);
         if let Some((key, value)) = matches {
@@ -179,6 +190,7 @@ impl Worterbuch {
         client_id: Uuid,
         transaction_id: TransactionId,
         pattern: String,
+        unique: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
         let path: Vec<&str> = pattern.split(self.config.separator).collect();
         let matches = self.pget(&pattern)?;
@@ -188,6 +200,7 @@ impl Worterbuch {
             subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             tx.clone(),
+            unique,
         );
         self.subscribers.add_subscriber(&path, subscriber);
         tx.send(matches).expect("rx is neither closed nor dropped");
@@ -215,6 +228,8 @@ impl Worterbuch {
                 self.config.multi_wildcard.to_string(),
                 key,
                 val,
+                // TODO only pass true if the value actually changed
+                true,
             );
         }
 
@@ -277,18 +292,24 @@ impl Worterbuch {
         multi_wildcard: String,
         key: impl AsRef<str>,
         value: &str,
+        value_changed: bool,
     ) {
         let subscribers = self
             .subscribers
             .get_subscribers(&path, &wildcard, &multi_wildcard);
 
+        let filtered_subscribers: Vec<Subscriber> = subscribers
+            .into_iter()
+            .filter(|s| value_changed || !s.is_unique())
+            .collect();
+
         log::debug!(
             "Calling {} subscribers: {} = {}",
-            subscribers.len(),
+            filtered_subscribers.len(),
             key.as_ref(),
             value
         );
-        for subscriber in subscribers {
+        for subscriber in filtered_subscribers {
             if let Err(e) =
                 subscriber.send(vec![(key.as_ref().to_owned(), value.to_owned()).into()])
             {

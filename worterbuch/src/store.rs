@@ -209,7 +209,7 @@ impl Store {
         matches
     }
 
-    pub fn insert(&mut self, path: &[&str], value: String) -> bool {
+    pub fn insert(&mut self, path: &[&str], value: String) -> (bool, bool) {
         let mut current = &mut self.data;
 
         for elem in path {
@@ -219,11 +219,15 @@ impl Store {
             current = current.t.get_mut(*elem).expect("we know this exists");
         }
 
-        let inserted = current.v.is_none();
+        let (inserted, changed) = if let Some(val) = &current.v {
+            (false, val != &value)
+        } else {
+            (true, true)
+        };
 
         current.v = Some(value);
 
-        inserted
+        (inserted, changed)
     }
 
     pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, String)> {

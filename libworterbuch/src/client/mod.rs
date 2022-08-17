@@ -68,15 +68,34 @@ impl Connection {
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
             key: key.to_owned(),
+            unique: false,
+        }))?;
+        Ok(i)
+    }
+    pub fn subscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Subscribe(Subscribe {
+            transaction_id: i,
+            key: key.to_owned(),
+            unique: true,
         }))?;
         Ok(i)
     }
 
     pub fn psubscribe(&mut self, key: &str) -> ConnectionResult<u64> {
+        self.do_subscribe(key, false)
+    }
+
+    pub fn psubscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
+        self.do_subscribe(key, true)
+    }
+
+    fn do_subscribe(&mut self, key: &str, unique: bool) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
             request_pattern: key.to_owned(),
+            unique,
         }))?;
         Ok(i)
     }
@@ -169,16 +188,29 @@ impl Connection {
         &mut self,
         key: &str,
     ) -> ConnectionResult<impl Stream<Item = Value>> {
-        let mut subscr = self.responses();
+        self.do_subscribe_values(key, false).await
+    }
 
+    pub async fn subscribe_unique_values(
+        &mut self,
+        key: &str,
+    ) -> ConnectionResult<impl Stream<Item = Value>> {
+        self.do_subscribe_values(key, true).await
+    }
+
+    async fn do_subscribe_values(
+        &mut self,
+        key: &str,
+        unique: bool,
+    ) -> ConnectionResult<impl Stream<Item = Value>> {
+        let mut subscr = self.responses();
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
             key: key.to_owned(),
+            unique,
         }))?;
-
         let owned_key = key.to_owned();
-
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -218,7 +250,6 @@ impl Connection {
                 Err(e) => return Err(e.into()),
             }
         }
-
         Err(ConnectionError::WorterbuchError(
             WorterbuchError::NotSubscribed,
         ))
@@ -228,16 +259,29 @@ impl Connection {
         &mut self,
         request_pattern: &str,
     ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
-        let mut subscr = self.responses();
+        self.do_psubscribe_values(request_pattern, false).await
+    }
 
+    pub async fn psubscribe_unique_values(
+        &mut self,
+        request_pattern: &str,
+    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+        self.do_psubscribe_values(request_pattern, true).await
+    }
+
+    async fn do_psubscribe_values(
+        &mut self,
+        request_pattern: &str,
+        unique: bool,
+    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+        let mut subscr = self.responses();
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
             request_pattern: request_pattern.to_owned(),
+            unique,
         }))?;
-
         let owned_pattern = request_pattern.to_owned();
-
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -278,7 +322,6 @@ impl Connection {
                 Err(e) => return Err(e.into()),
             }
         }
-
         Err(ConnectionError::WorterbuchError(
             WorterbuchError::NotSubscribed,
         ))

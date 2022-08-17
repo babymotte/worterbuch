@@ -151,7 +151,7 @@ impl Subscription {
             .lock()
             .expect("posoned mutex")
             .insert(transaction_id, pattern.clone());
-        let rx = worterbuch.psubscribe(context.client_id, transaction_id, pattern.clone());
+        let rx = worterbuch.psubscribe(context.client_id, transaction_id, pattern.clone(), false);
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
                 yield Ok(PEvent{
@@ -195,7 +195,7 @@ impl Subscription {
             .lock()
             .expect("posoned mutex")
             .insert(transaction_id, key.clone());
-        let rx = worterbuch.subscribe(context.client_id, transaction_id, key.clone());
+        let rx = worterbuch.subscribe(context.client_id, transaction_id, key.clone(), false);
         let stream = async_stream::stream! {
             if let Ok((mut rx, _)) = rx {
                 yield Ok(Event{

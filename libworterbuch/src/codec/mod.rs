@@ -56,6 +56,7 @@ pub const NUM_KEY_VALUE_PAIRS_BYTES: usize = 4;
 pub const ERROR_CODE_BYTES: usize = 1;
 pub const METADATA_LENGTH_BYTES: usize = 4;
 pub const PATH_LENGTH_BYTES: usize = 2;
+pub const UNIQUE_FLAG_BYTES: usize = 1;
 
 impl From<&WorterbuchError> for ErrorCode {
     fn from(e: &WorterbuchError) -> Self {
@@ -196,6 +197,7 @@ pub struct Set {
 pub struct Subscribe {
     pub transaction_id: TransactionId,
     pub key: RequestPattern,
+    pub unique: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -203,6 +205,7 @@ pub struct Subscribe {
 pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
+    pub unique: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -314,6 +317,7 @@ pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(key_length.to_be_bytes());
     buf.extend(msg.key.as_bytes());
+    buf.push(if msg.unique { 1 } else { 0 });
 
     Ok(buf)
 }
@@ -326,6 +330,7 @@ pub fn encode_psubscribe_message(msg: &PSubscribe) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.transaction_id.to_be_bytes());
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(msg.request_pattern.as_bytes());
+    buf.push(if msg.unique { 1 } else { 0 });
 
     Ok(buf)
 }
@@ -549,13 +554,14 @@ mod test {
         let msg = Subscribe {
             transaction_id: 5536684732567,
             key: "let/me/?/you/its/features".to_owned(),
+            unique: true,
         };
 
         let data = vec![
             SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
-            b't', b'u', b'r', b'e', b's',
+            b't', b'u', b'r', b'e', b's', 0b00000001,
         ];
 
         assert_eq!(data, encode_subscribe_message(&msg).unwrap());
@@ -566,13 +572,14 @@ mod test {
         let msg = PSubscribe {
             transaction_id: 5536684732567,
             request_pattern: "let/me/?/you/its/features".to_owned(),
+            unique: false,
         };
 
         let data = vec![
             PSUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
-            b't', b'u', b'r', b'e', b's',
+            b't', b'u', b'r', b'e', b's', 0b00000000,
         ];
 
         assert_eq!(data, encode_psubscribe_message(&msg).unwrap());

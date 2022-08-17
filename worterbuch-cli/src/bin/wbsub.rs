@@ -23,16 +23,23 @@ async fn main() -> Result<()> {
         "wbsub",
         "Subscribe to values of Wörterbuch keys.",
         true,
-        vec![Arg::with_name("KEYS")
-            .multiple(true)
-            .help(
-                r#"Wörterbuch keys to be subscribed to in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line."#,
-            )
-            .takes_value(true)
-            .required(false)],
+        vec![
+            Arg::with_name("KEYS")
+                .multiple(true)
+                .help(
+                    r#"Wörterbuch keys to be subscribed to in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line."#,
+                )
+                .takes_value(true)
+                .required(false),
+            Arg::with_name("UNIQUE")
+                .help("Only receive unique values, i.e. skip notifications when a key is set to a value it already has.")
+                .long("unique")
+                .short('u')
+        ]
     )?;
 
     let keys = matches.get_many::<String>("KEYS");
+    let unique = matches.is_present("UNIQUE");
 
     let on_disconnect = async move {
         eprintln!("Connection to server lost.");
@@ -56,12 +63,20 @@ async fn main() -> Result<()> {
 
     if let Some(keys) = keys {
         for key in keys {
-            con.subscribe(key)?;
+            if unique {
+                con.subscribe_unique(key)?;
+            } else {
+                con.subscribe(key)?;
+            }
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
-            con.subscribe(&key)?;
+            if unique {
+                con.subscribe_unique(&key)?;
+            } else {
+                con.subscribe(&key)?;
+            }
         }
     }
 
