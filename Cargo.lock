@@ -744,7 +744,7 @@ checksum = "505e71a4706fa491e9b1b55f51b95d4037d0821ee40131190475f692b35b009b"
 
 [[package]]
 name = "libworterbuch"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-stream",
  "futures-channel",
@@ -2020,7 +2020,7 @@ checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 
 [[package]]
 name = "worterbuch"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-js"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "libworterbuch",
  "serde_json",
