@@ -1,10 +1,12 @@
 use super::{
-    ClientMessage as CM, Export, Get, Import, Key, KeyLength, MetaData, MetaDataLength,
-    NumKeyValuePairs, PGet, PSubscribe, Path, PathLength, RequestPattern, RequestPatternLength,
-    Set, Subscribe, TransactionId, Unsubscribe, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET,
-    IMP, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PATH_LENGTH_BYTES,
-    PGET, PSUB, REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, UNIQUE_FLAG_BYTES,
-    USUB, VALUE_LENGTH_BYTES,
+    ClientMessage as CM, Export, Get, Handshake, Import, Key, KeyLength, MetaData, MetaDataLength,
+    NumKeyValuePairs, NumProtocolVersions, PGet, PSubscribe, Path, PathLength, ProtocolVersion,
+    ProtocolVersionSegment, RequestPattern, RequestPatternLength, Set, Subscribe, TransactionId,
+    Unsubscribe, Value, ValueLength, ERROR_CODE_BYTES, EXP, GET, HSHK, IMP, KEY_LENGTH_BYTES,
+    METADATA_LENGTH_BYTES, MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES,
+    NUM_PROTOCOL_VERSION_BYTES, PATH_LENGTH_BYTES, PGET, PROTOCOL_VERSION_SEGMENT_BYTES, PSUB,
+    REQUEST_PATTERN_LENGTH_BYTES, SEPARATOR_BYTES, SET, SUB, TRANSACTION_ID_BYTES,
+    UNIQUE_FLAG_BYTES, USUB, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
 };
 use crate::{
     codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
@@ -20,6 +22,7 @@ pub fn read_server_message(mut data: impl Read) -> DecodeResult<SM> {
         ACK => read_ack_message(data).map(SM::Ack),
         STA => read_state_message(data).map(SM::State),
         ERR => read_err_message(data).map(SM::Err),
+        HSHK => read_handshake_message(data).map(SM::Handshake),
         _ => Err(DecodeError::UndefinedType(buf[0])),
     }
 }
@@ -73,6 +76,45 @@ fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
         transaction_id,
         request_pattern,
         key_value_pairs,
+    })
+}
+
+fn read_handshake_message(mut data: impl Read) -> DecodeResult<Handshake> {
+    let mut buf = [0; NUM_PROTOCOL_VERSION_BYTES];
+    data.read_exact(&mut buf)?;
+    let num_protocol_versions = NumProtocolVersions::from_be_bytes(buf);
+
+    let mut supported_protocol_versions = Vec::new();
+
+    for _ in 0..num_protocol_versions {
+        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+        data.read_exact(&mut buf)?;
+        let major = ProtocolVersionSegment::from_be_bytes(buf);
+
+        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+        data.read_exact(&mut buf)?;
+        let minor = ProtocolVersionSegment::from_be_bytes(buf);
+
+        supported_protocol_versions.push(ProtocolVersion { major, minor });
+    }
+
+    let mut buf = vec![0; SEPARATOR_BYTES];
+    data.read_exact(&mut buf)?;
+    let separator = buf[0] as char;
+
+    let mut buf = vec![0; WILDCARD_BYTES];
+    data.read_exact(&mut buf)?;
+    let wildcard = buf[0] as char;
+
+    let mut buf = vec![0; MULTI_WILDCARD_BYTES];
+    data.read_exact(&mut buf)?;
+    let multi_wildcard = buf[0] as char;
+
+    Ok(Handshake {
+        supported_protocol_versions,
+        separator,
+        wildcard,
+        multi_wildcard,
     })
 }
 
@@ -450,6 +492,31 @@ mod test {
                 path: "/path/to/file".to_owned(),
             })
         )
+    }
+
+    #[test]
+    fn handshake_message_is_read_correctly() {
+        let data = vec![
+            HSHK, 0b00000011, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000000,
+            0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000010,
+            b'/', b'?', b'#',
+        ];
+
+        let result = read_server_message(&data[..]).unwrap();
+
+        assert_eq!(
+            result,
+            SM::Handshake(Handshake {
+                supported_protocol_versions: vec![
+                    ProtocolVersion { major: 1, minor: 0 },
+                    ProtocolVersion { major: 1, minor: 1 },
+                    ProtocolVersion { major: 1, minor: 2 },
+                ],
+                separator: '/',
+                wildcard: '?',
+                multi_wildcard: '#',
+            })
+        );
     }
 
     #[test]

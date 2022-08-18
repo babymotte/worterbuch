@@ -65,6 +65,7 @@ async fn main() -> Result<()> {
                 SM::State(msg) => print_state(&msg, json),
                 SM::Err(msg) => print_err(&msg, json),
                 SM::Ack(_) => {}
+                SM::Handshake(hs) => eprintln!("{hs:?}"),
             }
         }
     });

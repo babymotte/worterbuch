@@ -64,6 +64,7 @@ pub enum EncodeError {
     MetaDataTooLong(usize),
     PathTooLong(usize),
     TooManyKeyValuePairs(usize),
+    TooManyProtocolVersions(usize),
     IoError(io::Error),
 }
 
@@ -105,6 +106,12 @@ impl fmt::Display for EncodeError {
             EncodeError::TooManyKeyValuePairs(len) => write!(
                 f,
                 "too many key/value pairs: {} (max {} allowed)",
+                len,
+                NumKeyValuePairs::MAX
+            ),
+            EncodeError::TooManyProtocolVersions(len) => write!(
+                f,
+                "too many supported protocol versions pairs: {} (max {} allowed)",
                 len,
                 NumKeyValuePairs::MAX
             ),

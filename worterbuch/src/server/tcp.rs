@@ -1,7 +1,10 @@
 use super::common::process_incoming_message;
 use crate::{config::Config, server::common::Subscriptions, worterbuch::Worterbuch};
 use anyhow::Result;
-use libworterbuch::error::{WorterbuchError, WorterbuchResult};
+use libworterbuch::{
+    codec::{encode_handshake_message, Handshake, ProtocolVersion},
+    error::{WorterbuchError, WorterbuchResult},
+};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
@@ -25,7 +28,7 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
     loop {
         let conn = server.accept().await?;
         log::debug!("Client connected from {}", conn.1);
-        spawn(serve(conn.0, worterbuch.clone(), conn.1));
+        spawn(serve(conn.0, worterbuch.clone(), conn.1, config.clone()));
     }
 }
 
@@ -33,12 +36,34 @@ async fn serve(
     client: TcpStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
+    config: Config,
 ) -> WorterbuchResult<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_read, mut client_write) = client.into_split();
 
     spawn(async move {
+        let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 1 }];
+        let separator = config.separator;
+        let wildcard = config.wildcard;
+        let multi_wildcard = config.multi_wildcard;
+        let handshake = Handshake {
+            supported_protocol_versions,
+            separator,
+            wildcard,
+            multi_wildcard,
+        };
+        let handshake = match encode_handshake_message(&handshake) {
+            Ok(it) => it,
+            Err(e) => {
+                log::error!("Error encoding handshake message: {e}");
+                return;
+            }
+        };
+        if let Err(e) = client_write.write_all(&handshake).await {
+            log::error!("Error sending handshake message to client: {e}");
+            return;
+        }
         while let Some(bytes) = rx.recv().await {
             if let Err(e) = client_write.write_all(&bytes).await {
                 log::error!("Error sending message to client: {e}");

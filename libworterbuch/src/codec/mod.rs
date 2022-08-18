@@ -18,12 +18,18 @@ pub type ErrorCode = u8;
 pub type MetaData = String;
 pub type PathLength = u16;
 pub type Path = String;
+pub type Separator = char;
+pub type Wildcard = char;
+pub type MultiWildcard = char;
+pub type ProtocolVersionSegment = u16;
+pub type ProtocolVersions = Vec<ProtocolVersion>;
 
 pub type RequestPatternLength = u16;
 pub type KeyLength = u16;
 pub type ValueLength = u32;
 pub type MetaDataLength = u32;
 pub type NumKeyValuePairs = u32;
+pub type NumProtocolVersions = u8;
 
 pub const GET: MessageType = 0b00000000;
 pub const SET: MessageType = 0b00000001;
@@ -38,6 +44,7 @@ pub const PSTA: MessageType = 0b10000000;
 pub const ACK: MessageType = 0b10000001;
 pub const STA: MessageType = 0b10000010;
 pub const ERR: MessageType = 0b10000011;
+pub const HSHK: MessageType = 0b10000100;
 
 pub const ILLEGAL_WILDCARD: ErrorCode = 0b00000000;
 pub const ILLEGAL_MULTI_WILDCARD: ErrorCode = 0b00000001;
@@ -57,6 +64,18 @@ pub const ERROR_CODE_BYTES: usize = 1;
 pub const METADATA_LENGTH_BYTES: usize = 4;
 pub const PATH_LENGTH_BYTES: usize = 2;
 pub const UNIQUE_FLAG_BYTES: usize = 1;
+pub const PROTOCOL_VERSION_SEGMENT_BYTES: usize = 2;
+pub const NUM_PROTOCOL_VERSION_BYTES: usize = 1;
+pub const SEPARATOR_BYTES: usize = 1;
+pub const WILDCARD_BYTES: usize = 1;
+pub const MULTI_WILDCARD_BYTES: usize = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolVersion {
+    pub major: ProtocolVersionSegment,
+    pub minor: ProtocolVersionSegment,
+}
 
 impl From<&WorterbuchError> for ErrorCode {
     fn from(e: &WorterbuchError) -> Self {
@@ -135,6 +154,7 @@ pub enum ServerMessage {
     Ack(Ack),
     State(State),
     Err(Err),
+    Handshake(Handshake),
 }
 
 impl ServerMessage {
@@ -144,6 +164,7 @@ impl ServerMessage {
             ServerMessage::Ack(msg) => msg.transaction_id,
             ServerMessage::State(msg) => msg.transaction_id,
             ServerMessage::Err(msg) => msg.transaction_id,
+            ServerMessage::Handshake(_) => 0,
         }
     }
 }
@@ -235,6 +256,15 @@ pub struct Err {
     pub transaction_id: TransactionId,
     pub error_code: ErrorCode,
     pub metadata: MetaData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Handshake {
+    pub supported_protocol_versions: ProtocolVersions,
+    pub separator: Separator,
+    pub wildcard: Wildcard,
+    pub multi_wildcard: MultiWildcard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -424,6 +454,25 @@ pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
     Ok(buf)
 }
 
+pub fn encode_handshake_message(msg: &Handshake) -> EncodeResult<Vec<u8>> {
+    let num_protocol_versions = get_num_protocol_versions(&msg.supported_protocol_versions)?;
+
+    let mut buf = vec![HSHK];
+
+    buf.extend(num_protocol_versions.to_be_bytes());
+
+    for ProtocolVersion { major, minor } in &msg.supported_protocol_versions {
+        buf.extend(major.to_be_bytes());
+        buf.extend(minor.to_be_bytes());
+    }
+
+    buf.push(msg.separator as u8);
+    buf.push(msg.wildcard as u8);
+    buf.push(msg.multi_wildcard as u8);
+
+    Ok(buf)
+}
+
 pub fn encode_unsubscribe_message(msg: &Unsubscribe) -> EncodeResult<Vec<u8>> {
     let mut buf = vec![USUB];
 
@@ -465,6 +514,15 @@ fn get_num_key_val_pairs(pairs: &KeyValuePairs) -> EncodeResult<NumKeyValuePairs
         Err(EncodeError::TooManyKeyValuePairs(length))
     } else {
         Ok(length as NumKeyValuePairs)
+    }
+}
+
+fn get_num_protocol_versions(versions: &ProtocolVersions) -> EncodeResult<NumProtocolVersions> {
+    let length = versions.len();
+    if length > NumProtocolVersions::MAX as usize {
+        Err(EncodeError::TooManyProtocolVersions(length))
+    } else {
+        Ok(length as NumProtocolVersions)
     }
 }
 
@@ -583,6 +641,28 @@ mod test {
         ];
 
         assert_eq!(data, encode_psubscribe_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn handshake_message_is_encoded_correctly() {
+        let msg = Handshake {
+            supported_protocol_versions: vec![
+                ProtocolVersion { major: 1, minor: 0 },
+                ProtocolVersion { major: 1, minor: 1 },
+                ProtocolVersion { major: 1, minor: 2 },
+            ],
+            separator: '/',
+            wildcard: '?',
+            multi_wildcard: '#',
+        };
+
+        let data = vec![
+            HSHK, 0b00000011, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000000,
+            0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000010,
+            b'/', b'?', b'#',
+        ];
+
+        assert_eq!(data, encode_handshake_message(&msg).unwrap());
     }
 
     #[test]
