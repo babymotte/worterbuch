@@ -1,5 +1,5 @@
-use libworterbuch::codec::{blocking::read_server_message, encode_message};
 use wasm_bindgen::prelude::*;
+use worterbuch_codec::{blocking::read_server_message, encode_message};
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;

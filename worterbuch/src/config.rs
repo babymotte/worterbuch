@@ -1,8 +1,8 @@
-use libworterbuch::{
-    codec::Path,
-    error::{ConfigError, ConfigIntContext, ConfigResult},
-};
 use std::{env, net::IpAddr, time::Duration};
+use worterbuch_common::{
+    error::{ConfigError, ConfigIntContext, ConfigResult},
+    Path,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {

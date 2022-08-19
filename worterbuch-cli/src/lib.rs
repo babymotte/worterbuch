@@ -1,10 +1,7 @@
 use anyhow::Result;
 use clap::{App, Arg, ArgMatches};
-use libworterbuch::{
-    client::config::Config,
-    codec::{Ack, Err, Handshake, PState, ServerMessage as SM, State},
-};
 use serde::Serialize;
+use worterbuch_client::{config::Config, Ack, Err, Handshake, PState, ServerMessage as SM, State};
 
 pub fn print_message(msg: &SM, json: bool, debug: bool) {
     match msg {

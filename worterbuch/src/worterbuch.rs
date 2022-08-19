@@ -3,10 +3,6 @@ use crate::{
     store::{Store, StoreStats},
     subscribers::{Subscriber, Subscribers, SubscriptionId},
 };
-use libworterbuch::{
-    codec::{KeyValuePair, KeyValuePairs, Path, TransactionId},
-    error::{Context, WorterbuchError, WorterbuchResult},
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
 use std::fmt::Display;
@@ -16,6 +12,10 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver},
 };
 use uuid::Uuid;
+use worterbuch_common::{
+    error::{Context, WorterbuchError, WorterbuchResult},
+    KeyValuePair, KeyValuePairs, Path, TransactionId,
+};
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {

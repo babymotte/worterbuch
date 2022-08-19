@@ -1,6 +1,6 @@
-use libworterbuch::codec::KeyValuePair;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use worterbuch_common::KeyValuePair;
 
 type Value = Option<String>;
 type Tree = HashMap<String, Node>;

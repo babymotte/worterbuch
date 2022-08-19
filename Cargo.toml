@@ -1,8 +1,17 @@
 [workspace]
-members = ["libworterbuch", "worterbuch", "worterbuch-cli", "worterbuch-js"]
+members = [
+    "worterbuch-codec",
+    "worterbuch-common",
+    "worterbuch-client",
+    "worterbuch",
+    "worterbuch-cli",
+    "worterbuch-js",
+]
 
 [patch.crates-io]
-libworterbuch = { path = "./libworterbuch" }
+worterbuch-codec = { path = "./worterbuch-codec" }
+worterbuch-common = { path = "./worterbuch-common" }
+worterbuch-client = { path = "./worterbuch-client" }
 
 [profile.release]
 lto = true

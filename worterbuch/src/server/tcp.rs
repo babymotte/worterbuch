@@ -1,10 +1,6 @@
 use super::common::process_incoming_message;
 use crate::{config::Config, server::common::Subscriptions, worterbuch::Worterbuch};
 use anyhow::Result;
-use libworterbuch::{
-    codec::{encode_handshake_message, Handshake, ProtocolVersion},
-    error::{WorterbuchError, WorterbuchResult},
-};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
@@ -16,6 +12,11 @@ use tokio::{
     },
 };
 use uuid::Uuid;
+use worterbuch_common::{
+    encode_handshake_message,
+    error::{WorterbuchError, WorterbuchResult},
+    Handshake, ProtocolVersion,
+};
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
     log::info!("Starting TCP Server …");

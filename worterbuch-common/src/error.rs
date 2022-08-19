@@ -1,127 +1,11 @@
-use crate::codec::{
-    Err, ErrorCode, Key, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs,
-    PathLength, RequestPattern, RequestPatternLength, ValueLength,
-};
-use std::{fmt, io, net::AddrParseError, num::ParseIntError, string::FromUtf8Error};
+use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
-use tokio_tungstenite::tungstenite;
-
-#[derive(Debug)]
-pub enum DecodeError {
-    UndefinedType(MessageType),
-    IoError(io::Error),
-    FromUtf8Error(FromUtf8Error),
-    UndefinedErrorCode(ErrorCode),
-    SerDeError(serde_json::Error),
-}
-
-impl std::error::Error for DecodeError {}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DecodeError::UndefinedType(mtype) => write!(f, "undefined message type: {mtype})",),
-            DecodeError::IoError(e) => e.fmt(f),
-            DecodeError::FromUtf8Error(e) => e.fmt(f),
-            DecodeError::SerDeError(e) => e.fmt(f),
-            DecodeError::UndefinedErrorCode(error_code) => {
-                write!(f, "undefined error code: {error_code})",)
-            }
-        }
-    }
-}
-
-impl From<io::Error> for DecodeError {
-    fn from(e: io::Error) -> Self {
-        DecodeError::IoError(e)
-    }
-}
-
-impl From<FromUtf8Error> for DecodeError {
-    fn from(e: FromUtf8Error) -> Self {
-        DecodeError::FromUtf8Error(e)
-    }
-}
-
-impl From<serde_json::Error> for DecodeError {
-    fn from(e: serde_json::Error) -> Self {
-        DecodeError::SerDeError(e)
-    }
-}
-
-pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
-
-#[derive(Debug)]
-pub enum EncodeError {
-    RequestPatternTooLong(usize),
-    KeyTooLong(usize),
-    ValueTooLong(usize),
-    MetaDataTooLong(usize),
-    PathTooLong(usize),
-    TooManyKeyValuePairs(usize),
-    TooManyProtocolVersions(usize),
-    IoError(io::Error),
-}
-
-impl std::error::Error for EncodeError {}
-
-impl fmt::Display for EncodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EncodeError::RequestPatternTooLong(len) => write!(
-                f,
-                "request pattern is too long : {} bytes (max {} bytes allowed)",
-                len,
-                RequestPatternLength::MAX
-            ),
-            EncodeError::KeyTooLong(len) => write!(
-                f,
-                "key is too long : {} bytes (max {} bytes allowed)",
-                len,
-                KeyLength::MAX
-            ),
-            EncodeError::ValueTooLong(len) => write!(
-                f,
-                "value is too long : {} bytes (max {} bytes allowed)",
-                len,
-                ValueLength::MAX
-            ),
-            EncodeError::MetaDataTooLong(len) => write!(
-                f,
-                "meta data is too long : {} bytes (max {} bytes allowed)",
-                len,
-                MetaDataLength::MAX
-            ),
-            EncodeError::PathTooLong(len) => write!(
-                f,
-                "path is too long : {} bytes (max {} bytes allowed)",
-                len,
-                PathLength::MAX
-            ),
-            EncodeError::TooManyKeyValuePairs(len) => write!(
-                f,
-                "too many key/value pairs: {} (max {} allowed)",
-                len,
-                NumKeyValuePairs::MAX
-            ),
-            EncodeError::TooManyProtocolVersions(len) => write!(
-                f,
-                "too many supported protocol versions pairs: {} (max {} allowed)",
-                len,
-                NumKeyValuePairs::MAX
-            ),
-            EncodeError::IoError(ioe) => ioe.fmt(f),
-        }
-    }
-}
-
-impl From<io::Error> for EncodeError {
-    fn from(e: io::Error) -> Self {
-        EncodeError::IoError(e)
-    }
-}
-
-pub type EncodeResult<T> = std::result::Result<T, EncodeError>;
+pub use worterbuch_codec::{
+    error::{DecodeError, EncodeError},
+    Err, ErrorCode, Key, MetaData, RequestPattern, ILLEGAL_MULTI_WILDCARD, ILLEGAL_WILDCARD,
+    IO_ERROR, MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
+    SERDE_ERROR,
+};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -318,3 +202,45 @@ impl From<ConfigError> for ConnectionError {
         ConnectionError::ConfigError(e)
     }
 }
+
+impl From<&WorterbuchError> for ErrorCode {
+    fn from(e: &WorterbuchError) -> Self {
+        match e {
+            WorterbuchError::IllegalWildcard(_) => ILLEGAL_WILDCARD,
+            WorterbuchError::IllegalMultiWildcard(_) => ILLEGAL_MULTI_WILDCARD,
+            WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
+                MULTI_WILDCARD_AT_ILLEGAL_POSITION
+            }
+            WorterbuchError::NoSuchValue(_) => NO_SUCH_VALUE,
+            WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
+            WorterbuchError::IoError(_, _) => IO_ERROR,
+            WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
+            WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
+        }
+    }
+}
+
+// impl TryFrom<&Err> for Option<WorterbuchError> {
+//     type Error = DecodeError;
+
+//     fn try_from(value: &Err) -> Result<Self, Self::Error> {
+//         let Err {
+//             error_code,
+//             metadata,
+//             ..
+//         } = value;
+//         match error_code {
+//             &ILLEGAL_WILDCARD => Ok(Some(WorterbuchError::IllegalWildcard(
+//                 serde_json::from_str(&metadata)?,
+//             ))),
+//             &ILLEGAL_MULTI_WILDCARD => Ok(Some(WorterbuchError::IllegalMultiWildcard(
+//                 serde_json::from_str(&metadata)?,
+//             ))),
+//             &MULTI_WILDCARD_AT_ILLEGAL_POSITION => Ok(Some(
+//                 WorterbuchError::MultiWildcardAtIllegalPosition(serde_json::from_str(&metadata)?),
+//             )),
+//             &IO_ERROR | &SERDE_ERROR | &OTHER => Ok(None),
+//             _ => Err(DecodeError::UndefinedErrorCode(*error_code)),
+//         }
+//     }
+// }

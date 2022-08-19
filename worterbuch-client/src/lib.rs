@@ -2,18 +2,17 @@ pub mod config;
 pub mod tcp;
 pub mod ws;
 
-use super::error::ConnectionResult;
-use crate::{
-    codec::{
-        ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe,
-        ServerMessage as SM, Set, Subscribe, Value,
-    },
-    error::{ConnectionError, WorterbuchError},
-};
+pub use worterbuch_common::*;
+
 use async_stream::stream;
 use futures_core::stream::Stream;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
+use worterbuch_common::{
+    error::{ConnectionError, ConnectionResult, WorterbuchError},
+    ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM,
+    Set, Subscribe, Value,
+};
 
 #[derive(Clone)]
 pub struct Connection {

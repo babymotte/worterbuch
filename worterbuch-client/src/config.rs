@@ -1,5 +1,5 @@
-use crate::error::{ConfigError, ConfigIntContext, ConfigResult};
 use std::env;
+use worterbuch_common::error::{ConfigError, ConfigIntContext, ConfigResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {

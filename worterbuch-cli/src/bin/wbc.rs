@@ -1,12 +1,4 @@
 use anyhow::Result;
-#[cfg(feature = "tcp")]
-use libworterbuch::client::tcp as wb;
-#[cfg(feature = "ws")]
-use libworterbuch::client::ws as wb;
-use libworterbuch::{
-    client::Connection,
-    codec::{ClientMessage, TransactionId},
-};
 use std::{
     collections::HashSet,
     process,
@@ -19,6 +11,11 @@ use tokio::{
     time::sleep,
 };
 use worterbuch_cli::{app, print_message};
+#[cfg(feature = "tcp")]
+use worterbuch_client::tcp as wb;
+#[cfg(feature = "ws")]
+use worterbuch_client::ws as wb;
+use worterbuch_client::{ClientMessage, Connection, TransactionId};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {

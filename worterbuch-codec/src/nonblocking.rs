@@ -363,7 +363,7 @@ async fn read_unsubscribe_message(mut data: impl AsyncRead + Unpin) -> DecodeRes
 mod test {
 
     use super::*;
-    use crate::codec::{encode_set_message, Unsubscribe, USUB};
+    use crate::{encode_set_message, Unsubscribe, USUB};
 
     #[test]
     fn get_message_is_read_correctly() {

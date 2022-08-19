@@ -553,21 +553,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "505e71a4706fa491e9b1b55f51b95d4037d0821ee40131190475f692b35b009b"
 
 [[package]]
-name = "libworterbuch"
-version = "0.14.0"
-dependencies = [
- "async-stream",
- "futures-core",
- "futures-util",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "tokio-test",
- "tokio-tungstenite 0.17.2",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1678,7 +1663,7 @@ checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 
 [[package]]
 name = "worterbuch"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1686,7 +1671,6 @@ dependencies = [
  "env_logger",
  "futures",
  "hex",
- "libworterbuch",
  "log",
  "openssl",
  "serde",
@@ -1695,28 +1679,65 @@ dependencies = [
  "tokio",
  "uuid",
  "warp",
+ "worterbuch-common",
 ]
 
 [[package]]
 name = "worterbuch-cli"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
  "dotenv",
- "libworterbuch",
  "serde",
  "serde_json",
  "tokio",
+ "worterbuch-client",
+]
+
+[[package]]
+name = "worterbuch-client"
+version = "0.15.0"
+dependencies = [
+ "async-stream",
+ "futures-core",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.17.2",
+ "worterbuch-common",
+]
+
+[[package]]
+name = "worterbuch-codec"
+version = "0.15.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
+name = "worterbuch-common"
+version = "0.15.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "tungstenite 0.17.3",
+ "worterbuch-codec",
 ]
 
 [[package]]
 name = "worterbuch-js"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
- "libworterbuch",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
  "wee_alloc",
+ "worterbuch-codec",
 ]

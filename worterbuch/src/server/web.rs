@@ -1,4 +1,5 @@
 use super::common::process_incoming_message;
+use crate::server::common::Subscriptions;
 use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -6,8 +7,12 @@ use std::net::SocketAddr;
 use std::{env, sync::Arc};
 use tokio::sync::RwLock;
 use tokio::{spawn, sync::mpsc};
+use uuid::Uuid;
 use warp::{addr::remote, ws::Message, ws::Ws};
 use warp::{Filter, Reply};
+use worterbuch_common::{
+    encode_handshake_message, error::WorterbuchError, Handshake, ProtocolVersion,
+};
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");
@@ -97,14 +102,6 @@ async fn serve_ws(
     remote_addr: Option<SocketAddr>,
     config: Config,
 ) -> Result<()> {
-    use libworterbuch::{
-        codec::{encode_handshake_message, Handshake, ProtocolVersion},
-        error::WorterbuchError,
-    };
-    use uuid::Uuid;
-
-    use crate::server::common::Subscriptions;
-
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_write, mut client_read) = websocket.split();

@@ -1,6 +1,6 @@
-pub mod client;
-pub mod codec;
 pub mod error;
+
+pub use worterbuch_codec::*;
 
 #[macro_export]
 macro_rules! topic {

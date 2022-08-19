@@ -7,20 +7,6 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug unit tests in library 'libworterbuch'",
-      "cargo": {
-        "args": ["test", "--no-run", "--lib", "--package=libworterbuch"],
-        "filter": {
-          "name": "libworterbuch",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
       "name": "Debug executable 'worterbuch'",
       "cargo": {
         "args": ["build"],

@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Arg;
-#[cfg(feature = "tcp")]
-use libworterbuch::client::tcp as wb;
-#[cfg(feature = "ws")]
-use libworterbuch::client::ws as wb;
 use std::process;
 use worterbuch_cli::{app, print_message};
+#[cfg(feature = "tcp")]
+use worterbuch_client::tcp as wb;
+#[cfg(feature = "ws")]
+use worterbuch_client::ws as wb;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {

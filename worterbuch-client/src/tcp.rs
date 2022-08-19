@@ -1,8 +1,4 @@
-use crate::{
-    client::Connection,
-    codec::{encode_message, read_server_message},
-    error::ConnectionResult,
-};
+use crate::Connection;
 use std::future::Future;
 use tokio::{
     io::AsyncWriteExt,
@@ -10,6 +6,7 @@ use tokio::{
     spawn,
     sync::{broadcast, mpsc},
 };
+use worterbuch_common::{encode_message, error::ConnectionResult, read_server_message};
 
 use super::config::Config;
 

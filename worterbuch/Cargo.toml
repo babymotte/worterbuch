@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "A message broker / database hybrid."
@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [dependencies]
-libworterbuch = { version = "0.14.0" }
+worterbuch-common = "0.15.0"
 tokio = { version = "1.19.2", features = ["full"] }
 log = "0.4.17"
 env_logger = "0.9.0"

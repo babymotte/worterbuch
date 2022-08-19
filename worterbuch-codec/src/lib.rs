@@ -1,7 +1,8 @@
 pub mod blocking;
+pub mod error;
 mod nonblocking;
 
-use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
+use crate::error::{EncodeError, EncodeResult};
 pub use nonblocking::*;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -73,48 +74,6 @@ pub const MULTI_WILDCARD_BYTES: usize = 1;
 pub struct ProtocolVersion {
     pub major: ProtocolVersionSegment,
     pub minor: ProtocolVersionSegment,
-}
-
-impl From<&WorterbuchError> for ErrorCode {
-    fn from(e: &WorterbuchError) -> Self {
-        match e {
-            WorterbuchError::IllegalWildcard(_) => ILLEGAL_WILDCARD,
-            WorterbuchError::IllegalMultiWildcard(_) => ILLEGAL_MULTI_WILDCARD,
-            WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
-                MULTI_WILDCARD_AT_ILLEGAL_POSITION
-            }
-            WorterbuchError::NoSuchValue(_) => NO_SUCH_VALUE,
-            WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
-            WorterbuchError::IoError(_, _) => IO_ERROR,
-            WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
-            WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
-        }
-    }
-}
-
-impl TryFrom<&Err> for Option<WorterbuchError> {
-    type Error = DecodeError;
-
-    fn try_from(value: &Err) -> Result<Self, Self::Error> {
-        let Err {
-            error_code,
-            metadata,
-            ..
-        } = value;
-        match error_code {
-            &ILLEGAL_WILDCARD => Ok(Some(WorterbuchError::IllegalWildcard(
-                serde_json::from_str(&metadata)?,
-            ))),
-            &ILLEGAL_MULTI_WILDCARD => Ok(Some(WorterbuchError::IllegalMultiWildcard(
-                serde_json::from_str(&metadata)?,
-            ))),
-            &MULTI_WILDCARD_AT_ILLEGAL_POSITION => Ok(Some(
-                WorterbuchError::MultiWildcardAtIllegalPosition(serde_json::from_str(&metadata)?),
-            )),
-            &IO_ERROR | &SERDE_ERROR | &OTHER => Ok(None),
-            _ => Err(DecodeError::UndefinedErrorCode(*error_code)),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

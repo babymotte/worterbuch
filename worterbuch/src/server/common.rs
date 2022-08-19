@@ -1,13 +1,4 @@
 use crate::{subscribers::SubscriptionId, worterbuch::Worterbuch};
-use libworterbuch::{
-    codec::{
-        encode_ack_message, encode_err_message, encode_pstate_message, encode_state_message,
-        read_client_message, Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, Import,
-        KeyValuePair, MetaData, PGet, PState, PSubscribe, RequestPattern, Set, State, Subscribe,
-        Unsubscribe,
-    },
-    error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
-};
 use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
@@ -17,6 +8,13 @@ use tokio::{
     sync::{mpsc::UnboundedSender, RwLock},
 };
 use uuid::Uuid;
+use worterbuch_common::{
+    encode_ack_message, encode_err_message, encode_pstate_message, encode_state_message,
+    error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
+    read_client_message, Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, Import,
+    KeyValuePair, MetaData, PGet, PState, PSubscribe, RequestPattern, Set, State, Subscribe,
+    Unsubscribe,
+};
 
 pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
 

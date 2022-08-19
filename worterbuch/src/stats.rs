@@ -1,10 +1,10 @@
 use crate::{config::Config, worterbuch::Worterbuch};
-use libworterbuch::error::WorterbuchResult;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::RwLock,
     time::{sleep, Instant},
 };
+use worterbuch_common::error::WorterbuchResult;
 
 const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 const VERSION: &str = env!("CARGO_PKG_VERSION");

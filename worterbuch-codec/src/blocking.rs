@@ -9,8 +9,8 @@ use super::{
     UNIQUE_FLAG_BYTES, USUB, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
 };
 use crate::{
-    codec::{Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
     error::{DecodeError, DecodeResult},
+    {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
 };
 use std::io::Read;
 
@@ -355,8 +355,9 @@ fn read_export_message(mut data: impl Read) -> DecodeResult<Export> {
 
 #[cfg(test)]
 mod test {
+    use crate::encode_set_message;
+
     use super::*;
-    use crate::codec::{encode_set_message, Unsubscribe, GET, SET, SUB, USUB};
 
     #[test]
     fn get_message_is_read_correctly() {
