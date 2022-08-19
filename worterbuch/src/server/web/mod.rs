@@ -28,7 +28,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");
 
     #[cfg(feature = "ws")]
-    let wb_ws = worterbuch.clone();
+    let (wb_ws, cfg_ws) = (worterbuch.clone(), config.clone());
     #[cfg(feature = "graphql")]
     let wb_gql = worterbuch.clone();
 
@@ -47,8 +47,16 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
         warp::ws().and(warp::path(ws_path)).and(remote()).map(
             move |ws: Ws, remote: Option<SocketAddr>| {
                 let worterbuch = wb_ws.clone();
+                let config = cfg_ws.clone();
                 ws.on_upgrade(move |websocket| async move {
-                    if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
+                    if let Err(e) = serve_ws(
+                        websocket,
+                        worterbuch.clone(),
+                        remote.clone(),
+                        config.clone(),
+                    )
+                    .await
+                    {
                         log::error!("Error in WS connection: {e}");
                     }
                 })
@@ -164,8 +172,12 @@ async fn serve_ws(
     websocket: warp::ws::WebSocket,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: Option<SocketAddr>,
+    config: Config,
 ) -> Result<()> {
-    use libworterbuch::error::WorterbuchError;
+    use libworterbuch::{
+        codec::{encode_handshake_message, Handshake, ProtocolVersion},
+        error::WorterbuchError,
+    };
     use uuid::Uuid;
 
     use crate::server::common::Subscriptions;
@@ -175,6 +187,28 @@ async fn serve_ws(
     let (mut client_write, mut client_read) = websocket.split();
 
     spawn(async move {
+        let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 1 }];
+        let separator = config.separator;
+        let wildcard = config.wildcard;
+        let multi_wildcard = config.multi_wildcard;
+        let handshake = Handshake {
+            supported_protocol_versions,
+            separator,
+            wildcard,
+            multi_wildcard,
+        };
+        let handshake = match encode_handshake_message(&handshake) {
+            Ok(it) => it,
+            Err(e) => {
+                log::error!("Error encoding handshake message: {e}");
+                return;
+            }
+        };
+        let msg = Message::binary(handshake);
+        if let Err(e) = client_write.send(msg).await {
+            log::error!("Error sending handshake message to client: {e}");
+            return;
+        }
         while let Some(bytes) = rx.recv().await {
             let msg = Message::binary(bytes);
             if let Err(e) = client_write.send(msg).await {
