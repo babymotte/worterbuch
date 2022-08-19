@@ -1,10 +1,3 @@
-[tasks.test-features]
-dependencies = ["test"]
-
-[tasks.docker]
-
-[tasks.install]
-
 [tasks.build]
 command = "wasm-pack"
 args = ["build", "--target", "web"]

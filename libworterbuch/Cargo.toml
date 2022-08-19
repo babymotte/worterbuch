@@ -10,14 +10,6 @@ license = "MIT"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
-[features]
-default = []
-tcp = ["tokio/net"]
-ws = ["web"]
-graphql = ["web", "futures-channel", "url"]
-web = ["futures-util", "tokio-tungstenite"]
-blocking = []
-
 [dependencies]
 log = "0.4.17"
 tokio = { version = "1.20.1", features = ["sync", "rt", "io-util"] }
@@ -25,14 +17,11 @@ serde = { version = "1.0.140", features = ["derive"] }
 serde_json = "1.0.82"
 async-stream = "0.3.3"
 futures-core = "0.3.23"
-
 futures-util = { version = "0.3.21", default-features = false, features = [
     "sink",
     "std",
-], optional = true }
-futures-channel = { version = "0.3.21", optional = true }
-tokio-tungstenite = { version = "0.17.2", optional = true }
-url = { version = "2.2.2", optional = true }
+] }
+tokio-tungstenite = { version = "0.17.2" }
 
 [dev-dependencies]
 tokio-test = "0.4.2"

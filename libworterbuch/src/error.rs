@@ -2,14 +2,9 @@ use crate::codec::{
     Err, ErrorCode, Key, KeyLength, MessageType, MetaData, MetaDataLength, NumKeyValuePairs,
     PathLength, RequestPattern, RequestPatternLength, ValueLength,
 };
-#[cfg(feature = "graphql")]
-use futures_channel::mpsc::TrySendError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError, string::FromUtf8Error};
 use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
-#[cfg(feature = "web")]
 use tokio_tungstenite::tungstenite;
-#[cfg(feature = "graphql")]
-use url::ParseError;
 
 #[derive(Debug)]
 pub enum DecodeError {
@@ -254,13 +249,8 @@ pub enum ConnectionError {
     IoError(io::Error),
     EncodeError(EncodeError),
     SendError(Box<dyn std::error::Error + Send + Sync>),
-    #[cfg(feature = "web")]
     WebsocketError(tungstenite::Error),
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
-    #[cfg(feature = "graphql")]
-    JsonError(serde_json::Error),
-    #[cfg(feature = "graphql")]
-    ParseError(ParseError),
     RecvError(oneshot::error::RecvError),
     BcRecvError(broadcast::error::RecvError),
     WorterbuchError(WorterbuchError),
@@ -275,13 +265,8 @@ impl fmt::Display for ConnectionError {
             Self::IoError(e) => fmt::Display::fmt(&e, f),
             Self::EncodeError(e) => fmt::Display::fmt(&e, f),
             Self::SendError(e) => fmt::Display::fmt(&e, f),
-            #[cfg(feature = "graphql")]
-            Self::JsonError(e) => fmt::Display::fmt(&e, f),
-            #[cfg(feature = "web")]
             Self::WebsocketError(e) => fmt::Display::fmt(&e, f),
             Self::TrySendError(e) => fmt::Display::fmt(&e, f),
-            #[cfg(feature = "graphql")]
-            Self::ParseError(e) => fmt::Display::fmt(&e, f),
             Self::RecvError(e) => fmt::Display::fmt(&e, f),
             Self::BcRecvError(e) => fmt::Display::fmt(&e, f),
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
@@ -310,31 +295,9 @@ impl<T: fmt::Debug + 'static + Send + Sync> From<SendError<T>> for ConnectionErr
     }
 }
 
-#[cfg(feature = "web")]
 impl From<tungstenite::Error> for ConnectionError {
     fn from(e: tungstenite::Error) -> Self {
         ConnectionError::WebsocketError(e)
-    }
-}
-
-#[cfg(feature = "graphql")]
-impl From<ParseError> for ConnectionError {
-    fn from(e: ParseError) -> Self {
-        ConnectionError::ParseError(e)
-    }
-}
-
-#[cfg(feature = "graphql")]
-impl From<serde_json::Error> for ConnectionError {
-    fn from(e: serde_json::Error) -> Self {
-        ConnectionError::JsonError(e)
-    }
-}
-
-#[cfg(feature = "graphql")]
-impl<T: 'static + Send + Sync> From<TrySendError<T>> for ConnectionError {
-    fn from(e: TrySendError<T>) -> Self {
-        ConnectionError::TrySendError(Box::new(e))
     }
 }
 

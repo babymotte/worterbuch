@@ -12,12 +12,11 @@ categories = ["database", "command-line-utilities"]
 
 [features]
 default = ["tcp"]
-tcp = ["libworterbuch/tcp"]
-ws = ["libworterbuch/ws"]
-graphql = ["libworterbuch/graphql"]
+tcp = []
+ws = []
 
 [dependencies]
-libworterbuch = { version = "0.13.0" }
+libworterbuch = { version = "0.13.1" }
 tokio = { version = "1.19.2", features = ["rt", "macros", "io-std", "time"] }
 dotenv = "0.15.0"
 anyhow = "1.0.57"

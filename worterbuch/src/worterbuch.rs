@@ -278,13 +278,6 @@ impl Worterbuch {
         }
     }
 
-    #[cfg(not(feature = "docker"))]
-    pub fn stats(&self) -> Stats {
-        Stats {
-            store_stats: self.store.stats(),
-        }
-    }
-
     fn notify_subscribers(
         &mut self,
         path: Vec<&str>,

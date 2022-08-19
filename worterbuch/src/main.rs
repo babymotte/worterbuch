@@ -1,40 +1,43 @@
 mod config;
 mod persistence;
-#[cfg(not(feature = "docker"))]
-mod repl;
 mod server;
 mod stats;
 mod store;
 mod subscribers;
 mod worterbuch;
 
-#[cfg(not(feature = "docker"))]
-use crate::repl::repl;
 use crate::{config::Config, stats::track_stats, worterbuch::Worterbuch};
 use anyhow::Result;
 use clap::App;
 use std::sync::Arc;
-#[cfg(feature = "docker")]
+use tokio::runtime::{self, Runtime};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{spawn, sync::RwLock};
 
-#[cfg(not(feature = "multithreaded"))]
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
-    run("Starting Wörterbuch in single-threaded mode …").await
+
+    let config = Config::new()?;
+
+    let single_threaded = config.single_threaded;
+
+    let rt = if single_threaded {
+        log::info!("Starting Wörterbuch in single-threaded mode …");
+        runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+    } else {
+        log::info!("Starting Wörterbuch in multi-threaded mode …");
+        Runtime::new()?
+    };
+
+    rt.block_on(run())?;
+
+    Ok(())
 }
 
-#[cfg(feature = "multithreaded")]
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-    env_logger::init();
-    run("Starting Wörterbuch in multi-threaded mode …").await
-}
-
-async fn run(msg: &str) -> Result<()> {
+async fn run() -> Result<()> {
     let config = Config::new()?;
     let config_pers = config.clone();
 
@@ -44,7 +47,6 @@ async fn run(msg: &str) -> Result<()> {
         .about("An in-memory data base / message broker hybrid")
         .get_matches();
 
-    log::info!("{msg}");
     log::debug!("Separator: {}", config.separator);
     log::debug!("Wildcard: {}", config.wildcard);
     log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
@@ -67,22 +69,12 @@ async fn run(msg: &str) -> Result<()> {
 
     spawn(track_stats(worterbuch_uptime, config.clone()));
 
-    #[cfg(feature = "tcp")]
     spawn(server::tcp::start(worterbuch.clone(), config.clone()));
 
-    #[cfg(feature = "web")]
     spawn(server::web::start(worterbuch.clone(), config.clone()));
 
-    #[cfg(feature = "docker")]
-    {
-        let mut signal = signal(SignalKind::terminate())?;
-        signal.recv().await;
-    }
-
-    #[cfg(not(feature = "docker"))]
-    {
-        repl(worterbuch.clone()).await;
-    }
+    let mut signal = signal(SignalKind::terminate())?;
+    signal.recv().await;
 
     if use_persistence {
         persistence::once(worterbuch.clone(), config.clone()).await?;

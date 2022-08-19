@@ -1,9 +1,9 @@
 FROM messense/rust-musl-cross:x86_64-musl AS worterbuch-builder
 WORKDIR /src/worterbuch
 COPY . .
-RUN cargo test -p libworterbuch --release --all-features
-RUN cargo test -p worterbuch --release --features docker,tcp,ws,graphql,explorer
-RUN cargo build -p worterbuch --release --features docker,tcp,ws,graphql,explorer
+RUN cargo test -p libworterbuch --release
+RUN cargo test -p worterbuch --release
+RUN cargo build -p worterbuch --release
 
 FROM node:18.7 AS worterbuch-explorer-builder
 WORKDIR /src/worterbuch-explorer
@@ -22,5 +22,7 @@ ENV WORTERBUCH_DATA_DIR=/data
 ENV WORTERBUCH_PERSISTENCE_INTERVAL=5
 ENV WORTERBUCH_EXPLORER_WEBROOT_PATH=/app/html
 ENV WORTERBUCH_WEB_PORT=80
+ENV WORTERBUCH_SINGLE_THREADED=false
+ENV WORTERBUCH_EXPLORER=true
 VOLUME [ "/data" ]
 CMD ["./worterbuch"]

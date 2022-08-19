@@ -1,33 +1,25 @@
-#[cfg(feature = "server")]
-use std::net::IpAddr;
-use std::{env, net::IpAddr, time::Duration};
-
 use libworterbuch::{
     codec::Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
 };
+use std::{env, net::IpAddr, time::Duration};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub separator: char,
     pub wildcard: char,
     pub multi_wildcard: char,
-    #[cfg(feature = "tcp")]
     pub tcp_port: u16,
-    #[cfg(feature = "graphql")]
-    pub graphql_port: u16,
-    #[cfg(feature = "web")]
     pub web_port: u16,
-    #[cfg(feature = "web")]
     pub proto: String,
     pub bind_addr: IpAddr,
-    #[cfg(feature = "web")]
     pub cert_path: Option<String>,
-    #[cfg(feature = "web")]
     pub key_path: Option<String>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub data_dir: Path,
+    pub single_threaded: bool,
+    pub explorer: bool,
 }
 
 impl Config {
@@ -44,24 +36,16 @@ impl Config {
             self.multi_wildcard = to_multi_wildcard(val)?;
         }
 
-        #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_PROTO") {
             self.proto = val;
         }
 
-        #[cfg(feature = "web")]
         if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
             self.web_port = val.parse().as_port()?;
         }
 
-        #[cfg(feature = "tcp")]
         if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
             self.tcp_port = val.parse().as_port()?;
-        }
-
-        #[cfg(feature = "graphql")]
-        if let Ok(val) = env::var("WORTERBUCH_GRAPHQL_PORT") {
-            self.graphql_port = val.parse().as_port()?;
         }
 
         if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
@@ -81,6 +65,14 @@ impl Config {
             self.data_dir = val;
         }
 
+        if let Ok(val) = env::var("WORTERBUCH_SINGLE_THREADED") {
+            self.single_threaded = val.to_lowercase() == "true";
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_EXPLORER") {
+            self.explorer = val.to_lowercase() == "true";
+        }
+
         Ok(())
     }
 
@@ -97,22 +89,17 @@ impl Default for Config {
             separator: '/',
             wildcard: '?',
             multi_wildcard: '#',
-            #[cfg(feature = "tcp")]
             tcp_port: 4242,
-            #[cfg(feature = "graphql")]
-            graphql_port: 4243,
-            #[cfg(feature = "web")]
             web_port: 8080,
-            #[cfg(feature = "web")]
             proto: "ws".to_owned(),
             bind_addr: [127, 0, 0, 1].into(),
-            #[cfg(feature = "web")]
             cert_path: None,
-            #[cfg(feature = "web")]
             key_path: None,
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
+            single_threaded: false,
+            explorer: true,
         }
     }
 }

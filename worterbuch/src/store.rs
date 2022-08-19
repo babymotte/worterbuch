@@ -238,13 +238,6 @@ impl Store {
         insertions
     }
 
-    #[cfg(not(feature = "docker"))]
-    pub fn stats(&self) -> StoreStats {
-        let num_entries = self.count_entries();
-
-        StoreStats { num_entries }
-    }
-
     pub fn count_entries(&self) -> usize {
         count_children(&self.data)
     }

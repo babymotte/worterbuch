@@ -1,14 +1,10 @@
-mod nonblocking;
-use std::fmt;
-
-pub use nonblocking::*;
-#[cfg(feature = "blocking")]
 pub mod blocking;
+mod nonblocking;
 
 use crate::error::{DecodeError, EncodeError, EncodeResult, WorterbuchError};
+pub use nonblocking::*;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::wasm_bindgen;
+use std::fmt;
 
 pub type MessageType = u8;
 pub type TransactionId = u64;
@@ -584,18 +580,6 @@ fn get_path_length(string: &str) -> EncodeResult<PathLength> {
         Err(EncodeError::PathTooLong(length))
     } else {
         Ok(length as PathLength)
-    }
-}
-
-#[cfg(feature = "wasm")]
-pub mod wasm {
-    use super::*;
-    use wasm_bindgen::JsValue;
-
-    #[wasm_bindgen]
-    pub fn encode_message(msg: &JsValue) -> Result<Vec<u8>, String> {
-        let cm = msg.into_serde().map_err(|e| e.to_string())?;
-        super::encode_message(&cm).map_err(|e| e.to_string())
     }
 }
 

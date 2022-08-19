@@ -1,6 +1,4 @@
 use anyhow::Result;
-#[cfg(feature = "graphql")]
-use libworterbuch::client::gql as wb;
 #[cfg(feature = "tcp")]
 use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]

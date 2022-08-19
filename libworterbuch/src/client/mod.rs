@@ -1,9 +1,5 @@
 pub mod config;
-#[cfg(feature = "graphql")]
-pub mod gql;
-#[cfg(feature = "tcp")]
 pub mod tcp;
-#[cfg(feature = "ws")]
 pub mod ws;
 
 use super::error::ConnectionResult;
