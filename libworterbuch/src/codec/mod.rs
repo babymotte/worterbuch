@@ -1,4 +1,6 @@
 mod nonblocking;
+use std::fmt;
+
 pub use nonblocking::*;
 #[cfg(feature = "blocking")]
 pub mod blocking;
@@ -237,10 +239,28 @@ pub struct PState {
     pub key_value_pairs: KeyValuePairs,
 }
 
+impl fmt::Display for PState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kvps: Vec<String> = self
+            .key_value_pairs
+            .iter()
+            .map(|&KeyValuePair { ref key, ref value }| format!("{key}={value}"))
+            .collect();
+        let joined = kvps.join("\n");
+        write!(f, "{joined}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Ack {
     pub transaction_id: TransactionId,
+}
+
+impl fmt::Display for Ack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ack {}", self.transaction_id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -248,6 +268,13 @@ pub struct Ack {
 pub struct State {
     pub transaction_id: TransactionId,
     pub key_value: KeyValuePair,
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let KeyValuePair { key, value } = &self.key_value;
+        write!(f, "{key}={value}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -258,6 +285,12 @@ pub struct Err {
     pub metadata: MetaData,
 }
 
+impl fmt::Display for Err {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "server error {}: {}", self.error_code, self.metadata)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Handshake {
@@ -265,6 +298,16 @@ pub struct Handshake {
     pub separator: Separator,
     pub wildcard: Wildcard,
     pub multi_wildcard: MultiWildcard,
+}
+
+impl fmt::Display for Handshake {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "handshake: separator: '{}', wildcard: '{}', multi-wildcard: '{}', supported protocol versions: {}",
+            self.separator, self.wildcard, self.multi_wildcard, self.supported_protocol_versions.iter().map(|v| format!("{}.{}",v.major,v.minor)).collect::<Vec<String>>().join(", ")
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
