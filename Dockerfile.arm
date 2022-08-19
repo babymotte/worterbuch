@@ -1,13 +1,12 @@
 FROM messense/rust-musl-cross:armv7-musleabihf AS worterbuch-builder-arm
 WORKDIR /src/worterbuch
 COPY . .
-RUN cargo test -p libworterbuch --release
-RUN cargo test -p worterbuch --release
 RUN cargo build -p worterbuch --release
 
-FROM node:18.7 AS worterbuch-explorer-builder
+FROM node AS worterbuch-explorer-builder
 WORKDIR /src/worterbuch-explorer
 COPY worterbuch-explorer .
+COPY --from=worterbuch-builder /src/worterbuch/worterbuch-js/pkg /src/worterbuch-js/pkg
 RUN npm i
 RUN npm run build
 
@@ -22,7 +21,7 @@ ENV WORTERBUCH_DATA_DIR=/data
 ENV WORTERBUCH_PERSISTENCE_INTERVAL=5
 ENV WORTERBUCH_EXPLORER_WEBROOT_PATH=/app/html
 ENV WORTERBUCH_WEB_PORT=80
-ENV WORTERBUCH_SINGLE_THREADED=false
+ENV WORTERBUCH_SINGLE_THREADED=true
 ENV WORTERBUCH_EXPLORER=true
 VOLUME [ "/data" ]
 CMD ["./worterbuch"]

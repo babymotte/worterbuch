@@ -1,13 +1,12 @@
 FROM messense/rust-musl-cross:x86_64-musl AS worterbuch-builder
 WORKDIR /src/worterbuch
 COPY . .
-RUN cargo test -p libworterbuch --release
-RUN cargo test -p worterbuch --release
 RUN cargo build -p worterbuch --release
 
-FROM node:18.7 AS worterbuch-explorer-builder
+FROM node AS worterbuch-explorer-builder
 WORKDIR /src/worterbuch-explorer
 COPY worterbuch-explorer .
+COPY --from=worterbuch-builder /src/worterbuch/worterbuch-js/pkg /src/worterbuch-js/pkg
 RUN npm i
 RUN npm run build
 
