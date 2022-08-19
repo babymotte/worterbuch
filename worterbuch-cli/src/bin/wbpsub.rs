@@ -6,23 +6,21 @@ use libworterbuch::client::gql as wb;
 use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]
 use libworterbuch::client::ws as wb;
-use libworterbuch::codec::ServerMessage as SM;
 use std::{process, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_err, print_pstate, print_state};
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (matches, proto, host_addr, port, json) = app(
+    let (matches, proto, host_addr, port, json, debug) = app(
         "wbpsub",
         "Subscribe to values matching Wörterbuch patterns.",
-        true,
         vec![
             Arg::with_name("PATTERNS")
                 .multiple(true)
@@ -52,12 +50,7 @@ async fn main() -> Result<()> {
 
     spawn(async move {
         while let Ok(msg) = responses.recv().await {
-            match msg {
-                SM::PState(msg) => print_pstate(&msg, json),
-                SM::State(msg) => print_state(&msg, json),
-                SM::Err(msg) => print_err(&msg, json),
-                SM::Ack(_) | SM::Handshake(_) => {}
-            }
+            print_message(&msg, json, debug);
         }
     });
 

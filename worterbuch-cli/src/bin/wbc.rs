@@ -20,22 +20,17 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::app;
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (_, proto, host_addr, port, json) = app(
+    let (_matches, proto, host_addr, port, json, debug) = app(
         "wbc",
         "General purpose Wörterbuch command line client.",
-        true,
         vec![],
     )?;
-
-    if !json {
-        panic!("only json is implemented for now");
-    }
 
     let on_disconnect = async move {
         eprintln!("Connection to server lost.");
@@ -56,7 +51,7 @@ async fn main() -> Result<()> {
                 .lock()
                 .expect("mutex is poisoned")
                 .insert(msg.transaction_id());
-            println!("{}", serde_json::to_string(&msg).expect("cannot fail"));
+            print_message(&msg, json, debug);
         }
     });
 
@@ -98,8 +93,116 @@ fn process_line(
             Err(e) => eprintln!("Not a valid json representation of a client message: {e}"),
         }
     } else {
-        todo!()
+        let mut split = line.split(" ");
+        let cmd = split.next();
+        let tail = split.collect::<Vec<&str>>().join(" ");
+        match cmd {
+            Some("get") => get(&tail, con)?,
+            Some("pget") => pget(&tail, con)?,
+            Some("set") => set(&tail, con)?,
+            Some("sub") => sub(&tail, con)?,
+            Some("psub") => psub(&tail, con)?,
+            Some("subu") => subu(&tail, con)?,
+            Some("psubu") => psubu(&tail, con)?,
+            Some("imp") => imp(&tail, con)?,
+            Some("exp") => exp(&tail, con)?,
+            Some("") => {}
+            Some(other) => eprintln!("unknown command: {other}"),
+            None => {}
+        }
     }
 
+    Ok(())
+}
+
+fn get<'f>(key: &str, con: &mut Connection) -> Result<()> {
+    if key.is_empty() {
+        eprintln!("no key specified");
+    } else {
+        con.get(key)?;
+    }
+    Ok(())
+}
+
+fn pget<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+    if pattern.is_empty() {
+        eprintln!("no key specified");
+    } else {
+        con.pget(pattern)?;
+    }
+    Ok(())
+}
+
+fn set<'f>(key_value: &str, con: &mut Connection) -> Result<()> {
+    let mut split = key_value.split("=");
+    let key = match split.next() {
+        Some(it) => it,
+        None => {
+            eprintln!("no key specified");
+            return Ok(());
+        }
+    };
+    let value = match split.next() {
+        Some(it) => it,
+        None => {
+            eprintln!("no value specified");
+            return Ok(());
+        }
+    };
+    con.set(key, value)?;
+    Ok(())
+}
+
+fn sub<'f>(key: &str, con: &mut Connection) -> Result<()> {
+    if key.is_empty() {
+        eprintln!("no key specified");
+    } else {
+        con.subscribe(key)?;
+    }
+    Ok(())
+}
+
+fn psub<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+    if pattern.is_empty() {
+        eprintln!("no pattern specified");
+    } else {
+        con.psubscribe(pattern)?;
+    }
+    Ok(())
+}
+
+fn subu<'f>(key: &str, con: &mut Connection) -> Result<()> {
+    if key.is_empty() {
+        eprintln!("no key specified");
+    } else {
+        con.subscribe_unique(key)?;
+    }
+    Ok(())
+}
+
+fn psubu<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+    if pattern.is_empty() {
+        eprintln!("no pattern specified");
+    } else {
+        con.psubscribe_unique(pattern)?;
+    }
+    Ok(())
+}
+
+fn imp<'f>(path: &str, con: &mut Connection) -> Result<()> {
+    if path.is_empty() {
+        eprintln!("no path specified");
+    } else {
+        con.import(path)?;
+    }
+    Ok(())
+}
+
+fn exp<'f>(path: &str, con: &mut Connection) -> Result<()> {
+    if path.is_empty() {
+        eprintln!("no path specified");
+    } else {
+        con.export(path)?;
+    }
     Ok(())
 }

@@ -6,7 +6,6 @@ use libworterbuch::client::gql as wb;
 use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]
 use libworterbuch::client::ws as wb;
-use libworterbuch::codec::ServerMessage as SM;
 use std::{
     process,
     sync::{Arc, Mutex},
@@ -17,16 +16,15 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_err, print_pstate, print_state};
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (matches, proto, host_addr, port, json) = app(
+    let (matches, proto, host_addr, port, json, debug) = app(
         "wbget",
         "Get values for keys from a Wörterbuch.",
-        true,
         vec![Arg::with_name("KEYS")
             .multiple(true)
             .help(
@@ -60,13 +58,7 @@ async fn main() -> Result<()> {
                     *acked = tid;
                 }
             }
-            match msg {
-                SM::PState(msg) => print_pstate(&msg, json),
-                SM::State(msg) => print_state(&msg, json),
-                SM::Err(msg) => print_err(&msg, json),
-                SM::Ack(_) => {}
-                SM::Handshake(hs) => eprintln!("{hs:?}"),
-            }
+            print_message(&msg, json, debug);
         }
     });
 

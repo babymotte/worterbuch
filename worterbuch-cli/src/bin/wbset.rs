@@ -17,16 +17,15 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::app;
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (matches, proto, host_addr, port, _json) = app(
+    let (matches, proto, host_addr, port, json, debug) = app(
         "wbset",
         "Set values of keys on a Wörterbuch.",
-        false,
         vec![
             Arg::with_name("JSON")
                 .short('j')
@@ -45,7 +44,6 @@ async fn main() -> Result<()> {
     )?;
 
     let key_value_pairs = matches.get_many::<String>("KEY_VALUE_PAIRS");
-    let json = matches.is_present("JSON");
 
     let on_disconnect = async move {
         eprintln!("Connection to server lost.");
@@ -67,6 +65,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
+            print_message(&msg, json, debug);
         }
     });
 

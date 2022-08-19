@@ -7,16 +7,15 @@ use libworterbuch::client::tcp as wb;
 #[cfg(feature = "ws")]
 use libworterbuch::client::ws as wb;
 use std::process;
-use worterbuch_cli::app;
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (matches, proto, host_addr, port, _json) = app(
+    let (matches, proto, host_addr, port, json, debug) = app(
         "wbexp",
         "Export key/value pairs from Wörterbuch to a JSON file.",
-        false,
         vec![Arg::with_name("PATH")
             .multiple(false)
             .help(
@@ -37,7 +36,13 @@ async fn main() -> Result<()> {
 
     let mut responses = con.responses();
     con.export(path)?;
-    responses.recv().await?;
+    while let Ok(msg) = responses.recv().await {
+        print_message(&msg, json, debug);
+        let tid = msg.transaction_id();
+        if tid == 1 {
+            break;
+        }
+    }
 
     Ok(())
 }

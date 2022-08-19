@@ -16,16 +16,15 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::app;
+use worterbuch_cli::{app, print_message};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (matches, proto, host_addr, port, _json) = app(
+    let (matches, proto, host_addr, port, json, debug) = app(
         "wbsend",
         "Send a stream of values to a single Wörterbuch key. Values are read from stdin, one value is expected per line.",
-        false,
         vec![Arg::with_name("KEY")
             .multiple(false)
             .help("Wörterbuch key to send values to.")
@@ -55,6 +54,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
+            print_message(&msg, json, debug);
         }
     });
 
