@@ -2,23 +2,20 @@ name: Rust Test
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-    - uses: davidB/rust-cargo-make@v1
-    - uses: actions/checkout@v3
-    - name: Run tests
-      run: cargo make test-features
-    
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: davidB/rust-cargo-make@v1
+      - uses: actions/checkout@v3
+      - name: Run tests
+        run: cargo make test

@@ -40,7 +40,7 @@ jobs:
       - name: Package Binaries
         uses: vimtor/action-zip@v1
         with:
-          files: target/release/worterbuch${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsub${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbimp${{ matrix.ext }} target/release/wbexp${{ matrix.ext }} target/release/wbsend${{ matrix.ext }}
+          files: target/release/worterbuch${{ matrix.ext }} target/release/wbc${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsub${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbimp${{ matrix.ext }} target/release/wbexp${{ matrix.ext }} target/release/wbsend${{ matrix.ext }}
           dest: worterbuch-${{ matrix.target }}.zip
 
       - name: Release
