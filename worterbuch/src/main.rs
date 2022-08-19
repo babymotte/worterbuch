@@ -65,7 +65,7 @@ async fn run(msg: &str) -> Result<()> {
         spawn(persistence::periodic(worterbuch_pers, config_pers));
     }
 
-    spawn(track_stats(worterbuch_uptime));
+    spawn(track_stats(worterbuch_uptime, config.clone()));
 
     #[cfg(feature = "tcp")]
     spawn(server::tcp::start(worterbuch.clone(), config.clone()));
