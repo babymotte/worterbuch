@@ -1,3 +1,4 @@
+use super::config::Config;
 use crate::Connection;
 use std::future::Future;
 use tokio::{
@@ -6,9 +7,9 @@ use tokio::{
     spawn,
     sync::{broadcast, mpsc},
 };
-use worterbuch_common::{encode_message, error::ConnectionResult, read_server_message};
-
-use super::config::Config;
+use worterbuch_common::{
+    encode_message, error::ConnectionResult, nonblocking::read_server_message,
+};
 
 pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
     on_disconnect: F,

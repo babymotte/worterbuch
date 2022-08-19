@@ -3,7 +3,9 @@ use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
 use tokio::{spawn, sync::broadcast, sync::mpsc};
 use tokio_tungstenite::{connect_async, tungstenite};
-use worterbuch_common::{encode_message, error::ConnectionResult, read_server_message};
+use worterbuch_common::{
+    encode_message, error::ConnectionResult, nonblocking::read_server_message,
+};
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     proto: &str,
