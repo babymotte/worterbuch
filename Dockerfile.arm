@@ -1,7 +1,10 @@
 FROM messense/rust-musl-cross:armv7-musleabihf AS worterbuch-builder-arm
+RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh 
 WORKDIR /src/worterbuch
 COPY . .
 RUN cargo build -p worterbuch --release
+WORKDIR /src/worterbuch/worterbuch-js
+RUN wasm-pack build --target web
 
 FROM node AS worterbuch-explorer-builder
 WORKDIR /src/worterbuch-explorer
