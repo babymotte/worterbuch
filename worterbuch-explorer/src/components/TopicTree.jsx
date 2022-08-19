@@ -5,8 +5,10 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TreeItem from "@mui/lab/TreeItem";
 import { Typography } from "@mui/material";
 
-export default function TopicTree({ data }) {
-  const treeItems = toTreeItems(data);
+export default function TopicTree({ data, separator }) {
+  console.log("separator", separator);
+
+  const treeItems = toTreeItems(data, separator);
 
   return (
     <TreeView
@@ -25,21 +27,31 @@ export default function TopicTree({ data }) {
   );
 }
 
-function toTreeItems(data, path) {
+function toTreeItems(data, separator, path) {
   let items = [];
 
   data.forEach((child, id) => {
-    const item = toTreeItem(path ? `${path}/${id}` : id, child, id);
+    const item = toTreeItem(
+      path ? `${path}${separator}${id}` : id,
+      child,
+      id,
+      separator
+    );
     items.push(item);
   });
 
   return <>{items}</>;
 }
 
-function toTreeItem(path, item, id) {
+function toTreeItem(path, item, id, separator) {
   if (!item.value && item.children && item.children.size === 1) {
     const [childId, child] = item.children.entries().next().value;
-    return toTreeItem(`${path}/${childId}`, child, `${id}/${childId}`);
+    return toTreeItem(
+      `${path}${separator}${childId}`,
+      child,
+      `${id}${separator}${childId}`,
+      separator
+    );
   } else {
     const label = item.value ? (
       <>
@@ -56,7 +68,7 @@ function toTreeItem(path, item, id) {
     );
     return (
       <TreeItem key={path} nodeId={path} label={label}>
-        {item.children ? toTreeItems(item.children, path) : null}
+        {item.children ? toTreeItems(item.children, separator, path) : null}
       </TreeItem>
     );
   }
