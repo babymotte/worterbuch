@@ -1,3 +1,4 @@
+pub mod buffer;
 pub mod config;
 pub mod tcp;
 pub mod ws;
