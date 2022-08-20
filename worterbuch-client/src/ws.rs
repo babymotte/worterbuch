@@ -1,11 +1,31 @@
-use crate::Connection;
-use futures_util::{SinkExt, StreamExt};
-use std::future::Future;
-use tokio::{spawn, sync::broadcast, sync::mpsc};
-use tokio_tungstenite::{connect_async, tungstenite};
-use worterbuch_common::{
-    encode_message, error::ConnectionResult, nonblocking::read_server_message,
+use crate::{config::Config, Connection};
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
 };
+use std::{future::Future, io};
+use tokio::{net::TcpStream, spawn, sync::broadcast, sync::mpsc};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{self, Message},
+    MaybeTlsStream, WebSocketStream,
+};
+use worterbuch_common::{
+    encode_message,
+    error::{ConnectionError, ConnectionResult},
+    nonblocking::read_server_message,
+    ClientMessage as CM, Handshake, ServerMessage as SM,
+};
+
+pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
+    on_disconnect: F,
+) -> ConnectionResult<(Connection, Config)> {
+    let config = Config::new_ws()?;
+    Ok((
+        connect(&config.proto, &config.host_addr, config.port, on_disconnect).await?,
+        config,
+    ))
+}
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     proto: &str,
@@ -13,12 +33,55 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     port: u16,
     on_disconnect: F,
 ) -> ConnectionResult<Connection> {
-    let url = format!("{proto}://{host_addr}:{port}");
+    let url = format!("{proto}://{host_addr}:{port}/ws");
     let (server, _) = connect_async(url).await?;
-    let (mut ws_tx, mut ws_rx) = server.split();
+    let (ws_tx, mut ws_rx) = server.split();
 
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let (result_tx, result_rx) = broadcast::channel(1_000);
+
+    match ws_rx.next().await {
+        Some(Ok(msg)) => {
+            let data = msg.into_data();
+            match read_server_message(&*data).await? {
+                Some(SM::Handshake(handshake)) => connected(
+                    ws_tx,
+                    ws_rx,
+                    cmd_tx,
+                    cmd_rx,
+                    result_tx,
+                    result_rx,
+                    on_disconnect,
+                    handshake,
+                ),
+                Some(other) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sendt invalid handshake message: {other:?}"),
+                ))),
+                None => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "connection closed before handshake",
+                ))),
+            }
+        }
+        Some(Err(e)) => Err(e.into()),
+        None => Err(ConnectionError::IoError(io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "connection closed before handshake",
+        ))),
+    }
+}
+
+fn connected<F: Future<Output = ()> + Send + 'static>(
+    mut ws_tx: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    mut ws_rx: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    cmd_tx: mpsc::UnboundedSender<CM>,
+    mut cmd_rx: mpsc::UnboundedReceiver<CM>,
+    result_tx: broadcast::Sender<SM>,
+    result_rx: broadcast::Receiver<SM>,
+    on_disconnect: F,
+    handshake: Handshake,
+) -> Result<Connection, ConnectionError> {
     let result_tx_recv = result_tx.clone();
 
     spawn(async move {
@@ -62,5 +125,15 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
         }
     });
 
-    Ok(Connection::new(cmd_tx, result_tx))
+    let separator = handshake.separator;
+    let wildcard = handshake.wildcard;
+    let multi_wildcard = handshake.multi_wildcard;
+
+    Ok(Connection::new(
+        cmd_tx,
+        result_tx,
+        separator,
+        wildcard,
+        multi_wildcard,
+    ))
 }

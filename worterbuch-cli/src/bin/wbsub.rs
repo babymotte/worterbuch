@@ -42,6 +42,10 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
+    if debug {
+        eprintln!("Server: {proto}://{host_addr}:{port}");
+    }
+
     let mut con = wb::connect(&proto, &host_addr, port, on_disconnect).await?;
 
     let mut responses = con.responses();

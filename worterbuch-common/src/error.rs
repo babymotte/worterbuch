@@ -139,6 +139,7 @@ pub enum ConnectionError {
     BcRecvError(broadcast::error::RecvError),
     WorterbuchError(WorterbuchError),
     ConfigError(ConfigError),
+    DecodeError(DecodeError),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -155,6 +156,7 @@ impl fmt::Display for ConnectionError {
             Self::BcRecvError(e) => fmt::Display::fmt(&e, f),
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
+            Self::DecodeError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
@@ -200,6 +202,12 @@ impl From<broadcast::error::RecvError> for ConnectionError {
 impl From<ConfigError> for ConnectionError {
     fn from(e: ConfigError) -> Self {
         ConnectionError::ConfigError(e)
+    }
+}
+
+impl From<DecodeError> for ConnectionError {
+    fn from(e: DecodeError) -> Self {
+        ConnectionError::DecodeError(e)
     }
 }
 

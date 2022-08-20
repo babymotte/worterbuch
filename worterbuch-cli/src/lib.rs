@@ -75,7 +75,10 @@ pub fn app<'help>(
     about: &'help str,
     args: Vec<Arg<'help>>,
 ) -> Result<(ArgMatches, String, String, u16, bool, bool)> {
-    let config = Config::new()?;
+    #[cfg(feature = "tcp")]
+    let config = Config::new_tcp()?;
+    #[cfg(feature = "ws")]
+    let config = Config::new_ws()?;
 
     let mut app = App::new(name)
         .version(env!("CARGO_PKG_VERSION"))
@@ -97,8 +100,8 @@ pub fn app<'help>(
         .map(ToOwned::to_owned)
         .unwrap_or(default_host_addr);
     let port = matches
-        .get_one::<u16>("PORT")
-        .map(ToOwned::to_owned)
+        .get_one::<String>("PORT")
+        .and_then(|p| p.parse().ok())
         .unwrap_or(default_port);
 
     let json = matches.is_present("JSON");
