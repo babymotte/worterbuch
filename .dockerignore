@@ -4,6 +4,6 @@
 .dockerignore
 /worterbuch-explorer/node_modules/*
 /worterbuch-explorer/build/*
-/worterbuch-js/examples/*
+/worterbuch-wasm/examples/*
 .git/*
 .github/*

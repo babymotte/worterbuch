@@ -2,7 +2,7 @@ import * as React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./components/App";
 // import reportWebVitals from "./reportWebVitals";
-import init from "worterbuch-js";
+import init from "worterbuch-wasm";
 import { StyledEngineProvider } from "@mui/material/styles";
 
 async function start() {

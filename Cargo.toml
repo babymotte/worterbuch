@@ -5,7 +5,7 @@ members = [
     "worterbuch-client",
     "worterbuch",
     "worterbuch-cli",
-    "worterbuch-js",
+    "worterbuch-wasm",
 ]
 
 [patch.crates-io]

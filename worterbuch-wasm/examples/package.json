@@ -1,9 +1,9 @@
 {
-  "name": "worterbuch-js-example",
+  "name": "worterbuch-wasm-example",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "worterbuch-js": "file:../pkg/",
+    "worterbuch-wasm": "file:../pkg/",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"

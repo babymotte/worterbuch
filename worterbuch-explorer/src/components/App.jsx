@@ -1,5 +1,5 @@
 import * as React from "react";
-import { decode_server_message, encode_client_message } from "worterbuch-js";
+import { decode_server_message, encode_client_message } from "worterbuch-wasm";
 import TopicTree from "./TopicTree";
 import SortedMap from "collections/sorted-map";
 

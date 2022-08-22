@@ -6,4 +6,4 @@ cd ../worterbuch-common && cargo make publish
 cd ../worterbuch-client && cargo make publish
 cd ../worterbuch && cargo make publish
 cd ../worterbuch-cli && cargo make publish
-cd ../worterbuch-js && cargo make publish
+cd ../worterbuch-wasm && cargo make publish

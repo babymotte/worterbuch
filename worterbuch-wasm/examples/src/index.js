@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import init, {
   encode_client_message,
   decode_server_message,
-} from "worterbuch-js";
+} from "worterbuch-wasm";
 
 async function start() {
   const res = await init();

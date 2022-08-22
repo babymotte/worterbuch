@@ -1,5 +1,5 @@
 [package]
-name = "worterbuch-js"
+name = "worterbuch-wasm"
 version = "0.15.1"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
