@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-codec"
-version = "0.15.1"
+version = "0.17.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Encode/decode Wörterbuch messages."

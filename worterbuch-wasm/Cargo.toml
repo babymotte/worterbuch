@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-wasm"
-version = "0.15.1"
+version = "0.17.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "JavaScript client library for Wörterbuch."
@@ -14,7 +14,7 @@ categories = ["database"]
 crate-type = ["cdylib"]
 
 [dependencies]
-worterbuch-codec = { version = "0.15.0" }
+worterbuch-codec = { version = "0.17.0" }
 wasm-bindgen = { version = "0.2.63", features = ["serde-serialize"] }
 wee_alloc = "0.4.5"
 serde_json = "1.0.82"
