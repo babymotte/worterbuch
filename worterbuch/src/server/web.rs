@@ -4,7 +4,7 @@ use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
 use std::net::SocketAddr;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::{spawn, sync::mpsc};
 use uuid::Uuid;
@@ -50,10 +50,7 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
         let explorer_path = "*";
         let explorer = {
             log::info!("Mounting explorer endpoint at {explorer_path} …");
-            warp::fs::dir(
-                env::var("WORTERBUCH_EXPLORER_WEBROOT_PATH")
-                    .unwrap_or("../worterbuch-explorer/build".to_owned()),
-            )
+            warp::fs::dir(config.web_root_path.clone())
         };
         let expl_route = explorer;
         let routes = expl_route.or(ws_route);
@@ -96,7 +93,7 @@ where
     log::info!("Web server stopped.");
 }
 
-async fn serve_ws(
+pub(crate) async fn serve_ws(
     websocket: warp::ws::WebSocket,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: Option<SocketAddr>,

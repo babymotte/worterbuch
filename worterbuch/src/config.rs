@@ -20,57 +20,66 @@ pub struct Config {
     pub data_dir: Path,
     pub single_threaded: bool,
     pub explorer: bool,
+    pub web_root_path: String,
 }
 
 impl Config {
     pub fn load_env(&mut self) -> ConfigResult<()> {
-        if let Ok(val) = env::var("WORTERBUCH_SEPARATOR") {
+        self.load_env_with_prefix("WORTERBUCH")
+    }
+
+    pub fn load_env_with_prefix(&mut self, prefix: &str) -> ConfigResult<()> {
+        if let Ok(val) = env::var(prefix.to_owned() + "_SEPARATOR") {
             self.separator = to_separator(val)?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_WILDCARD") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_WILDCARD") {
             self.wildcard = to_wildcard(val)?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_MULTI_WILDCARD") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_MULTI_WILDCARD") {
             self.multi_wildcard = to_multi_wildcard(val)?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_PROTO") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_PROTO") {
             self.proto = val;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_WEB_PORT") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_WEB_PORT") {
             self.web_port = val.parse().as_port()?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_TCP_PORT") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_TCP_PORT") {
             self.tcp_port = val.parse().as_port()?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_BIND_ADDRESS") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_BIND_ADDRESS") {
             self.bind_addr = val.parse()?;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_USE_PERSISTENCE") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_USE_PERSISTENCE") {
             self.use_persistence = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_PERSISTENCE_INTERVAL") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_PERSISTENCE_INTERVAL") {
             let secs = val.parse().as_interval()?;
             self.persistence_interval = Duration::from_secs(secs);
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_DATA_DIR") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_DATA_DIR") {
             self.data_dir = val;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_SINGLE_THREADED") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_SINGLE_THREADED") {
             self.single_threaded = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_EXPLORER") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_EXPLORER") {
             self.explorer = val.to_lowercase() == "true";
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_WEBROOT_PATH") {
+            self.web_root_path = val;
         }
 
         Ok(())
@@ -100,6 +109,7 @@ impl Default for Config {
             data_dir: "./data".into(),
             single_threaded: false,
             explorer: true,
+            web_root_path: "build".to_owned(),
         }
     }
 }

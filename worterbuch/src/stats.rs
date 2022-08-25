@@ -9,10 +9,7 @@ use worterbuch_common::error::WorterbuchResult;
 const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub(crate) async fn track_stats(
-    wb: Arc<RwLock<Worterbuch>>,
-    config: Config,
-) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: Arc<RwLock<Worterbuch>>, config: Config) -> WorterbuchResult<()> {
     let start = Instant::now();
     let separator = config.separator;
     wb.write().await.set(
