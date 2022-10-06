@@ -107,7 +107,7 @@ impl Default for Config {
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
-            single_threaded: false,
+            single_threaded: true,
             explorer: true,
             web_root_path: "build".to_owned(),
         }
