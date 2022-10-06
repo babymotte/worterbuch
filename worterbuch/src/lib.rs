@@ -7,8 +7,8 @@ mod subscribers;
 pub mod warp;
 mod worterbuch;
 
+pub use crate::worterbuch::*;
 pub use config::*;
-pub use worterbuch::*;
 
 use crate::stats::track_stats;
 use anyhow::Result;
