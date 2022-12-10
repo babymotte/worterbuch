@@ -47,3 +47,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: worterbuch-${{ matrix.target }}.zip
+
+      # TODO publish to crates.io
