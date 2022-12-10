@@ -42,6 +42,7 @@ service:
   type: ClusterIP
   port: 4242
   httpPort: 80
+  nodePort: ""
 
 ingress:
   enabled: false

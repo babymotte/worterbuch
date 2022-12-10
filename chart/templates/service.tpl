@@ -11,6 +11,10 @@ spec:
       targetPort: tcp
       protocol: TCP
       name: tcp
+      {{- with .Values.service.nodePort }}
+      nodePort:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     - port: {{ .Values.service.httpPort }}
       targetPort: http
       protocol: TCP
