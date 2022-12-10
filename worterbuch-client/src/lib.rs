@@ -1,14 +1,19 @@
 pub mod buffer;
 pub mod config;
+pub mod error;
 pub mod tcp;
 pub mod ws;
 
+use error::SubscriptionError;
 pub use worterbuch_common::*;
 
 use async_stream::stream;
 use futures_core::stream::Stream;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc::UnboundedSender};
+use tokio::sync::{
+    broadcast::{self},
+    mpsc::UnboundedSender,
+};
 use worterbuch_common::{
     error::{ConnectionError, ConnectionResult, WorterbuchError},
     ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM,
@@ -196,14 +201,14 @@ impl Connection {
     pub async fn subscribe_values(
         &mut self,
         key: &str,
-    ) -> ConnectionResult<impl Stream<Item = Value>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         self.do_subscribe_values(key, false).await
     }
 
     pub async fn subscribe_unique_values(
         &mut self,
         key: &str,
-    ) -> ConnectionResult<impl Stream<Item = Value>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         self.do_subscribe_values(key, true).await
     }
 
@@ -211,7 +216,7 @@ impl Connection {
         &mut self,
         key: &str,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Value>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
@@ -234,20 +239,27 @@ impl Connection {
                             }
                             SM::Ack(_) => {
                                 return Ok(stream! {
-                                    while let Ok(msg) = subscr.recv().await {
-                                        let tid = msg.transaction_id();
-                                        if tid == i {
-                                            match msg {
-                                                SM::State(state) => {
-                                                    yield state.key_value.value;
-                                                }
-                                                SM::Err(msg) => {
-                                                    log::error!("Error in subscription of {owned_key}: {msg:?}");
-                                                        break;
-                                                }
-                                                msg => log::warn!(
-                                                    "received unrelated msg with subscription tid {tid}: {msg:?}"
-                                                ),
+                                    loop {
+                                        match subscr.recv().await{
+                                            Ok(msg) =>{let tid = msg.transaction_id();
+                                                if tid == i {
+                                                    match msg {
+                                                        SM::State(state) => {
+                                                            yield Ok(state.key_value.value);
+                                                        }
+                                                        SM::Err(err) => {
+                                                            log::error!("Error in subscription of {owned_key}: {err:?}");
+                                                            yield Err(SubscriptionError::ServerError(err));
+                                                                break;
+                                                        }
+                                                        msg => log::warn!(
+                                                            "received unrelated msg with subscription tid {tid}: {msg:?}"
+                                                        ),
+                                                    }
+                                                }}
+                                            Err(e) => {
+                                                yield Err(SubscriptionError::RecvError(e));
+                                                break;
                                             }
                                         }
                                     }
@@ -272,14 +284,14 @@ impl Connection {
     pub async fn psubscribe_values(
         &mut self,
         request_pattern: &str,
-    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, false).await
     }
 
     pub async fn psubscribe_unique_values(
         &mut self,
         request_pattern: &str,
-    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, true).await
     }
 
@@ -287,7 +299,7 @@ impl Connection {
         &mut self,
         request_pattern: &str,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = KeyValuePairs>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
@@ -312,18 +324,28 @@ impl Connection {
                             }
                             SM::Ack(_) => {
                                 return Ok(stream! {
-                                    while let Ok(msg) = subscr.recv().await {
-                                        let tid = msg.transaction_id();
+                                    loop {
+                                        match subscr.recv().await {
+                                            Ok(msg) => {
+                                                let tid = msg.transaction_id();
                                         if tid == i {
                                             match msg {
                                                 SM::PState(pstate) => {
-                                                    yield pstate.key_value_pairs;
+                                                    yield Ok(pstate.key_value_pairs);
                                                 }
-                                                SM::Err(msg) => {
-                                                    log::error!("Error in subscription of {owned_pattern}: {msg:?}");
+                                                SM::Err(err) => {
+                                                    log::error!("Error in subscription of {owned_pattern}: {err:?}");
+                                                    yield Err(SubscriptionError::ServerError(err));
                                                     break;
                                                 }
                                                 _ => { /* ignore */ }
+                                            }
+                                        }
+                                            },
+                                            Err(e) => {
+                                                eprintln!("Error receiving message: {e}");
+                                                yield Err(SubscriptionError::RecvError(e));
+                                                break;
                                             }
                                         }
                                         // TODO time out
