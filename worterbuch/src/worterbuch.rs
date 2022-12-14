@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -14,7 +14,8 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    KeyValuePair, KeyValuePairs, Path, TransactionId,
+    GraveGoods, Handshake, KeyValuePairs, LastWill, Path, ProtocolVersion, ProtocolVersions,
+    TransactionId,
 };
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -35,6 +36,8 @@ pub struct Worterbuch {
     store: Store,
     subscribers: Subscribers,
     len: usize,
+    last_wills: HashMap<Uuid, LastWill>,
+    grave_goods: HashMap<Uuid, GraveGoods>,
 }
 
 impl Worterbuch {
@@ -58,6 +61,45 @@ impl Worterbuch {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn handshake(
+        &mut self,
+        client_protocol_versions: &ProtocolVersions,
+        last_will: LastWill,
+        grave_goods: GraveGoods,
+        client_id: Uuid,
+    ) -> WorterbuchResult<Handshake> {
+        // TODO implement protocol versions prperly
+        let mut supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
+
+        supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
+        supported_protocol_versions.sort();
+        let protocol_version = match supported_protocol_versions.into_iter().last() {
+            Some(version) => version,
+            None => return Err(WorterbuchError::ProtocolNegotiationFailed),
+        };
+
+        if !last_will.is_empty() {
+            self.last_wills.insert(client_id, last_will);
+        }
+
+        if !grave_goods.is_empty() {
+            self.grave_goods.insert(client_id, grave_goods);
+        }
+
+        let separator = self.config.separator;
+        let wildcard = self.config.wildcard;
+        let multi_wildcard = self.config.multi_wildcard;
+
+        let handshake = Handshake {
+            protocol_version,
+            separator,
+            wildcard,
+            multi_wildcard,
+        };
+
+        Ok(handshake)
     }
 
     pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, String)> {
@@ -121,7 +163,7 @@ impl Worterbuch {
         self.len += increment;
     }
 
-    pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<Vec<KeyValuePair>> {
+    pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<&str> = pattern.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -296,7 +338,7 @@ impl Worterbuch {
             .filter(|s| value_changed || !s.is_unique())
             .collect();
 
-        log::debug!(
+        log::trace!(
             "Calling {} subscribers: {} = {}",
             filtered_subscribers.len(),
             key.as_ref(),
@@ -306,9 +348,20 @@ impl Worterbuch {
             if let Err(e) =
                 subscriber.send(vec![(key.as_ref().to_owned(), value.to_owned()).into()])
             {
-                log::debug!("Error calling subscriber: {e}");
+                log::trace!("Error calling subscriber: {e}");
                 self.subscribers.remove_subscriber(subscriber)
             }
         }
+    }
+
+    pub fn disconnected(&mut self, client_id: Uuid) {
+        if let Some(last_wills) = self.last_wills.remove(&client_id) {
+            for last_will in last_wills {
+                if let Err(e) = self.set(last_will.key, last_will.value) {
+                    log::error!("Error setting last will of client {client_id}: {e}")
+                }
+            }
+        }
+        // TODO process grave goods
     }
 }

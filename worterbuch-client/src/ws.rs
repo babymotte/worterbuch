@@ -11,18 +11,29 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 use worterbuch_common::{
-    encode_message,
+    encode_handshake_request_message, encode_message,
     error::{ConnectionError, ConnectionResult},
     nonblocking::read_server_message,
-    ClientMessage as CM, Handshake, ServerMessage as SM,
+    ClientMessage as CM, GraveGoods, Handshake, HandshakeRequest, LastWill, ProtocolVersion,
+    ServerMessage as SM,
 };
 
 pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
+    last_will: LastWill,
+    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<(Connection, Config)> {
     let config = Config::new_ws()?;
     Ok((
-        connect(&config.proto, &config.host_addr, config.port, on_disconnect).await?,
+        connect(
+            &config.proto,
+            &config.host_addr,
+            config.port,
+            last_will,
+            grave_goods,
+            on_disconnect,
+        )
+        .await?,
         config,
     ))
 }
@@ -31,14 +42,27 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     proto: &str,
     host_addr: &str,
     port: u16,
+    last_will: LastWill,
+    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<Connection> {
     let url = format!("{proto}://{host_addr}:{port}/ws");
     let (server, _) = connect_async(url).await?;
-    let (ws_tx, mut ws_rx) = server.split();
+    let (mut ws_tx, mut ws_rx) = server.split();
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let (result_tx, result_rx) = broadcast::channel(1_000);
+
+    // TODO implement protocol versions properly
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
+
+    let handshake = HandshakeRequest {
+        supported_protocol_versions,
+        last_will,
+        grave_goods,
+    };
+    let msg = encode_handshake_request_message(&handshake)?;
+    ws_tx.send(Message::Binary(msg)).await?;
 
     match ws_rx.next().await {
         Some(Ok(msg)) => {

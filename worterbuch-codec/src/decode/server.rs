@@ -1,12 +1,11 @@
 use crate::{
     error::{DecodeError, DecodeResult},
     Handshake, Key, KeyLength, KeyValuePairs, MetaData, MetaDataLength, NumKeyValuePairs,
-    NumProtocolVersions, ProtocolVersion, ProtocolVersionSegment, ProtocolVersions, RequestPattern,
-    RequestPatternLength, TransactionId, Value, ValueLength, ERROR_CODE_BYTES, HSHK,
-    KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES,
-    NUM_PROTOCOL_VERSION_BYTES, PROTOCOL_VERSION_SEGMENT_BYTES, REQUEST_PATTERN_LENGTH_BYTES,
-    SEPARATOR_BYTES, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
-    {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
+    ProtocolVersion, ProtocolVersionSegment, RequestPattern, RequestPatternLength, TransactionId,
+    Value, ValueLength, ERROR_CODE_BYTES, HSHK, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES,
+    MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PROTOCOL_VERSION_SEGMENT_BYTES,
+    REQUEST_PATTERN_LENGTH_BYTES, SEPARATOR_BYTES, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
+    WILDCARD_BYTES, {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
 };
 use std::io::Read;
 
@@ -76,23 +75,15 @@ fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
 }
 
 fn read_handshake_message(mut data: impl Read) -> DecodeResult<Handshake> {
-    let mut buf = [0; NUM_PROTOCOL_VERSION_BYTES];
+    let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
     data.read_exact(&mut buf)?;
-    let num_protocol_versions = NumProtocolVersions::from_be_bytes(buf);
+    let major = ProtocolVersionSegment::from_be_bytes(buf);
 
-    let mut supported_protocol_versions = ProtocolVersions::new();
+    let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+    data.read_exact(&mut buf)?;
+    let minor = ProtocolVersionSegment::from_be_bytes(buf);
 
-    for _ in 0..num_protocol_versions {
-        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
-        data.read_exact(&mut buf)?;
-        let major = ProtocolVersionSegment::from_be_bytes(buf);
-
-        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
-        data.read_exact(&mut buf)?;
-        let minor = ProtocolVersionSegment::from_be_bytes(buf);
-
-        supported_protocol_versions.push(ProtocolVersion { major, minor });
-    }
+    let protocol_version = ProtocolVersion { major, minor };
 
     let mut buf = vec![0; SEPARATOR_BYTES];
     data.read_exact(&mut buf)?;
@@ -107,7 +98,7 @@ fn read_handshake_message(mut data: impl Read) -> DecodeResult<Handshake> {
     let multi_wildcard = buf[0] as char;
 
     Ok(Handshake {
-        supported_protocol_versions,
+        protocol_version,
         separator,
         wildcard,
         multi_wildcard,
@@ -181,9 +172,7 @@ mod test {
     #[test]
     fn handshake_message_is_read_correctly() {
         let data = vec![
-            HSHK, 0b00000011, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000000,
-            0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000010,
-            b'/', b'?', b'#',
+            HSHK, 0b00000000, 0b00000001, 0b00000000, 0b00000000, b'/', b'?', b'#',
         ];
 
         let result = read_server_message(&data[..]).unwrap();
@@ -191,11 +180,7 @@ mod test {
         assert_eq!(
             result,
             SM::Handshake(Handshake {
-                supported_protocol_versions: vec![
-                    ProtocolVersion { major: 1, minor: 0 },
-                    ProtocolVersion { major: 1, minor: 1 },
-                    ProtocolVersion { major: 1, minor: 2 },
-                ],
+                protocol_version: ProtocolVersion { major: 1, minor: 0 },
                 separator: '/',
                 wildcard: '?',
                 multi_wildcard: '#',

@@ -223,23 +223,15 @@ async fn read_pstate_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<P
 }
 
 async fn read_handshake_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Handshake> {
-    let mut buf = [0; NUM_PROTOCOL_VERSION_BYTES];
+    let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
     data.read_exact(&mut buf).await?;
-    let num_protocol_versions = NumProtocolVersions::from_be_bytes(buf);
+    let major = ProtocolVersionSegment::from_be_bytes(buf);
 
-    let mut supported_protocol_versions = Vec::new();
+    let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+    data.read_exact(&mut buf).await?;
+    let minor = ProtocolVersionSegment::from_be_bytes(buf);
 
-    for _ in 0..num_protocol_versions {
-        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
-        data.read_exact(&mut buf).await?;
-        let major = ProtocolVersionSegment::from_be_bytes(buf);
-
-        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
-        data.read_exact(&mut buf).await?;
-        let minor = ProtocolVersionSegment::from_be_bytes(buf);
-
-        supported_protocol_versions.push(ProtocolVersion { major, minor });
-    }
+    let protocol_version = ProtocolVersion { major, minor };
 
     let mut buf = vec![0; SEPARATOR_BYTES];
     data.read_exact(&mut buf).await?;
@@ -254,7 +246,7 @@ async fn read_handshake_message(mut data: impl AsyncRead + Unpin) -> DecodeResul
     let multi_wildcard = buf[0] as char;
 
     Ok(Handshake {
-        supported_protocol_versions,
+        protocol_version,
         separator,
         wildcard,
         multi_wildcard,
@@ -608,9 +600,7 @@ mod test {
     #[test]
     fn handshake_message_is_read_correctly() {
         let data = vec![
-            HSHK, 0b00000011, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000000,
-            0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000010,
-            b'/', b'?', b'#',
+            HSHK, 0b00000000, 0b00000001, 0b00000000, 0b00000000, b'/', b'?', b'#',
         ];
 
         let result = tokio_test::block_on(read_server_message(&data[..]))
@@ -620,11 +610,7 @@ mod test {
         assert_eq!(
             result,
             SM::Handshake(Handshake {
-                supported_protocol_versions: vec![
-                    ProtocolVersion { major: 1, minor: 0 },
-                    ProtocolVersion { major: 1, minor: 1 },
-                    ProtocolVersion { major: 1, minor: 2 },
-                ],
+                protocol_version: ProtocolVersion { major: 1, minor: 0 },
                 separator: '/',
                 wildcard: '?',
                 multi_wildcard: '#',

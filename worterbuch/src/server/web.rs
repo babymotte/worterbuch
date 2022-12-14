@@ -10,14 +10,12 @@ use tokio::{spawn, sync::mpsc};
 use uuid::Uuid;
 use warp::{addr::remote, ws::Message, ws::Ws};
 use warp::{Filter, Reply};
-use worterbuch_common::{
-    encode_handshake_message, error::WorterbuchError, Handshake, ProtocolVersion,
-};
+use worterbuch_common::error::WorterbuchError;
 
 pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     log::info!("Starting Web Server …");
 
-    let (wb_ws, cfg_ws) = (worterbuch.clone(), config.clone());
+    let wb_ws = worterbuch.clone();
     let ws_path = "ws";
 
     let ws = {
@@ -25,16 +23,8 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
         warp::ws().and(warp::path(ws_path)).and(remote()).map(
             move |ws: Ws, remote: Option<SocketAddr>| {
                 let worterbuch = wb_ws.clone();
-                let config = cfg_ws.clone();
                 ws.on_upgrade(move |websocket| async move {
-                    if let Err(e) = serve_ws(
-                        websocket,
-                        worterbuch.clone(),
-                        remote.clone(),
-                        config.clone(),
-                    )
-                    .await
-                    {
+                    if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
                         log::error!("Error in WS connection: {e}");
                     }
                 })
@@ -97,35 +87,12 @@ pub(crate) async fn serve_ws(
     websocket: warp::ws::WebSocket,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: Option<SocketAddr>,
-    config: Config,
 ) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_write, mut client_read) = websocket.split();
 
     spawn(async move {
-        let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 1 }];
-        let separator = config.separator;
-        let wildcard = config.wildcard;
-        let multi_wildcard = config.multi_wildcard;
-        let handshake = Handshake {
-            supported_protocol_versions,
-            separator,
-            wildcard,
-            multi_wildcard,
-        };
-        let handshake = match encode_handshake_message(&handshake) {
-            Ok(it) => it,
-            Err(e) => {
-                log::error!("Error encoding handshake message: {e}");
-                return;
-            }
-        };
-        let msg = Message::binary(handshake);
-        if let Err(e) = client_write.send(msg).await {
-            log::error!("Error sending handshake message to client: {e}");
-            return;
-        }
         while let Some(bytes) = rx.recv().await {
             let msg = Message::binary(bytes);
             if let Err(e) = client_write.send(msg).await {
@@ -173,6 +140,8 @@ pub(crate) async fn serve_ws(
             }
         }
     }
+
+    wb.disconnected(client_id);
 
     Ok(())
 }

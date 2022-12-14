@@ -52,11 +52,17 @@ pub const SEPARATOR_BYTES: usize = 1;
 pub const WILDCARD_BYTES: usize = 1;
 pub const MULTI_WILDCARD_BYTES: usize = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolVersion {
     pub major: ProtocolVersionSegment,
     pub minor: ProtocolVersionSegment,
+}
+
+impl ProtocolVersion {
+    pub fn new(major: ProtocolVersionSegment, minor: ProtocolVersionSegment) -> Self {
+        ProtocolVersion { major, minor }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,5 +84,42 @@ impl From<(&str, &str)> for KeyValuePair {
             key: key.to_owned(),
             value: value.to_owned(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::cmp::Ordering;
+
+    use crate::ProtocolVersion as PV;
+
+    #[test]
+    fn protocol_versions_are_sorted_correctly() {
+        assert_eq!(PV::new(0, 1).cmp(&PV::new(0, 2)), Ordering::Less);
+        assert_eq!(PV::new(0, 9).cmp(&PV::new(1, 0)), Ordering::Less);
+        assert_eq!(PV::new(1, 2).cmp(&PV::new(1, 3)), Ordering::Less);
+
+        assert_eq!(PV::new(0, 1).cmp(&PV::new(0, 1)), Ordering::Equal);
+        assert_eq!(PV::new(0, 9).cmp(&PV::new(0, 9)), Ordering::Equal);
+        assert_eq!(PV::new(1, 2).cmp(&PV::new(1, 2)), Ordering::Equal);
+
+        assert_eq!(PV::new(0, 2).cmp(&PV::new(0, 1)), Ordering::Greater);
+        assert_eq!(PV::new(1, 0).cmp(&PV::new(0, 9)), Ordering::Greater);
+        assert_eq!(PV::new(1, 3).cmp(&PV::new(1, 2)), Ordering::Greater);
+
+        assert_eq!(PV::new(0, 3), PV::new(0, 3).min(PV::new(0, 5)));
+        assert_eq!(PV::new(0, 8), PV::new(0, 8).min(PV::new(1, 2)));
+        assert_eq!(PV::new(2, 3), PV::new(2, 3).min(PV::new(3, 1)));
+
+        assert_eq!(PV::new(0, 3), PV::new(0, 5).min(PV::new(0, 3)));
+        assert_eq!(PV::new(0, 8), PV::new(1, 2).min(PV::new(0, 8)));
+        assert_eq!(PV::new(2, 3), PV::new(3, 1).min(PV::new(2, 3)));
+
+        let mut versions = vec![PV::new(1, 2), PV::new(0, 4), PV::new(9, 0), PV::new(3, 5)];
+        versions.sort();
+        assert_eq!(
+            vec![PV::new(0, 4), PV::new(1, 2), PV::new(3, 5), PV::new(9, 0)],
+            versions
+        );
     }
 }

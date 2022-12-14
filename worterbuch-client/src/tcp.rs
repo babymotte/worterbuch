@@ -11,30 +11,54 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 use worterbuch_common::{
-    encode_message,
+    encode_handshake_request_message, encode_message,
     error::{ConnectionError, ConnectionResult},
     nonblocking::read_server_message,
-    ClientMessage as CM, Handshake, ServerMessage as SM,
+    ClientMessage as CM, GraveGoods, Handshake, HandshakeRequest, LastWill, ProtocolVersion,
+    ServerMessage as SM,
 };
 
 pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
+    last_will: LastWill,
+    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<Connection> {
     let config = Config::new_tcp()?;
-    connect(&config.proto, &config.host_addr, config.port, on_disconnect).await
+    connect(
+        &config.proto,
+        &config.host_addr,
+        config.port,
+        last_will,
+        grave_goods,
+        on_disconnect,
+    )
+    .await
 }
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     _proto: &str,
     host_addr: &str,
     port: u16,
+    last_will: LastWill,
+    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<Connection> {
     let server = TcpStream::connect(format!("{host_addr}:{port}")).await?;
-    let (mut tcp_rx, tcp_tx) = server.into_split();
+    let (mut tcp_rx, mut tcp_tx) = server.into_split();
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let (result_tx, result_rx) = broadcast::channel(1_000);
+
+    // TODO implement protocol versions properly
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
+
+    let handshake = HandshakeRequest {
+        supported_protocol_versions,
+        last_will,
+        grave_goods,
+    };
+    let msg = encode_handshake_request_message(&handshake)?;
+    tcp_tx.write(&msg).await?;
 
     match read_server_message(&mut tcp_rx).await? {
         Some(SM::Handshake(handshake)) => connected(
@@ -49,7 +73,7 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
         ),
         Some(other) => Err(ConnectionError::IoError(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("server sendt invalid handshake message: {other:?}"),
+            format!("server sent invalid handshake message: {other:?}"),
         ))),
         None => Err(ConnectionError::IoError(io::Error::new(
             io::ErrorKind::ConnectionAborted,

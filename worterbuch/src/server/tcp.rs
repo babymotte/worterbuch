@@ -12,11 +12,7 @@ use tokio::{
     },
 };
 use uuid::Uuid;
-use worterbuch_common::{
-    encode_handshake_message,
-    error::{WorterbuchError, WorterbuchResult},
-    Handshake, ProtocolVersion,
-};
+use worterbuch_common::error::{WorterbuchError, WorterbuchResult};
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
     log::info!("Starting TCP Server …");
@@ -29,7 +25,7 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
     loop {
         let conn = server.accept().await?;
         log::debug!("Client connected from {}", conn.1);
-        spawn(serve(conn.0, worterbuch.clone(), conn.1, config.clone()));
+        spawn(serve(conn.0, worterbuch.clone(), conn.1));
     }
 }
 
@@ -37,34 +33,12 @@ async fn serve(
     client: TcpStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
-    config: Config,
 ) -> WorterbuchResult<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_read, mut client_write) = client.into_split();
 
     spawn(async move {
-        let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 1 }];
-        let separator = config.separator;
-        let wildcard = config.wildcard;
-        let multi_wildcard = config.multi_wildcard;
-        let handshake = Handshake {
-            supported_protocol_versions,
-            separator,
-            wildcard,
-            multi_wildcard,
-        };
-        let handshake = match encode_handshake_message(&handshake) {
-            Ok(it) => it,
-            Err(e) => {
-                log::error!("Error encoding handshake message: {e}");
-                return;
-            }
-        };
-        if let Err(e) = client_write.write_all(&handshake).await {
-            log::error!("Error sending handshake message to client: {e}");
-            return;
-        }
         while let Some(bytes) = rx.recv().await {
             if let Err(e) = client_write.write_all(&bytes).await {
                 log::error!("Error sending message to client: {e}");
@@ -104,6 +78,8 @@ async fn serve(
             }
         }
     }
+
+    wb.disconnected(client_id);
 
     Ok(())
 }

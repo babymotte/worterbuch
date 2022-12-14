@@ -1,5 +1,6 @@
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
+use worterbuch_codec::PROTOCOL_NEGOTIATION_FAILED;
 pub use worterbuch_codec::{
     error::{DecodeError, EncodeError},
     Err, ErrorCode, Key, MetaData, RequestPattern, ILLEGAL_MULTI_WILDCARD, ILLEGAL_WILDCARD,
@@ -78,6 +79,7 @@ pub enum WorterbuchError {
     SerDeError(serde_json::Error, MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
     ServerResponse(Err),
+    ProtocolNegotiationFailed,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -101,6 +103,9 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::ServerResponse(e) => {
                 write!(f, "error {}: {}", e.error_code, e.metadata)
+            }
+            WorterbuchError::ProtocolNegotiationFailed => {
+                write!(f, "The server does not implement any of the protocol versions supported by this client")
             }
         }
     }
@@ -223,6 +228,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
             WorterbuchError::IoError(_, _) => IO_ERROR,
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
+            WorterbuchError::ProtocolNegotiationFailed => PROTOCOL_NEGOTIATION_FAILED,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
         }
     }

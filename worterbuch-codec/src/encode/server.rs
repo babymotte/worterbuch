@@ -1,11 +1,10 @@
-use crate::{
-    error::EncodeResult, Ack, Err, Handshake, KeyValuePair, PState, ProtocolVersion, State, ACK,
-    ERR, HSHK, PSTA, STA,
-};
-
 use super::{
-    get_key_length, get_metadata_length, get_num_key_val_pairs, get_num_protocol_versions,
-    get_request_pattern_length, get_value_length,
+    get_key_length, get_metadata_length, get_num_key_val_pairs, get_request_pattern_length,
+    get_value_length,
+};
+use crate::{
+    error::EncodeResult, Ack, Err, Handshake, KeyValuePair, PState, State, ACK, ERR, HSHK, PSTA,
+    STA,
 };
 
 pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
@@ -74,16 +73,10 @@ pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
 }
 
 pub fn encode_handshake_message(msg: &Handshake) -> EncodeResult<Vec<u8>> {
-    let num_protocol_versions = get_num_protocol_versions(&msg.supported_protocol_versions)?;
-
     let mut buf = vec![HSHK];
 
-    buf.extend(num_protocol_versions.to_be_bytes());
-
-    for ProtocolVersion { major, minor } in &msg.supported_protocol_versions {
-        buf.extend(major.to_be_bytes());
-        buf.extend(minor.to_be_bytes());
-    }
+    buf.extend(msg.protocol_version.major.to_be_bytes());
+    buf.extend(msg.protocol_version.minor.to_be_bytes());
 
     buf.push(msg.separator as u8);
     buf.push(msg.wildcard as u8);
@@ -100,20 +93,14 @@ mod test {
     #[test]
     fn handshake_message_is_encoded_correctly() {
         let msg = Handshake {
-            supported_protocol_versions: vec![
-                ProtocolVersion { major: 1, minor: 0 },
-                ProtocolVersion { major: 1, minor: 1 },
-                ProtocolVersion { major: 1, minor: 2 },
-            ],
+            protocol_version: ProtocolVersion { major: 1, minor: 0 },
             separator: '/',
             wildcard: '?',
             multi_wildcard: '#',
         };
 
         let data = vec![
-            HSHK, 0b00000011, 0b00000000, 0b00000001, 0b00000000, 0b00000000, 0b00000000,
-            0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000001, 0b00000000, 0b00000010,
-            b'/', b'?', b'#',
+            HSHK, 0b00000000, 0b00000001, 0b00000000, 0b00000000, b'/', b'?', b'#',
         ];
 
         assert_eq!(data, encode_handshake_message(&msg).unwrap());

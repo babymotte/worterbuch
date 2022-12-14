@@ -50,16 +50,8 @@ pub async fn worterbuch_ws_filter(
     let ws = warp::ws().and(warp::path(ws_path)).and(remote()).map(
         move |ws: Ws, remote: Option<SocketAddr>| {
             let worterbuch = worterbuch.clone();
-            let config = config.clone();
             ws.on_upgrade(move |websocket| async move {
-                if let Err(e) = serve_ws(
-                    websocket,
-                    worterbuch.clone(),
-                    remote.clone(),
-                    config.clone(),
-                )
-                .await
-                {
+                if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
                     log::error!("Error in WS connection: {e}");
                 }
             })

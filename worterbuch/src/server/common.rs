@@ -9,11 +9,12 @@ use tokio::{
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    encode_ack_message, encode_err_message, encode_pstate_message, encode_state_message,
+    encode_ack_message, encode_err_message, encode_handshake_message, encode_pstate_message,
+    encode_state_message,
     error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
     nonblocking::read_client_message,
-    Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, Import, KeyValuePair, MetaData, PGet,
-    PState, PSubscribe, RequestPattern, Set, State, Subscribe, Unsubscribe,
+    Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, HandshakeRequest, Import, KeyValuePair,
+    MetaData, PGet, PState, PSubscribe, RequestPattern, Set, State, Subscribe, Unsubscribe,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
@@ -26,8 +27,8 @@ pub async fn process_incoming_message(
     subscriptions: &mut Subscriptions,
 ) -> WorterbuchResult<bool> {
     match read_client_message(msg).await {
-        Ok(Some(CM::HandshakeRequest(_msg))) => {
-            todo!()
+        Ok(Some(CM::HandshakeRequest(msg))) => {
+            handshake(msg, worterbuch.clone(), tx.clone(), client_id.clone()).await?;
         }
         Ok(Some(CM::Get(msg))) => {
             get(msg, worterbuch.clone(), tx.clone()).await?;
@@ -77,6 +78,37 @@ pub async fn process_incoming_message(
     }
 
     Ok(true)
+}
+
+async fn handshake(
+    msg: HandshakeRequest,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<Vec<u8>>,
+    client_id: Uuid,
+) -> WorterbuchResult<()> {
+    let mut wb = worterbuch.write().await;
+
+    let response = match wb.handshake(
+        &msg.supported_protocol_versions,
+        msg.last_will,
+        msg.grave_goods,
+        client_id,
+    ) {
+        Ok(handshake) => handshake,
+        Err(e) => {
+            handle_store_error(e, client.clone(), 0).await?;
+            return Ok(());
+        }
+    };
+
+    match encode_handshake_message(&response) {
+        Ok(data) => client
+            .send(data)
+            .context(|| format!("Error sending HANDSHAKE message",))?,
+        Err(e) => handle_encode_error(e, client).await?,
+    }
+
+    Ok(())
 }
 
 async fn get(
@@ -491,6 +523,14 @@ async fn handle_store_error(
             transaction_id,
             metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
                 .expect("failed to serialize metadata"),
+        },
+        WorterbuchError::ProtocolNegotiationFailed => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(
+                "server does not implement any of the protocl versions supported by this client",
+            )
+            .expect("failed to serialize metadata"),
         },
         WorterbuchError::Other(e, meta) => Err {
             error_code,

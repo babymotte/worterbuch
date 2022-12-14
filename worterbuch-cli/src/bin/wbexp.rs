@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, on_disconnect).await?;
+    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut responses = con.responses();
     con.export(path)?;

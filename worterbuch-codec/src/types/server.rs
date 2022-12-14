@@ -1,5 +1,5 @@
 use crate::{
-    ErrorCode, KeyValuePair, KeyValuePairs, MessageType, MetaData, MultiWildcard, ProtocolVersions,
+    ErrorCode, KeyValuePair, KeyValuePairs, MessageType, MetaData, MultiWildcard, ProtocolVersion,
     RequestPattern, Separator, TransactionId, Wildcard,
 };
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub const IO_ERROR: ErrorCode = 0b00000011;
 pub const SERDE_ERROR: ErrorCode = 0b00000100;
 pub const NO_SUCH_VALUE: ErrorCode = 0b00000101;
 pub const NOT_SUBSCRIBED: ErrorCode = 0b00000110;
+pub const PROTOCOL_NEGOTIATION_FAILED: ErrorCode = 0b00000111;
 pub const OTHER: ErrorCode = 0b11111111;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -105,7 +106,7 @@ impl fmt::Display for Err {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Handshake {
-    pub supported_protocol_versions: ProtocolVersions,
+    pub protocol_version: ProtocolVersion,
     pub separator: Separator,
     pub wildcard: Wildcard,
     pub multi_wildcard: MultiWildcard,
@@ -116,7 +117,7 @@ impl fmt::Display for Handshake {
         write!(
             f,
             "handshake: separator: '{}', wildcard: '{}', multi-wildcard: '{}', supported protocol versions: {}",
-            self.separator, self.wildcard, self.multi_wildcard, self.supported_protocol_versions.iter().map(|v| format!("{}.{}",v.major,v.minor)).collect::<Vec<String>>().join(", ")
+            self.separator, self.wildcard, self.multi_wildcard, format!("{}.{}",self.protocol_version.major,self.protocol_version.minor)
         )
     }
 }
