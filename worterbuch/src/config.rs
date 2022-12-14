@@ -78,7 +78,7 @@ impl Config {
             self.explorer = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_WEBROOT_PATH") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_EXPLORER_WEBROOT_PATH") {
             self.web_root_path = val;
         }
 
