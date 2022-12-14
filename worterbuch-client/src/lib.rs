@@ -343,7 +343,7 @@ impl Connection {
                                         }
                                             },
                                             Err(e) => {
-                                                eprintln!("Error receiving message: {e}");
+                                                log::error!("Error receiving message: {e}");
                                                 yield Err(SubscriptionError::RecvError(e));
                                                 break;
                                             }
