@@ -1,12 +1,16 @@
-use crate::{
-    error::EncodeResult, ClientMessage, Export, Get, Import, PGet, PSubscribe, Set, Subscribe,
-    Unsubscribe, EXP, GET, IMP, PGET, PSUB, SET, SUB, USUB,
+use super::{
+    get_key_length, get_num_grave_goods, get_num_last_will, get_num_protocol_versions,
+    get_path_length, get_request_pattern_length, get_value_length,
 };
-
-use super::{get_key_length, get_path_length, get_request_pattern_length, get_value_length};
+use crate::{
+    error::EncodeResult, ClientMessage, Export, Get, HandshakeRequest, Import, KeyValuePair, PGet,
+    PSubscribe, ProtocolVersion, Set, Subscribe, Unsubscribe, EXP, GET, HSHKR, IMP, PGET, PSUB,
+    SET, SUB, USUB,
+};
 
 pub fn encode_message(msg: &ClientMessage) -> EncodeResult<Vec<u8>> {
     match msg {
+        ClientMessage::HandshakeRequest(msg) => encode_handshake_request_message(msg),
         ClientMessage::Get(msg) => encode_get_message(msg),
         ClientMessage::PGet(msg) => encode_pget_message(msg),
         ClientMessage::Set(msg) => encode_set_message(msg),
@@ -111,6 +115,46 @@ pub fn encode_unsubscribe_message(msg: &Unsubscribe) -> EncodeResult<Vec<u8>> {
     let mut buf = vec![USUB];
 
     buf.extend(msg.transaction_id.to_be_bytes());
+
+    Ok(buf)
+}
+
+pub fn encode_handshake_request_message(msg: &HandshakeRequest) -> EncodeResult<Vec<u8>> {
+    let num_protocol_versions = get_num_protocol_versions(&msg.supported_protocol_versions)?;
+    let num_last_will = get_num_last_will(&msg.last_will)?;
+    let num_grave_goods = get_num_grave_goods(&msg.grave_goods)?;
+
+    let mut buf = vec![HSHKR];
+
+    buf.extend(num_protocol_versions.to_be_bytes());
+    buf.extend(num_last_will.to_be_bytes());
+    buf.extend(num_grave_goods.to_be_bytes());
+
+    for ProtocolVersion { major, minor } in &msg.supported_protocol_versions {
+        buf.extend(major.to_be_bytes());
+        buf.extend(minor.to_be_bytes());
+    }
+
+    for KeyValuePair { key, value } in &msg.last_will {
+        let key_length = get_key_length(&key)?;
+        let value_length = get_value_length(&value)?;
+        buf.extend(key_length.to_be_bytes());
+        buf.extend(value_length.to_be_bytes());
+    }
+
+    for grave_good in &msg.grave_goods {
+        let key_length = get_key_length(&grave_good)?;
+        buf.extend(key_length.to_be_bytes());
+    }
+
+    for KeyValuePair { key, value } in &msg.last_will {
+        buf.extend(key.as_bytes());
+        buf.extend(value.as_bytes());
+    }
+
+    for grave_good in &msg.grave_goods {
+        buf.extend(grave_good.as_bytes());
+    }
 
     Ok(buf)
 }
@@ -248,5 +292,40 @@ mod test {
         ];
 
         assert_eq!(data, encode_unsubscribe_message(&msg).unwrap());
+    }
+
+    #[test]
+    fn handshake_request_message_is_encoded_correctly() {
+        let msg = HandshakeRequest {
+            supported_protocol_versions: vec![
+                ProtocolVersion { major: 0, minor: 1 },
+                ProtocolVersion { major: 0, minor: 5 },
+                ProtocolVersion { major: 1, minor: 0 },
+            ],
+            last_will: vec![("last/will", "test").into()],
+            grave_goods: vec!["grave/goods/1".into(), "grave/goods/2".into()],
+        };
+
+        let data = vec![
+            HSHKR,      // message type
+            0b00000011, // 3 protocol versions
+            0b00000001, // 1 last will
+            0b00000010, // 2 grave goods
+            0b00000000, 0b00000000, 0b00000000, 0b00000001, // protocol version 0.1
+            0b00000000, 0b00000000, 0b00000000, 0b00000101, // protocol version 0.5
+            0b00000000, 0b00000001, 0b00000000, 0b00000000, // protocol version 1.0
+            0b00000000, 0b00001001, // last will key length (9)
+            0b00000000, 0b00000000, 0b00000000, 0b00000100, // last will value length (4)
+            0b00000000, 0b00001101, // grave good 1 key length (13)
+            0b00000000, 0b00001101, // grave good 2 key length (13)
+            b'l', b'a', b's', b't', b'/', b'w', b'i', b'l', b'l', // last will key
+            b't', b'e', b's', b't', // last will value
+            b'g', b'r', b'a', b'v', b'e', b'/', b'g', b'o', b'o', b'd', b's', b'/',
+            b'1', // grave goods 1 key
+            b'g', b'r', b'a', b'v', b'e', b'/', b'g', b'o', b'o', b'd', b's', b'/',
+            b'2', // grave goods 2 key
+        ];
+
+        assert_eq!(data, encode_handshake_request_message(&msg).unwrap());
     }
 }

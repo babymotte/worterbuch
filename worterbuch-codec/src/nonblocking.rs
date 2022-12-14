@@ -9,7 +9,11 @@ use super::{
     SEPARATOR_BYTES, SET, STA, SUB, TRANSACTION_ID_BYTES, UNIQUE_FLAG_BYTES, USUB,
     VALUE_LENGTH_BYTES, WILDCARD_BYTES,
 };
-use crate::error::{DecodeError, DecodeResult};
+use crate::{
+    error::{DecodeError, DecodeResult},
+    GraveGoods, HandshakeRequest, LastWill, NumGraveGoods, NumLastWill, ProtocolVersions, HSHKR,
+    NUM_GRAVE_GOODS_BYTES, NUM_LAST_WILL_BYTES,
+};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub async fn read_client_message(mut data: impl AsyncRead + Unpin) -> DecodeResult<Option<CM>> {
@@ -19,6 +23,9 @@ pub async fn read_client_message(mut data: impl AsyncRead + Unpin) -> DecodeResu
         return Ok(None);
     }
     match buf[0] {
+        HSHKR => read_handshake_request_message(data)
+            .await
+            .map(CM::HandshakeRequest),
         GET => read_get_message(data).await.map(CM::Get),
         PGET => read_pget_message(data).await.map(CM::PGet),
         SET => read_set_message(data).await.map(CM::Set),
@@ -359,6 +366,90 @@ async fn read_unsubscribe_message(mut data: impl AsyncRead + Unpin) -> DecodeRes
     Ok(Unsubscribe { transaction_id })
 }
 
+async fn read_handshake_request_message(
+    mut data: impl AsyncRead + Unpin,
+) -> DecodeResult<HandshakeRequest> {
+    let mut buf = [0; NUM_PROTOCOL_VERSION_BYTES];
+    data.read_exact(&mut buf).await?;
+    let num_protocol_versions = NumProtocolVersions::from_be_bytes(buf);
+
+    let mut buf = [0; NUM_LAST_WILL_BYTES];
+    data.read_exact(&mut buf).await?;
+    let num_last_will = NumLastWill::from_be_bytes(buf);
+
+    let mut buf = [0; NUM_GRAVE_GOODS_BYTES];
+    data.read_exact(&mut buf).await?;
+    let num_grave_good = NumGraveGoods::from_be_bytes(buf);
+
+    let mut supported_protocol_versions = ProtocolVersions::new();
+
+    for _ in 0..num_protocol_versions {
+        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+        data.read_exact(&mut buf).await?;
+        let major = ProtocolVersionSegment::from_be_bytes(buf);
+
+        let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];
+        data.read_exact(&mut buf).await?;
+        let minor = ProtocolVersionSegment::from_be_bytes(buf);
+
+        supported_protocol_versions.push(ProtocolVersion { major, minor });
+    }
+
+    let mut last_will_key_value_lengths = Vec::new();
+
+    for _ in 0..num_last_will {
+        let mut buf = [0; KEY_LENGTH_BYTES];
+        data.read_exact(&mut buf).await?;
+        let key_length = KeyLength::from_be_bytes(buf);
+
+        let mut buf = [0; VALUE_LENGTH_BYTES];
+        data.read_exact(&mut buf).await?;
+        let value_length = ValueLength::from_be_bytes(buf);
+
+        last_will_key_value_lengths.push((key_length, value_length));
+    }
+
+    let mut grave_goods_key_lengths = Vec::new();
+
+    for _ in 0..num_grave_good {
+        let mut buf = [0; KEY_LENGTH_BYTES];
+        data.read_exact(&mut buf).await?;
+        let key_length = KeyLength::from_be_bytes(buf);
+
+        grave_goods_key_lengths.push(key_length);
+    }
+
+    let mut last_will = LastWill::new();
+
+    for (key_length, value_length) in last_will_key_value_lengths {
+        let mut buf = vec![0; key_length as usize];
+        data.read_exact(&mut buf).await?;
+        let key = Key::from_utf8(buf)?;
+
+        let mut buf = vec![0; value_length as usize];
+        data.read_exact(&mut buf).await?;
+        let value = Value::from_utf8_lossy(&buf).to_string();
+
+        last_will.push((key, value).into());
+    }
+
+    let mut grave_goods = GraveGoods::new();
+
+    for key_length in grave_goods_key_lengths {
+        let mut buf = vec![0; key_length as usize];
+        data.read_exact(&mut buf).await?;
+        let key = Key::from_utf8(buf)?;
+
+        grave_goods.push(key);
+    }
+
+    Ok(HandshakeRequest {
+        supported_protocol_versions,
+        last_will,
+        grave_goods,
+    })
+}
+
 #[cfg(test)]
 mod test {
 
@@ -675,6 +766,46 @@ mod test {
             .unwrap();
 
         assert_eq!(result, CM::Unsubscribe(Unsubscribe { transaction_id: 42 }))
+    }
+
+    #[test]
+    fn handshake_request_message_is_read_correctly() {
+        let data = [
+            HSHKR,      // message type
+            0b00000011, // 3 protocol versions
+            0b00000001, // 1 last will
+            0b00000010, // 2 grave goods
+            0b00000000, 0b00000000, 0b00000000, 0b00000001, // protocol version 0.1
+            0b00000000, 0b00000000, 0b00000000, 0b00000101, // protocol version 0.5
+            0b00000000, 0b00000001, 0b00000000, 0b00000000, // protocol version 1.0
+            0b00000000, 0b00001001, // last will key length (9)
+            0b00000000, 0b00000000, 0b00000000, 0b00000100, // last will value length (4)
+            0b00000000, 0b00001101, // grave good 1 key length (13)
+            0b00000000, 0b00001101, // grave good 2 key length (13)
+            b'l', b'a', b's', b't', b'/', b'w', b'i', b'l', b'l', // last will key
+            b't', b'e', b's', b't', // last will value
+            b'g', b'r', b'a', b'v', b'e', b'/', b'g', b'o', b'o', b'd', b's', b'/',
+            b'1', // grave goods 1 key
+            b'g', b'r', b'a', b'v', b'e', b'/', b'g', b'o', b'o', b'd', b's', b'/',
+            b'2', // grave goods 2 key
+        ];
+
+        let result = tokio_test::block_on(read_client_message(&data[..]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CM::HandshakeRequest(HandshakeRequest {
+                supported_protocol_versions: vec![
+                    ProtocolVersion { major: 0, minor: 1 },
+                    ProtocolVersion { major: 0, minor: 5 },
+                    ProtocolVersion { major: 1, minor: 0 },
+                ],
+                last_will: vec![("last/will", "test").into(),],
+                grave_goods: vec!["grave/goods/1".into(), "grave/goods/2".into(),]
+            })
+        )
     }
 
     #[test]

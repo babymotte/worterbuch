@@ -1,5 +1,5 @@
 use crate::{
-    ErrorCode, KeyLength, MessageType, MetaDataLength, NumKeyValuePairs, PathLength,
+    ErrorCode, KeyLength, MessageType, MetaDataLength, NumGraveGoods, NumKeyValuePairs, PathLength,
     RequestPatternLength, ValueLength,
 };
 use std::{fmt, io, string::FromUtf8Error};
@@ -58,6 +58,8 @@ pub enum EncodeError {
     PathTooLong(usize),
     TooManyKeyValuePairs(usize),
     TooManyProtocolVersions(usize),
+    TooManyLastWills(usize),
+    TooManyGraveGoods(usize),
     IoError(io::Error),
 }
 
@@ -107,6 +109,18 @@ impl fmt::Display for EncodeError {
                 "too many supported protocol versions pairs: {} (max {} allowed)",
                 len,
                 NumKeyValuePairs::MAX
+            ),
+            EncodeError::TooManyLastWills(len) => write!(
+                f,
+                "too many last will key/value pairs: {} (max {} allowed)",
+                len,
+                NumGraveGoods::MAX
+            ),
+            EncodeError::TooManyGraveGoods(len) => write!(
+                f,
+                "too many grave goods: {} (max {} allowed)",
+                len,
+                NumGraveGoods::MAX
             ),
             EncodeError::IoError(ioe) => ioe.fmt(f),
         }

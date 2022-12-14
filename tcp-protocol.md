@@ -4,6 +4,16 @@ Wörterbuch follows a client/server model. All data is stored on the server, cli
 
 Within a SESSION a client can make an arbitrary number of GET, PGET, SET, SUBSCRIBE and PSUBSCRIBE requests to query or update data on the server.
 
+Upon connecting to the server the client sends a HANDSHAKE REQUEST. It contains the following information:
+ - a list of the protocol verions the client supports
+ - optionally a LAST WILL (KEY and VALUE) that the server will set when the client disconnects
+ - optionally a list of GRAVE GOODS (KEYs or REQUEST PATTERNs) that the server will clear when the client disconnects
+The Server must respond either with a HANDSHAKE ERROR if the server supports none of the protocol versions the client requested or with a HANDSHAKE RESPONSE containing the following:
+ - the protocol version that will be used in this session. This must be the highest version that both server and client suppport
+ - the character the server uses as WILDCARD
+ - the character the server uses as MULTI LEVEL WILDCARD
+ - the character the server uses as SEPARATOR
+
 ## Term definitions
 
 - MESSAGE: a set of bytes transferred between the client and the server. Every message must follow the specifications defined in [Message Format](#message-format)
@@ -28,9 +38,10 @@ Within a SESSION a client can make an arbitrary number of GET, PGET, SET, SUBSCR
 - WILDCARD: can be either a SINGLE LEVEL WILDCARD or a MULTI LEVEL WILDCARD
 - SINGLE LEVEL WILDCARD: a single ASCII char that can be used as a placeholder for any single KEY ELEMENT in a REQUEST PATTERN. The default character for a single level wildcard is `?` however this can be changed to any other ASCII character in the configuration of the server. A REQUEST PATTERN can contain any number of single level wildcards.
 - MULTI LEVEL WILDCARD: a single ASCII character that can be used as a placeholder for any number of KEY ELEMENTs in a REQUEST PATTERN. The default character for a single level wildcard is `#` however this can be changed to any other ASCII character in the configuration of the server. A multi level wildcard can only be used at the very end of a REQUEST PATTERN, as a result a REQUEST PATTERN cannot contain more than one multi level wildcard.
-- TRANSACTION ID: transaction IDs are used to match server messages to the client message that triggered them. Transaction ids used by the client must be unique within the current SESSION, i.e. for every message the client sends it must use a new transaction id. Uniqueness across SESSIONs or across multiple clients is not necessary. Transaction ids must always be an unsigned 64 Bit integer. A reasonable strategy for client implementations is to start with 0 in a new SESSION and simply count up for every message sent.
+- TRANSACTION ID: transaction IDs are used to match server messages to the client message that triggered them. Transaction ids used by the client must be unique within the current SESSION, i.e. for every message the client sends it must use a new transaction id. Uniqueness across SESSIONs or across multiple clients is not necessary. Transaction ids must always be an unsigned 64 Bit integer. A reasonable strategy for client implementations is to start with 1 in a new SESSION and simply count up for every message sent. Handshake messages (both client and server) must always have the transaction ID 0.
 - SUBSCRIPTION: clients can receive asynchronous notifications from the server whenever certain VALUEs change on the server. This is done by sending a SUBSCRIBE message containing a REQUEST PATTERN. For every change of a VALUE whose KEY matches the subscription's REQUEST PATTERN the server will send an EVENT message containing the REQUEST PATTERN, the concrete KEY and the new VALUE to the client.
-
+- LAST WILL: clients can specify a last will message that the server will publish when the client disconnects. This can be useful to detect vital services being offline 
+- GRAVE GOODS: KEYs or REQUEST PATTERNs that will be 'buried' along with the client, i.e. if the client disconnects, matching keys will be cleared.
 ## Client Actions
 
 ### GET

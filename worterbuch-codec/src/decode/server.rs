@@ -1,11 +1,11 @@
 use crate::{
     error::{DecodeError, DecodeResult},
-    Handshake, Key, KeyLength, MetaData, MetaDataLength, NumKeyValuePairs, NumProtocolVersions,
-    ProtocolVersion, ProtocolVersionSegment, RequestPattern, RequestPatternLength, TransactionId,
-    Value, ValueLength, ERROR_CODE_BYTES, HSHK, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES,
-    MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, NUM_PROTOCOL_VERSION_BYTES,
-    PROTOCOL_VERSION_SEGMENT_BYTES, REQUEST_PATTERN_LENGTH_BYTES, SEPARATOR_BYTES,
-    TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
+    Handshake, Key, KeyLength, KeyValuePairs, MetaData, MetaDataLength, NumKeyValuePairs,
+    NumProtocolVersions, ProtocolVersion, ProtocolVersionSegment, ProtocolVersions, RequestPattern,
+    RequestPatternLength, TransactionId, Value, ValueLength, ERROR_CODE_BYTES, HSHK,
+    KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES, MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES,
+    NUM_PROTOCOL_VERSION_BYTES, PROTOCOL_VERSION_SEGMENT_BYTES, REQUEST_PATTERN_LENGTH_BYTES,
+    SEPARATOR_BYTES, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
     {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
 };
 use std::io::Read;
@@ -54,7 +54,7 @@ fn read_pstate_message(mut data: impl Read) -> DecodeResult<PState> {
     data.read_exact(&mut buf)?;
     let request_pattern = RequestPattern::from_utf8_lossy(&buf).to_string();
 
-    let mut key_value_pairs = Vec::new();
+    let mut key_value_pairs = KeyValuePairs::new();
 
     for (key_length, value_length) in key_value_lengths {
         let mut buf = vec![0; key_length as usize];
@@ -80,7 +80,7 @@ fn read_handshake_message(mut data: impl Read) -> DecodeResult<Handshake> {
     data.read_exact(&mut buf)?;
     let num_protocol_versions = NumProtocolVersions::from_be_bytes(buf);
 
-    let mut supported_protocol_versions = Vec::new();
+    let mut supported_protocol_versions = ProtocolVersions::new();
 
     for _ in 0..num_protocol_versions {
         let mut buf = [0; PROTOCOL_VERSION_SEGMENT_BYTES];

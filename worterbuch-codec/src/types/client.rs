@@ -1,6 +1,10 @@
-use crate::{Key, MessageType, Path, RequestPattern, TransactionId, Value};
+use crate::{
+    GraveGoods, Key, LastWill, MessageType, Path, ProtocolVersions, RequestPattern, TransactionId,
+    Value,
+};
 use serde::{Deserialize, Serialize};
 
+pub const HSHKR: MessageType = 0b00001000;
 pub const GET: MessageType = 0b00000000;
 pub const SET: MessageType = 0b00000001;
 pub const SUB: MessageType = 0b00000010;
@@ -13,6 +17,7 @@ pub const USUB: MessageType = 0b00000111;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientMessage {
+    HandshakeRequest(HandshakeRequest),
     Get(Get),
     PGet(PGet),
     Set(Set),
@@ -26,6 +31,7 @@ pub enum ClientMessage {
 impl ClientMessage {
     pub fn transaction_id(&self) -> TransactionId {
         match self {
+            ClientMessage::HandshakeRequest(_) => 0,
             ClientMessage::Get(m) => m.transaction_id,
             ClientMessage::PGet(m) => m.transaction_id,
             ClientMessage::Set(m) => m.transaction_id,
@@ -36,6 +42,14 @@ impl ClientMessage {
             ClientMessage::Unsubscribe(m) => m.transaction_id,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HandshakeRequest {
+    pub supported_protocol_versions: ProtocolVersions,
+    pub last_will: LastWill,
+    pub grave_goods: GraveGoods,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

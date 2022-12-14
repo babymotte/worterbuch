@@ -26,6 +26,9 @@ pub async fn process_incoming_message(
     subscriptions: &mut Subscriptions,
 ) -> WorterbuchResult<bool> {
     match read_client_message(msg).await {
+        Ok(Some(CM::HandshakeRequest(_msg))) => {
+            todo!()
+        }
         Ok(Some(CM::Get(msg))) => {
             get(msg, worterbuch.clone(), tx.clone()).await?;
         }

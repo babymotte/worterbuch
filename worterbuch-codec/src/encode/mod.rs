@@ -6,11 +6,12 @@ pub use server::*;
 
 use crate::{
     error::{EncodeError, EncodeResult},
-    KeyLength, KeyValuePairs, MetaDataLength, NumKeyValuePairs, NumProtocolVersions, PathLength,
-    ProtocolVersions, RequestPatternLength, ValueLength,
+    GraveGoods, Key, KeyLength, KeyValuePairs, LastWill, MetaData, MetaDataLength, NumGraveGoods,
+    NumKeyValuePairs, NumLastWill, NumProtocolVersions, Path, PathLength, ProtocolVersions,
+    RequestPattern, RequestPatternLength, Value, ValueLength,
 };
 
-fn get_request_pattern_length(string: &str) -> EncodeResult<RequestPatternLength> {
+fn get_request_pattern_length(string: &RequestPattern) -> EncodeResult<RequestPatternLength> {
     let length = string.len();
     if length > RequestPatternLength::MAX as usize {
         Err(EncodeError::RequestPatternTooLong(length))
@@ -19,7 +20,7 @@ fn get_request_pattern_length(string: &str) -> EncodeResult<RequestPatternLength
     }
 }
 
-fn get_key_length(string: &str) -> EncodeResult<KeyLength> {
+fn get_key_length(string: &Key) -> EncodeResult<KeyLength> {
     let length = string.len();
     if length > KeyLength::MAX as usize {
         Err(EncodeError::KeyTooLong(length))
@@ -28,7 +29,7 @@ fn get_key_length(string: &str) -> EncodeResult<KeyLength> {
     }
 }
 
-fn get_value_length(string: &str) -> EncodeResult<ValueLength> {
+fn get_value_length(string: &Value) -> EncodeResult<ValueLength> {
     let length = string.len();
     if length > ValueLength::MAX as usize {
         Err(EncodeError::ValueTooLong(length))
@@ -55,7 +56,25 @@ fn get_num_protocol_versions(versions: &ProtocolVersions) -> EncodeResult<NumPro
     }
 }
 
-fn get_metadata_length(string: &str) -> EncodeResult<MetaDataLength> {
+fn get_num_last_will(last_will: &LastWill) -> EncodeResult<NumLastWill> {
+    let length = last_will.len();
+    if length > NumLastWill::MAX as usize {
+        Err(EncodeError::TooManyLastWills(length))
+    } else {
+        Ok(length as NumLastWill)
+    }
+}
+
+fn get_num_grave_goods(grave_goods: &GraveGoods) -> EncodeResult<NumGraveGoods> {
+    let length = grave_goods.len();
+    if length > NumGraveGoods::MAX as usize {
+        Err(EncodeError::TooManyGraveGoods(length))
+    } else {
+        Ok(length as NumGraveGoods)
+    }
+}
+
+fn get_metadata_length(string: &MetaData) -> EncodeResult<MetaDataLength> {
     let length = string.len();
     if length > MetaDataLength::MAX as usize {
         Err(EncodeError::MetaDataTooLong(length))
@@ -64,7 +83,7 @@ fn get_metadata_length(string: &str) -> EncodeResult<MetaDataLength> {
     }
 }
 
-fn get_path_length(string: &str) -> EncodeResult<PathLength> {
+fn get_path_length(string: &Path) -> EncodeResult<PathLength> {
     let length = string.len();
     if length > PathLength::MAX as usize {
         Err(EncodeError::PathTooLong(length))
