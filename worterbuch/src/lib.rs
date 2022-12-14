@@ -13,8 +13,12 @@ pub use config::*;
 use crate::stats::track_stats;
 use anyhow::Result;
 use std::sync::Arc;
+#[cfg(not(target_os = "windows"))]
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::{spawn, sync::RwLock};
+use tokio::{
+    spawn,
+    sync::{mpsc, RwLock},
+};
 
 pub async fn start_worterbuch(config: Config) -> Result<()> {
     let config_pers = config.clone();
@@ -35,6 +39,8 @@ pub async fn start_worterbuch(config: Config) -> Result<()> {
     let worterbuch_pers = worterbuch.clone();
     let worterbuch_uptime = worterbuch.clone();
 
+    let (terminate_tx, mut terminate_rx) = mpsc::channel(1);
+
     if use_persistence {
         spawn(persistence::periodic(worterbuch_pers, config_pers));
     }
@@ -45,8 +51,23 @@ pub async fn start_worterbuch(config: Config) -> Result<()> {
 
     spawn(server::web::start(worterbuch.clone(), config.clone()));
 
-    let mut signal = signal(SignalKind::terminate())?;
-    signal.recv().await;
+    #[cfg(not(target_os = "windows"))]
+    spawn(async move {
+        match signal(SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+                log::info!("SIGTERM received.");
+                if let Err(e) = terminate_tx.send(()).await {
+                    log::error!("Error sending terminate signal: {e}");
+                }
+            }
+            Err(e) => log::error!("Error registring SIGTERM handler: {e}"),
+        }
+    });
+
+    terminate_rx.recv().await;
+
+    log::info!("Shutting down.");
 
     if use_persistence {
         persistence::once(worterbuch.clone(), config.clone()).await?;
