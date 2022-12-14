@@ -9,8 +9,8 @@ type Tree = HashMap<String, Node>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SubscriptionId {
-    client_id: Uuid,
-    transaction_id: TransactionId,
+    pub client_id: Uuid,
+    pub transaction_id: TransactionId,
 }
 
 impl SubscriptionId {
@@ -74,6 +74,12 @@ impl Subscribers {
         multi_wildcard: &str,
     ) -> Vec<Subscriber> {
         let mut all_subscribers = Vec::new();
+
+        for segment in key {
+            if segment.contains(wildcard) || segment.contains(multi_wildcard) {
+                panic!("get_subscribers must only be used for keys, not patterns");
+            }
+        }
 
         self.add_matches(
             &self.data,
@@ -152,7 +158,7 @@ impl Subscribers {
             let retain = &s.id != subscription;
             removed = removed || !retain;
             if !retain {
-                log::debug!("removing subscription {subscription:?}");
+                log::debug!("Removing subscription {subscription:?} to pattern {pattern:?}");
             }
             retain
         });
@@ -213,6 +219,37 @@ mod test {
         assert_eq!(res.len(), 1);
 
         let res = subscribers.get_subscribers(&["test", "a", "b"], "?", "#");
+        assert_eq!(res.len(), 0);
+    }
+
+    #[test]
+    fn subscribers_are_cleaned_up() {
+        let mut subscribers = Subscribers::default();
+
+        let (tx, _rx) = unbounded_channel();
+        let pattern = vec!["test", "?", "b", "#"];
+        let id = SubscriptionId {
+            client_id: Uuid::new_v4(),
+            transaction_id: 123,
+        };
+        let subscriber = Subscriber::new(
+            id.clone(),
+            pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
+            tx,
+            false,
+        );
+
+        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        assert_eq!(res.len(), 0);
+
+        subscribers.add_subscriber(&pattern, subscriber);
+
+        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        assert_eq!(res.len(), 1);
+
+        subscribers.unsubscribe(&pattern, &id);
+
+        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
         assert_eq!(res.len(), 0);
     }
 }

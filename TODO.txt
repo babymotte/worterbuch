@@ -9,3 +9,5 @@ length of the message must either be the first or second fixed size number in th
 
 Protocol versions
 Servers should support multiple protocol versions. The list of supported versions is sent to the client with the handshake message. The client should respond, telling the server which protocol version it wishes to use
+
+keepalive messages to make sure client is still responding

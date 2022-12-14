@@ -1,6 +1,6 @@
-use crate::{subscribers::SubscriptionId, worterbuch::Worterbuch};
+use crate::worterbuch::Worterbuch;
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     fs::File,
     io::AsyncReadExt,
@@ -14,17 +14,14 @@ use worterbuch_common::{
     error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
     nonblocking::read_client_message,
     Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, HandshakeRequest, Import, KeyValuePair,
-    MetaData, PGet, PState, PSubscribe, RequestPattern, Set, State, Subscribe, Unsubscribe,
+    MetaData, PGet, PState, PSubscribe, Set, State, Subscribe, Unsubscribe,
 };
-
-pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
 
 pub async fn process_incoming_message(
     client_id: Uuid,
     msg: impl AsyncReadExt + Unpin,
     worterbuch: Arc<RwLock<Worterbuch>>,
     tx: UnboundedSender<Vec<u8>>,
-    subscriptions: &mut Subscriptions,
 ) -> WorterbuchResult<bool> {
     match read_client_message(msg).await {
         Ok(Some(CM::HandshakeRequest(msg))) => {
@@ -40,36 +37,24 @@ pub async fn process_incoming_message(
             set(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(Some(CM::Subscribe(msg))) => {
-            let transaction_id = msg.transaction_id;
-            let key = msg.key.clone();
             let unique = msg.unique;
-            if subscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await? {
-                let subscription_id = SubscriptionId::new(client_id, transaction_id);
-                subscriptions.insert(subscription_id, key);
-            }
+            subscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
         }
         Ok(Some(CM::PSubscribe(msg))) => {
-            let transaction_id = msg.transaction_id;
-            let pattern = msg.request_pattern.clone();
             let unique = msg.unique;
-            if psubscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await? {
-                let subscription_id = SubscriptionId::new(client_id, transaction_id);
-                subscriptions.insert(subscription_id, pattern);
-            }
+            psubscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
         }
         Ok(Some(CM::Export(msg))) => export(msg, worterbuch.clone(), tx.clone()).await?,
         Ok(Some(CM::Import(msg))) => import(msg, worterbuch.clone(), tx.clone()).await?,
         Ok(Some(CM::Unsubscribe(msg))) => {
-            let subscription = SubscriptionId::new(client_id, msg.transaction_id);
-            let pattern = subscriptions.remove(&subscription);
-            unsubscribe(msg, &subscription, pattern, worterbuch.clone(), tx.clone()).await?
+            unsubscribe(msg, worterbuch.clone(), tx.clone(), client_id).await?
         }
         Ok(None) => {
             // client disconnected
             return Ok(false);
         }
         Err(e) => {
-            log::error!("error decoding message: {e}");
+            log::error!("Error decoding message: {e}");
             if let DecodeError::IoError(_) = e {
                 return Ok(false);
             }
@@ -241,8 +226,6 @@ async fn subscribe(
     }
 
     let transaction_id = msg.transaction_id;
-    let key = msg.key;
-    let key_recv = key.clone();
 
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription:?} …");
@@ -271,7 +254,7 @@ async fn subscribe(
 
         let mut wb = wb_unsub.write().await;
         log::debug!("No more events, ending subscription {subscription:?}.");
-        match wb.unsubscribe(&key_recv, &subscription) {
+        match wb.unsubscribe(client_id, transaction_id) {
             Ok(()) => {
                 log::warn!("Subscription {subscription:?} was not cleaned up properly!");
             }
@@ -324,7 +307,6 @@ async fn psubscribe(
 
     let transaction_id = msg.transaction_id;
     let request_pattern = msg.request_pattern;
-    let request_pattern_recv = request_pattern.clone();
 
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription:?} …");
@@ -352,7 +334,7 @@ async fn psubscribe(
 
         let mut wb = wb_unsub.write().await;
         log::debug!("No more events, ending subscription {subscription:?}.");
-        match wb.unsubscribe(&request_pattern_recv, &subscription) {
+        match wb.unsubscribe(client_id, transaction_id) {
             Ok(()) => {
                 log::warn!("Subscription {subscription:?} was not cleaned up properly!");
             }
@@ -436,34 +418,25 @@ async fn import(
 
 async fn unsubscribe(
     msg: Unsubscribe,
-    subscription_id: &SubscriptionId,
-    pattern: Option<RequestPattern>,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<Vec<u8>>,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
 
-    match pattern {
-        Some(pattern) => {
-            wb.unsubscribe(&pattern, subscription_id)?;
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
+    wb.unsubscribe(client_id, msg.transaction_id)?;
+    let response = Ack {
+        transaction_id: msg.transaction_id,
+    };
 
-            match encode_ack_message(&response) {
-                Ok(data) => client.send(data).context(|| {
-                    format!(
-                        "Error sending ACK message for transaction ID {}",
-                        msg.transaction_id
-                    )
-                })?,
-                Err(e) => handle_encode_error(e, client.clone()).await?,
-            }
-        }
-        None => {
-            handle_store_error(WorterbuchError::NotSubscribed, client, msg.transaction_id).await?;
-            return Ok(());
-        }
+    match encode_ack_message(&response) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client.clone()).await?,
     }
 
     Ok(())

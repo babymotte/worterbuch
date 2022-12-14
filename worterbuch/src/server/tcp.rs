@@ -1,5 +1,5 @@
 use super::common::process_incoming_message;
-use crate::{config::Config, server::common::Subscriptions, worterbuch::Worterbuch};
+use crate::{config::Config, worterbuch::Worterbuch};
 use anyhow::Result;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
@@ -12,7 +12,7 @@ use tokio::{
     },
 };
 use uuid::Uuid;
-use worterbuch_common::error::{WorterbuchError, WorterbuchResult};
+use worterbuch_common::error::WorterbuchResult;
 
 pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
     log::info!("Starting TCP Server …");
@@ -24,7 +24,6 @@ pub async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Resul
 
     loop {
         let conn = server.accept().await?;
-        log::debug!("Client connected from {}", conn.1);
         spawn(serve(conn.0, worterbuch.clone(), conn.1));
     }
 }
@@ -34,6 +33,10 @@ async fn serve(
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
 ) -> WorterbuchResult<()> {
+    let client_id = Uuid::new_v4();
+
+    log::info!("New client connected: {client_id} ({remote_addr})");
+
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     let (mut client_read, mut client_write) = client.into_split();
@@ -41,45 +44,30 @@ async fn serve(
     spawn(async move {
         while let Some(bytes) = rx.recv().await {
             if let Err(e) = client_write.write_all(&bytes).await {
-                log::error!("Error sending message to client: {e}");
+                log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
                 break;
             }
         }
     });
 
-    let mut subscriptions = Subscriptions::new();
-    let client_id = Uuid::new_v4();
-
-    log::debug!("Receiving messages from client {remote_addr} …");
+    log::debug!("Receiving messages from client {client_id} ({remote_addr}) …");
     loop {
         if !process_incoming_message(
             client_id.clone(),
             &mut client_read,
             worterbuch.clone(),
             tx.clone(),
-            &mut subscriptions,
         )
         .await?
         {
             break;
         }
     }
-    log::debug!("No more messages from {remote_addr}, closing connection.");
+
+    log::info!("TCP stream of client {client_id} ({remote_addr}) closed.");
 
     let mut wb = worterbuch.write().await;
-    for (subscription, pattern) in subscriptions {
-        match wb.unsubscribe(&pattern, &subscription) {
-            Ok(()) => {}
-            Err(WorterbuchError::NotSubscribed) => {
-                log::warn!("Inconsistent subscription state: tracked subscription {subscription:?} is not present on server.");
-            }
-            Err(e) => {
-                log::warn!("Error while unsubscribing: {e}");
-            }
-        }
-    }
-
-    wb.disconnected(client_id);
+    wb.disconnected(client_id, remote_addr);
 
     Ok(())
 }

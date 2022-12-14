@@ -1,4 +1,4 @@
-use crate::server::web::serve_ws;
+use crate::server::web::serve;
 use crate::stats::track_stats;
 use crate::{config::Config, worterbuch::Worterbuch};
 use crate::{persistence, server};
@@ -51,8 +51,12 @@ pub async fn worterbuch_ws_filter(
         move |ws: Ws, remote: Option<SocketAddr>| {
             let worterbuch = worterbuch.clone();
             ws.on_upgrade(move |websocket| async move {
-                if let Err(e) = serve_ws(websocket, worterbuch.clone(), remote.clone()).await {
-                    log::error!("Error in WS connection: {e}");
+                if let Some(remote) = remote {
+                    if let Err(e) = serve(websocket, worterbuch.clone(), remote).await {
+                        log::error!("Error in WS connection: {e}");
+                    }
+                } else {
+                    log::error!("Client has no remote address.");
                 }
             })
         },

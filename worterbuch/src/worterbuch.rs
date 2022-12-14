@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_value, Value};
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, net::SocketAddr};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,8 +15,10 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     GraveGoods, Handshake, KeyValuePairs, LastWill, Path, ProtocolVersion, ProtocolVersions,
-    TransactionId,
+    RequestPattern, TransactionId,
 };
+
+pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
@@ -34,6 +36,7 @@ impl Display for Stats {
 pub struct Worterbuch {
     config: Config,
     store: Store,
+    subscriptions: Subscriptions,
     subscribers: Subscribers,
     len: usize,
     last_wills: HashMap<Uuid, LastWill>,
@@ -70,7 +73,7 @@ impl Worterbuch {
         grave_goods: GraveGoods,
         client_id: Uuid,
     ) -> WorterbuchResult<Handshake> {
-        // TODO implement protocol versions prperly
+        // TODO implement protocol versions properly
         let mut supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
@@ -224,6 +227,9 @@ impl Worterbuch {
             tx.send(vec![(key, value).into()])
                 .expect("rx is neither closed nor dropped");
         }
+        let subscription_id = SubscriptionId::new(client_id, transaction_id);
+        self.subscriptions.insert(subscription_id, key);
+        log::debug!("Total subscriptions: {}", self.subscriptions.len());
         Ok((rx, subscription))
     }
 
@@ -246,6 +252,9 @@ impl Worterbuch {
         );
         self.subscribers.add_subscriber(&path, subscriber);
         tx.send(matches).expect("rx is neither closed nor dropped");
+        let subscription_id = SubscriptionId::new(client_id, transaction_id);
+        self.subscriptions.insert(subscription_id, pattern);
+        log::debug!("Total subscriptions: {}", self.subscriptions.len());
         Ok((rx, subscription))
     }
 
@@ -309,12 +318,22 @@ impl Worterbuch {
 
     pub fn unsubscribe(
         &mut self,
-        key_pattern: &str,
-        subscription: &SubscriptionId,
+        client_id: Uuid,
+        transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
-        let pattern: Vec<&str> = key_pattern.split(self.config.separator).collect();
-        if self.subscribers.unsubscribe(&pattern, subscription) {
-            Ok(())
+        let subscription = SubscriptionId::new(client_id, transaction_id);
+        self.do_unsubscribe(&subscription)
+    }
+
+    fn do_unsubscribe(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
+        if let Some(pattern) = self.subscriptions.remove(&subscription) {
+            log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
+            let pattern: Vec<&str> = pattern.split(self.config.separator).collect();
+            if self.subscribers.unsubscribe(&pattern, &subscription) {
+                Ok(())
+            } else {
+                Err(WorterbuchError::NotSubscribed)
+            }
         } else {
             Err(WorterbuchError::NotSubscribed)
         }
@@ -354,14 +373,40 @@ impl Worterbuch {
         }
     }
 
-    pub fn disconnected(&mut self, client_id: Uuid) {
+    pub fn disconnected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
+        let subscription_keys: Vec<SubscriptionId> = self
+            .subscriptions
+            .keys()
+            .filter(|k| k.client_id == client_id)
+            .map(ToOwned::to_owned)
+            .collect();
+        log::info!(
+            "Removing {} subscription(s) of client {client_id} ({remote_addr}).",
+            subscription_keys.len()
+        );
+        for subscription in subscription_keys {
+            if let Err(e) = self.do_unsubscribe(&subscription) {
+                log::error!("Inconsistent subscription state: {e}");
+            }
+        }
+
         if let Some(last_wills) = self.last_wills.remove(&client_id) {
+            log::info!("Triggering last will of client {client_id} ({remote_addr}).");
+
             for last_will in last_wills {
+                log::debug!(
+                    "Setting last will of client {client_id} ({remote_addr}): {} = {}",
+                    last_will.key,
+                    last_will.value
+                );
                 if let Err(e) = self.set(last_will.key, last_will.value) {
                     log::error!("Error setting last will of client {client_id}: {e}")
                 }
             }
+        } else {
+            log::info!("Client {client_id} ({remote_addr}) has no last will.");
         }
+
         // TODO process grave goods
     }
 }
