@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::{
     spawn,
-    sync::{mpsc, RwLock},
+    sync::{oneshot, RwLock},
 };
 
 pub async fn start_worterbuch(config: Config) -> Result<()> {
@@ -39,7 +39,7 @@ pub async fn start_worterbuch(config: Config) -> Result<()> {
     let worterbuch_pers = worterbuch.clone();
     let worterbuch_uptime = worterbuch.clone();
 
-    let (terminate_tx, mut terminate_rx) = mpsc::channel(1);
+    let (_terminate_tx, terminate_rx) = oneshot::channel::<()>();
 
     if use_persistence {
         spawn(persistence::periodic(worterbuch_pers, config_pers));
@@ -57,15 +57,15 @@ pub async fn start_worterbuch(config: Config) -> Result<()> {
             Ok(mut signal) => {
                 signal.recv().await;
                 log::info!("SIGTERM received.");
-                if let Err(e) = terminate_tx.send(()).await {
-                    log::error!("Error sending terminate signal: {e}");
+                if let Err(_) = _terminate_tx.send(()) {
+                    log::error!("Error sending terminate signal");
                 }
             }
             Err(e) => log::error!("Error registring SIGTERM handler: {e}"),
         }
     });
 
-    terminate_rx.recv().await;
+    terminate_rx.await?;
 
     log::info!("Shutting down.");
 
