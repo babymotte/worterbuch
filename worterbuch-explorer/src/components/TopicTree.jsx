@@ -6,8 +6,6 @@ import TreeItem from "@mui/lab/TreeItem";
 import { Typography } from "@mui/material";
 
 export default function TopicTree({ data, separator }) {
-  console.log("separator", separator);
-
   const treeItems = toTreeItems(data, separator);
 
   return (

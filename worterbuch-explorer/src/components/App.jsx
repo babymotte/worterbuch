@@ -16,11 +16,11 @@ export default function App() {
   const dataRef = React.useRef(new SortedMap());
   const [data, setData] = React.useState(new SortedMap());
   const [socket, setSocket] = React.useState();
-  const [multiWildcard, setMultiWildcard] = React.useState();
+  const multiWildcardRef = React.useRef();
   const separatorRef = React.useRef();
 
   React.useEffect(() => {
-    const topic = multiWildcard;
+    const topic = multiWildcardRef.current;
     if (topic && socket) {
       dataRef.current = new SortedMap();
       const subscrMsg = {
@@ -29,14 +29,13 @@ export default function App() {
       const buf = encode_client_message(subscrMsg);
       socket.send(buf);
     }
-  }, [multiWildcard, socket]);
+  }, [socket]);
 
   React.useEffect(() => {
     console.log("Connecting to server.");
     const socket = new WebSocket(url);
     socket.onclose = (e) => {
       setSocket(undefined);
-      setMultiWildcard(undefined);
     };
     socket.onmessage = async (e) => {
       const buf = await e.data.arrayBuffer();
@@ -51,13 +50,23 @@ export default function App() {
         setData(new SortedMap(dataRef.current));
       }
       if (msg.handshake) {
+        console.log("Handshake complete.");
+        setSocket(socket);
         separatorRef.current = msg.handshake.separator;
-        setMultiWildcard(msg.handshake.multiWildcard);
+        multiWildcardRef.current = msg.handshake.multiWildcard;
       }
     };
     socket.onopen = () => {
       console.log("Connected to server.");
-      setSocket(socket);
+      const handshake = {
+        handshakeRequest: {
+          supportedProtocolVersions: [{ major: 0, minor: 2 }],
+          lastWill: [],
+          graveGoods: [],
+        },
+      };
+      const buf = encode_client_message(handshake);
+      socket.send(buf);
     };
     return () => {
       console.log("Disconnecting from server.");
