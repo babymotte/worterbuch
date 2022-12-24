@@ -5,7 +5,7 @@ pub mod tcp;
 pub mod ws;
 
 use error::SubscriptionError;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 pub use worterbuch_common::*;
 
 use async_stream::stream;
@@ -55,6 +55,17 @@ impl Connection {
             transaction_id: i,
             key: key.to_owned(),
             value: value.to_owned(),
+        }))?;
+        Ok(i)
+    }
+
+    pub fn set_json<T: Serialize>(&mut self, key: &str, value: &T) -> ConnectionResult<u64> {
+        let i = self.inc_counter();
+        let str_value = serde_json::to_string(value)?;
+        self.cmd_tx.send(CM::Set(Set {
+            transaction_id: i,
+            key: key.to_owned(),
+            value: str_value,
         }))?;
         Ok(i)
     }
