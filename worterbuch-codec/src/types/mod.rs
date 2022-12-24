@@ -4,7 +4,7 @@ mod server;
 pub use client::*;
 pub use server::*;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub type MessageType = u8;
 pub type TransactionId = u64;
@@ -13,6 +13,7 @@ pub type RequestPatterns = Vec<RequestPattern>;
 pub type Key = String;
 pub type Value = String;
 pub type KeyValuePairs = Vec<KeyValuePair>;
+pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type ErrorCode = u8;
 pub type MetaData = String;
 pub type PathLength = u16;
@@ -70,6 +71,11 @@ impl ProtocolVersion {
 pub struct KeyValuePair {
     pub key: Key,
     pub value: Value,
+}
+
+pub struct TypedKeyValuePair<T: DeserializeOwned> {
+    pub key: Key,
+    pub value: T,
 }
 
 impl From<(String, String)> for KeyValuePair {

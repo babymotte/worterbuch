@@ -145,6 +145,7 @@ pub enum ConnectionError {
     WorterbuchError(WorterbuchError),
     ConfigError(ConfigError),
     DecodeError(DecodeError),
+    SerdeError(serde_json::Error),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -162,6 +163,7 @@ impl fmt::Display for ConnectionError {
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
             Self::DecodeError(e) => fmt::Display::fmt(&e, f),
+            Self::SerdeError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
@@ -213,6 +215,12 @@ impl From<ConfigError> for ConnectionError {
 impl From<DecodeError> for ConnectionError {
     fn from(e: DecodeError) -> Self {
         ConnectionError::DecodeError(e)
+    }
+}
+
+impl From<serde_json::Error> for ConnectionError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::SerdeError(e)
     }
 }
 
