@@ -4,14 +4,29 @@ import TopicTree from "./TopicTree";
 import SortedMap from "collections/sorted-map";
 
 export default function App() {
-  const loc = window.location;
-  let proto;
-  if (loc.protocol === "https:") {
-    proto = "wss";
-  } else {
-    proto = "ws";
+  const [wbAddress, setWbAddress] = React.useState(
+    window.localStorage?.getItem("worterbuch.address")
+  );
+
+  let url = wbAddress;
+
+  if (!url || url.trim() === "") {
+    const loc = window.location;
+    let proto;
+    if (loc.protocol === "https:") {
+      proto = "wss";
+    } else {
+      proto = "ws";
+    }
+    url = `${proto}://${loc.hostname}:${loc.port}/ws`;
+    setWbAddress(url);
   }
-  const url = `${proto}://${loc.hostname}:${loc.port}/ws`;
+
+  React.useEffect(() => {
+    if (window.localStorage) {
+      window.localStorage.setItem("worterbuch.address", url);
+    }
+  }, [url]);
 
   const dataRef = React.useRef(new SortedMap());
   const [data, setData] = React.useState(new SortedMap());
@@ -74,9 +89,19 @@ export default function App() {
     };
   }, [url]);
 
+  function handleUrlInput(e) {
+    if (e.key === "Enter") {
+      setWbAddress(e.target.value);
+    }
+  }
+
   return (
     <div className="App">
-      {<TopicTree data={data} separator={separatorRef.current} />}
+      <nav className="AddressBar">
+        <input type="text" defaultValue={url} onKeyDown={handleUrlInput} />
+      </nav>
+      <div className="spacer" style={{ padding: "4px" }} />
+      <TopicTree data={data} separator={separatorRef.current} />
     </div>
   );
 }
