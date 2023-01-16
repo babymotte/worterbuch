@@ -18,9 +18,6 @@
     ```
   similar to how `ls` lists all immediate children of the file system tree
 
-- get rid of nonblocking decoder, messages should have known length
-  length of the message must either be the first or second fixed size number in the packet or messages must be base64 encoded and delimited by a line break
-
 - Protocol versions
   Servers should support multiple protocol versions. The list of supported versions is sent to the client with the handshake message. The client should respond, telling the server which protocol version it wishes to use
 
