@@ -4,7 +4,7 @@ use crate::{
     LastWill, NumGraveGoods, NumLastWill, NumProtocolVersions, PGet, PSubscribe, Path, PathLength,
     ProtocolVersion, ProtocolVersionSegment, ProtocolVersions, RequestPattern,
     RequestPatternLength, Set, Subscribe, TransactionId, Unsubscribe, Value, ValueLength, EXP, GET,
-    HSHKR, IMP, KEY_LENGTH_BYTES, NUM_GRAVE_GOODS_BYTES, NUM_LAST_WILL_BYTES,
+    HSHKR, IMP, KEY_LENGTH_BYTES, MESSAGE_LENGTH_BYTES, NUM_GRAVE_GOODS_BYTES, NUM_LAST_WILL_BYTES,
     NUM_PROTOCOL_VERSION_BYTES, PATH_LENGTH_BYTES, PGET, PROTOCOL_VERSION_SEGMENT_BYTES, PSUB,
     REQUEST_PATTERN_LENGTH_BYTES, SET, SUB, TRANSACTION_ID_BYTES, UNIQUE_FLAG_BYTES, USUB,
     VALUE_LENGTH_BYTES,
@@ -12,6 +12,8 @@ use crate::{
 use std::io::Read;
 
 pub fn read_client_message(mut data: impl Read) -> DecodeResult<CM> {
+    let mut buf = [0; MESSAGE_LENGTH_BYTES];
+    data.read_exact(&mut buf)?;
     let mut buf = [0];
     data.read_exact(&mut buf)?;
     match buf[0] {
@@ -279,6 +281,7 @@ mod test {
     #[test]
     fn get_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010000, // message length
             GET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
@@ -297,6 +300,7 @@ mod test {
     #[test]
     fn pget_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010000, // message length
             PGET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
@@ -315,6 +319,7 @@ mod test {
     #[test]
     fn set_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011001, // message length
             SET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000000, 0b00000000, 0b00000111, 0b00000000, 0b00000000, 0b00000000,
             0b00000011, b'y', b'o', b'/', b'm', b'a', b'm', b'a', b'f', b'a', b't',
@@ -335,6 +340,7 @@ mod test {
     #[test]
     fn subscribe_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00100101, // message length
             SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
@@ -356,6 +362,7 @@ mod test {
     #[test]
     fn psubscribe_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00100101, // message length
             PSUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
@@ -377,6 +384,7 @@ mod test {
     #[test]
     fn export_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011000, // message length
             EXP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
             b't', b'o', b'/', b'f', b'i', b'l', b'e',
@@ -396,6 +404,7 @@ mod test {
     #[test]
     fn import_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011000, // message length
             IMP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
             b't', b'o', b'/', b'f', b'i', b'l', b'e',
@@ -415,6 +424,7 @@ mod test {
     #[test]
     fn unsubscribe_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001001, // message length
             USUB, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010,
         ];
@@ -427,6 +437,7 @@ mod test {
     #[test]
     fn handshake_request_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b01000001, // message length
             HSHKR,      // message type
             0b00000011, // 3 protocol versions
             0b00000001, // 1 last will
@@ -472,7 +483,7 @@ mod test {
 
         let data = encode_set_message(&msg).unwrap();
 
-        let decoded = read_client_message(&*data).unwrap();
+        let decoded = read_client_message(&data[..]).unwrap();
 
         assert_eq!(CM::Set(msg), decoded);
     }

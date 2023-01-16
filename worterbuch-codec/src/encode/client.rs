@@ -3,9 +3,9 @@ use super::{
     get_path_length, get_request_pattern_length, get_value_length,
 };
 use crate::{
-    error::EncodeResult, ClientMessage, Export, Get, HandshakeRequest, Import, KeyValuePair, PGet,
-    PSubscribe, ProtocolVersion, Set, Subscribe, Unsubscribe, EXP, GET, HSHKR, IMP, PGET, PSUB,
-    SET, SUB, USUB,
+    error::EncodeResult, prepend_buffer_length, ClientMessage, Export, Get, HandshakeRequest,
+    Import, KeyValuePair, PGet, PSubscribe, ProtocolVersion, Set, Subscribe, Unsubscribe, EXP, GET,
+    HSHKR, IMP, PGET, PSUB, SET, SUB, USUB,
 };
 
 pub fn encode_message(msg: &ClientMessage) -> EncodeResult<Vec<u8>> {
@@ -31,7 +31,7 @@ pub fn encode_get_message(msg: &Get) -> EncodeResult<Vec<u8>> {
     buf.extend(key_length.to_be_bytes());
     buf.extend(msg.key.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_pget_message(msg: &PGet) -> EncodeResult<Vec<u8>> {
@@ -43,7 +43,7 @@ pub fn encode_pget_message(msg: &PGet) -> EncodeResult<Vec<u8>> {
     buf.extend(request_pattern_length.to_be_bytes());
     buf.extend(msg.request_pattern.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
@@ -58,7 +58,7 @@ pub fn encode_set_message(msg: &Set) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.key.as_bytes());
     buf.extend(msg.value.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
@@ -71,7 +71,7 @@ pub fn encode_subscribe_message(msg: &Subscribe) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.key.as_bytes());
     buf.push(if msg.unique { 1 } else { 0 });
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_psubscribe_message(msg: &PSubscribe) -> EncodeResult<Vec<u8>> {
@@ -84,7 +84,7 @@ pub fn encode_psubscribe_message(msg: &PSubscribe) -> EncodeResult<Vec<u8>> {
     buf.extend(msg.request_pattern.as_bytes());
     buf.push(if msg.unique { 1 } else { 0 });
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_export_message(msg: &Export) -> EncodeResult<Vec<u8>> {
@@ -96,7 +96,7 @@ pub fn encode_export_message(msg: &Export) -> EncodeResult<Vec<u8>> {
     buf.extend(path_length.to_be_bytes());
     buf.extend(msg.path.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_import_message(msg: &Import) -> EncodeResult<Vec<u8>> {
@@ -108,7 +108,7 @@ pub fn encode_import_message(msg: &Import) -> EncodeResult<Vec<u8>> {
     buf.extend(path_length.to_be_bytes());
     buf.extend(msg.path.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_unsubscribe_message(msg: &Unsubscribe) -> EncodeResult<Vec<u8>> {
@@ -116,7 +116,7 @@ pub fn encode_unsubscribe_message(msg: &Unsubscribe) -> EncodeResult<Vec<u8>> {
 
     buf.extend(msg.transaction_id.to_be_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_handshake_request_message(msg: &HandshakeRequest) -> EncodeResult<Vec<u8>> {
@@ -156,7 +156,7 @@ pub fn encode_handshake_request_message(msg: &HandshakeRequest) -> EncodeResult<
         buf.extend(grave_good.as_bytes());
     }
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 #[cfg(test)]
@@ -174,12 +174,13 @@ mod test {
             key: "trolo".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010000, // message length
             GET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
 
-        assert_eq!(data, encode_get_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_get_message(&msg).unwrap());
     }
 
     #[test]
@@ -189,12 +190,13 @@ mod test {
             request_pattern: "trolo".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010000, // message length
             PGET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000100, 0b00000000, 0b00000101, b't', b'r', b'o', b'l', b'o',
         ];
 
-        assert_eq!(data, encode_pget_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_pget_message(&msg).unwrap());
     }
 
     #[test]
@@ -205,13 +207,14 @@ mod test {
             value: "fat".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011001, // message length
             SET, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00000000, 0b00000000, 0b00000111, 0b00000000, 0b00000000, 0b00000000,
             0b00000011, b'y', b'o', b'/', b'm', b'a', b'm', b'a', b'f', b'a', b't',
         ];
 
-        assert_eq!(data, encode_set_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_set_message(&msg).unwrap());
     }
 
     #[test]
@@ -222,14 +225,15 @@ mod test {
             unique: true,
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00100101, // message length
             SUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
             b't', b'u', b'r', b'e', b's', 0b00000001,
         ];
 
-        assert_eq!(data, encode_subscribe_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_subscribe_message(&msg).unwrap());
     }
 
     #[test]
@@ -240,14 +244,15 @@ mod test {
             unique: false,
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00100101, // message length
             PSUB, 0b00000000, 0b00000000, 0b00000101, 0b00001001, 0b00011100, 0b00100000,
             0b01110000, 0b10010111, 0b00000000, 0b00011001, b'l', b'e', b't', b'/', b'm', b'e',
             b'/', b'?', b'/', b'y', b'o', b'u', b'/', b'i', b't', b's', b'/', b'f', b'e', b'a',
             b't', b'u', b'r', b'e', b's', 0b00000000,
         ];
 
-        assert_eq!(data, encode_psubscribe_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_psubscribe_message(&msg).unwrap());
     }
 
     #[test]
@@ -257,13 +262,14 @@ mod test {
             path: "/path/to/file".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011000, // message length
             EXP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
             b't', b'o', b'/', b'f', b'i', b'l', b'e',
         ];
 
-        assert_eq!(data, encode_export_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_export_message(&msg).unwrap());
     }
 
     #[test]
@@ -273,25 +279,27 @@ mod test {
             path: "/path/to/file".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011000, // message length
             IMP, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00001101, b'/', b'p', b'a', b't', b'h', b'/',
             b't', b'o', b'/', b'f', b'i', b'l', b'e',
         ];
 
-        assert_eq!(data, encode_import_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_import_message(&msg).unwrap());
     }
 
     #[test]
     fn unsubscribe_message_is_encoded_correctly() {
         let msg = Unsubscribe { transaction_id: 42 };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001001, // message length
             USUB, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010,
         ];
 
-        assert_eq!(data, encode_unsubscribe_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_unsubscribe_message(&msg).unwrap());
     }
 
     #[test]
@@ -306,7 +314,8 @@ mod test {
             grave_goods: vec!["grave/goods/1".into(), "grave/goods/2".into()],
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b01000001, // message length
             HSHKR,      // message type
             0b00000011, // 3 protocol versions
             0b00000001, // 1 last will
@@ -326,6 +335,9 @@ mod test {
             b'2', // grave goods 2 key
         ];
 
-        assert_eq!(data, encode_handshake_request_message(&msg).unwrap());
+        assert_eq!(
+            data.to_vec(),
+            encode_handshake_request_message(&msg).unwrap()
+        );
     }
 }

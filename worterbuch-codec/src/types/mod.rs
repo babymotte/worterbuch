@@ -6,6 +6,7 @@ pub use server::*;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub type MessageLength = u32;
 pub type MessageType = u8;
 pub type TransactionId = u64;
 pub type RequestPattern = String;
@@ -36,6 +37,7 @@ pub type NumProtocolVersions = u8;
 pub type NumLastWill = u8;
 pub type NumGraveGoods = u8;
 
+pub const MESSAGE_LENGTH_BYTES: usize = (MessageLength::BITS / 8) as usize;
 pub const TRANSACTION_ID_BYTES: usize = (TransactionId::BITS / 8) as usize;
 pub const REQUEST_PATTERN_LENGTH_BYTES: usize = (RequestPatternLength::BITS / 8) as usize;
 pub const KEY_LENGTH_BYTES: usize = (KeyLength::BITS / 8) as usize;

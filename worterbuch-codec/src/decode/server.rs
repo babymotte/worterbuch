@@ -2,14 +2,17 @@ use crate::{
     error::{DecodeError, DecodeResult},
     Handshake, Key, KeyLength, KeyValuePairs, MetaData, MetaDataLength, NumKeyValuePairs,
     ProtocolVersion, ProtocolVersionSegment, RequestPattern, RequestPatternLength, TransactionId,
-    Value, ValueLength, ERROR_CODE_BYTES, HSHK, KEY_LENGTH_BYTES, METADATA_LENGTH_BYTES,
-    MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES, PROTOCOL_VERSION_SEGMENT_BYTES,
-    REQUEST_PATTERN_LENGTH_BYTES, SEPARATOR_BYTES, TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES,
-    WILDCARD_BYTES, {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
+    Value, ValueLength, ERROR_CODE_BYTES, HSHK, KEY_LENGTH_BYTES, MESSAGE_LENGTH_BYTES,
+    METADATA_LENGTH_BYTES, MULTI_WILDCARD_BYTES, NUM_KEY_VALUE_PAIRS_BYTES,
+    PROTOCOL_VERSION_SEGMENT_BYTES, REQUEST_PATTERN_LENGTH_BYTES, SEPARATOR_BYTES,
+    TRANSACTION_ID_BYTES, VALUE_LENGTH_BYTES, WILDCARD_BYTES,
+    {Ack, Err, PState, ServerMessage as SM, State, ACK, ERR, PSTA, STA},
 };
 use std::io::Read;
 
 pub fn read_server_message(mut data: impl Read) -> DecodeResult<SM> {
+    let mut buf = [0; MESSAGE_LENGTH_BYTES];
+    data.read_exact(&mut buf)?;
     let mut buf = [0];
     data.read_exact(&mut buf)?;
     match buf[0] {
@@ -171,7 +174,8 @@ mod test {
 
     #[test]
     fn handshake_message_is_read_correctly() {
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001000, // message length
             HSHK, 0b00000000, 0b00000001, 0b00000000, 0b00000000, b'/', b'?', b'#',
         ];
 
@@ -191,6 +195,7 @@ mod test {
     #[test]
     fn pstate_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b10010010, // message length
             PSTA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
             0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
             0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
@@ -232,6 +237,7 @@ mod test {
     #[test]
     fn ack_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001001, // message length
             ACK, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010,
         ];
@@ -244,6 +250,7 @@ mod test {
     #[test]
     fn state_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010101, // message length
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
             0b00000001, b'1', b'/', b'2', b'/', b'3', b'4',
@@ -263,6 +270,7 @@ mod test {
     #[test]
     fn err_message_is_read_correctly() {
         let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011111, // message length
             ERR, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000101, 0b00000000, 0b00000000, 0b00000000, 0b00010001,
             b'T', b'H', b'I', b'S', b' ', b'I', b'S', b' ', b'M', b'E', b'T', b'A', b'A', b'A',

@@ -3,8 +3,8 @@ use super::{
     get_value_length,
 };
 use crate::{
-    error::EncodeResult, Ack, Err, Handshake, KeyValuePair, PState, State, ACK, ERR, HSHK, PSTA,
-    STA,
+    error::EncodeResult, prepend_buffer_length, Ack, Err, Handshake, KeyValuePair, PState, State,
+    ACK, ERR, HSHK, PSTA, STA,
 };
 
 pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
@@ -31,7 +31,7 @@ pub fn encode_pstate_message(msg: &PState) -> EncodeResult<Vec<u8>> {
         buf.extend(value.as_bytes());
     }
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
@@ -39,7 +39,7 @@ pub fn encode_ack_message(msg: &Ack) -> EncodeResult<Vec<u8>> {
 
     buf.extend(msg.transaction_id.to_be_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
@@ -56,7 +56,7 @@ pub fn encode_state_message(msg: &State) -> EncodeResult<Vec<u8>> {
     buf.extend(key.as_bytes());
     buf.extend(value.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
@@ -69,7 +69,7 @@ pub fn encode_err_message(msg: &Err) -> EncodeResult<Vec<u8>> {
     buf.extend(metadata_length.to_be_bytes());
     buf.extend(msg.metadata.as_bytes());
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 pub fn encode_handshake_message(msg: &Handshake) -> EncodeResult<Vec<u8>> {
@@ -82,7 +82,7 @@ pub fn encode_handshake_message(msg: &Handshake) -> EncodeResult<Vec<u8>> {
     buf.push(msg.wildcard as u8);
     buf.push(msg.multi_wildcard as u8);
 
-    Ok(buf)
+    prepend_buffer_length(buf)
 }
 
 #[cfg(test)]
@@ -99,11 +99,12 @@ mod test {
             multi_wildcard: '#',
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001000, // message length
             HSHK, 0b00000000, 0b00000001, 0b00000000, 0b00000000, b'/', b'?', b'#',
         ];
 
-        assert_eq!(data, encode_handshake_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_handshake_message(&msg).unwrap());
     }
 
     #[test]
@@ -125,7 +126,8 @@ mod test {
             ],
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b10010010, // message length
             PSTA, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111, 0b11111111,
             0b11111111, 0b11111111, 0b00000000, 0b00001111, 0b00000000, 0b00000000, 0b00000000,
             0b00000010, 0b00000000, 0b00100010, 0b00000000, 0b00000000, 0b00000000, 0b00011010,
@@ -141,19 +143,20 @@ mod test {
             b' ', b'W', b'h', b'o', b'?',
         ];
 
-        assert_eq!(data, encode_pstate_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_pstate_message(&msg).unwrap());
     }
 
     #[test]
     fn ack_message_is_encoded_correctly() {
         let msg = Ack { transaction_id: 42 };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00001001, // message length
             ACK, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010,
         ];
 
-        assert_eq!(data, encode_ack_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_ack_message(&msg).unwrap());
     }
 
     #[test]
@@ -163,13 +166,14 @@ mod test {
             key_value: ("1/2/3", "4").into(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010101, // message length
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
             0b00000001, b'1', b'/', b'2', b'/', b'3', b'4',
         ];
 
-        assert_eq!(data, encode_state_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_state_message(&msg).unwrap());
     }
 
     #[test]
@@ -179,13 +183,14 @@ mod test {
             key_value: ("1/2/3", "").into(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00010100, // message length
             STA, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000000, 0b00000101, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, b'1', b'/', b'2', b'/', b'3',
         ];
 
-        assert_eq!(data, encode_state_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_state_message(&msg).unwrap());
     }
 
     #[test]
@@ -196,13 +201,14 @@ mod test {
             metadata: "THIS IS METAAA!!!".to_owned(),
         };
 
-        let data = vec![
+        let data = [
+            0b00000000, 0b00000000, 0b00000000, 0b00011111, // message length
             ERR, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,
             0b00000000, 0b00101010, 0b00000101, 0b00000000, 0b00000000, 0b00000000, 0b00010001,
             b'T', b'H', b'I', b'S', b' ', b'I', b'S', b' ', b'M', b'E', b'T', b'A', b'A', b'A',
             b'!', b'!', b'!',
         ];
 
-        assert_eq!(data, encode_err_message(&msg).unwrap());
+        assert_eq!(data.to_vec(), encode_err_message(&msg).unwrap());
     }
 }

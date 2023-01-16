@@ -61,6 +61,7 @@ pub enum EncodeError {
     TooManyLastWills(usize),
     TooManyGraveGoods(usize),
     IoError(io::Error),
+    MessageTooLarge(u64),
 }
 
 impl std::error::Error for EncodeError {}
@@ -121,6 +122,12 @@ impl fmt::Display for EncodeError {
                 "too many grave goods: {} (max {} allowed)",
                 len,
                 NumGraveGoods::MAX
+            ),
+            EncodeError::MessageTooLarge(len) => write!(
+                f,
+                "message is too large: {} (max {} allowed)",
+                len,
+                MetaDataLength::MAX
             ),
             EncodeError::IoError(ioe) => ioe.fmt(f),
         }
