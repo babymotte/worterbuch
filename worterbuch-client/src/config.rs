@@ -19,7 +19,9 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
-            self.port = val.parse().as_port()?;
+            if let Ok(port) = val.parse().as_port() {
+                self.port = port;
+            }
         }
 
         Ok(())
