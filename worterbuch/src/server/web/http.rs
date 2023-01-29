@@ -38,7 +38,8 @@ pub fn worterbuch_http_api_filter(
             .and(warp::path(api_path))
             .and(warp::path("get"))
             .and(warp::path::tail())
-            .and_then(move |tail: Tail| {
+            .and(warp::query::<HashMap<String, String>>())
+            .and_then(move |tail: Tail, query: HashMap<String, String>| {
                 let worterbuch = get_wb.clone();
                 async move {
                     let key = match decode(tail.as_str()) {
@@ -46,9 +47,17 @@ pub fn worterbuch_http_api_filter(
                         Err(_) => tail.as_str().to_string(),
                     };
                     log::debug!("Processing http request 'get {key}'");
+                    let raw = query.contains_key("raw")
+                        && query.get("raw").map(|s| s.to_lowercase()) != Some("false".to_owned());
                     match worterbuch.read().await.get(key) {
-                        Ok((key, value)) => Ok(serde_json::to_string(&KeyValuePair { key, value })
-                            .expect("cannot fail")),
+                        Ok((key, value)) => {
+                            if raw {
+                                Ok(value)
+                            } else {
+                                Ok(serde_json::to_string(&KeyValuePair { key, value })
+                                    .expect("cannot fail"))
+                            }
+                        }
                         Err(e) => Err(reject::custom(WorterbuchErrorRejection::from(e))),
                     }
                 }
