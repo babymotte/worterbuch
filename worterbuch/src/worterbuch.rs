@@ -44,6 +44,10 @@ pub struct Worterbuch {
 }
 
 impl Worterbuch {
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
     pub fn with_config(config: Config) -> Worterbuch {
         Worterbuch {
             config,

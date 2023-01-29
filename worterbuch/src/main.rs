@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::App;
 use tokio::runtime::{self, Runtime};
-use worterbuch::start_worterbuch;
+use worterbuch::run_worterbuch;
 use worterbuch::Config;
 
 fn main() -> Result<()> {
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
         Runtime::new()?
     };
 
-    rt.block_on(start_worterbuch(config))?;
+    rt.block_on(run_worterbuch(config))?;
 
     Ok(())
 }

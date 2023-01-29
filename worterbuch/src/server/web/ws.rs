@@ -1,5 +1,5 @@
-use super::common::process_incoming_message;
-use crate::{config::Config, worterbuch::Worterbuch};
+use crate::server::common::process_incoming_message;
+use crate::worterbuch::Worterbuch;
 use anyhow::Result;
 use futures::{sink::SinkExt, stream::StreamExt};
 use std::net::SocketAddr;
@@ -8,19 +8,18 @@ use tokio::sync::RwLock;
 use tokio::{spawn, sync::mpsc};
 use uuid::Uuid;
 use warp::{addr::remote, ws::Message, ws::Ws};
-use warp::{Filter, Reply};
+use warp::{Filter, Rejection, Reply};
 
-pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
-    log::info!("Starting Web Server …");
-
-    let wb_ws = worterbuch.clone();
+pub fn worterbuch_ws_filter(
+    worterbuch: Arc<RwLock<Worterbuch>>,
+) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + Sync + 'static {
     let ws_path = "ws";
 
     let ws = {
         log::info!("Mounting ws endpoint at /{ws_path} …");
         warp::ws().and(warp::path(ws_path)).and(remote()).map(
             move |ws: Ws, remote: Option<SocketAddr>| {
-                let worterbuch = wb_ws.clone();
+                let worterbuch = worterbuch.clone();
                 ws.on_upgrade(move |websocket| async move {
                     if let Some(remote) = remote {
                         if let Err(e) = serve(websocket, worterbuch.clone(), remote).await {
@@ -34,58 +33,10 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
         )
     };
 
-    let ws_route = ws;
-
-    let start_explorer = config.explorer;
-
-    if start_explorer {
-        let explorer_path = "*";
-        let explorer = {
-            log::info!("Mounting explorer endpoint at {explorer_path} …");
-            warp::fs::dir(config.web_root_path.clone())
-        };
-        let expl_route = explorer;
-        let routes = expl_route.or(ws_route);
-        run_server(routes, &config).await;
-    } else {
-        let routes = ws_route;
-        run_server(routes, &config).await;
-    };
+    ws
 }
 
-async fn run_server<F>(filter: F, config: &Config)
-where
-    F: Filter + Clone + Send + Sync + 'static,
-    F::Extract: Reply,
-{
-    let server = warp::serve(filter);
-    let port = config.web_port;
-    let bind_addr = config.bind_addr;
-    let cert_path = &config.cert_path;
-    let key_path = &config.key_path;
-
-    let addr = (bind_addr, port);
-
-    if let (Some(cert_path), Some(key_path)) = (cert_path, key_path) {
-        log::info!("Using TLS certificate {}", cert_path);
-        log::info!("Using TLS private key {}", key_path);
-        log::info!("Starting web server with TLS …");
-
-        server
-            .tls()
-            .cert_path(cert_path)
-            .key_path(key_path)
-            .run(addr)
-            .await;
-    } else {
-        log::info!("Starting web server without TLS …");
-        server.run(addr).await;
-    }
-
-    log::info!("Web server stopped.");
-}
-
-pub(crate) async fn serve(
+async fn serve(
     websocket: warp::ws::WebSocket,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,

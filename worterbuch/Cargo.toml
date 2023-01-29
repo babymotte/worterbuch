@@ -26,3 +26,4 @@ hex = "0.4.3"
 warp = { version = "0.3.2", features = ["tls"] }
 futures = { version = "0.3.21" }
 openssl = { version = "0.10.38", features = ["vendored"] }
+urlencoding = "2.1.2"
