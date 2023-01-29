@@ -1,0 +1,16 @@
+FROM messense/rust-musl-cross:x86_64-musl AS worterbuch-builder
+WORKDIR /src/worterbuch
+COPY . .
+RUN cargo build -p worterbuch-cli --release
+
+FROM scratch
+WORKDIR /app
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbc .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbexp .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbget .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbimp .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbpget .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbpsub .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbsend .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbset .
+COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/wbsub .
