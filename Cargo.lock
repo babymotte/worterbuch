@@ -1595,7 +1595,7 @@ checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 
 [[package]]
 name = "worterbuch"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "async-stream",
  "futures-core",
