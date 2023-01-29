@@ -9,13 +9,13 @@ RUN wasm-pack build --target web
 FROM node AS worterbuch-explorer-builder
 WORKDIR /src/worterbuch-explorer
 COPY worterbuch-explorer .
-COPY --from=worterbuch-builder /src/worterbuch/worterbuch-wasm/pkg /src/worterbuch-wasm/pkg
+COPY --from=worterbuch-builder-arm /src/worterbuch/worterbuch-wasm/pkg /src/worterbuch-wasm/pkg
 RUN npm i
 RUN npm run build
 
 FROM --platform=linux/arm scratch
 WORKDIR /app
-COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/worterbuch .
+COPY --from=worterbuch-builder-arm /src/worterbuch/target/armv7-unknown-linux-musleabihf/release/worterbuch .
 COPY --from=worterbuch-explorer-builder /src/worterbuch-explorer/build ./html
 ENV RUST_LOG=info
 ENV WORTERBUCH_BIND_ADDRESS=0.0.0.0
