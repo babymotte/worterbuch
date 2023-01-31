@@ -7,10 +7,7 @@ use std::{
 };
 use tokio::{spawn, time::sleep};
 use worterbuch_cli::{app, print_message};
-#[cfg(feature = "tcp")]
-use worterbuch_client::tcp as wb;
-#[cfg(feature = "ws")]
-use worterbuch_client::ws as wb;
+use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -41,7 +38,7 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
@@ -61,7 +58,7 @@ async fn main() -> Result<()> {
     });
 
     for path in paths {
-        trans_id = con.import(path)?;
+        trans_id = con.import(path.to_owned())?;
     }
 
     loop {

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Arg;
+use serde_json::json;
 use std::{
     process,
     sync::{Arc, Mutex},
@@ -11,10 +12,7 @@ use tokio::{
     time::sleep,
 };
 use worterbuch_cli::{app, print_message};
-#[cfg(feature = "tcp")]
-use worterbuch_client::tcp as wb;
-#[cfg(feature = "ws")]
-use worterbuch_client::ws as wb;
+use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -41,7 +39,7 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
@@ -62,7 +60,7 @@ async fn main() -> Result<()> {
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(value)) = lines.next_line().await {
-        trans_id = con.set(&key, &value)?;
+        trans_id = con.set(key.to_owned(), json!(value))?;
     }
 
     loop {

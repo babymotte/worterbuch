@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Arg;
+use serde_json::json;
 use std::{
     process,
     sync::{Arc, Mutex},
@@ -11,10 +12,7 @@ use tokio::{
     time::sleep,
 };
 use worterbuch_cli::{app, print_message};
-#[cfg(feature = "tcp")]
-use worterbuch_client::tcp as wb;
-#[cfg(feature = "ws")]
-use worterbuch_client::ws as wb;
+use worterbuch_client::connect;
 use worterbuch_client::KeyValuePair;
 
 #[tokio::main(flavor = "current_thread")]
@@ -52,7 +50,7 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
@@ -76,7 +74,7 @@ async fn main() -> Result<()> {
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<KeyValuePair>(&line) {
                 Ok(KeyValuePair { key, value }) => {
-                    trans_id = con.set(&key, &value)?;
+                    trans_id = con.set(key, json!(value))?;
                 }
                 Err(e) => {
                     eprintln!("Error parsing json: {e}");
@@ -89,7 +87,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = key_calue_pair.find('=') {
                     let key = &key_calue_pair[..index];
                     let val = &key_calue_pair[index + 1..];
-                    trans_id = con.set(key, val)?;
+                    trans_id = con.set(key.to_owned(), json!(val))?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", key_calue_pair);
                 }
@@ -100,7 +98,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = line.find('=') {
                     let key = &line[..index];
                     let val = &line[index + 1..];
-                    trans_id = con.set(key, val)?;
+                    trans_id = con.set(key.to_owned(), json!(val))?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
                 }

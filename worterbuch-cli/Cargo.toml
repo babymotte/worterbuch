@@ -10,11 +10,6 @@ license = "MIT"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 
-[features]
-default = ["tcp"]
-tcp = []
-ws = []
-
 [dependencies]
 worterbuch-client = { version = "0.21.0" }
 tokio = { version = "1.19.2", features = ["rt", "macros", "io-std", "time"] }

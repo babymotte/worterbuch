@@ -2,10 +2,7 @@ use anyhow::Result;
 use clap::Arg;
 use std::process;
 use worterbuch_cli::{app, print_message};
-#[cfg(feature = "tcp")]
-use worterbuch_client::tcp as wb;
-#[cfg(feature = "ws")]
-use worterbuch_client::ws as wb;
+use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -34,10 +31,10 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut responses = con.responses();
-    con.export(path)?;
+    con.export(path.to_owned())?;
     while let Ok(msg) = responses.recv().await {
         print_message(&msg, json, debug);
         let tid = msg.transaction_id();

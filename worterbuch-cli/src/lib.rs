@@ -75,10 +75,7 @@ pub fn app<'help>(
     about: &'help str,
     args: Vec<Arg<'help>>,
 ) -> Result<(ArgMatches, String, String, u16, bool, bool)> {
-    #[cfg(feature = "tcp")]
-    let config = Config::new_tcp()?;
-    #[cfg(feature = "ws")]
-    let config = Config::new_ws()?;
+    let config = Config::new()?;
 
     let mut app = App::new(name)
         .version(env!("CARGO_PKG_VERSION"))

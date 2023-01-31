@@ -3,7 +3,7 @@ members = [
     "worterbuch-common",
     "worterbuch-client",
     "worterbuch",
-    # "worterbuch-cli",
+    "worterbuch-cli",
 ]
 
 [patch.crates-io]

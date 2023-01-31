@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde_json::json;
 use std::{
     collections::HashSet,
     process,
@@ -11,14 +12,11 @@ use tokio::{
     time::sleep,
 };
 use worterbuch_cli::{app, print_message};
-#[cfg(feature = "tcp")]
-use worterbuch_client::tcp as wb;
-#[cfg(feature = "ws")]
-use worterbuch_client::ws as wb;
-use worterbuch_client::{ClientMessage, Connection, TransactionId};
+use worterbuch_client::{connect, ClientMessage, Connection, TransactionId};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // TODO this needs a major rework, most of the input json can now be simply passed through to the websocket
     dotenv::dotenv().ok();
 
     let (_matches, proto, host_addr, port, json, debug) = app(
@@ -36,7 +34,7 @@ async fn main() -> Result<()> {
         eprintln!("Server: {proto}://{host_addr}:{port}");
     }
 
-    let mut con = wb::connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut open_trans_ids = HashSet::new();
     let acked_trans_ids = Arc::new(Mutex::new(HashSet::new()));
@@ -96,15 +94,15 @@ fn process_line(
         let cmd = split.next();
         let tail = split.collect::<Vec<&str>>().join(" ");
         match cmd {
-            Some("get") => get(&tail, con)?,
-            Some("pget") => pget(&tail, con)?,
-            Some("set") => set(&tail, con)?,
-            Some("sub") => sub(&tail, con)?,
-            Some("psub") => psub(&tail, con)?,
-            Some("subu") => subu(&tail, con)?,
-            Some("psubu") => psubu(&tail, con)?,
-            Some("imp") => imp(&tail, con)?,
-            Some("exp") => exp(&tail, con)?,
+            Some("get") => get(tail, con)?,
+            Some("pget") => pget(tail, con)?,
+            Some("set") => set(tail, con)?,
+            Some("sub") => sub(tail, con)?,
+            Some("psub") => psub(tail, con)?,
+            Some("subu") => subu(tail, con)?,
+            Some("psubu") => psubu(tail, con)?,
+            Some("imp") => imp(tail, con)?,
+            Some("exp") => exp(tail, con)?,
             Some("") => {}
             Some(other) => eprintln!("unknown command: {other}"),
             None => {}
@@ -114,7 +112,7 @@ fn process_line(
     Ok(())
 }
 
-fn get<'f>(key: &str, con: &mut Connection) -> Result<()> {
+fn get<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
@@ -123,7 +121,7 @@ fn get<'f>(key: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn pget<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+fn pget<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no key specified");
     } else {
@@ -132,7 +130,7 @@ fn pget<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn set<'f>(key_value: &str, con: &mut Connection) -> Result<()> {
+fn set<'f>(key_value: String, con: &mut Connection) -> Result<()> {
     let mut split = key_value.split("=");
     let key = match split.next() {
         Some(it) => it,
@@ -148,11 +146,11 @@ fn set<'f>(key_value: &str, con: &mut Connection) -> Result<()> {
             return Ok(());
         }
     };
-    con.set(key, value)?;
+    con.set(key.to_owned(), json!(value))?;
     Ok(())
 }
 
-fn sub<'f>(key: &str, con: &mut Connection) -> Result<()> {
+fn sub<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
@@ -161,7 +159,7 @@ fn sub<'f>(key: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn psub<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+fn psub<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no pattern specified");
     } else {
@@ -170,7 +168,7 @@ fn psub<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn subu<'f>(key: &str, con: &mut Connection) -> Result<()> {
+fn subu<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
@@ -179,7 +177,7 @@ fn subu<'f>(key: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn psubu<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
+fn psubu<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no pattern specified");
     } else {
@@ -188,7 +186,7 @@ fn psubu<'f>(pattern: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn imp<'f>(path: &str, con: &mut Connection) -> Result<()> {
+fn imp<'f>(path: String, con: &mut Connection) -> Result<()> {
     if path.is_empty() {
         eprintln!("no path specified");
     } else {
@@ -197,7 +195,7 @@ fn imp<'f>(path: &str, con: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn exp<'f>(path: &str, con: &mut Connection) -> Result<()> {
+fn exp<'f>(path: String, con: &mut Connection) -> Result<()> {
     if path.is_empty() {
         eprintln!("no path specified");
     } else {
