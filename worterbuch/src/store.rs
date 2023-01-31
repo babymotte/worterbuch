@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use worterbuch_common::KeyValuePair;
+use worterbuch_common::{KeyValuePair, Value};
 
-type Value = Option<String>;
+type NodeValue = Option<Value>;
 type Tree = HashMap<String, Node>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub v: Value,
+    pub v: NodeValue,
     pub t: Tree,
 }
 
@@ -17,7 +17,7 @@ impl Node {
         &mut self,
         other: Node,
         key: Option<&str>,
-        insertions: &mut Vec<(String, String)>,
+        insertions: &mut Vec<(String, Value)>,
         path: &[&str],
         separator: char,
     ) {
@@ -55,7 +55,7 @@ pub struct Store {
 
 impl Store {
     /// retrieve a value for a non-wildcard key
-    pub fn get(&self, path: &[&str]) -> Option<&str> {
+    pub fn get(&self, path: &[&str]) -> Option<&Value> {
         let mut current = &self.data;
 
         for elem in path {
@@ -66,7 +66,7 @@ impl Store {
             }
         }
 
-        current.v.as_deref()
+        current.v.as_ref()
     }
 
     /// retrieve values for a key containing at least one single-level wildcard but no multi-level wildcard
@@ -209,7 +209,7 @@ impl Store {
         matches
     }
 
-    pub fn insert(&mut self, path: &[&str], value: String) -> (bool, bool) {
+    pub fn insert(&mut self, path: &[&str], value: Value) -> (bool, bool) {
         let mut current = &mut self.data;
 
         for elem in path {
@@ -230,7 +230,7 @@ impl Store {
         (inserted, changed)
     }
 
-    pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, String)> {
+    pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, Value)> {
         let mut insertions = Vec::new();
         let path = Vec::new();
         self.data
@@ -272,14 +272,15 @@ fn count_children(node: &Node) -> usize {
 #[cfg(test)]
 mod test {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_insert_get() {
         let path = vec!["test", "a", "b"];
 
         let mut store = Store::default();
-        store.insert(&path, "Hello, World!".to_owned());
-        assert_eq!(store.get(&path), Some("Hello, World!"));
+        store.insert(&path, json!("Hello, World!"));
+        assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
 
         assert_eq!(store.get(&vec!["test", "a"]), None);
         assert_eq!(store.get(&vec!["test", "a", "b", "c"]), None);
@@ -295,59 +296,59 @@ mod test {
         let path5 = vec!["trolo", "c", "b", "d"];
 
         let mut store = Store::default();
-        store.insert(&path0, "0".to_owned());
-        store.insert(&path1, "1".to_owned());
-        store.insert(&path2, "2".to_owned());
-        store.insert(&path3, "3".to_owned());
-        store.insert(&path4, "4".to_owned());
-        store.insert(&path5, "5".to_owned());
+        store.insert(&path0, json!("0"));
+        store.insert(&path1, json!("1"));
+        store.insert(&path2, json!("2"));
+        store.insert(&path3, json!("3"));
+        store.insert(&path4, json!("4"));
+        store.insert(&path5, json!("5"));
 
         let res = store.get_matches(&vec!["test", "a", "?"], "?", "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
+            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
+            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
             .is_some());
 
         let res = store.get_matches(&vec!["trolo", "?", "b"], "?", "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
+            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
             .is_some());
 
         let res = store.get_matches(&vec!["?", "a", "b"], "?", "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
+            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
+            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
             .is_some());
 
         let res = store.get_matches(&vec!["?", "?", "b"], "?", "/");
         assert_eq!(res.len(), 3);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
+            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
+            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
             .is_some());
     }
 
@@ -361,68 +362,68 @@ mod test {
         let path5 = vec!["trolo", "c", "b", "d"];
 
         let mut store = Store::default();
-        store.insert(&path0, "0".to_owned());
-        store.insert(&path1, "1".to_owned());
-        store.insert(&path2, "2".to_owned());
-        store.insert(&path3, "3".to_owned());
-        store.insert(&path4, "4".to_owned());
-        store.insert(&path5, "5".to_owned());
+        store.insert(&path0, json!("0"));
+        store.insert(&path1, json!("1"));
+        store.insert(&path2, json!("2"));
+        store.insert(&path3, json!("3"));
+        store.insert(&path4, json!("4"));
+        store.insert(&path5, json!("5"));
 
         let res = store.get_children(&vec!["test", "a"], "/");
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
+            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
+            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
             .is_some());
 
         let res = store.get_children(&vec!["trolo"], "/");
         assert_eq!(res.len(), 4);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()).into())
+            .find(|e| e == &&("trolo/a".to_owned(), json!("0")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
+            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b/d".to_owned(), json!("5")).into())
             .is_some());
 
         let res = store.get_children(&vec![], "/");
         assert_eq!(res.len(), 6);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), "0".to_owned()).into())
+            .find(|e| e == &&("trolo/a".to_owned(), json!("0")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), "1".to_owned()).into())
+            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), "2".to_owned()).into())
+            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), "3".to_owned()).into())
+            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), "4".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
             .is_some());
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), "5".to_owned()).into())
+            .find(|e| e == &&("trolo/c/b/d".to_owned(), json!("5")).into())
             .is_some());
     }
 }

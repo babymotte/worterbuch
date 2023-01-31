@@ -2,7 +2,7 @@
 members = [
     "worterbuch-common",
     # "worterbuch-client",
-    # "worterbuch",
+    "worterbuch",
     # "worterbuch-cli",
 ]
 

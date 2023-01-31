@@ -3,27 +3,23 @@ use serde::Serialize;
 use std::sync::Arc;
 use tokio::{
     fs::File,
-    io::AsyncReadExt,
     spawn,
     sync::{mpsc::UnboundedSender, RwLock},
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    encode_ack_message, encode_err_message, encode_handshake_message, encode_pstate_message,
-    encode_state_message,
-    error::{Context, DecodeError, EncodeError, WorterbuchError, WorterbuchResult},
-    nonblocking::read_client_message,
+    error::{Context, WorterbuchError, WorterbuchResult},
     Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, HandshakeRequest, Import, KeyValuePair,
-    MetaData, PGet, PState, PSubscribe, Set, State, Subscribe, Unsubscribe,
+    MetaData, PGet, PState, PSubscribe, ServerMessage, Set, State, Subscribe, Unsubscribe,
 };
 
 pub async fn process_incoming_message(
     client_id: Uuid,
-    msg: impl AsyncReadExt + Unpin,
+    msg: &str,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    tx: UnboundedSender<Vec<u8>>,
+    tx: UnboundedSender<String>,
 ) -> WorterbuchResult<bool> {
-    match read_client_message(msg).await {
+    match serde_json::from_str(msg) {
         Ok(Some(CM::HandshakeRequest(msg))) => {
             handshake(msg, worterbuch.clone(), tx.clone(), client_id.clone()).await?;
         }
@@ -55,10 +51,7 @@ pub async fn process_incoming_message(
         }
         Err(e) => {
             log::error!("Error decoding message: {e}");
-            if let DecodeError::IoError(_) = e {
-                return Ok(false);
-            }
-            // TODO send special ERR message
+            return Ok(false);
         }
     }
 
@@ -68,7 +61,7 @@ pub async fn process_incoming_message(
 async fn handshake(
     msg: HandshakeRequest,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
     client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
@@ -86,7 +79,7 @@ async fn handshake(
         }
     };
 
-    match encode_handshake_message(&response) {
+    match serde_json::to_string(&ServerMessage::Handshake(response)) {
         Ok(data) => client
             .send(data)
             .context(|| format!("Error sending HANDSHAKE message",))?,
@@ -99,7 +92,7 @@ async fn handshake(
 async fn get(
     msg: Get,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
@@ -116,7 +109,7 @@ async fn get(
         key_value,
     };
 
-    match encode_state_message(&response) {
+    match serde_json::to_string(&ServerMessage::State(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending STATE message for transaction ID {}",
@@ -132,7 +125,7 @@ async fn get(
 async fn pget(
     msg: PGet,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
@@ -150,7 +143,7 @@ async fn pget(
         key_value_pairs: values,
     };
 
-    match encode_pstate_message(&response) {
+    match serde_json::to_string(&ServerMessage::PState(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending PSTATE message for transaction ID {}",
@@ -166,7 +159,7 @@ async fn pget(
 async fn set(
     msg: Set,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
 
@@ -179,7 +172,7 @@ async fn set(
         transaction_id: msg.transaction_id,
     };
 
-    match encode_ack_message(&response) {
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -196,7 +189,7 @@ async fn subscribe(
     msg: Subscribe,
     client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
     unique: bool,
 ) -> WorterbuchResult<bool> {
     let wb_unsub = worterbuch.clone();
@@ -215,7 +208,7 @@ async fn subscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match encode_ack_message(&response) {
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -235,7 +228,7 @@ async fn subscribe(
                     transaction_id: transaction_id.clone(),
                     key_value,
                 };
-                match encode_state_message(&event) {
+                match serde_json::to_string(&ServerMessage::State(event)) {
                     Ok(data) => {
                         if let Err(e) = client.clone().send(data) {
                             log::error!("Error sending STATE message to client: {e}");
@@ -272,7 +265,7 @@ async fn psubscribe(
     msg: PSubscribe,
     client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
     unique: bool,
 ) -> WorterbuchResult<bool> {
     let wb_unsub = worterbuch.clone();
@@ -295,7 +288,7 @@ async fn psubscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match encode_ack_message(&response) {
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -316,7 +309,7 @@ async fn psubscribe(
                 request_pattern: request_pattern.clone(),
                 key_value_pairs,
             };
-            match encode_pstate_message(&event) {
+            match serde_json::to_string(&ServerMessage::PState(event)) {
                 Ok(data) => {
                     if let Err(e) = client.clone().send(data) {
                         log::error!("Error sending STATE message to client: {e}");
@@ -351,7 +344,7 @@ async fn psubscribe(
 async fn export(
     msg: Export,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
     log::info!("export");
     let wb = worterbuch.read().await;
@@ -364,7 +357,7 @@ async fn export(
                 transaction_id: msg.transaction_id,
             };
 
-            match encode_ack_message(&response) {
+            match serde_json::to_string(&ServerMessage::Ack(response)) {
                 Ok(data) => client.send(data).context(|| {
                     format!(
                         "Error sending ACK message for transaction ID {}",
@@ -386,7 +379,7 @@ async fn export(
 async fn import(
     msg: Import,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
     log::info!("import");
     let mut wb = worterbuch.write().await;
@@ -397,7 +390,7 @@ async fn import(
                 transaction_id: msg.transaction_id,
             };
 
-            match encode_ack_message(&response) {
+            match serde_json::to_string(&ServerMessage::Ack(response)) {
                 Ok(data) => client.send(data).context(|| {
                     format!(
                         "Error sending ACK message for transaction ID {}",
@@ -419,7 +412,7 @@ async fn import(
 async fn unsubscribe(
     msg: Unsubscribe,
     worterbuch: Arc<RwLock<Worterbuch>>,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
     client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
@@ -429,7 +422,7 @@ async fn unsubscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match encode_ack_message(&response) {
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -443,15 +436,16 @@ async fn unsubscribe(
 }
 
 async fn handle_encode_error(
-    _e: EncodeError,
-    _client: UnboundedSender<Vec<u8>>,
+    e: serde_json::Error,
+    client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
-    todo!()
+    drop(client);
+    panic!("Failed to encode a value to JSON: {e}");
 }
 
 async fn handle_store_error(
     e: WorterbuchError,
-    client: UnboundedSender<Vec<u8>>,
+    client: UnboundedSender<String>,
     transaction_id: u64,
 ) -> WorterbuchResult<()> {
     let error_code = ErrorCode::from(&e);
@@ -513,7 +507,7 @@ async fn handle_store_error(
         },
         WorterbuchError::ServerResponse(_) => panic!("store must not produce this error"),
     };
-    let msg = encode_err_message(&err_msg)
+    let msg = serde_json::to_string(&err_msg)
         .expect(&format!("failed to encode error message: {err_msg:?}"));
     client
         .send(msg)

@@ -14,13 +14,25 @@ struct WorterbuchErrorRejection {
     _error: WorterbuchError,
 }
 
+#[derive(Debug)]
+struct SerdeErrorRejection {
+    _error: serde_json::Error,
+}
+
 impl From<WorterbuchError> for WorterbuchErrorRejection {
     fn from(_error: WorterbuchError) -> Self {
         WorterbuchErrorRejection { _error }
     }
 }
 
+impl From<serde_json::Error> for SerdeErrorRejection {
+    fn from(_error: serde_json::Error) -> Self {
+        SerdeErrorRejection { _error }
+    }
+}
+
 impl Reject for WorterbuchErrorRejection {}
+impl Reject for SerdeErrorRejection {}
 
 pub fn worterbuch_http_api_filter(
     worterbuch: Arc<RwLock<Worterbuch>>,
@@ -52,7 +64,7 @@ pub fn worterbuch_http_api_filter(
                     match worterbuch.read().await.get(key) {
                         Ok((key, value)) => {
                             if raw {
-                                Ok(value)
+                                Ok(serde_json::to_string(&value).expect("cannot fail"))
                             } else {
                                 Ok(serde_json::to_string(&KeyValuePair { key, value })
                                     .expect("cannot fail"))
@@ -96,8 +108,15 @@ pub fn worterbuch_http_api_filter(
                     let mut wb = worterbuch.write().await;
                     for (key, value) in data {
                         log::debug!("Processing http request 'set {key} = {value}'");
-                        if let Err(e) = wb.set(key, value) {
-                            return Err(reject::custom(WorterbuchErrorRejection::from(e)));
+                        match serde_json::from_str(&value) {
+                            Ok(value) => {
+                                if let Err(e) = wb.set(key, value) {
+                                    return Err(reject::custom(WorterbuchErrorRejection::from(e)));
+                                }
+                            }
+                            Err(e) => {
+                                return Err(reject::custom(SerdeErrorRejection::from(e)));
+                            }
                         }
                     }
                     Ok("Ok".to_owned())

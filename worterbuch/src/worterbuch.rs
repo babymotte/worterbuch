@@ -78,7 +78,7 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<Handshake> {
         // TODO implement protocol versions properly
-        let mut supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
+        let mut supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 3 }];
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
         supported_protocol_versions.sort();
@@ -109,7 +109,7 @@ impl Worterbuch {
         Ok(handshake)
     }
 
-    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, String)> {
+    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, Value)> {
         let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -135,7 +135,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn set(&mut self, key: impl AsRef<str>, value: String) -> WorterbuchResult<()> {
+    pub fn set(&mut self, key: impl AsRef<str>, value: Value) -> WorterbuchResult<()> {
         let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
 
         let wildcard = self.config.wildcard.to_string();
@@ -268,7 +268,7 @@ impl Worterbuch {
         Ok(value)
     }
 
-    pub fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, String)>> {
+    pub fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
         log::debug!("Parsing store data …");
         let store: Store =
             from_str(json).context(|| format!("Error parsing JSON during import"))?;
@@ -349,7 +349,7 @@ impl Worterbuch {
         wildcard: String,
         multi_wildcard: String,
         key: impl AsRef<str>,
-        value: &str,
+        value: &Value,
         value_changed: bool,
     ) {
         let subscribers = self

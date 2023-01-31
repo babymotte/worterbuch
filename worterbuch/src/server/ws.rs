@@ -45,7 +45,7 @@ async fn serve(
 
     log::info!("New client connected: {client_id} ({remote_addr})");
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     let (mut client_write, mut client_read) = websocket.split();
 
@@ -63,8 +63,7 @@ async fn serve(
 
     loop {
         if let Some(Ok(incoming_msg)) = client_read.next().await {
-            if incoming_msg.is_binary() {
-                let data = incoming_msg.as_bytes();
+            if let Ok(data) = incoming_msg.to_str() {
                 if !process_incoming_message(client_id, data, worterbuch.clone(), tx.clone())
                     .await?
                 {

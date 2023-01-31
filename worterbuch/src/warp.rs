@@ -1,2 +1,2 @@
-pub use crate::server::web::http;
-pub use crate::server::web::ws;
+pub use crate::server::http;
+pub use crate::server::ws;

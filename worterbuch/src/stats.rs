@@ -1,4 +1,5 @@
 use crate::{config::Config, worterbuch::Worterbuch};
+use serde_json::json;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::RwLock,
@@ -14,7 +15,7 @@ pub async fn track_stats(wb: Arc<RwLock<Worterbuch>>, config: Config) -> Worterb
     let separator = config.separator;
     wb.write().await.set(
         format!("{SYSTEM_TOPIC_ROOT}{separator}version"),
-        VERSION.to_owned(),
+        json!(VERSION),
     )?;
     loop {
         update_stats(&wb, start, &config).await?;
@@ -37,7 +38,7 @@ fn update_uptime(wb: &mut Worterbuch, uptime: Duration, config: &Config) -> Wort
     let separator = config.separator;
     wb.set(
         format!("{SYSTEM_TOPIC_ROOT}{separator}uptime"),
-        format!("{}", uptime.as_secs()),
+        json!(uptime.as_secs()),
     )
 }
 
@@ -46,6 +47,6 @@ fn update_message_count(wb: &mut Worterbuch, config: &Config) -> WorterbuchResul
     let len = wb.len();
     wb.set(
         format!("{SYSTEM_TOPIC_ROOT}{separator}store{separator}values{separator}count"),
-        len.to_string(),
+        json!(len),
     )
 }
