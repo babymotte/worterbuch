@@ -507,8 +507,8 @@ async fn handle_store_error(
         },
         WorterbuchError::ServerResponse(_) => panic!("store must not produce this error"),
     };
-    let msg = serde_json::to_string(&err_msg)
-        .expect(&format!("failed to encode error message: {err_msg:?}"));
+    let msg = serde_json::to_string(&ServerMessage::Err(err_msg))
+        .expect(&format!("failed to encode error message"));
     client
         .send(msg)
         .context(|| format!("Error sending ERR message to client"))
