@@ -52,7 +52,7 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     let (result_tx, result_rx) = broadcast::channel(1_000);
 
     // TODO implement protocol versions properly
-    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 2 }];
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 3 }];
 
     let handshake = HandshakeRequest {
         supported_protocol_versions,
