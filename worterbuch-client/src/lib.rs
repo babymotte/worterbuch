@@ -1,12 +1,12 @@
 pub mod buffer;
 pub mod config;
 pub mod error;
-pub mod tcp;
-pub mod ws;
+mod ws;
 
 use error::SubscriptionError;
 use serde::{de::DeserializeOwned, Serialize};
 pub use worterbuch_common::*;
+pub use ws::*;
 
 use async_stream::stream;
 use futures_core::stream::Stream;
@@ -49,95 +49,95 @@ impl Connection {
         }
     }
 
-    pub fn set(&mut self, key: &str, value: &str) -> ConnectionResult<u64> {
+    pub fn set(&mut self, key: String, value: Value) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
-            key: key.to_owned(),
-            value: value.to_owned(),
+            key,
+            value,
         }))?;
         Ok(i)
     }
 
-    pub fn set_json<T: Serialize>(&mut self, key: &str, value: &T) -> ConnectionResult<u64> {
+    pub fn set_json<T: Serialize>(&mut self, key: String, value: &T) -> ConnectionResult<u64> {
         let i = self.inc_counter();
-        let str_value = serde_json::to_string(value)?;
+        let value = serde_json::to_value(value)?;
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
-            key: key.to_owned(),
-            value: str_value,
+            key,
+            value,
         }))?;
         Ok(i)
     }
 
-    pub fn get(&mut self, key: &str) -> ConnectionResult<u64> {
+    pub fn get(&mut self, key: String) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
         }))?;
         Ok(i)
     }
 
-    pub fn pget(&mut self, key: &str) -> ConnectionResult<u64> {
+    pub fn pget(&mut self, request_pattern: String) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
-            request_pattern: key.to_owned(),
+            request_pattern,
         }))?;
         Ok(i)
     }
 
-    pub fn subscribe(&mut self, key: &str) -> ConnectionResult<u64> {
+    pub fn subscribe(&mut self, key: String) -> ConnectionResult<u64> {
         self.do_subscribe(key, false)
     }
 
-    pub fn subscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
+    pub fn subscribe_unique(&mut self, key: String) -> ConnectionResult<u64> {
         self.do_subscribe(key, true)
     }
 
-    fn do_subscribe(&mut self, key: &str, unique: bool) -> Result<u64, ConnectionError> {
+    fn do_subscribe(&mut self, key: String, unique: bool) -> Result<u64, ConnectionError> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
             unique,
         }))?;
         Ok(i)
     }
 
-    pub fn psubscribe(&mut self, key: &str) -> ConnectionResult<u64> {
-        self.do_psubscribe(key, false)
+    pub fn psubscribe(&mut self, request_pattern: String) -> ConnectionResult<u64> {
+        self.do_psubscribe(request_pattern, false)
     }
 
-    pub fn psubscribe_unique(&mut self, key: &str) -> ConnectionResult<u64> {
-        self.do_psubscribe(key, true)
+    pub fn psubscribe_unique(&mut self, request_pattern: String) -> ConnectionResult<u64> {
+        self.do_psubscribe(request_pattern, true)
     }
 
-    fn do_psubscribe(&mut self, key: &str, unique: bool) -> ConnectionResult<u64> {
+    fn do_psubscribe(&mut self, request_pattern: String, unique: bool) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
-            request_pattern: key.to_owned(),
+            request_pattern,
             unique,
         }))?;
         Ok(i)
     }
 
-    pub fn export(&mut self, path: &str) -> ConnectionResult<u64> {
+    pub fn export(&mut self, path: String) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Export(Export {
             transaction_id: i,
-            path: path.to_owned(),
+            path,
         }))?;
         Ok(i)
     }
 
-    pub fn import(&mut self, path: &str) -> ConnectionResult<u64> {
+    pub fn import(&mut self, path: String) -> ConnectionResult<u64> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Import(Import {
             transaction_id: i,
-            path: path.to_owned(),
+            path,
         }))?;
         Ok(i)
     }
@@ -146,13 +146,13 @@ impl Connection {
         self.result_tx.subscribe()
     }
 
-    pub async fn get_value(&mut self, key: &str) -> ConnectionResult<Value> {
+    pub async fn get_value(&mut self, key: String) -> ConnectionResult<Value> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
         }))?;
 
         loop {
@@ -177,13 +177,16 @@ impl Connection {
         }
     }
 
-    pub async fn get_json_value<T: DeserializeOwned>(&mut self, key: &str) -> ConnectionResult<T> {
+    pub async fn get_json_value<T: DeserializeOwned>(
+        &mut self,
+        key: String,
+    ) -> ConnectionResult<T> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
         }))?;
 
         loop {
@@ -208,13 +211,16 @@ impl Connection {
         }
     }
 
-    pub async fn pget_values(&mut self, pattern: &str) -> ConnectionResult<KeyValuePairs> {
+    pub async fn pget_values(
+        &mut self,
+        request_pattern: String,
+    ) -> ConnectionResult<KeyValuePairs> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
-            request_pattern: pattern.to_owned(),
+            request_pattern,
         }))?;
 
         loop {
@@ -243,14 +249,14 @@ impl Connection {
 
     pub async fn pget_json_values<T: DeserializeOwned>(
         &mut self,
-        pattern: &str,
+        request_pattern: String,
     ) -> ConnectionResult<TypedKeyValuePairs<T>> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
-            request_pattern: pattern.to_owned(),
+            request_pattern,
         }))?;
 
         loop {
@@ -279,45 +285,45 @@ impl Connection {
 
     pub async fn subscribe_values(
         &mut self,
-        key: &str,
+        key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         self.do_subscribe_values(key, false).await
     }
 
     pub async fn subscribe_json_values<T: DeserializeOwned>(
         &mut self,
-        key: &str,
+        key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
         self.do_subscribe_json_values(key, false).await
     }
 
     pub async fn subscribe_unique_values(
         &mut self,
-        key: &str,
+        key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         self.do_subscribe_values(key, true).await
     }
 
     pub async fn subscribe_unique_json_values<T: DeserializeOwned>(
         &mut self,
-        key: &str,
+        key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
         self.do_subscribe_json_values(key, true).await
     }
 
     async fn do_subscribe_values(
         &mut self,
-        key: &str,
+        key: String,
         unique: bool,
     ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
+        let owned_key = key.clone();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
             unique,
         }))?;
-        let owned_key = key.to_owned();
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -325,7 +331,7 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
-                                log::warn!("subscription {tid} to key {key} failed");
+                                log::warn!("subscription {tid} to key {owned_key} failed");
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
                                 ));
@@ -376,17 +382,17 @@ impl Connection {
 
     async fn do_subscribe_json_values<T: DeserializeOwned>(
         &mut self,
-        key: &str,
+        key: String,
         unique: bool,
     ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
+        let owned_key = key.clone();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
-            key: key.to_owned(),
+            key,
             unique,
         }))?;
-        let owned_key = key.to_owned();
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -394,7 +400,7 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
-                                log::warn!("subscription {tid} to key {key} failed");
+                                log::warn!("subscription {tid} to key {owned_key} failed");
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
                                 ));
@@ -445,14 +451,14 @@ impl Connection {
 
     pub async fn psubscribe_values(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, false).await
     }
 
     pub async fn psubscribe_json_values<T: DeserializeOwned>(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
     {
         self.do_psubscribe_json_values::<T>(request_pattern, false)
@@ -461,14 +467,14 @@ impl Connection {
 
     pub async fn psubscribe_unique_values(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, true).await
     }
 
     pub async fn psubscribe_unique_json_values<T: DeserializeOwned>(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
     {
         self.do_psubscribe_json_values(request_pattern, true).await
@@ -476,17 +482,17 @@ impl Connection {
 
     async fn do_psubscribe_values(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
         unique: bool,
     ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
+        let owned_pattern = request_pattern.clone();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
-            request_pattern: request_pattern.to_owned(),
+            request_pattern,
             unique,
         }))?;
-        let owned_pattern = request_pattern.to_owned();
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -494,9 +500,7 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
-                                log::warn!(
-                                    "subscription {tid} to pattern {request_pattern} failed"
-                                );
+                                log::warn!("subscription {tid} to pattern {owned_pattern} failed");
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
                                 ));
@@ -549,18 +553,18 @@ impl Connection {
 
     async fn do_psubscribe_json_values<T: DeserializeOwned>(
         &mut self,
-        request_pattern: &str,
+        request_pattern: String,
         unique: bool,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
     {
         let mut subscr = self.responses();
         let i = self.inc_counter();
+        let owned_pattern = request_pattern.clone();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
-            request_pattern: request_pattern.to_owned(),
+            request_pattern,
             unique,
         }))?;
-        let owned_pattern = request_pattern.to_owned();
         loop {
             match subscr.recv().await {
                 Ok(msg) => {
@@ -568,9 +572,7 @@ impl Connection {
                     if tid == i {
                         match msg {
                             SM::Err(msg) => {
-                                log::warn!(
-                                    "subscription {tid} to pattern {request_pattern} failed"
-                                );
+                                log::warn!("subscription {tid} to pattern {owned_pattern} failed");
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
                                 ));
@@ -635,7 +637,7 @@ impl Connection {
 }
 
 fn deserialize_state_con<T: DeserializeOwned>(state: State) -> Result<T, ConnectionError> {
-    let deserialized = serde_json::from_str(&state.key_value.value)?;
+    let deserialized = serde_json::from_value(state.key_value.value)?;
     Ok(deserialized)
 }
 
@@ -644,7 +646,7 @@ fn deserialize_pstate_con<T: DeserializeOwned>(
 ) -> Result<TypedKeyValuePairs<T>, ConnectionError> {
     let mut pairs = TypedKeyValuePairs::new();
     for KeyValuePair { key, value } in pstate.key_value_pairs {
-        let deserialized = serde_json::from_str(&value)?;
+        let deserialized = serde_json::from_value(value)?;
         pairs.push(TypedKeyValuePair {
             key,
             value: deserialized,
@@ -654,7 +656,7 @@ fn deserialize_pstate_con<T: DeserializeOwned>(
 }
 
 fn deserialize_state_sub<T: DeserializeOwned>(state: State) -> Result<T, SubscriptionError> {
-    let deserialized = serde_json::from_str(&state.key_value.value)?;
+    let deserialized = serde_json::from_value(state.key_value.value)?;
     Ok(deserialized)
 }
 
@@ -663,7 +665,7 @@ fn deserialize_pstate_sub<T: DeserializeOwned>(
 ) -> Result<TypedKeyValuePairs<T>, SubscriptionError> {
     let mut pairs = TypedKeyValuePairs::new();
     for KeyValuePair { key, value } in pstate.key_value_pairs {
-        let deserialized = serde_json::from_str(&value)?;
+        let deserialized = serde_json::from_value(value)?;
         pairs.push(TypedKeyValuePair {
             key,
             value: deserialized,

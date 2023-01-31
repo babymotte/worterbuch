@@ -1,14 +1,14 @@
 [workspace]
 members = [
     "worterbuch-common",
-    # "worterbuch-client",
+    "worterbuch-client",
     "worterbuch",
     # "worterbuch-cli",
 ]
 
 [patch.crates-io]
 worterbuch-common = { path = "./worterbuch-common" }
-# worterbuch-client = { path = "./worterbuch-client" }
+worterbuch-client = { path = "./worterbuch-client" }
 
 [profile.release]
 lto = true

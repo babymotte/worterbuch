@@ -29,23 +29,7 @@ impl Config {
 }
 
 impl Config {
-    pub fn new_tcp() -> ConfigResult<Self> {
-        let proto = "tcp".to_owned();
-        let host_addr = "localhost".to_owned();
-        let port = 4242;
-
-        let mut config = Config {
-            proto,
-            host_addr,
-            port,
-        };
-
-        config.load_env()?;
-
-        Ok(config)
-    }
-
-    pub fn new_ws() -> ConfigResult<Self> {
+    pub fn new() -> ConfigResult<Self> {
         let proto = "ws".to_owned();
         let host_addr = "localhost".to_owned();
         let port = 8080;

@@ -11,9 +11,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 use worterbuch_common::{
-    encode_handshake_request_message, encode_message,
     error::{ConnectionError, ConnectionResult},
-    nonblocking::read_server_message,
     ClientMessage as CM, GraveGoods, Handshake, HandshakeRequest, LastWill, ProtocolVersion,
     ServerMessage as SM,
 };
@@ -23,7 +21,7 @@ pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static
     grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<(Connection, Config)> {
-    let config = Config::new_ws()?;
+    let config = Config::new()?;
     Ok((
         connect(
             &config.proto,
@@ -61,14 +59,13 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
         last_will,
         grave_goods,
     };
-    let msg = encode_handshake_request_message(&handshake)?;
-    ws_tx.send(Message::Binary(msg)).await?;
+    let msg = serde_json::to_string(&CM::HandshakeRequest(handshake))?;
+    ws_tx.send(Message::Text(msg)).await?;
 
     match ws_rx.next().await {
-        Some(Ok(msg)) => {
-            let data = msg.into_data();
-            match read_server_message(&*data).await? {
-                Some(SM::Handshake(handshake)) => connected(
+        Some(Ok(msg)) => match msg.to_text() {
+            Ok(data) => match serde_json::from_str::<SM>(data) {
+                Ok(SM::Handshake(handshake)) => connected(
                     ws_tx,
                     ws_rx,
                     cmd_tx,
@@ -78,16 +75,20 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
                     on_disconnect,
                     handshake,
                 ),
-                Some(other) => Err(ConnectionError::IoError(io::Error::new(
+                Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("server sendt invalid handshake message: {other:?}"),
+                    format!("server sent invalid handshake message: {msg:?}"),
                 ))),
-                None => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    "connection closed before handshake",
+                Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid handshake message: {e}"),
                 ))),
-            }
-        }
+            },
+            Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("server sent invalid handshake message: {e}"),
+            ))),
+        },
         Some(Err(e)) => Err(e.into()),
         None => Err(ConnectionError::IoError(io::Error::new(
             io::ErrorKind::ConnectionAborted,
@@ -110,8 +111,8 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
-            if let Ok(Some(data)) = encode_message(&msg).map(Some) {
-                let msg = tungstenite::Message::Binary(data);
+            if let Ok(Some(data)) = serde_json::to_string(&msg).map(Some) {
+                let msg = tungstenite::Message::Text(data);
                 if let Err(e) = ws_tx.send(msg).await {
                     log::error!("failed to send tcp message: {e}");
                     break;
@@ -128,20 +129,21 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
         loop {
             if let Some(Ok(incoming_msg)) = ws_rx.next().await {
                 if incoming_msg.is_binary() {
-                    let data = incoming_msg.into_data();
-                    match read_server_message(&*data).await {
-                        Ok(Some(msg)) => {
-                            if let Err(e) = result_tx_recv.send(msg) {
-                                log::error!("Error forwarding server message: {e}");
+                    if let Ok(data) = incoming_msg.to_text() {
+                        match serde_json::from_str(data) {
+                            Ok(Some(msg)) => {
+                                if let Err(e) = result_tx_recv.send(msg) {
+                                    log::error!("Error forwarding server message: {e}");
+                                }
                             }
-                        }
-                        Ok(None) => {
-                            log::error!("Connection to server lost.");
-                            on_disconnect.await;
-                            break;
-                        }
-                        Err(e) => {
-                            log::error!("Error decoding message: {e}");
+                            Ok(None) => {
+                                log::error!("Connection to server lost.");
+                                on_disconnect.await;
+                                break;
+                            }
+                            Err(e) => {
+                                log::error!("Error decoding message: {e}");
+                            }
                         }
                     }
                 }

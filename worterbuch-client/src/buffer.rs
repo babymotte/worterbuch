@@ -94,8 +94,8 @@ impl SendBuffer {
         sleep(self.delay).await;
         let value = self.set_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value {
-            if let Err(e) = self.conn.set(&key, &value) {
-                log::error!("Error setting key {key} to value {value}: {e}");
+            if let Err(e) = self.conn.set(key, value) {
+                log::error!("Error sending set message: {e}");
             }
         }
     }

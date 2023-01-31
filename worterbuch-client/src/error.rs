@@ -1,7 +1,7 @@
 use std::fmt;
 
 use tokio::sync::broadcast;
-use worterbuch_common::error::Err;
+use worterbuch_common::Err;
 
 #[derive(Debug)]
 pub enum SubscriptionError {
