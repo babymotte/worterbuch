@@ -1,11 +1,13 @@
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
-use worterbuch_codec::PROTOCOL_NEGOTIATION_FAILED;
-pub use worterbuch_codec::{
-    error::{DecodeError, EncodeError},
-    Err, ErrorCode, Key, MetaData, RequestPattern, ILLEGAL_MULTI_WILDCARD, ILLEGAL_WILDCARD,
-    IO_ERROR, MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
-    SERDE_ERROR,
+
+use crate::{
+    server::{
+        Err, ILLEGAL_MULTI_WILDCARD, ILLEGAL_WILDCARD, IO_ERROR,
+        MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
+        PROTOCOL_NEGOTIATION_FAILED, SERDE_ERROR,
+    },
+    ErrorCode, Key, MetaData, RequestPattern,
 };
 
 #[derive(Debug)]
@@ -136,7 +138,6 @@ pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 #[derive(Debug)]
 pub enum ConnectionError {
     IoError(io::Error),
-    EncodeError(EncodeError),
     SendError(Box<dyn std::error::Error + Send + Sync>),
     WebsocketError(tungstenite::Error),
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
@@ -144,7 +145,6 @@ pub enum ConnectionError {
     BcRecvError(broadcast::error::RecvError),
     WorterbuchError(WorterbuchError),
     ConfigError(ConfigError),
-    DecodeError(DecodeError),
     SerdeError(serde_json::Error),
 }
 
@@ -154,7 +154,6 @@ impl fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::IoError(e) => fmt::Display::fmt(&e, f),
-            Self::EncodeError(e) => fmt::Display::fmt(&e, f),
             Self::SendError(e) => fmt::Display::fmt(&e, f),
             Self::WebsocketError(e) => fmt::Display::fmt(&e, f),
             Self::TrySendError(e) => fmt::Display::fmt(&e, f),
@@ -162,19 +161,12 @@ impl fmt::Display for ConnectionError {
             Self::BcRecvError(e) => fmt::Display::fmt(&e, f),
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
-            Self::DecodeError(e) => fmt::Display::fmt(&e, f),
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
 
 pub type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
-
-impl From<EncodeError> for ConnectionError {
-    fn from(e: EncodeError) -> Self {
-        ConnectionError::EncodeError(e)
-    }
-}
 
 impl From<io::Error> for ConnectionError {
     fn from(e: io::Error) -> Self {
@@ -212,12 +204,6 @@ impl From<ConfigError> for ConnectionError {
     }
 }
 
-impl From<DecodeError> for ConnectionError {
-    fn from(e: DecodeError) -> Self {
-        ConnectionError::DecodeError(e)
-    }
-}
-
 impl From<serde_json::Error> for ConnectionError {
     fn from(e: serde_json::Error) -> Self {
         Self::SerdeError(e)
@@ -241,28 +227,3 @@ impl From<&WorterbuchError> for ErrorCode {
         }
     }
 }
-
-// impl TryFrom<&Err> for Option<WorterbuchError> {
-//     type Error = DecodeError;
-
-//     fn try_from(value: &Err) -> Result<Self, Self::Error> {
-//         let Err {
-//             error_code,
-//             metadata,
-//             ..
-//         } = value;
-//         match error_code {
-//             &ILLEGAL_WILDCARD => Ok(Some(WorterbuchError::IllegalWildcard(
-//                 serde_json::from_str(&metadata)?,
-//             ))),
-//             &ILLEGAL_MULTI_WILDCARD => Ok(Some(WorterbuchError::IllegalMultiWildcard(
-//                 serde_json::from_str(&metadata)?,
-//             ))),
-//             &MULTI_WILDCARD_AT_ILLEGAL_POSITION => Ok(Some(
-//                 WorterbuchError::MultiWildcardAtIllegalPosition(serde_json::from_str(&metadata)?),
-//             )),
-//             &IO_ERROR | &SERDE_ERROR | &OTHER => Ok(None),
-//             _ => Err(DecodeError::UndefinedErrorCode(*error_code)),
-//         }
-//     }
-// }
