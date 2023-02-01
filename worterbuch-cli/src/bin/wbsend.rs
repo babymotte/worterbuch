@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Arg;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     process,
     sync::{Arc, Mutex},
@@ -54,7 +54,16 @@ async fn main() -> Result<()> {
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(value)) = lines.next_line().await {
-        trans_id = con.set(key.to_owned(), json!(value))?;
+        if json {
+            match serde_json::from_str::<Value>(&value) {
+                Ok(value) => trans_id = con.set(key.to_owned(), value)?,
+                Err(e) => {
+                    log::error!("Invalid input '{value}': {e}");
+                }
+            }
+        } else {
+            trans_id = con.set(key.to_owned(), json!(value))?;
+        }
     }
 
     loop {

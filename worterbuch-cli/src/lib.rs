@@ -100,7 +100,7 @@ fn default_args<'help>() -> Vec<Arg<'help>> {
         Arg::with_name("JSON")
             .short('j')
             .long("json")
-            .help("Output data in JSON format instead of '[key]=[value]' pairs.")
+            .help("Read/write data in JSON format instead of '[key]=[value]' pairs.")
             .takes_value(false)
             .required(false),
     ];

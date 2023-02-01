@@ -21,12 +21,6 @@ async fn main() -> Result<()> {
         "wbset",
         "Set values of keys on a Wörterbuch.",
         vec![
-            Arg::with_name("JSON")
-                .short('j')
-                .long("json")
-                .help(r#"Read key/value pairs as JSON formatted {"key":"some key","value":"some value"} instead of '[key]=[value]' pairs. This option is only available when reading from stdin. One JSON object is expected per line."#)
-                .takes_value(false)
-                .required(false),
             Arg::with_name("KEY_VALUE_PAIRS")
                 .multiple(true)
                 .help(
