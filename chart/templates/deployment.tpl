@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "chart.fullname" . }}
+  name: {{ include "worterbuch.fullname" . }}
   labels:
-    {{- include "chart.labels" . | nindent 4 }}
+    {{- include "worterbuch.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "chart.selectorLabels" . | nindent 6 }}
+      {{- include "worterbuch.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -18,20 +18,20 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "chart.selectorLabels" . | nindent 8 }}
+        {{- include "worterbuch.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "chart.serviceAccountName" . }}
+      serviceAccountName: {{ include "worterbuch.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.storage.enabled }}
       volumes:
-        - name: {{ include "chart.fullname" . }}
+        - name: {{ include "worterbuch.fullname" . }}
           persistentVolumeClaim:
-            claimName: {{ include "chart.fullname" . }}
+            claimName: {{ include "worterbuch.fullname" . }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -56,7 +56,7 @@ spec:
           {{- if .Values.storage.enabled }}
           volumeMounts:
             - mountPath: "/data"
-              name: {{ include "chart.fullname" . }}
+              name: {{ include "worterbuch.fullname" . }}
           {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

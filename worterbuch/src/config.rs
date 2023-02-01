@@ -44,7 +44,7 @@ impl Config {
             self.proto = val;
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_PORT") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_SERVER_PORT") {
             self.port = val.parse().as_port()?;
         }
 

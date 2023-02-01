@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "chart.serviceAccountName" . }}
+  name: {{ include "worterbuch.serviceAccountName" . }}
   labels:
-    {{- include "chart.labels" . | nindent 4 }}
+    {{- include "worterbuch.labels" . | nindent 4 }}
   {{- with .Values.serviceAccount.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

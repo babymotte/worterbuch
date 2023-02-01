@@ -39,7 +39,7 @@ impl fmt::Display for ConfigError {
             ),
             ConfigError::InvalidPort(e) => write!(f, "invalid port: {e}"),
             ConfigError::InvalidAddr(e) => write!(f, "invalid address: {e}"),
-            ConfigError::InvalidInterval(e) => write!(f, "invalid port: {e}"),
+            ConfigError::InvalidInterval(e) => write!(f, "invalid interval: {e}"),
         }
     }
 }

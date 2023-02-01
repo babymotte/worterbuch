@@ -1,5 +1,5 @@
 {{- if .Values.storage.enabled -}}
-{{- $fullName := include "chart.fullname" . -}}
+{{- $fullName := include "worterbuch.fullname" . -}}
 {{- $size := .Values.storage.size -}}
 apiVersion: v1
 kind: PersistentVolumeClaim

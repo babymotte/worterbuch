@@ -1,4 +1,4 @@
-# Default values for chart.
+# Default values for worterbuch.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
@@ -41,7 +41,6 @@ securityContext:
 service:
   type: ClusterIP
   port: 80
-  nodePort: ""
 
 ingress:
   enabled: false
