@@ -128,7 +128,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     spawn(async move {
         loop {
             if let Some(Ok(incoming_msg)) = ws_rx.next().await {
-                if incoming_msg.is_binary() {
+                if incoming_msg.is_text() {
                     if let Ok(data) = incoming_msg.to_text() {
                         match serde_json::from_str(data) {
                             Ok(Some(msg)) => {
