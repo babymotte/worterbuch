@@ -1582,7 +1582,7 @@ checksum = "447660ad36a13288b1db4d4248e857b510e8c3a225c822ba4fb748c0aafecffd"
 
 [[package]]
 name = "worterbuch"
-version = "0.21.2"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1604,7 +1604,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "0.21.0"
+version = "0.30.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1617,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "0.21.1"
+version = "0.30.0"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "0.21.0"
+version = "0.30.0"
 dependencies = [
  "serde",
  "serde_json",
