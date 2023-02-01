@@ -6,9 +6,7 @@ use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let (matches, proto, host_addr, port, json, debug) = app(
+    let (matches, proto, host_addr, port, json, ) = app(
         "wbexp",
         "Export key/value pairs from Wörterbuch to a JSON file.",
         vec![Arg::with_name("PATH")
@@ -23,20 +21,16 @@ async fn main() -> Result<()> {
     let path = matches.get_one::<String>("PATH").expect("path is required");
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut responses = con.responses();
     con.export(path.to_owned())?;
     while let Ok(msg) = responses.recv().await {
-        print_message(&msg, json, debug);
+        print_message(&msg, json);
         let tid = msg.transaction_id();
         if tid == 1 {
             break;

@@ -16,9 +16,7 @@ use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let (matches, proto, host_addr, port, json, debug) = app(
+    let (matches, proto, host_addr, port, json, ) = app(
         "wbsend",
         "Send a stream of values to a single Wörterbuch key. Values are read from stdin, one value is expected per line.",
         vec![Arg::with_name("KEY")
@@ -31,13 +29,9 @@ async fn main() -> Result<()> {
     let key = matches.get_one::<String>("KEY").expect("key is required");
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
@@ -54,7 +48,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
-            print_message(&msg, json, debug);
+            print_message(&msg, json);
         }
     });
 

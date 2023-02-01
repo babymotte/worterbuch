@@ -21,7 +21,7 @@ use worterbuch_common::{
     Set, Subscribe, Value,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Connection {
     cmd_tx: UnboundedSender<CM>,
     result_tx: broadcast::Sender<SM>,

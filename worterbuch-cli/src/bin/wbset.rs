@@ -17,9 +17,7 @@ use worterbuch_client::KeyValuePair;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let (matches, proto, host_addr, port, json, debug) = app(
+    let (matches, proto, host_addr, port, json) = app(
         "wbset",
         "Set values of keys on a Wörterbuch.",
         vec![
@@ -42,13 +40,9 @@ async fn main() -> Result<()> {
     let key_value_pairs = matches.get_many::<String>("KEY_VALUE_PAIRS");
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
@@ -65,7 +59,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
-            print_message(&msg, json, debug);
+            print_message(&msg, json);
         }
     });
 

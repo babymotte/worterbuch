@@ -45,7 +45,9 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     on_disconnect: F,
 ) -> ConnectionResult<Connection> {
     let url = format!("{proto}://{host_addr}:{port}/ws");
+    log::debug!("Connecting to server {url} …");
     let (server, _) = connect_async(url).await?;
+    log::debug!("Connected to server.");
     let (mut ws_tx, mut ws_rx) = server.split();
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -108,10 +110,12 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     handshake: Handshake,
 ) -> Result<Connection, ConnectionError> {
     let result_tx_recv = result_tx.clone();
+    log::debug!("Handhsake complete: {handshake}");
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
             if let Ok(Some(data)) = serde_json::to_string(&msg).map(Some) {
+                log::debug!("Sending {data}");
                 let msg = tungstenite::Message::Text(data);
                 if let Err(e) = ws_tx.send(msg).await {
                     log::error!("failed to send ws message: {e}");
@@ -130,6 +134,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
             if let Some(Ok(incoming_msg)) = ws_rx.next().await {
                 if incoming_msg.is_text() {
                     if let Ok(data) = incoming_msg.to_text() {
+                        log::debug!("Received {data}");
                         match serde_json::from_str(data) {
                             Ok(Some(msg)) => {
                                 if let Err(e) = result_tx_recv.send(msg) {

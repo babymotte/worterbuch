@@ -1,23 +1,14 @@
 use anyhow::Result;
 use clap::{App, Arg, ArgMatches};
 use serde::Serialize;
-use worterbuch_client::{config::Config, Ack, Err, Handshake, PState, ServerMessage as SM, State};
+use worterbuch_client::{config::Config, Err, PState, ServerMessage as SM, State};
 
-pub fn print_message(msg: &SM, json: bool, debug: bool) {
+pub fn print_message(msg: &SM, json: bool) {
     match msg {
         SM::PState(msg) => print_pstate(&msg, json),
         SM::State(msg) => print_state(&msg, json),
         SM::Err(msg) => print_err(&msg, json),
-        SM::Ack(msg) => {
-            if debug {
-                print_ack(&msg, json)
-            }
-        }
-        SM::Handshake(msg) => {
-            if debug {
-                print_handshake(&msg, json)
-            }
-        }
+        _ => (),
     }
 }
 
@@ -45,22 +36,6 @@ fn print_err(msg: &Err, json: bool) {
     }
 }
 
-fn print_ack(msg: &Ack, json: bool) {
-    if json {
-        print_msg_as_json(&msg);
-    } else {
-        eprintln!("{msg}");
-    }
-}
-
-fn print_handshake(msg: &Handshake, json: bool) {
-    if json {
-        print_msg_as_json(&msg);
-    } else {
-        eprintln!("{msg}");
-    }
-}
-
 fn print_msg_as_json(msg: impl Serialize) {
     match serde_json::to_string(&msg) {
         Ok(json) => println!("{json}"),
@@ -74,7 +49,9 @@ pub fn app<'help>(
     name: &'help str,
     about: &'help str,
     args: Vec<Arg<'help>>,
-) -> Result<(ArgMatches, String, String, u16, bool, bool)> {
+) -> Result<(ArgMatches, String, String, u16, bool)> {
+    dotenv::dotenv().ok();
+    env_logger::init();
     let config = Config::new()?;
 
     let mut app = App::new(name)
@@ -102,9 +79,8 @@ pub fn app<'help>(
         .unwrap_or(default_port);
 
     let json = matches.is_present("JSON");
-    let debug = matches.is_present("DEBUG");
 
-    Ok((matches, proto, host_addr, port, json, debug))
+    Ok((matches, proto, host_addr, port, json))
 }
 
 fn default_args<'help>() -> Vec<Arg<'help>> {
@@ -120,12 +96,6 @@ fn default_args<'help>() -> Vec<Arg<'help>> {
             .long("port")
             .help("The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.")
             .takes_value(true)
-            .required(false),
-        Arg::with_name("DEBUG")
-            .short('d')
-            .long("debug")
-            .help("Start client in debug mode. This will log all messages received by the server to stderr.")
-            .takes_value(false)
             .required(false),
         Arg::with_name("JSON")
             .short('j')

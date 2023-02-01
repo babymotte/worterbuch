@@ -11,9 +11,7 @@ use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let (matches, proto, host_addr, port, json,debug) = app(
+    let (matches, proto, host_addr, port, json) = app(
         "wbsub",
         "Subscribe to values of Wörterbuch keys.",
         vec![
@@ -35,13 +33,9 @@ async fn main() -> Result<()> {
     let unique = matches.is_present("UNIQUE");
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
@@ -49,7 +43,7 @@ async fn main() -> Result<()> {
 
     spawn(async move {
         while let Ok(msg) = responses.recv().await {
-            print_message(&msg, json, debug);
+            print_message(&msg, json);
         }
     });
 

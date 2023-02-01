@@ -9,20 +9,16 @@ use worterbuch_client::connect;
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    let (_matches, proto, host_addr, port, _json, debug) = app(
+    let (_matches, proto, host_addr, port, _json) = app(
         "last-will-test",
         "Test Wörterbuch's last will funciton.",
         vec![],
     )?;
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(
         &proto,

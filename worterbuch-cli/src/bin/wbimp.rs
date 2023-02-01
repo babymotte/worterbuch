@@ -11,9 +11,7 @@ use worterbuch_client::connect;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let (matches, proto, host_addr, port, json,debug) = app(
+    let (matches, proto, host_addr, port, json,) = app(
         "wbimp",
         "Import key/value pairs from JSON files into Wörterbuch.",
         vec![Arg::with_name("PATHS")
@@ -30,13 +28,9 @@ async fn main() -> Result<()> {
         .expect("paths are required");
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
@@ -53,7 +47,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
-            print_message(&msg, json, debug);
+            print_message(&msg, json);
         }
     });
 

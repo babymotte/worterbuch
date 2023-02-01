@@ -17,22 +17,17 @@ use worterbuch_client::{connect, ClientMessage, Connection, TransactionId};
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // TODO this needs a major rework, most of the input json can now be simply passed through to the websocket
-    dotenv::dotenv().ok();
 
-    let (_matches, proto, host_addr, port, json, debug) = app(
+    let (_matches, proto, host_addr, port, json) = app(
         "wbc",
         "General purpose Wörterbuch command line client.",
         vec![],
     )?;
 
     let on_disconnect = async move {
-        eprintln!("Connection to server lost.");
+        log::warn!("Connection to server lost.");
         process::exit(1);
     };
-
-    if debug {
-        eprintln!("Server: {proto}://{host_addr}:{port}");
-    }
 
     let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
@@ -48,7 +43,7 @@ async fn main() -> Result<()> {
                 .lock()
                 .expect("mutex is poisoned")
                 .insert(msg.transaction_id());
-            print_message(&msg, json, debug);
+            print_message(&msg, json);
         }
     });
 
