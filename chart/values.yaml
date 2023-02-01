@@ -40,8 +40,7 @@ securityContext:
 
 service:
   type: ClusterIP
-  port: 4242
-  httpPort: 80
+  port: 80
   nodePort: ""
 
 ingress:
@@ -55,7 +54,7 @@ ingress:
     - host: worterbuch.local
       paths:
         - path: /
-          pathType: ImplementationSpecific
+          pathType: Prefix
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:

@@ -8,16 +8,12 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }} 
-      targetPort: tcp
+      targetPort: http
       protocol: TCP
-      name: tcp
+      name: http
       {{- with .Values.service.nodePort }}
       nodePort:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    - port: {{ .Values.service.httpPort }}
-      targetPort: http
-      protocol: TCP
-      name: http
   selector:
     {{- include "chart.selectorLabels" . | nindent 4 }}
