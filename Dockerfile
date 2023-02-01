@@ -3,13 +3,11 @@ RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | bash
 WORKDIR /src/worterbuch
 COPY . .
 RUN cargo build -p worterbuch --release
-WORKDIR /src/worterbuch/worterbuch-wasm
-RUN wasm-pack build --target web
 
 FROM node AS worterbuch-explorer-builder
+WORKDIR /src
+RUN git clone https://github.com/babymotte/worterbuch-explorer.git
 WORKDIR /src/worterbuch-explorer
-COPY worterbuch-explorer .
-COPY --from=worterbuch-builder /src/worterbuch/worterbuch-wasm/pkg /src/worterbuch-wasm/pkg
 RUN npm i
 RUN npm run build
 
