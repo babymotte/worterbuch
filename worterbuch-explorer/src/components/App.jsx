@@ -1,5 +1,4 @@
 import * as React from "react";
-import { decode_server_message, encode_client_message } from "worterbuch-wasm";
 import TopicTree from "./TopicTree";
 import SortedMap from "collections/sorted-map";
 
@@ -41,8 +40,7 @@ export default function App() {
       const subscrMsg = {
         pSubscribe: { transactionId: 1, requestPattern: topic, unique: true },
       };
-      const buf = encode_client_message(subscrMsg);
-      socket.send(buf);
+      socket.send(JSON.stringify(subscrMsg));
     }
   }, [socket]);
 
@@ -53,9 +51,7 @@ export default function App() {
       setSocket(undefined);
     };
     socket.onmessage = async (e) => {
-      const buf = await e.data.arrayBuffer();
-      const uint8View = new Uint8Array(buf);
-      const msg = decode_server_message(uint8View);
+      const msg = JSON.parse(e.data);
       if (msg.pState) {
         mergeKeyValuePairs(
           msg.pState.keyValuePairs,
@@ -70,18 +66,21 @@ export default function App() {
         separatorRef.current = msg.handshake.separator;
         multiWildcardRef.current = msg.handshake.multiWildcard;
       }
+      if (msg.err) {
+        const meta = JSON.parse(msg.err.metadata);
+        window.alert(meta);
+      }
     };
     socket.onopen = () => {
       console.log("Connected to server.");
       const handshake = {
         handshakeRequest: {
-          supportedProtocolVersions: [{ major: 0, minor: 2 }],
+          supportedProtocolVersions: [{ major: 0, minor: 3 }],
           lastWill: [],
           graveGoods: [],
         },
       };
-      const buf = encode_client_message(handshake);
-      socket.send(buf);
+      socket.send(JSON.stringify(handshake));
     };
     return () => {
       console.log("Disconnecting from server.");
