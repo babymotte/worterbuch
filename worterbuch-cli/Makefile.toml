@@ -1,8 +1,0 @@
-[tasks.test-ws]
-command = "cargo"
-args = ["test", "--no-default-features", "--features", "ws"]
-
-[tasks.test]
-command = "cargo"
-args = ["test"]
-dependencies = ["test-ws"]
