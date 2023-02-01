@@ -51,7 +51,7 @@ async fn serve(
 
     spawn(async move {
         while let Some(bytes) = rx.recv().await {
-            let msg = Message::binary(bytes);
+            let msg = Message::text(bytes);
             if let Err(e) = client_write.send(msg).await {
                 log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
                 break;
