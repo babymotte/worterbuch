@@ -114,7 +114,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
             if let Ok(Some(data)) = serde_json::to_string(&msg).map(Some) {
                 let msg = tungstenite::Message::Text(data);
                 if let Err(e) = ws_tx.send(msg).await {
-                    log::error!("failed to send tcp message: {e}");
+                    log::error!("failed to send ws message: {e}");
                     break;
                 }
             } else {

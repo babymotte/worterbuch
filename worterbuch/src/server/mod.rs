@@ -18,16 +18,14 @@ pub(crate) async fn start(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) {
     let http_api = worterbuch_http_api_filter(worterbuch.clone());
     let routes = http_api.or(ws);
 
-    let start_explorer = config.explorer;
-
-    if start_explorer {
-        let explorer_path = "*";
-        let explorer = {
-            log::info!("Mounting explorer endpoint at {explorer_path} …");
+    if config.webapp {
+        let web_root_path = "*";
+        let webpage = {
+            log::info!("Mounting web app at {web_root_path} …");
             warp::fs::dir(config.web_root_path.clone())
         };
-        let expl_route = explorer;
-        let routes = expl_route.or(routes);
+        let webapp_route = webpage;
+        let routes = webapp_route.or(routes);
         run_server(routes, &config).await;
     } else {
         run_server(routes, &config).await;
@@ -40,7 +38,7 @@ where
     F::Extract: Reply,
 {
     let server = warp::serve(filter);
-    let port = config.web_port;
+    let port = config.port;
     let bind_addr = config.bind_addr;
     let cert_path = &config.cert_path;
     let key_path = &config.key_path;

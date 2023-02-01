@@ -9,8 +9,7 @@ pub struct Config {
     pub separator: char,
     pub wildcard: char,
     pub multi_wildcard: char,
-    pub tcp_port: u16,
-    pub web_port: u16,
+    pub port: u16,
     pub proto: String,
     pub bind_addr: IpAddr,
     pub cert_path: Option<String>,
@@ -19,7 +18,7 @@ pub struct Config {
     pub persistence_interval: Duration,
     pub data_dir: Path,
     pub single_threaded: bool,
-    pub explorer: bool,
+    pub webapp: bool,
     pub web_root_path: String,
 }
 
@@ -45,12 +44,8 @@ impl Config {
             self.proto = val;
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_WEB_PORT") {
-            self.web_port = val.parse().as_port()?;
-        }
-
-        if let Ok(val) = env::var(prefix.to_owned() + "_TCP_PORT") {
-            self.tcp_port = val.parse().as_port()?;
+        if let Ok(val) = env::var(prefix.to_owned() + "_PORT") {
+            self.port = val.parse().as_port()?;
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_BIND_ADDRESS") {
@@ -74,11 +69,11 @@ impl Config {
             self.single_threaded = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_EXPLORER") {
-            self.explorer = val.to_lowercase() == "true";
+        if let Ok(val) = env::var(prefix.to_owned() + "_WEBAPP") {
+            self.webapp = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_EXPLORER_WEBROOT_PATH") {
+        if let Ok(val) = env::var(prefix.to_owned() + "_WEBROOT_PATH") {
             self.web_root_path = val;
         }
 
@@ -98,8 +93,7 @@ impl Default for Config {
             separator: '/',
             wildcard: '?',
             multi_wildcard: '#',
-            tcp_port: 4242,
-            web_port: 8080,
+            port: 8080,
             proto: "ws".to_owned(),
             bind_addr: [127, 0, 0, 1].into(),
             cert_path: None,
@@ -108,8 +102,8 @@ impl Default for Config {
             persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
             single_threaded: true,
-            explorer: true,
-            web_root_path: "build".to_owned(),
+            webapp: true,
+            web_root_path: "html".to_owned(),
         }
     }
 }
