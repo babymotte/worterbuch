@@ -1582,7 +1582,7 @@ checksum = "447660ad36a13288b1db4d4248e857b510e8c3a225c822ba4fb748c0aafecffd"
 
 [[package]]
 name = "worterbuch"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "serde",
  "serde_json",
