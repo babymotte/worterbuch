@@ -1,5 +1,4 @@
 FROM messense/rust-musl-cross:x86_64-musl AS worterbuch-builder
-RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | bash 
 WORKDIR /src/worterbuch
 COPY . .
 RUN cargo build -p worterbuch --release
