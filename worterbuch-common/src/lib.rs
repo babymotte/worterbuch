@@ -25,6 +25,19 @@ pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = u8;
 
+#[macro_export]
+macro_rules! topic {
+    ( $sep:expr, $( $x:expr ),+ ) => {
+        {
+            let mut segments = Vec::new();
+            $(
+                segments.push($x.to_string());
+            )+
+            segments.join(&$sep.to_string())
+        }
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolVersion {
