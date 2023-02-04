@@ -1,10 +1,11 @@
 use crate::{
     config::Config,
+    stats::{SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT},
     store::{Store, StoreStats},
     subscribers::{Subscriber, Subscribers, SubscriptionId},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{from_str, to_value, Value};
+use serde_json::{from_str, json, to_value, Value};
 use std::{collections::HashMap, fmt::Display, net::SocketAddr};
 use tokio::{
     fs::File,
@@ -14,7 +15,7 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    GraveGoods, Handshake, KeyValuePairs, LastWill, Path, ProtocolVersion, ProtocolVersions,
+    topic, GraveGoods, Handshake, KeyValuePairs, LastWill, Path, ProtocolVersion, ProtocolVersions,
     RequestPattern, TransactionId,
 };
 
@@ -41,6 +42,7 @@ pub struct Worterbuch {
     len: usize,
     last_wills: HashMap<Uuid, LastWill>,
     grave_goods: HashMap<Uuid, GraveGoods>,
+    clients: HashMap<Uuid, SocketAddr>,
 }
 
 impl Worterbuch {
@@ -377,7 +379,29 @@ impl Worterbuch {
         }
     }
 
+    pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
+        self.clients.insert(client_id, remote_addr);
+        let client_count_key = topic!(
+            self.config.separator,
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS
+        );
+        if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
+            log::error!("Error updating client count: {e}");
+        }
+    }
+
     pub fn disconnected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
+        self.clients.remove(&client_id);
+        let client_count_key = topic!(
+            self.config.separator,
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS
+        );
+        if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
+            log::error!("Error updating client count: {e}");
+        }
+
         let subscription_keys: Vec<SubscriptionId> = self
             .subscriptions
             .keys()

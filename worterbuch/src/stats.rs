@@ -7,7 +7,8 @@ use tokio::{
 };
 use worterbuch_common::error::WorterbuchResult;
 
-const SYSTEM_TOPIC_ROOT: &str = "$SYS";
+pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
+pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn track_stats(wb: Arc<RwLock<Worterbuch>>, config: Config) -> WorterbuchResult<()> {

@@ -10,6 +10,11 @@ use uuid::Uuid;
 use warp::{addr::remote, ws::Message, ws::Ws};
 use warp::{Filter, Rejection, Reply};
 
+pub enum ClientEvent {
+    Connected,
+    Disconnected,
+}
+
 pub fn worterbuch_ws_filter(
     worterbuch: Arc<RwLock<Worterbuch>>,
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone + Send + Sync + 'static {
@@ -48,6 +53,11 @@ async fn serve(
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     let (mut client_write, mut client_read) = websocket.split();
+
+    {
+        let mut wb = worterbuch.write().await;
+        wb.connected(client_id, remote_addr);
+    }
 
     spawn(async move {
         while let Some(bytes) = rx.recv().await {
