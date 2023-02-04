@@ -7,7 +7,7 @@ use crate::{
         MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
         PROTOCOL_NEGOTIATION_FAILED, SERDE_ERROR,
     },
-    ErrorCode, Key, MetaData, RequestPattern,
+    ErrorCode, Key, MetaData, RequestPattern, INVALID_SERVER_RESPONSE,
 };
 
 #[derive(Debug)]
@@ -79,6 +79,7 @@ pub enum WorterbuchError {
     NotSubscribed,
     IoError(io::Error, MetaData),
     SerDeError(serde_json::Error, MetaData),
+    InvalidServerResponse(MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
     ServerResponse(Err),
     ProtocolNegotiationFailed,
@@ -109,6 +110,10 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::ProtocolNegotiationFailed => {
                 write!(f, "The server does not implement any of the protocol versions supported by this client")
             }
+            WorterbuchError::InvalidServerResponse(meta) => write!(
+                f,
+                "The server sent a response that is not valid for the issued request: {meta}"
+            ),
         }
     }
 }
@@ -223,6 +228,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::IoError(_, _) => IO_ERROR,
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
             WorterbuchError::ProtocolNegotiationFailed => PROTOCOL_NEGOTIATION_FAILED,
+            WorterbuchError::InvalidServerResponse(_) => INVALID_SERVER_RESPONSE,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
         }
     }

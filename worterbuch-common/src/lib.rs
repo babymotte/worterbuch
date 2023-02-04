@@ -10,6 +10,7 @@ pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type RequestPatterns = Vec<RequestPattern>;
 pub type Key = String;
+pub type Keys = Vec<Key>;
 pub type Value = serde_json::Value;
 pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
@@ -58,9 +59,28 @@ pub struct KeyValuePair {
     pub value: Value,
 }
 
+impl From<KeyValuePair> for Option<Value> {
+    fn from(kvp: KeyValuePair) -> Self {
+        Some(kvp.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedKeyValuePair<T: DeserializeOwned> {
     pub key: Key,
     pub value: T,
+}
+
+impl<T: DeserializeOwned> TryFrom<KeyValuePair> for TypedKeyValuePair<T> {
+    type Error = serde_json::Error;
+
+    fn try_from(kvp: KeyValuePair) -> Result<Self, Self::Error> {
+        let deserialized = serde_json::from_value(kvp.value)?;
+        Ok(TypedKeyValuePair {
+            key: kvp.key,
+            value: deserialized,
+        })
+    }
 }
 
 impl From<(String, serde_json::Value)> for KeyValuePair {

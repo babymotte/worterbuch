@@ -161,11 +161,16 @@ impl Connection {
                     let tid = msg.transaction_id();
                     if tid == i {
                         match msg {
-                            SM::State(state) => return Ok(state.key_value.value),
+                            SM::State(state) => match state.event {
+                                StateEvent::KeyValue(key_value) => return Ok(key_value.value),
+                                StateEvent::Deleted(_) => {
+                                    return Err(ConnectionError::WorterbuchError(WorterbuchError::InvalidServerResponse("a delte event is not a valid response for a get request".to_owned())))
+                                }
+                            },
                             SM::Err(msg) => {
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
-                                ))
+                                ));
                             }
                             _ => { /* ignore */ }
                         }
@@ -195,7 +200,16 @@ impl Connection {
                     let tid = msg.transaction_id();
                     if tid == i {
                         match msg {
-                            SM::State(state) => return deserialize_state_con(state),
+                            SM::State(state) => match deserialize_state_con(state) {
+                                Ok(Some(value)) => return Ok(value),
+                                Err(e) => return Err(e),
+                                Ok(None) => return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::InvalidServerResponse(
+                                        "a get request must not be answered with a delete event"
+                                            .to_owned(),
+                                    ),
+                                )),
+                            },
                             SM::Err(msg) => {
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
@@ -229,7 +243,14 @@ impl Connection {
                     let tid = msg.transaction_id();
                     if tid == i {
                         match msg {
-                            SM::PState(pstate) => return Ok(pstate.key_value_pairs),
+                            SM::PState(pstate) => {
+                                match pstate.event {
+                                    PStateEvent::KeyValuePairs(key_value_pairs) => return Ok(key_value_pairs),
+                                    PStateEvent::Deleted(_) => {
+                                        return Err(ConnectionError::WorterbuchError(WorterbuchError::InvalidServerResponse("a delte event is not a valid response for a pget request".to_owned())))
+                                    },
+                                }
+                            },
                             SM::Err(msg) => {
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
@@ -265,7 +286,10 @@ impl Connection {
                     let tid = msg.transaction_id();
                     if tid == i {
                         match msg {
-                            SM::PState(pstate) => return deserialize_pstate_con(pstate),
+                            SM::PState(pstate) => match pstate.event {
+                                PStateEvent::KeyValuePairs(kvps) => return deserialize_pstate_con(kvps),
+                                PStateEvent::Deleted(_) => return Err(ConnectionError::WorterbuchError(WorterbuchError::InvalidServerResponse("a delte event is not a valid response for a pget request".to_owned()))),
+                            },
                             SM::Err(msg) => {
                                 return Err(ConnectionError::WorterbuchError(
                                     WorterbuchError::ServerResponse(msg),
@@ -286,28 +310,28 @@ impl Connection {
     pub async fn subscribe_values(
         &mut self,
         key: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<Value>, SubscriptionError>>> {
         self.do_subscribe_values(key, false).await
     }
 
     pub async fn subscribe_json_values<T: DeserializeOwned>(
         &mut self,
         key: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
         self.do_subscribe_json_values(key, false).await
     }
 
     pub async fn subscribe_unique_values(
         &mut self,
         key: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<Value>, SubscriptionError>>> {
         self.do_subscribe_values(key, true).await
     }
 
     pub async fn subscribe_unique_json_values<T: DeserializeOwned>(
         &mut self,
         key: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
         self.do_subscribe_json_values(key, true).await
     }
 
@@ -315,7 +339,7 @@ impl Connection {
         &mut self,
         key: String,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Result<Value, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<Value>, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         let owned_key = key.clone();
@@ -344,7 +368,10 @@ impl Connection {
                                                 if tid == i {
                                                     match msg {
                                                         SM::State(state) => {
-                                                            yield Ok(state.key_value.value);
+                                                            match state.event {
+                                                                StateEvent::KeyValue(kv) =>  yield Ok(Some(kv.value)),
+                                                                StateEvent::Deleted(_) =>  yield Ok(None),
+                                                            }
                                                         }
                                                         SM::Err(err) => {
                                                             log::error!("Error in subscription of {owned_key}: {err:?}");
@@ -384,7 +411,7 @@ impl Connection {
         &mut self,
         key: String,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Result<T, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         let owned_key = key.clone();
@@ -452,15 +479,14 @@ impl Connection {
     pub async fn psubscribe_values(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, false).await
     }
 
     pub async fn psubscribe_json_values<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
-    {
+    ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
         self.do_psubscribe_json_values::<T>(request_pattern, false)
             .await
     }
@@ -468,15 +494,14 @@ impl Connection {
     pub async fn psubscribe_unique_values(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, true).await
     }
 
     pub async fn psubscribe_unique_json_values<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
-    {
+    ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
         self.do_psubscribe_json_values(request_pattern, true).await
     }
 
@@ -484,7 +509,7 @@ impl Connection {
         &mut self,
         request_pattern: String,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Result<KeyValuePairs, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         let owned_pattern = request_pattern.clone();
@@ -514,7 +539,18 @@ impl Connection {
                                         if tid == i {
                                             match msg {
                                                 SM::PState(pstate) => {
-                                                    yield Ok(pstate.key_value_pairs);
+                                                    match pstate.event {
+                                                        PStateEvent::KeyValuePairs(kvps) => {
+                                                            for kvp in kvps {
+                                                                yield Ok(kvp.into());
+                                                            }
+                                                        },
+                                                        PStateEvent::Deleted(keys) => {
+                                                            for key in keys {
+                                                                yield Ok(key.into());
+                                                            }
+                                                        },
+                                                    }
                                                 }
                                                 SM::Err(err) => {
                                                     log::error!("Error in subscription of {owned_pattern}: {err:?}");
@@ -555,8 +591,7 @@ impl Connection {
         &mut self,
         request_pattern: String,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Result<TypedKeyValuePairs<T>, SubscriptionError>>>
-    {
+    ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         let owned_pattern = request_pattern.clone();
@@ -586,7 +621,16 @@ impl Connection {
                                         if tid == i {
                                             match msg {
                                                 SM::PState(pstate) => {
-                                                    yield deserialize_pstate_sub(pstate);
+                                                    match deserialize_pstate_sub(pstate) {
+                                                        Ok(events) => {
+                                                            for event in events {
+                                                                yield Ok(event);
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            yield Err(e);
+                                                        }
+                                                    }
                                                 }
                                                 SM::Err(err) => {
                                                     log::error!("Error in subscription of {owned_pattern}: {err:?}");
@@ -636,40 +680,30 @@ impl Connection {
     }
 }
 
-fn deserialize_state_con<T: DeserializeOwned>(state: State) -> Result<T, ConnectionError> {
-    let deserialized = serde_json::from_value(state.key_value.value)?;
-    Ok(deserialized)
+fn deserialize_state_con<T: DeserializeOwned>(state: State) -> Result<Option<T>, ConnectionError> {
+    let typed: TypedStateEvent<T> = state.event.try_into()?;
+    Ok(typed.into())
 }
 
 fn deserialize_pstate_con<T: DeserializeOwned>(
-    pstate: PState,
+    kvps: KeyValuePairs,
 ) -> Result<TypedKeyValuePairs<T>, ConnectionError> {
-    let mut pairs = TypedKeyValuePairs::new();
-    for KeyValuePair { key, value } in pstate.key_value_pairs {
-        let deserialized = serde_json::from_value(value)?;
-        pairs.push(TypedKeyValuePair {
-            key,
-            value: deserialized,
-        });
+    let mut typed = TypedKeyValuePairs::new();
+    for kvp in kvps {
+        typed.push(kvp.try_into()?);
     }
-    Ok(pairs)
+    Ok(typed)
 }
 
-fn deserialize_state_sub<T: DeserializeOwned>(state: State) -> Result<T, SubscriptionError> {
-    let deserialized = serde_json::from_value(state.key_value.value)?;
-    Ok(deserialized)
+fn deserialize_state_sub<T: DeserializeOwned>(
+    state: State,
+) -> Result<Option<T>, SubscriptionError> {
+    let typed: TypedStateEvent<T> = state.event.try_into()?;
+    Ok(typed.into())
 }
 
 fn deserialize_pstate_sub<T: DeserializeOwned>(
     pstate: PState,
-) -> Result<TypedKeyValuePairs<T>, SubscriptionError> {
-    let mut pairs = TypedKeyValuePairs::new();
-    for KeyValuePair { key, value } in pstate.key_value_pairs {
-        let deserialized = serde_json::from_value(value)?;
-        pairs.push(TypedKeyValuePair {
-            key,
-            value: deserialized,
-        });
-    }
-    Ok(pairs)
+) -> Result<TypedStateEvents<T>, SubscriptionError> {
+    Ok(pstate.try_into()?)
 }

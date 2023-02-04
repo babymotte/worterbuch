@@ -10,7 +10,8 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, HandshakeRequest, Import, KeyValuePair,
-    MetaData, PGet, PState, PSubscribe, ServerMessage, Set, State, Subscribe, Unsubscribe,
+    MetaData, PGet, PState, PStateEvent, PSubscribe, ServerMessage, Set, State, StateEvent,
+    Subscribe, Unsubscribe,
 };
 
 pub async fn process_incoming_message(
@@ -106,7 +107,7 @@ async fn get(
 
     let response = State {
         transaction_id: msg.transaction_id,
-        key_value,
+        event: StateEvent::KeyValue(key_value),
     };
 
     match serde_json::to_string(&ServerMessage::State(response)) {
@@ -140,7 +141,7 @@ async fn pget(
     let response = PState {
         transaction_id: msg.transaction_id,
         request_pattern: msg.request_pattern,
-        key_value_pairs: values,
+        event: PStateEvent::KeyValuePairs(values),
     };
 
     match serde_json::to_string(&ServerMessage::PState(response)) {
@@ -226,7 +227,7 @@ async fn subscribe(
             for key_value in kvs {
                 let event = State {
                     transaction_id: transaction_id.clone(),
-                    key_value,
+                    event: StateEvent::KeyValue(key_value),
                 };
                 match serde_json::to_string(&ServerMessage::State(event)) {
                     Ok(data) => {
@@ -307,7 +308,7 @@ async fn psubscribe(
             let event = PState {
                 transaction_id: transaction_id.clone(),
                 request_pattern: request_pattern.clone(),
-                key_value_pairs,
+                event: PStateEvent::KeyValuePairs(key_value_pairs),
             };
             match serde_json::to_string(&ServerMessage::PState(event)) {
                 Ok(data) => {
@@ -505,7 +506,9 @@ async fn handle_store_error(
             metadata: serde_json::to_string::<Meta>(&(&e, meta).into())
                 .expect("failed to serialize metadata"),
         },
-        WorterbuchError::ServerResponse(_) => panic!("store must not produce this error"),
+        WorterbuchError::ServerResponse(_) | WorterbuchError::InvalidServerResponse(_) => {
+            panic!("store must not produce this error")
+        }
     };
     let msg = serde_json::to_string(&ServerMessage::Err(err_msg))
         .expect(&format!("failed to encode error message"));
