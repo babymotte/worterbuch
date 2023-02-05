@@ -79,7 +79,10 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<Handshake> {
         // TODO implement protocol versions properly
-        let mut supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 3 }];
+        let mut supported_protocol_versions = vec![
+            ProtocolVersion { major: 0, minor: 3 },
+            ProtocolVersion { major: 0, minor: 4 },
+        ];
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
         supported_protocol_versions.sort();
