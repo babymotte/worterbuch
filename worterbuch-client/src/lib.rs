@@ -49,7 +49,7 @@ impl Connection {
         }
     }
 
-    pub fn set(&mut self, key: String, value: Value) -> ConnectionResult<u64> {
+    pub fn set(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
@@ -59,7 +59,11 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn set_json<T: Serialize>(&mut self, key: String, value: &T) -> ConnectionResult<u64> {
+    pub fn set_json<T: Serialize>(
+        &mut self,
+        key: String,
+        value: &T,
+    ) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         let value = serde_json::to_value(value)?;
         self.cmd_tx.send(CM::Set(Set {
@@ -70,7 +74,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn get(&mut self, key: String) -> ConnectionResult<u64> {
+    pub fn get(&mut self, key: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
@@ -79,7 +83,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn pget(&mut self, request_pattern: String) -> ConnectionResult<u64> {
+    pub fn pget(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
@@ -88,11 +92,29 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn subscribe(&mut self, key: String) -> ConnectionResult<u64> {
+    pub fn delete(&mut self, key: String) -> ConnectionResult<TransactionId> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Delete(Delete {
+            transaction_id: i,
+            key,
+        }))?;
+        Ok(i)
+    }
+
+    pub fn pdelete(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::PDelete(PDelete {
+            transaction_id: i,
+            request_pattern,
+        }))?;
+        Ok(i)
+    }
+
+    pub fn subscribe(&mut self, key: String) -> ConnectionResult<TransactionId> {
         self.do_subscribe(key, false)
     }
 
-    pub fn subscribe_unique(&mut self, key: String) -> ConnectionResult<u64> {
+    pub fn subscribe_unique(&mut self, key: String) -> ConnectionResult<TransactionId> {
         self.do_subscribe(key, true)
     }
 
@@ -106,15 +128,22 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn psubscribe(&mut self, request_pattern: String) -> ConnectionResult<u64> {
+    pub fn psubscribe(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
         self.do_psubscribe(request_pattern, false)
     }
 
-    pub fn psubscribe_unique(&mut self, request_pattern: String) -> ConnectionResult<u64> {
+    pub fn psubscribe_unique(
+        &mut self,
+        request_pattern: String,
+    ) -> ConnectionResult<TransactionId> {
         self.do_psubscribe(request_pattern, true)
     }
 
-    fn do_psubscribe(&mut self, request_pattern: String, unique: bool) -> ConnectionResult<u64> {
+    fn do_psubscribe(
+        &mut self,
+        request_pattern: String,
+        unique: bool,
+    ) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PSubscribe(PSubscribe {
             transaction_id: i,
@@ -124,7 +153,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn export(&mut self, path: String) -> ConnectionResult<u64> {
+    pub fn export(&mut self, path: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Export(Export {
             transaction_id: i,
@@ -133,7 +162,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn import(&mut self, path: String) -> ConnectionResult<u64> {
+    pub fn import(&mut self, path: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Import(Import {
             transaction_id: i,
@@ -164,7 +193,7 @@ impl Connection {
                             SM::State(state) => match state.event {
                                 StateEvent::KeyValue(key_value) => return Ok(key_value.value),
                                 StateEvent::Deleted(_) => {
-                                    return Err(ConnectionError::WorterbuchError(WorterbuchError::InvalidServerResponse("a delte event is not a valid response for a get request".to_owned())))
+                                    return Err(ConnectionError::WorterbuchError(WorterbuchError::InvalidServerResponse("a delete event is not a valid response for a get request".to_owned())))
                                 }
                             },
                             SM::Err(msg) => {

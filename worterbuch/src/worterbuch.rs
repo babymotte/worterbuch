@@ -327,7 +327,10 @@ impl Worterbuch {
     pub fn pdelete(&mut self, pattern: String) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
-        if path.is_empty() || &*(path[0]) == SYSTEM_TOPIC_ROOT {
+        if path.is_empty()
+            || &*(path[0]) == SYSTEM_TOPIC_ROOT
+            || path[0] == KeySegment::MultiWildcard
+        {
             return Err(WorterbuchError::ReadOnlyKey(pattern));
         }
 
