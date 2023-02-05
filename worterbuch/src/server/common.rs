@@ -9,9 +9,9 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, ClientMessage as CM, Err, ErrorCode, Export, Get, HandshakeRequest, Import, KeyValuePair,
-    MetaData, PGet, PState, PStateEvent, PSubscribe, ServerMessage, Set, State, StateEvent,
-    Subscribe, Unsubscribe,
+    Ack, ClientMessage as CM, Delete, Err, ErrorCode, Export, Get, HandshakeRequest, Import,
+    KeyValuePair, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, ServerMessage, Set,
+    State, StateEvent, Subscribe, Unsubscribe,
 };
 
 pub async fn process_incoming_message(
@@ -45,6 +45,12 @@ pub async fn process_incoming_message(
         Ok(Some(CM::Import(msg))) => import(msg, worterbuch.clone(), tx.clone()).await?,
         Ok(Some(CM::Unsubscribe(msg))) => {
             unsubscribe(msg, worterbuch.clone(), tx.clone(), client_id).await?
+        }
+        Ok(Some(CM::Delete(msg))) => {
+            delete(msg, worterbuch.clone(), tx.clone()).await?;
+        }
+        Ok(Some(CM::PDelete(msg))) => {
+            pdelete(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(None) => {
             // client disconnected
@@ -97,7 +103,7 @@ async fn get(
 ) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
-    let key_value = match wb.get(&msg.key) {
+    let key_value = match wb.get(msg.key) {
         Ok(key_value) => key_value.into(),
         Err(e) => {
             handle_store_error(e, client.clone(), msg.transaction_id).await?;
@@ -223,13 +229,15 @@ async fn subscribe(
 
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription:?} …");
-        while let Some(kvs) = rx.recv().await {
-            for key_value in kvs {
-                let event = State {
+        while let Some(event) = rx.recv().await {
+            let state_events: Vec<StateEvent> = event.into();
+
+            for event in state_events {
+                let state = State {
                     transaction_id: transaction_id.clone(),
-                    event: StateEvent::KeyValue(key_value),
+                    event,
                 };
-                match serde_json::to_string(&ServerMessage::State(event)) {
+                match serde_json::to_string(&ServerMessage::State(state)) {
                     Ok(data) => {
                         if let Err(e) = client.clone().send(data) {
                             log::error!("Error sending STATE message to client: {e}");
@@ -304,11 +312,11 @@ async fn psubscribe(
 
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription:?} …");
-        while let Some(key_value_pairs) = rx.recv().await {
+        while let Some(event) = rx.recv().await {
             let event = PState {
                 transaction_id: transaction_id.clone(),
                 request_pattern: request_pattern.clone(),
-                event: PStateEvent::KeyValuePairs(key_value_pairs),
+                event,
             };
             match serde_json::to_string(&ServerMessage::PState(event)) {
                 Ok(data) => {
@@ -436,6 +444,73 @@ async fn unsubscribe(
     Ok(())
 }
 
+async fn delete(
+    msg: Delete,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<()> {
+    let mut wb = worterbuch.write().await;
+
+    let key_value = match wb.delete(msg.key) {
+        Ok(key_value) => key_value.into(),
+        Err(e) => {
+            handle_store_error(e, client.clone(), msg.transaction_id).await?;
+            return Ok(());
+        }
+    };
+
+    let response = State {
+        transaction_id: msg.transaction_id,
+        event: StateEvent::Deleted(key_value),
+    };
+
+    match serde_json::to_string(&ServerMessage::State(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending STATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client).await?,
+    }
+
+    Ok(())
+}
+
+async fn pdelete(
+    msg: PDelete,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<()> {
+    let mut wb = worterbuch.write().await;
+
+    let deleted = match wb.pdelete(msg.request_pattern.clone()) {
+        Ok(it) => it,
+        Result::Err(e) => {
+            handle_store_error(e, client.clone(), msg.transaction_id).await?;
+            return Ok(());
+        }
+    };
+
+    let response = PState {
+        transaction_id: msg.transaction_id,
+        request_pattern: msg.request_pattern,
+        event: PStateEvent::Deleted(deleted),
+    };
+
+    match serde_json::to_string(&ServerMessage::PState(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending PSTATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client).await?,
+    }
+
+    Ok(())
+}
+
 async fn handle_encode_error(
     e: serde_json::Error,
     client: UnboundedSender<String>,
@@ -509,6 +584,12 @@ async fn handle_store_error(
         WorterbuchError::ServerResponse(_) | WorterbuchError::InvalidServerResponse(_) => {
             panic!("store must not produce this error")
         }
+        WorterbuchError::ReadOnlyKey(key) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(&format!("tried to delete read only key '{key}'"))
+                .expect("failed to serialize error message"),
+        },
     };
     let msg = serde_json::to_string(&ServerMessage::Err(err_msg))
         .expect(&format!("failed to encode error message"));

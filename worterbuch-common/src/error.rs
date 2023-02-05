@@ -7,7 +7,7 @@ use crate::{
         MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
         PROTOCOL_NEGOTIATION_FAILED, SERDE_ERROR,
     },
-    ErrorCode, Key, MetaData, RequestPattern, INVALID_SERVER_RESPONSE,
+    ErrorCode, Key, MetaData, RequestPattern, INVALID_SERVER_RESPONSE, READ_ONLY_KEY,
 };
 
 #[derive(Debug)]
@@ -83,6 +83,7 @@ pub enum WorterbuchError {
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
     ServerResponse(Err),
     ProtocolNegotiationFailed,
+    ReadOnlyKey(Key),
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -114,6 +115,9 @@ impl fmt::Display for WorterbuchError {
                 f,
                 "The server sent a response that is not valid for the issued request: {meta}"
             ),
+            WorterbuchError::ReadOnlyKey(key) => {
+                write!(f, "Tried to delete a read only key: {key}")
+            }
         }
     }
 }
@@ -229,6 +233,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
             WorterbuchError::ProtocolNegotiationFailed => PROTOCOL_NEGOTIATION_FAILED,
             WorterbuchError::InvalidServerResponse(_) => INVALID_SERVER_RESPONSE,
+            WorterbuchError::ReadOnlyKey(_) => READ_ONLY_KEY,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
         }
     }

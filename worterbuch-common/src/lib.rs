@@ -3,14 +3,15 @@ pub mod error;
 mod server;
 
 pub use client::*;
+use error::WorterbuchResult;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use server::*;
+use std::{fmt, ops::Deref};
 
 pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type RequestPatterns = Vec<RequestPattern>;
 pub type Key = String;
-pub type Keys = Vec<Key>;
 pub type Value = serde_json::Value;
 pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
@@ -25,6 +26,8 @@ pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = u8;
+
+pub const SEPARATOR: &str = "/";
 
 #[macro_export]
 macro_rules! topic {
@@ -116,6 +119,98 @@ impl TryFrom<(&str, &str)> for KeyValuePair {
             key: key.to_owned(),
             value,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct RegularKeySegment(pub String);
+
+impl RegularKeySegment {
+    pub fn parse(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let mut segments = Vec::new();
+        for segment in pattern.split(SEPARATOR) {
+            let ks: KeySegment = segment.into();
+            match ks {
+                KeySegment::Regular(reg) => segments.push(reg),
+                KeySegment::Wildcard => {
+                    return Err(error::WorterbuchError::IllegalWildcard(pattern.to_owned()))
+                }
+                KeySegment::MultiWildcard => {
+                    return Err(error::WorterbuchError::IllegalMultiWildcard(
+                        pattern.to_owned(),
+                    ))
+                }
+            }
+        }
+        Ok(segments)
+    }
+}
+
+impl Deref for RegularKeySegment {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for RegularKeySegment {
+    fn from(str: String) -> Self {
+        RegularKeySegment(str)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum KeySegment {
+    Regular(RegularKeySegment),
+    Wildcard,
+    MultiWildcard,
+    // RegexWildcard(String),
+}
+
+impl From<RegularKeySegment> for KeySegment {
+    fn from(reg: RegularKeySegment) -> Self {
+        Self::Regular(reg)
+    }
+}
+
+impl Deref for KeySegment {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            KeySegment::Regular(reg) => &reg,
+            KeySegment::Wildcard => "?",
+            KeySegment::MultiWildcard => "#",
+        }
+    }
+}
+
+impl fmt::Display for KeySegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeySegment::Regular(segment) => segment.fmt(f),
+            KeySegment::Wildcard => write!(f, "?"),
+            KeySegment::MultiWildcard => write!(f, "#"),
+            // PathSegment::RegexWildcard(regex) => write!(f, "?{regex}?"),
+        }
+    }
+}
+
+impl From<&str> for KeySegment {
+    fn from(str: &str) -> Self {
+        match str {
+            "?" => KeySegment::Wildcard,
+            "#" => KeySegment::MultiWildcard,
+            other => KeySegment::Regular(other.to_owned().into()),
+        }
+    }
+}
+
+impl KeySegment {
+    pub fn parse(pattern: &str) -> Vec<KeySegment> {
+        let segments = pattern.split(SEPARATOR);
+        segments.map(KeySegment::from).collect()
     }
 }
 

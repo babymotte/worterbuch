@@ -1,11 +1,11 @@
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
-use worterbuch_common::{KeyValuePairs, TransactionId};
+use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, TransactionId};
 
 type Subs = Vec<Subscriber>;
-type Tree = HashMap<String, Node>;
+type Tree = HashMap<KeySegment, Node>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SubscriptionId {
@@ -24,8 +24,8 @@ impl SubscriptionId {
 
 #[derive(Clone)]
 pub struct Subscriber {
-    pattern: Vec<String>,
-    tx: UnboundedSender<KeyValuePairs>,
+    pattern: Vec<KeySegment>,
+    tx: UnboundedSender<PStateEvent>,
     id: SubscriptionId,
     unique: bool,
 }
@@ -33,8 +33,8 @@ pub struct Subscriber {
 impl Subscriber {
     pub fn new(
         id: SubscriptionId,
-        pattern: Vec<String>,
-        tx: UnboundedSender<KeyValuePairs>,
+        pattern: Vec<KeySegment>,
+        tx: UnboundedSender<PStateEvent>,
         unique: bool,
     ) -> Subscriber {
         Subscriber {
@@ -45,7 +45,7 @@ impl Subscriber {
         }
     }
 
-    pub fn send(&self, event: KeyValuePairs) -> Result<()> {
+    pub fn send(&self, event: PStateEvent) -> Result<()> {
         self.tx.send(event)?;
         Ok(())
     }
@@ -67,27 +67,10 @@ pub struct Subscribers {
 }
 
 impl Subscribers {
-    pub fn get_subscribers(
-        &self,
-        key: &[&str],
-        wildcard: &str,
-        multi_wildcard: &str,
-    ) -> Vec<Subscriber> {
+    pub fn get_subscribers(&self, key: &[RegularKeySegment]) -> Vec<Subscriber> {
         let mut all_subscribers = Vec::new();
 
-        for segment in key {
-            if segment.contains(wildcard) || segment.contains(multi_wildcard) {
-                panic!("get_subscribers must only be used for keys, not patterns");
-            }
-        }
-
-        self.add_matches(
-            &self.data,
-            key,
-            wildcard,
-            multi_wildcard,
-            &mut all_subscribers,
-        );
+        self.add_matches(&self.data, key, &mut all_subscribers);
 
         all_subscribers
     }
@@ -95,9 +78,7 @@ impl Subscribers {
     fn add_matches(
         &self,
         mut current: &Node,
-        remaining_path: &[&str],
-        wildcard: &str,
-        multi_wildcard: &str,
+        remaining_path: &[RegularKeySegment],
         all_subscribers: &mut Vec<Subscriber>,
     ) {
         let mut remaining_path = remaining_path;
@@ -105,21 +86,15 @@ impl Subscribers {
         for elem in remaining_path {
             remaining_path = &remaining_path[1..];
 
-            if let Some(node) = current.tree.get(wildcard) {
-                self.add_matches(
-                    &node,
-                    remaining_path,
-                    wildcard,
-                    multi_wildcard,
-                    all_subscribers,
-                );
+            if let Some(node) = current.tree.get(&KeySegment::Wildcard) {
+                self.add_matches(&node, remaining_path, all_subscribers);
             }
 
-            if let Some(node) = current.tree.get(multi_wildcard) {
+            if let Some(node) = current.tree.get(&KeySegment::MultiWildcard) {
                 self.add_all_children(node, all_subscribers);
             }
 
-            if let Some(node) = current.tree.get(*elem) {
+            if let Some(node) = current.tree.get(&elem.to_owned().into()) {
                 current = node;
             } else {
                 return;
@@ -128,25 +103,25 @@ impl Subscribers {
         all_subscribers.extend(current.subscribers.clone());
     }
 
-    pub fn add_subscriber(&mut self, pattern: &[&str], subscriber: Subscriber) {
+    pub fn add_subscriber(&mut self, pattern: &[KeySegment], subscriber: Subscriber) {
         log::debug!("Adding subscriber for pattern {:?}", pattern);
         let mut current = &mut self.data;
 
         for elem in pattern {
-            if !current.tree.contains_key(*elem) {
-                current.tree.insert((*elem).to_owned(), Node::default());
-            }
-            current = current.tree.get_mut(*elem).expect("we know this exists");
+            current = match current.tree.entry(elem.to_owned().into()) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => e.insert(Node::default()),
+            };
         }
 
         current.subscribers.push(subscriber);
     }
 
-    pub fn unsubscribe(&mut self, pattern: &[&str], subscription: &SubscriptionId) -> bool {
+    pub fn unsubscribe(&mut self, pattern: &[KeySegment], subscription: &SubscriptionId) -> bool {
         let mut current = &mut self.data;
 
         for elem in pattern {
-            if let Some(node) = current.tree.get_mut(*elem) {
+            if let Some(node) = current.tree.get_mut(elem) {
                 current = node;
             } else {
                 log::warn!("No subscriber found for pattern {:?}", pattern);
@@ -196,12 +171,20 @@ mod test {
     use super::*;
     use tokio::sync::mpsc::unbounded_channel;
 
+    fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
+        RegularKeySegment::parse(key).unwrap()
+    }
+
+    fn key_segs(key: &str) -> Vec<KeySegment> {
+        KeySegment::parse(key)
+    }
+
     #[test]
     fn get_subscribers() {
         let mut subscribers = Subscribers::default();
 
         let (tx, _rx) = unbounded_channel();
-        let pattern = vec!["test", "?", "b", "#"];
+        let pattern = KeySegment::parse("test/?/b/#");
         let id = SubscriptionId {
             client_id: Uuid::new_v4(),
             transaction_id: 123,
@@ -215,10 +198,10 @@ mod test {
 
         subscribers.add_subscriber(&pattern, subscriber);
 
-        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        let res = subscribers.get_subscribers(&reg_key_segs("test/a/b/c/d"));
         assert_eq!(res.len(), 1);
 
-        let res = subscribers.get_subscribers(&["test", "a", "b"], "?", "#");
+        let res = subscribers.get_subscribers(&reg_key_segs("test/a/b"));
         assert_eq!(res.len(), 0);
     }
 
@@ -227,7 +210,7 @@ mod test {
         let mut subscribers = Subscribers::default();
 
         let (tx, _rx) = unbounded_channel();
-        let pattern = vec!["test", "?", "b", "#"];
+        let pattern = key_segs("test/?/b/#");
         let id = SubscriptionId {
             client_id: Uuid::new_v4(),
             transaction_id: 123,
@@ -239,17 +222,17 @@ mod test {
             false,
         );
 
-        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        let res = subscribers.get_subscribers(&reg_key_segs("test/a/b/c/d"));
         assert_eq!(res.len(), 0);
 
         subscribers.add_subscriber(&pattern, subscriber);
 
-        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        let res = subscribers.get_subscribers(&reg_key_segs("test/a/b/c/d"));
         assert_eq!(res.len(), 1);
 
         subscribers.unsubscribe(&pattern, &id);
 
-        let res = subscribers.get_subscribers(&["test", "a", "b", "c", "d"], "?", "#");
+        let res = subscribers.get_subscribers(&reg_key_segs("test/a/b/c/d"));
         assert_eq!(res.len(), 0);
     }
 }

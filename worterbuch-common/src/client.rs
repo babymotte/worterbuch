@@ -15,6 +15,8 @@ pub enum ClientMessage {
     Export(Export),
     Import(Import),
     Unsubscribe(Unsubscribe),
+    Delete(Delete),
+    PDelete(PDelete),
 }
 
 impl ClientMessage {
@@ -29,6 +31,8 @@ impl ClientMessage {
             ClientMessage::Export(m) => m.transaction_id,
             ClientMessage::Import(m) => m.transaction_id,
             ClientMessage::Unsubscribe(m) => m.transaction_id,
+            ClientMessage::Delete(m) => m.transaction_id,
+            ClientMessage::PDelete(m) => m.transaction_id,
         }
     }
 }
@@ -97,6 +101,20 @@ pub struct Import {
 #[serde(rename_all = "camelCase")]
 pub struct Unsubscribe {
     pub transaction_id: TransactionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delete {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PDelete {
+    pub transaction_id: TransactionId,
+    pub request_pattern: RequestPattern,
 }
 
 #[cfg(test)]

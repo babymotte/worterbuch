@@ -542,12 +542,12 @@ impl Connection {
                                                     match pstate.event {
                                                         PStateEvent::KeyValuePairs(kvps) => {
                                                             for kvp in kvps {
-                                                                yield Ok(kvp.into());
+                                                                yield Ok(StateEvent::KeyValue(kvp));
                                                             }
                                                         },
-                                                        PStateEvent::Deleted(keys) => {
-                                                            for key in keys {
-                                                                yield Ok(key.into());
+                                                        PStateEvent::Deleted(kvps) => {
+                                                            for kvp in kvps {
+                                                                yield Ok(StateEvent::Deleted(kvp));
                                                             }
                                                         },
                                                     }

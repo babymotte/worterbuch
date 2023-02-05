@@ -15,8 +15,8 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    topic, GraveGoods, Handshake, KeyValuePairs, LastWill, Path, ProtocolVersion, ProtocolVersions,
-    RequestPattern, TransactionId,
+    topic, GraveGoods, Handshake, KeySegment, KeyValuePairs, LastWill, PStateEvent, Path,
+    ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
@@ -39,7 +39,7 @@ pub struct Worterbuch {
     store: Store,
     subscriptions: Subscriptions,
     subscribers: Subscribers,
-    len: usize,
+    // len: usize,
     last_wills: HashMap<Uuid, LastWill>,
     grave_goods: HashMap<Uuid, GraveGoods>,
     clients: HashMap<Uuid, SocketAddr>,
@@ -58,18 +58,17 @@ impl Worterbuch {
     }
 
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
-        let store: Store = from_str(json).context(|| format!("Error parsing JSON"))?;
-        let len = store.count_entries();
+        let mut store: Store = from_str(json).context(|| format!("Error parsing JSON"))?;
+        store.count_entries();
         Ok(Worterbuch {
             config,
             store,
-            len,
             ..Default::default()
         })
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.store.len()
     }
 
     pub fn handshake(
@@ -111,100 +110,36 @@ impl Worterbuch {
         Ok(handshake)
     }
 
-    pub fn get<'a>(&self, key: impl AsRef<str>) -> WorterbuchResult<(String, Value)> {
-        let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
-
-        let wildcard = self.config.wildcard.to_string();
-        let has_wildcard = path.contains(&wildcard.as_str());
-        if has_wildcard {
-            return Err(WorterbuchError::IllegalWildcard(key.as_ref().to_owned()));
-        }
-
-        let multi_wildcard = self.config.multi_wildcard.to_string();
-        let has_multi_wildcard = path.last() == Some(&multi_wildcard.as_str());
-        if has_multi_wildcard {
-            return Err(WorterbuchError::IllegalMultiWildcard(
-                key.as_ref().to_owned(),
-            ));
-        }
+    pub fn get(&self, key: String) -> WorterbuchResult<(String, Value)> {
+        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
         match self.store.get(&path) {
             Some(value) => {
-                let key_value = (key.as_ref().to_owned(), value.to_owned());
+                let key_value = (key.to_owned(), value.to_owned());
                 Ok(key_value)
             }
-            None => Err(WorterbuchError::NoSuchValue(key.as_ref().to_owned())),
+            None => Err(WorterbuchError::NoSuchValue(key)),
         }
     }
 
-    pub fn set(&mut self, key: impl AsRef<str>, value: Value) -> WorterbuchResult<()> {
-        let path: Vec<&str> = key.as_ref().split(self.config.separator).collect();
+    pub fn set(&mut self, key: String, value: Value) -> WorterbuchResult<()> {
+        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
-        let wildcard = self.config.wildcard.to_string();
-        let has_wildcard = path.contains(&wildcard.as_str());
+        let changed = self
+            .store
+            .insert(&path, value.clone())
+            .map_err(|e| e.for_pattern(key.clone()))?;
 
-        let multi_wildcard = self.config.multi_wildcard.to_string();
-        let has_multi_wildcard = path.last() == Some(&multi_wildcard.as_str());
-
-        if has_multi_wildcard || has_wildcard {
-            return Err(WorterbuchError::IllegalWildcard(key.as_ref().to_owned()));
-        }
-
-        let (inserted, changed) = self.store.insert(&path, value.clone());
-
-        if inserted {
-            self.increment_len(1);
-        }
-
-        self.notify_subscribers(
-            path,
-            wildcard,
-            multi_wildcard,
-            key.as_ref(),
-            &value,
-            changed,
-        );
+        self.notify_subscribers(path, key, value, changed, false);
 
         Ok(())
     }
 
-    fn increment_len(&mut self, increment: usize) {
-        self.len += increment;
-    }
-
-    pub fn pget<'a>(&self, pattern: impl AsRef<str>) -> WorterbuchResult<KeyValuePairs> {
-        let path: Vec<&str> = pattern.as_ref().split(self.config.separator).collect();
-
-        let wildcard = self.config.wildcard.to_string();
-        let has_wildcard = path.contains(&wildcard.as_str());
-
-        let multi_wildcard = self.config.multi_wildcard.to_string();
-        let has_multi_wildcard = path.last() == Some(&multi_wildcard.as_str());
-
-        let separator = self.config.separator.to_string();
-
-        if has_multi_wildcard {
-            let path = &path[0..path.len() - 1];
-            if path.contains(&multi_wildcard.as_str()) {
-                return Err(WorterbuchError::MultiWildcardAtIllegalPosition(
-                    pattern.as_ref().to_owned(),
-                ));
-            }
-
-            if has_wildcard {
-                Ok(self.store.get_match_children(path, &wildcard, &separator))
-            } else {
-                Ok(self.store.get_children(path, &separator))
-            }
-        } else if has_wildcard {
-            Ok(self.store.get_matches(&path, &wildcard, &separator))
-        } else {
-            let value = self.store.get(&path);
-            let values = value
-                .map(|v| vec![(pattern.as_ref().to_owned(), v.to_owned()).into()])
-                .unwrap_or_else(|| vec![]);
-            Ok(values)
-        }
+    pub fn pget<'a>(&self, pattern: &str) -> WorterbuchResult<KeyValuePairs> {
+        let path: Vec<KeySegment> = KeySegment::parse(pattern);
+        self.store
+            .get_matches(&path)
+            .map_err(|e| e.for_pattern(pattern.to_owned()))
     }
 
     pub fn subscribe(
@@ -213,24 +148,19 @@ impl Worterbuch {
         transaction_id: TransactionId,
         key: String,
         unique: bool,
-    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
-        let path: Vec<&str> = key.split(self.config.separator).collect();
-        let matches = match self.get(&key) {
+    ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
+        let path: Vec<KeySegment> = KeySegment::parse(&key);
+        let matches = match self.get(key.clone()) {
             Ok((key, value)) => Some((key, value)),
             Err(WorterbuchError::NoSuchValue(_)) => None,
             Err(e) => return Err(e),
         };
         let (tx, rx) = unbounded_channel();
         let subscription = SubscriptionId::new(client_id, transaction_id);
-        let subscriber = Subscriber::new(
-            subscription.clone(),
-            path.clone().into_iter().map(|s| s.to_owned()).collect(),
-            tx.clone(),
-            unique,
-        );
+        let subscriber = Subscriber::new(subscription.clone(), path.clone(), tx.clone(), unique);
         self.subscribers.add_subscriber(&path, subscriber);
         if let Some((key, value)) = matches {
-            tx.send(vec![(key, value).into()])
+            tx.send(PStateEvent::KeyValuePairs(vec![(key, value).into()]))
                 .expect("rx is neither closed nor dropped");
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
@@ -245,8 +175,8 @@ impl Worterbuch {
         transaction_id: TransactionId,
         pattern: String,
         unique: bool,
-    ) -> WorterbuchResult<(UnboundedReceiver<KeyValuePairs>, SubscriptionId)> {
-        let path: Vec<&str> = pattern.split(self.config.separator).collect();
+    ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
+        let path: Vec<KeySegment> = KeySegment::parse(&pattern);
         let matches = self.pget(&pattern)?;
         let (tx, rx) = unbounded_channel();
         let subscription = SubscriptionId::new(client_id, transaction_id);
@@ -257,7 +187,8 @@ impl Worterbuch {
             unique,
         );
         self.subscribers.add_subscriber(&path, subscriber);
-        tx.send(matches).expect("rx is neither closed nor dropped");
+        tx.send(PStateEvent::KeyValuePairs(matches))
+            .expect("rx is neither closed nor dropped");
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, pattern);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
@@ -278,19 +209,16 @@ impl Worterbuch {
         let imported_values = self.store.merge(store, self.config.separator);
 
         for (key, val) in &imported_values {
-            let path: Vec<&str> = key.split(self.config.separator).collect();
+            let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
             self.notify_subscribers(
                 path,
-                self.config.wildcard.to_string(),
-                self.config.multi_wildcard.to_string(),
-                key,
-                val,
+                key.to_owned(),
+                val.to_owned(),
                 // TODO only pass true if the value actually changed
                 true,
+                false,
             );
         }
-
-        self.increment_len(imported_values.len());
 
         Ok(imported_values)
     }
@@ -334,7 +262,7 @@ impl Worterbuch {
     fn do_unsubscribe(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
         if let Some(pattern) = self.subscriptions.remove(&subscription) {
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
-            let pattern: Vec<&str> = pattern.split(self.config.separator).collect();
+            let pattern: Vec<KeySegment> = KeySegment::parse(&pattern);
             if self.subscribers.unsubscribe(&pattern, &subscription) {
                 Ok(())
             } else {
@@ -347,16 +275,13 @@ impl Worterbuch {
 
     fn notify_subscribers(
         &mut self,
-        path: Vec<&str>,
-        wildcard: String,
-        multi_wildcard: String,
-        key: impl AsRef<str>,
-        value: &Value,
+        path: Vec<RegularKeySegment>,
+        key: String,
+        value: Value,
         value_changed: bool,
+        deleted: bool,
     ) {
-        let subscribers = self
-            .subscribers
-            .get_subscribers(&path, &wildcard, &multi_wildcard);
+        let subscribers = self.subscribers.get_subscribers(&path);
 
         let filtered_subscribers: Vec<Subscriber> = subscribers
             .into_iter()
@@ -364,19 +289,61 @@ impl Worterbuch {
             .collect();
 
         log::trace!(
-            "Calling {} subscribers: {} = {}",
+            "Calling {} subscribers: {} = {:?}",
             filtered_subscribers.len(),
-            key.as_ref(),
+            key,
             value
         );
         for subscriber in filtered_subscribers {
-            if let Err(e) =
-                subscriber.send(vec![(key.as_ref().to_owned(), value.to_owned()).into()])
-            {
+            let kvps = vec![(key.clone(), value.clone()).into()];
+            if let Err(e) = if deleted {
+                subscriber.send(PStateEvent::Deleted(kvps))
+            } else {
+                subscriber.send(PStateEvent::KeyValuePairs(kvps))
+            } {
                 log::trace!("Error calling subscriber: {e}");
                 self.subscribers.remove_subscriber(subscriber)
             }
         }
+    }
+
+    pub fn delete(&mut self, key: String) -> WorterbuchResult<(String, Value)> {
+        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+
+        if path.is_empty() || *path[0] == SYSTEM_TOPIC_ROOT {
+            return Err(WorterbuchError::ReadOnlyKey(key));
+        }
+
+        match self.store.delete(&path) {
+            Some(value) => {
+                let key_value = (key.to_owned(), value.to_owned());
+                self.notify_subscribers(path, key.clone(), value.clone(), true, true);
+                Ok(key_value)
+            }
+            None => Err(WorterbuchError::NoSuchValue(key)),
+        }
+    }
+
+    pub fn pdelete(&mut self, pattern: String) -> WorterbuchResult<KeyValuePairs> {
+        let path: Vec<KeySegment> = KeySegment::parse(&pattern);
+
+        if path.is_empty() || &*(path[0]) == SYSTEM_TOPIC_ROOT {
+            return Err(WorterbuchError::ReadOnlyKey(pattern));
+        }
+
+        let deleted = self
+            .store
+            .delete_matches(&path)
+            .map_err(|e| e.for_pattern(pattern.to_owned()));
+
+        if let Ok(deleted) = &deleted {
+            for kvp in deleted {
+                let path = RegularKeySegment::parse(&kvp.key)?;
+                self.notify_subscribers(path, kvp.key.clone(), kvp.value.clone(), true, true);
+            }
+        }
+
+        deleted
     }
 
     pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
@@ -418,8 +385,24 @@ impl Worterbuch {
             }
         }
 
+        if let Some(grave_goods) = self.grave_goods.remove(&client_id) {
+            log::info!("Burying grave goods of client {client_id} ({remote_addr}).");
+
+            for grave_good in grave_goods {
+                log::debug!(
+                    "Deleting grave good key of client {client_id} ({remote_addr}): {} ",
+                    grave_good
+                );
+                if let Err(e) = self.pdelete(grave_good) {
+                    log::error!("Error burying grave goods for client {client_id}: {e}")
+                }
+            }
+        } else {
+            log::info!("Client {client_id} ({remote_addr}) has no last will.");
+        }
+
         if let Some(last_wills) = self.last_wills.remove(&client_id) {
-            log::info!("Triggering last will of client {client_id} ({remote_addr}).");
+            log::info!("Publishing last will of client {client_id} ({remote_addr}).");
 
             for last_will in last_wills {
                 log::debug!(
@@ -434,7 +417,5 @@ impl Worterbuch {
         } else {
             log::info!("Client {client_id} ({remote_addr}) has no last will.");
         }
-
-        // TODO process grave goods
     }
 }

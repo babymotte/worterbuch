@@ -1,7 +1,7 @@
 mod config;
 mod persistence;
 mod server;
-pub mod stats;
+mod stats;
 mod store;
 mod subscribers;
 pub mod warp;
