@@ -262,6 +262,7 @@ impl Store {
         let traversed_path = vec![];
         self.data
             .delete_matches(traversed_path, &mut matches, path)?;
+        self.len -= matches.len();
         Ok(matches)
     }
 
