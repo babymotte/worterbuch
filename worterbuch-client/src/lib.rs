@@ -74,6 +74,31 @@ impl Connection {
         Ok(i)
     }
 
+    pub fn publish(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Publish(Publish {
+            transaction_id: i,
+            key,
+            value,
+        }))?;
+        Ok(i)
+    }
+
+    pub fn publish_json<T: Serialize>(
+        &mut self,
+        key: String,
+        value: &T,
+    ) -> ConnectionResult<TransactionId> {
+        let i = self.inc_counter();
+        let value = serde_json::to_value(value)?;
+        self.cmd_tx.send(CM::Publish(Publish {
+            transaction_id: i,
+            key,
+            value,
+        }))?;
+        Ok(i)
+    }
+
     pub fn get(&mut self, key: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {

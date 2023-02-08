@@ -10,6 +10,7 @@ pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
     Set(Set),
+    Publish(Publish),
     Subscribe(Subscribe),
     PSubscribe(PSubscribe),
     Export(Export),
@@ -26,6 +27,7 @@ impl ClientMessage {
             ClientMessage::Get(m) => m.transaction_id,
             ClientMessage::PGet(m) => m.transaction_id,
             ClientMessage::Set(m) => m.transaction_id,
+            ClientMessage::Publish(m) => m.transaction_id,
             ClientMessage::Subscribe(m) => m.transaction_id,
             ClientMessage::PSubscribe(m) => m.transaction_id,
             ClientMessage::Export(m) => m.transaction_id,
@@ -67,6 +69,13 @@ pub struct Set {
     pub value: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Publish {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+    pub value: Value,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscribe {

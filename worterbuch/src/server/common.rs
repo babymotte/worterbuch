@@ -10,8 +10,8 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, ClientMessage as CM, Delete, Err, ErrorCode, Export, Get, HandshakeRequest, Import,
-    KeyValuePair, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, ServerMessage, Set,
-    State, StateEvent, Subscribe, Unsubscribe,
+    KeyValuePair, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish, ServerMessage,
+    Set, State, StateEvent, Subscribe, Unsubscribe,
 };
 
 pub async fn process_incoming_message(
@@ -32,6 +32,9 @@ pub async fn process_incoming_message(
         }
         Ok(Some(CM::Set(msg))) => {
             set(msg, worterbuch.clone(), tx.clone()).await?;
+        }
+        Ok(Some(CM::Publish(msg))) => {
+            publish(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(Some(CM::Subscribe(msg))) => {
             let unique = msg.unique;
@@ -171,6 +174,35 @@ async fn set(
     let mut wb = worterbuch.write().await;
 
     if let Err(e) = wb.set(msg.key, msg.value) {
+        handle_store_error(e, client, msg.transaction_id).await?;
+        return Ok(());
+    }
+
+    let response = Ack {
+        transaction_id: msg.transaction_id,
+    };
+
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client).await?,
+    }
+
+    Ok(())
+}
+
+async fn publish(
+    msg: Publish,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<()> {
+    let mut wb = worterbuch.write().await;
+
+    if let Err(e) = wb.publish(msg.key, msg.value) {
         handle_store_error(e, client, msg.transaction_id).await?;
         return Ok(());
     }

@@ -82,6 +82,7 @@ impl Worterbuch {
         let mut supported_protocol_versions = vec![
             ProtocolVersion { major: 0, minor: 3 },
             ProtocolVersion { major: 0, minor: 4 },
+            ProtocolVersion { major: 0, minor: 5 },
         ];
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
@@ -134,6 +135,14 @@ impl Worterbuch {
             .map_err(|e| e.for_pattern(key.clone()))?;
 
         self.notify_subscribers(path, key, value, changed, false);
+
+        Ok(())
+    }
+
+    pub fn publish(&mut self, key: String, value: Value) -> WorterbuchResult<()> {
+        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+
+        self.notify_subscribers(path, key, value, true, false);
 
         Ok(())
     }
