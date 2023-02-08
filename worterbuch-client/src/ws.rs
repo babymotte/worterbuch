@@ -136,15 +136,10 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
                     if let Ok(data) = incoming_msg.to_text() {
                         log::debug!("Received {data}");
                         match serde_json::from_str(data) {
-                            Ok(Some(msg)) => {
+                            Ok(msg) => {
                                 if let Err(e) = result_tx_recv.send(msg) {
                                     log::error!("Error forwarding server message: {e}");
                                 }
-                            }
-                            Ok(None) => {
-                                log::error!("Connection to server lost.");
-                                on_disconnect.await;
-                                break;
                             }
                             Err(e) => {
                                 log::error!("Error decoding message: {e}");
@@ -152,8 +147,14 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
                         }
                     }
                 }
+            } else {
+                log::error!("Connection to server lost.");
+                on_disconnect.await;
+                break;
             }
         }
+
+        log::info!("WS closed.")
     });
 
     let separator = handshake.separator;
