@@ -28,6 +28,7 @@ pub type StoreResult<T> = Result<T, StoreError>;
 pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub v: NodeValue,
+    #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
     pub t: Tree,
 }
 
@@ -218,6 +219,7 @@ pub struct StoreStats {
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Store {
     data: Node,
+    #[serde(skip_serializing, default = "usize::default")]
     len: usize,
 }
 
