@@ -1,31 +1,45 @@
 use anyhow::Result;
-use clap::Arg;
+use clap::Parser;
 use std::{
     process,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{spawn, time::sleep};
-use worterbuch_cli::{app, print_message};
+use worterbuch_cli::print_message;
+use worterbuch_client::config::Config;
 use worterbuch_client::connect;
 
+#[derive(Parser)]
+#[command(author, version, about = "Import key/value pairs from JSON files into Wörterbuch.", long_about = None)]
+struct Args {
+    /// Connect to the Wörterbuch server using SSL encryption.
+    #[arg(short, long)]
+    ssl: bool,
+    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    #[arg(short, long)]
+    addr: Option<String>,
+    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Paths to the JSON files to be imported. Note that this refers to the file system of the server, the files will NOT be uploaded from the client.
+    paths: Vec<String>,
+}
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let (matches, proto, host_addr, port, json,) = app(
-        "wbimp",
-        "Import key/value pairs from JSON files into Wörterbuch.",
-        vec![Arg::with_name("PATHS")
-            .multiple(true)
-            .help(
-                r#"Paths to the JSON files to be imported. Note that this refers to the file system of the server, the files will NOT be uploaded from the client."#,
-            )
-            .takes_value(true)
-            .required(true)],
-    )?;
+    dotenv::dotenv().ok();
+    env_logger::init();
+    let config = Config::new()?;
+    let args: Args = Args::parse();
 
-    let paths = matches
-        .get_many::<String>("PATHS")
-        .expect("paths are required");
+    let proto = if args.ssl {
+        "wss".to_owned()
+    } else {
+        "ws".to_owned()
+    };
+    let host_addr = args.addr.unwrap_or(config.host_addr);
+    let port = args.port.unwrap_or(config.port);
+    let paths = args.paths;
 
     let on_disconnect = async move {
         log::warn!("Connection to server lost.");
@@ -47,7 +61,7 @@ async fn main() -> Result<()> {
             if tid > *acked {
                 *acked = tid;
             }
-            print_message(&msg, json);
+            print_message(&msg, false);
         }
     });
 

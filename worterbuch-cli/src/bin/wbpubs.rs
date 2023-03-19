@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Arg;
+use clap::Parser;
 use serde_json::{json, Value};
 use std::{
     process,
@@ -11,22 +11,45 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_message};
+use worterbuch_cli::print_message;
+use worterbuch_client::config::Config;
 use worterbuch_client::connect;
+
+#[derive(Parser)]
+#[command(author, version, about = "Publish a stream of values read from stdin to a single Wörterbuch key.", long_about = None)]
+struct Args {
+    /// Connect to the Wörterbuch server using SSL encryption.
+    #[arg(short, long)]
+    ssl: bool,
+    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    #[arg(short, long)]
+    addr: Option<String>,
+    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Output data in JSON and expect input data to be JSON.
+    #[arg(short, long)]
+    json: bool,
+    /// Wörterbuch key to publish values to.
+    key: String,
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let (matches, proto, host_addr, port, json, ) = app(
-        "wbpubs",
-        "Publish a stream of values to a single Wörterbuch key. Values are read from stdin, one value is expected per line.",
-        vec![Arg::with_name("KEY")
-            .multiple(false)
-            .help("Wörterbuch key to publish values to.")
-            .takes_value(true)
-            .required(true)],
-    )?;
+    dotenv::dotenv().ok();
+    env_logger::init();
+    let config = Config::new()?;
+    let args: Args = Args::parse();
 
-    let key = matches.get_one::<String>("KEY").expect("key is required");
+    let proto = if args.ssl {
+        "wss".to_owned()
+    } else {
+        "ws".to_owned()
+    };
+    let host_addr = args.addr.unwrap_or(config.host_addr);
+    let port = args.port.unwrap_or(config.port);
+    let json = args.json;
+    let key = args.key;
 
     let on_disconnect = async move {
         log::warn!("Connection to server lost.");

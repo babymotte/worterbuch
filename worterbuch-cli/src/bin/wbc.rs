@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Parser;
 use serde_json::json;
 use std::{
     collections::HashSet,
@@ -11,18 +12,43 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_message};
-use worterbuch_client::{connect, ClientMessage, Connection, TransactionId};
+use worterbuch_cli::print_message;
+use worterbuch_client::{config::Config, connect, ClientMessage, Connection, TransactionId};
+
+#[derive(Parser)]
+#[command(author, version, about = "General purpose Wörterbuch command line client.", long_about = None)]
+struct Args {
+    /// Connect to the Wörterbuch server using SSL encryption.
+    #[arg(short, long)]
+    ssl: bool,
+    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    #[arg(short, long)]
+    addr: Option<String>,
+    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Output data in JSON and expect input data to be JSON.
+    #[arg(short, long)]
+    json: bool,
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // TODO this needs a major rework, most of the input json can now be simply passed through to the websocket
 
-    let (_matches, proto, host_addr, port, json) = app(
-        "wbc",
-        "General purpose Wörterbuch command line client.",
-        vec![],
-    )?;
+    dotenv::dotenv().ok();
+    env_logger::init();
+    let config = Config::new()?;
+    let args: Args = Args::parse();
+
+    let proto = if args.ssl {
+        "wss".to_owned()
+    } else {
+        "ws".to_owned()
+    };
+    let host_addr = args.addr.unwrap_or(config.host_addr);
+    let port = args.port.unwrap_or(config.port);
+    let json = args.json;
 
     let on_disconnect = async move {
         log::warn!("Connection to server lost.");

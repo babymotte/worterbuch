@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Arg;
+use clap::Parser;
 use serde_json::json;
 use std::{
     process,
@@ -11,27 +11,46 @@ use tokio::{
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_message};
+use worterbuch_cli::print_message;
+use worterbuch_client::config::Config;
 use worterbuch_client::connect;
 use worterbuch_client::KeyValuePair;
 
+#[derive(Parser)]
+#[command(author, version, about = "Set values of keys on a Wörterbuch.", long_about = None)]
+struct Args {
+    /// Connect to the Wörterbuch server using SSL encryption.
+    #[arg(short, long)]
+    ssl: bool,
+    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    #[arg(short, long)]
+    addr: Option<String>,
+    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Output data in JSON and expect input data to be JSON.
+    #[arg(short, long)]
+    json: bool,
+    /// Key/value pairs to be set on Wörterbuch in the form "KEY1=VALUE1 KEY2=VALUE2 KEY3=VALUE3 ...". When omitted, key/value pairs will be read from stdin. When reading key/value pairs from stdin, one key/value pair is expected per line.
+    key_value_pairs: Option<Vec<String>>,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let (matches, proto, host_addr, port, json) = app(
-        "wbset",
-        "Set values of keys on a Wörterbuch.",
-        vec![
-            Arg::with_name("KEY_VALUE_PAIRS")
-                .multiple(true)
-                .help(
-                    r#"Key/value pairs to be set on Wörterbuch in the form "KEY1=VALUE1 KEY2=VALUE2 KEY3=VALUE3 ...". When omitted, key/value pairs will be read from stdin. When reading key/value pairs from stdin, one key/value pair is expected per line."#,
-                )
-                .takes_value(true)
-                .required(false)
-        ],
-    )?;
+    dotenv::dotenv().ok();
+    env_logger::init();
+    let config = Config::new()?;
+    let args: Args = Args::parse();
 
-    let key_value_pairs = matches.get_many::<String>("KEY_VALUE_PAIRS");
+    let proto = if args.ssl {
+        "wss".to_owned()
+    } else {
+        "ws".to_owned()
+    };
+    let host_addr = args.addr.unwrap_or(config.host_addr);
+    let port = args.port.unwrap_or(config.port);
+    let json = args.json;
+    let key_value_pairs = args.key_value_pairs;
 
     let on_disconnect = async move {
         log::warn!("Connection to server lost.");

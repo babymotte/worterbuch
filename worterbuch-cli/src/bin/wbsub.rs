@@ -1,36 +1,53 @@
 use anyhow::Result;
-use clap::Arg;
+use clap::Parser;
 use std::{process, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     spawn,
     time::sleep,
 };
-use worterbuch_cli::{app, print_message};
-use worterbuch_client::connect;
+use worterbuch_cli::print_message;
+use worterbuch_client::{config::Config, connect};
+
+#[derive(Parser)]
+#[command(author, version, about = "Subscribe to values of Wörterbuch keys.", long_about = None)]
+struct Args {
+    /// Connect to the Wörterbuch server using SSL encryption.
+    #[arg(short, long)]
+    ssl: bool,
+    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    #[arg(short, long)]
+    addr: Option<String>,
+    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Output data in JSON and expect input data to be JSON.
+    #[arg(short, long)]
+    json: bool,
+    /// Wörterbuch keys to be subscribed to in the form "PATTERN1 PATTERN2 PATTERN3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
+    keys: Option<Vec<String>>,
+    /// Only receive unique values, i.e. skip notifications when a key is set to a value it already has.
+    #[arg(short, long)]
+    unique: Option<bool>,
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let (matches, proto, host_addr, port, json) = app(
-        "wbsub",
-        "Subscribe to values of Wörterbuch keys.",
-        vec![
-            Arg::with_name("KEYS")
-                .multiple(true)
-                .help(
-                    r#"Wörterbuch keys to be subscribed to in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line."#,
-                )
-                .takes_value(true)
-                .required(false),
-            Arg::with_name("UNIQUE")
-                .help("Only receive unique values, i.e. skip notifications when a key is set to a value it already has.")
-                .long("unique")
-                .short('u')
-        ]
-    )?;
+    dotenv::dotenv().ok();
+    env_logger::init();
+    let config = Config::new()?;
+    let args: Args = Args::parse();
 
-    let keys = matches.get_many::<String>("KEYS");
-    let unique = matches.is_present("UNIQUE");
+    let proto = if args.ssl {
+        "wss".to_owned()
+    } else {
+        "ws".to_owned()
+    };
+    let host_addr = args.addr.unwrap_or(config.host_addr);
+    let port = args.port.unwrap_or(config.port);
+    let json = args.json;
+    let keys = args.keys;
+    let unique = args.unique.unwrap_or(false);
 
     let on_disconnect = async move {
         log::warn!("Connection to server lost.");

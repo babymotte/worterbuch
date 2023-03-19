@@ -1,22 +1,24 @@
 use anyhow::Result;
-use clap::App;
+use clap::Parser;
 use tokio::runtime::{self, Runtime};
 use worterbuch::run_worterbuch;
 use worterbuch::Config;
 
+#[derive(Parser)]
+#[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
+struct Args {
+    /// Start Wörterbuch in single threaded mode. Default is multi threaded.
+    #[arg(short, long)]
+    single_threaded: bool,
+}
+
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
-
-    App::new("worterbuch")
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("An in-memory data base / message broker hybrid")
-        .get_matches();
-
     let config = Config::new()?;
+    let args: Args = Args::parse();
 
-    let single_threaded = config.single_threaded;
+    let single_threaded = args.single_threaded || config.single_threaded;
 
     let rt = if single_threaded {
         log::info!("Starting Wörterbuch in single-threaded mode …");
