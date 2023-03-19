@@ -196,6 +196,15 @@ impl Connection {
         Ok(i)
     }
 
+    pub fn ls(&mut self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Ls(Ls {
+            transaction_id: i,
+            parent,
+        }))?;
+        Ok(i)
+    }
+
     pub fn responses(&mut self) -> broadcast::Receiver<SM> {
         self.result_tx.subscribe()
     }

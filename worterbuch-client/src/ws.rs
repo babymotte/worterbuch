@@ -54,7 +54,7 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     let (result_tx, result_rx) = broadcast::channel(1_000);
 
     // TODO implement protocol versions properly
-    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 5 }];
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
 
     let handshake = HandshakeRequest {
         supported_protocol_versions,
@@ -62,6 +62,7 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
         grave_goods,
     };
     let msg = serde_json::to_string(&CM::HandshakeRequest(handshake))?;
+    log::debug!("Sending handshake message: {msg}");
     ws_tx.send(Message::Text(msg)).await?;
 
     match ws_rx.next().await {

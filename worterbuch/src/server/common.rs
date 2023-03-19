@@ -10,8 +10,8 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, ClientMessage as CM, Delete, Err, ErrorCode, Export, Get, HandshakeRequest, Import,
-    KeyValuePair, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish, ServerMessage,
-    Set, State, StateEvent, Subscribe, Unsubscribe,
+    KeyValuePair, Ls, LsState, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish,
+    ServerMessage, Set, State, StateEvent, Subscribe, Unsubscribe,
 };
 
 pub async fn process_incoming_message(
@@ -54,6 +54,9 @@ pub async fn process_incoming_message(
         }
         Ok(Some(CM::PDelete(msg))) => {
             pdelete(msg, worterbuch.clone(), tx.clone()).await?;
+        }
+        Ok(Some(CM::Ls(msg))) => {
+            ls(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(None) => {
             // client disconnected
@@ -534,6 +537,39 @@ async fn pdelete(
         Ok(data) => client.send(data).context(|| {
             format!(
                 "Error sending PSTATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client).await?,
+    }
+
+    Ok(())
+}
+
+async fn ls(
+    msg: Ls,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<()> {
+    let wb = worterbuch.read().await;
+
+    let children = match wb.ls(msg.parent.clone()) {
+        Ok(it) => it,
+        Result::Err(e) => {
+            handle_store_error(e, client.clone(), msg.transaction_id).await?;
+            return Ok(());
+        }
+    };
+
+    let response = LsState {
+        transaction_id: msg.transaction_id,
+        children: children.into_iter().map(|it| it.0).collect(),
+    };
+
+    match serde_json::to_string(&ServerMessage::LsState(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending LSSTATE message for transaction ID {}",
                 msg.transaction_id
             )
         })?,

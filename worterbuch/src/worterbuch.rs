@@ -15,7 +15,7 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    topic, GraveGoods, Handshake, KeySegment, KeyValuePairs, LastWill, PStateEvent, Path,
+    topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill, PStateEvent, Path,
     ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, TransactionId,
 };
 
@@ -83,6 +83,7 @@ impl Worterbuch {
             ProtocolVersion { major: 0, minor: 3 },
             ProtocolVersion { major: 0, minor: 4 },
             ProtocolVersion { major: 0, minor: 5 },
+            ProtocolVersion { major: 0, minor: 6 },
         ];
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
@@ -114,7 +115,7 @@ impl Worterbuch {
         Ok(handshake)
     }
 
-    pub fn get(&self, key: String) -> WorterbuchResult<(String, Value)> {
+    pub fn get(&self, key: Key) -> WorterbuchResult<(String, Value)> {
         let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
         match self.store.get(&path) {
@@ -126,7 +127,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn set(&mut self, key: String, value: Value) -> WorterbuchResult<()> {
+    pub fn set(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
         let changed = self
@@ -139,7 +140,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub fn publish(&mut self, key: String, value: Value) -> WorterbuchResult<()> {
+    pub fn publish(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
         self.notify_subscribers(path, key, value, true, false);
@@ -158,7 +159,7 @@ impl Worterbuch {
         &mut self,
         client_id: Uuid,
         transaction_id: TransactionId,
-        key: String,
+        key: Key,
         unique: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
@@ -185,7 +186,7 @@ impl Worterbuch {
         &mut self,
         client_id: Uuid,
         transaction_id: TransactionId,
-        pattern: String,
+        pattern: RequestPattern,
         unique: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
@@ -288,7 +289,7 @@ impl Worterbuch {
     fn notify_subscribers(
         &mut self,
         path: Vec<RegularKeySegment>,
-        key: String,
+        key: Key,
         value: Value,
         value_changed: bool,
         deleted: bool,
@@ -319,7 +320,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn delete(&mut self, key: String) -> WorterbuchResult<(String, Value)> {
+    pub fn delete(&mut self, key: Key) -> WorterbuchResult<(String, Value)> {
         let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
 
         if path.is_empty() || *path[0] == SYSTEM_TOPIC_ROOT {
@@ -336,7 +337,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn pdelete(&mut self, pattern: String) -> WorterbuchResult<KeyValuePairs> {
+    pub fn pdelete(&mut self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
         if path.is_empty()
@@ -359,6 +360,34 @@ impl Worterbuch {
         }
 
         deleted
+    }
+
+    pub fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let children = if let Some(parent) = parent.as_deref() {
+            let path = KeySegment::parse(&parent);
+            let mut cleaned_path = Vec::new();
+            for segment in path {
+                match segment {
+                    KeySegment::Regular(segment) => cleaned_path.push(segment),
+                    KeySegment::Wildcard => {
+                        return Err(WorterbuchError::IllegalWildcard(parent.to_owned()))
+                    }
+                    KeySegment::MultiWildcard => {
+                        return Err(WorterbuchError::IllegalMultiWildcard(parent.to_owned()))
+                    }
+                }
+            }
+            self.store.ls(cleaned_path)
+        } else {
+            Some(self.store.ls_root())
+        };
+
+        match children {
+            Some(children) => Ok(children),
+            None => Err(WorterbuchError::NoSuchValue(
+                parent.unwrap_or("".to_owned()),
+            )),
+        }
     }
 
     pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {

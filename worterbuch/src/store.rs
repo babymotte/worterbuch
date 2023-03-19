@@ -293,6 +293,23 @@ impl Store {
         Ok(changed)
     }
 
+    pub fn ls(&self, path: Vec<RegularKeySegment>) -> Option<Vec<RegularKeySegment>> {
+        let mut current = &self.data;
+
+        for elem in path {
+            current = match current.t.get(&elem) {
+                Some(e) => e,
+                None => return None,
+            }
+        }
+
+        Some(current.t.keys().map(ToOwned::to_owned).collect())
+    }
+
+    pub fn ls_root(&self) -> Vec<RegularKeySegment> {
+        self.data.t.keys().map(ToOwned::to_owned).collect()
+    }
+
     pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, Value)> {
         let mut insertions = Vec::new();
         let path = Vec::new();

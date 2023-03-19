@@ -25,6 +25,7 @@ pub enum ServerMessage {
     State(State),
     Err(Err),
     Handshake(Handshake),
+    LsState(LsState),
 }
 
 impl ServerMessage {
@@ -34,6 +35,7 @@ impl ServerMessage {
             ServerMessage::Ack(msg) => msg.transaction_id,
             ServerMessage::State(msg) => msg.transaction_id,
             ServerMessage::Err(msg) => msg.transaction_id,
+            ServerMessage::LsState(msg) => msg.transaction_id,
             ServerMessage::Handshake(_) => 0,
         }
     }
@@ -246,6 +248,19 @@ impl fmt::Display for Handshake {
             "handshake: separator: '{}', wildcard: '{}', multi-wildcard: '{}', supported protocol versions: {}",
             self.separator, self.wildcard, self.multi_wildcard, format!("{}.{}",self.protocol_version.major,self.protocol_version.minor)
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LsState {
+    pub transaction_id: TransactionId,
+    pub children: Vec<String>,
+}
+
+impl fmt::Display for LsState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.children.join(", "))
     }
 }
 
