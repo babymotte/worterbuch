@@ -40,26 +40,11 @@ where
     let server = warp::serve(filter);
     let port = config.port;
     let bind_addr = config.bind_addr;
-    let cert_path = &config.cert_path;
-    let key_path = &config.key_path;
 
     let addr = (bind_addr, port);
 
-    if let (Some(cert_path), Some(key_path)) = (cert_path, key_path) {
-        log::info!("Using TLS certificate {}", cert_path);
-        log::info!("Using TLS private key {}", key_path);
-        log::info!("Starting web server with TLS …");
-
-        server
-            .tls()
-            .cert_path(cert_path)
-            .key_path(key_path)
-            .run(addr)
-            .await;
-    } else {
-        log::info!("Starting web server without TLS …");
-        server.run(addr).await;
-    }
+    log::info!("Starting web server …");
+    server.run(addr).await;
 
     log::info!("Web server stopped.");
 }
