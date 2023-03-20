@@ -13,6 +13,9 @@ struct Args {
     json: bool,
     /// JSON file to be converted. If omitted, JSON is read from stdin.
     file: Option<String>,
+    /// Prefix the keys with a string.
+    #[arg(short, long)]
+    prefix: Option<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -31,7 +34,7 @@ async fn main() -> Result<()> {
         json
     };
 
-    let kvps = convert(&json)?;
+    let kvps = convert(&json, args.prefix)?;
 
     if args.json {
         for kvp in kvps {
@@ -47,14 +50,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn convert(json: &str) -> Result<Vec<KeyValuePair>> {
+fn convert(json: &str, prefix: Option<String>) -> Result<Vec<KeyValuePair>> {
     let parsed: Value = serde_json::from_str(json)?;
 
     let mut kvps = Vec::new();
 
     if let Some(object) = parsed.as_object() {
         for (key, value) in object {
-            traverse(key, value.to_owned(), &mut kvps);
+            let path = if let Some(prefix) = &prefix {
+                format!("{prefix}/{key}")
+            } else {
+                key.to_owned()
+            };
+            traverse(&path, value.to_owned(), &mut kvps);
         }
     }
 
