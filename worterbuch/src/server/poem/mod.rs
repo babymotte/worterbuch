@@ -2,13 +2,8 @@ use crate::{Config, Worterbuch};
 use poem::http::StatusCode;
 use poem::Result;
 use poem::{listener::TcpListener, Route};
-use poem_openapi::{
-    param::Query,
-    payload::{Form, Json},
-    OpenApi, OpenApiService,
-};
-use serde_json::json;
-use std::collections::HashMap;
+use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use worterbuch_common::error::WorterbuchError;
@@ -20,8 +15,8 @@ struct Api {
 
 #[OpenApi]
 impl Api {
-    #[oai(path = "/get", method = "get")]
-    async fn get(&self, key: Query<String>) -> Result<Json<KeyValuePair>> {
+    #[oai(path = "/get/:key", method = "get")]
+    async fn get(&self, key: Path<String>) -> Result<Json<KeyValuePair>> {
         let wb = self.worterbuch.read().await;
         match wb.get(key.0) {
             Ok(kvp) => {
@@ -32,8 +27,8 @@ impl Api {
         }
     }
 
-    #[oai(path = "/pget", method = "get")]
-    async fn pget(&self, pattern: Query<String>) -> Result<Json<KeyValuePairs>> {
+    #[oai(path = "/pget/:pattern", method = "get")]
+    async fn pget(&self, pattern: Path<String>) -> Result<Json<KeyValuePairs>> {
         let wb = self.worterbuch.read().await;
         match wb.pget(&pattern.0) {
             Ok(kvps) => Ok(Json(kvps)),
@@ -41,21 +36,18 @@ impl Api {
         }
     }
 
-    #[oai(path = "/set", method = "post")]
-    async fn set(&self, kvps: Form<HashMap<String, String>>) -> Result<Json<&'static str>> {
+    #[oai(path = "/set/:key", method = "post")]
+    async fn set(&self, key: Path<String>, value: Json<Value>) -> Result<Json<&'static str>> {
         let mut wb = self.worterbuch.write().await;
-        println!("{kvps:?}");
-        for (key, value) in kvps.0 {
-            match wb.set(key, json!(value)) {
-                Ok(()) => {}
-                Err(e) => return to_error_response(e),
-            }
+        match wb.set(key.0, value.0) {
+            Ok(()) => {}
+            Err(e) => return to_error_response(e),
         }
         Ok(Json("Ok"))
     }
 
-    #[oai(path = "/delete", method = "post")]
-    async fn delete(&self, key: Query<String>) -> Result<Json<KeyValuePair>> {
+    #[oai(path = "/delete/:key", method = "delete")]
+    async fn delete(&self, key: Path<String>) -> Result<Json<KeyValuePair>> {
         let mut wb = self.worterbuch.write().await;
         match wb.delete(key.0) {
             Ok(kvp) => {
@@ -66,8 +58,8 @@ impl Api {
         }
     }
 
-    #[oai(path = "/pdelete", method = "post")]
-    async fn pdelete(&self, pattern: Query<String>) -> Result<Json<KeyValuePairs>> {
+    #[oai(path = "/pdelete/:pattern", method = "delete")]
+    async fn pdelete(&self, pattern: Path<String>) -> Result<Json<KeyValuePairs>> {
         let mut wb = self.worterbuch.write().await;
         match wb.pdelete(pattern.0) {
             Ok(kvps) => Ok(Json(kvps)),
@@ -75,10 +67,19 @@ impl Api {
         }
     }
 
-    #[oai(path = "/ls", method = "get")]
-    async fn ls(&self, pattern: Query<Option<String>>) -> Result<Json<Vec<RegularKeySegment>>> {
+    #[oai(path = "/ls/:key", method = "get")]
+    async fn ls(&self, key: Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
         let wb = self.worterbuch.read().await;
-        match wb.ls(pattern.0) {
+        match wb.ls(Some(key.0)) {
+            Ok(kvps) => Ok(Json(kvps)),
+            Err(e) => to_error_response(e),
+        }
+    }
+
+    #[oai(path = "/ls", method = "get")]
+    async fn ls_root(&self) -> Result<Json<Vec<RegularKeySegment>>> {
+        let wb = self.worterbuch.read().await;
+        match wb.ls(None) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
