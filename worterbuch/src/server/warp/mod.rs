@@ -2,11 +2,8 @@ pub(crate) mod common;
 pub mod http;
 pub mod ws;
 
-use crate::{
-    config::Config,
-    server::{http::worterbuch_http_api_filter, ws::worterbuch_ws_filter},
-    worterbuch::Worterbuch,
-};
+use self::{http::worterbuch_http_api_filter, ws::worterbuch_ws_filter};
+use crate::{config::Config, worterbuch::Worterbuch};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use warp::{Filter, Reply};
