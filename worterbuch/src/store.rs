@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap};
 use worterbuch_common::{
     error::WorterbuchError, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
-    SEPARATOR,
 };
 
 type NodeValue = Option<Value>;
@@ -39,11 +38,10 @@ impl Node {
         key: Option<&str>,
         insertions: &mut Vec<(String, Value)>,
         path: &[&str],
-        separator: char,
     ) {
         if let Some(v) = other.v {
             self.v = Some(v.clone());
-            let key = concat_key(&path, key, separator);
+            let key = concat_key(&path, key);
             log::debug!("Imported {} = {}", key, v);
             insertions.push((key, v));
         }
@@ -58,7 +56,7 @@ impl Node {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => e.insert(Node::default()),
             };
-            own_node.merge(node, Some(&key), insertions, &path, separator);
+            own_node.merge(node, Some(&key), insertions, &path);
         }
     }
 
@@ -78,7 +76,7 @@ impl Node {
     ) -> StoreResult<()> {
         if remaining_path.is_empty() {
             if let Some(value) = &self.v {
-                let key = traversed_path.join(SEPARATOR);
+                let key = traversed_path.join("/");
                 matches.push((key, value.to_owned()).into());
             }
 
@@ -95,7 +93,7 @@ impl Node {
                 }
 
                 if let Some(value) = &self.v {
-                    let key = traversed_path.join(SEPARATOR);
+                    let key = traversed_path.join("/");
                     matches.push((key, value.to_owned()).into());
                 }
 
@@ -151,7 +149,7 @@ impl Node {
     ) -> StoreResult<CanDelete> {
         if relative_path.is_empty() {
             if let Some(value) = self.v.take() {
-                let key = traversed_path.join(&SEPARATOR.to_string());
+                let key = traversed_path.join("/");
                 matches.push((key, value).into());
             }
             return Ok(self.t.is_empty());
@@ -310,11 +308,10 @@ impl Store {
         self.data.t.keys().map(ToOwned::to_owned).collect()
     }
 
-    pub fn merge(&mut self, other: Store, separator: char) -> Vec<(String, Value)> {
+    pub fn merge(&mut self, other: Store) -> Vec<(String, Value)> {
         let mut insertions = Vec::new();
         let path = Vec::new();
-        self.data
-            .merge(other.data, None, &mut insertions, &path, separator);
+        self.data.merge(other.data, None, &mut insertions, &path);
         self.len = self.data.count_values();
         insertions
     }
@@ -324,11 +321,11 @@ impl Store {
     }
 }
 
-fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
+fn concat_key(path: &[&str], key: Option<&str>) -> String {
     let mut string = String::new();
     for elem in path {
         string.push_str(elem);
-        string.push(separator);
+        string.push('/');
     }
     if let Some(key) = key {
         string.push_str(key);

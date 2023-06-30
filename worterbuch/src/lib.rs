@@ -56,10 +56,6 @@ pub async fn run_worterbuch(config: Config) -> Result<()> {
 pub async fn start_worterbuch(config: Config) -> Result<Arc<RwLock<Worterbuch>>> {
     let config_pers = config.clone();
 
-    log::debug!("Separator: {}", config.separator);
-    log::debug!("Wildcard: {}", config.wildcard);
-    log::debug!("Multi-Wildcard: {}", config.multi_wildcard);
-
     let use_persistence = config.use_persistence;
 
     let worterbuch = if use_persistence {
@@ -76,7 +72,7 @@ pub async fn start_worterbuch(config: Config) -> Result<Arc<RwLock<Worterbuch>>>
         spawn(persistence::periodic(worterbuch_pers, config_pers));
     }
 
-    spawn(track_stats(worterbuch_uptime, config.clone()));
+    spawn(track_stats(worterbuch_uptime));
 
     #[cfg(feature = "warp")]
     spawn(server::warp::start(worterbuch.clone(), config.clone()));

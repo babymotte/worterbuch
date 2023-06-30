@@ -102,16 +102,7 @@ impl Worterbuch {
             self.grave_goods.insert(client_id, grave_goods);
         }
 
-        let separator = self.config.separator;
-        let wildcard = self.config.wildcard;
-        let multi_wildcard = self.config.multi_wildcard;
-
-        let handshake = Handshake {
-            protocol_version,
-            separator,
-            wildcard,
-            multi_wildcard,
-        };
+        let handshake = Handshake { protocol_version };
 
         Ok(handshake)
     }
@@ -220,7 +211,7 @@ impl Worterbuch {
         let store: Store =
             from_str(json).context(|| format!("Error parsing JSON during import"))?;
         log::debug!("Done. Merging nodes …");
-        let imported_values = self.store.merge(store, self.config.separator);
+        let imported_values = self.store.merge(store);
 
         for (key, val) in &imported_values {
             let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -393,11 +384,7 @@ impl Worterbuch {
 
     pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
         self.clients.insert(client_id, remote_addr);
-        let client_count_key = topic!(
-            self.config.separator,
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS
-        );
+        let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
             log::error!("Error updating client count: {e}");
         }
@@ -405,11 +392,7 @@ impl Worterbuch {
 
     pub fn disconnected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
         self.clients.remove(&client_id);
-        let client_count_key = topic!(
-            self.config.separator,
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS
-        );
+        let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
             log::error!("Error updating client count: {e}");
         }

@@ -1,14 +1,11 @@
 use std::{env, net::IpAddr, time::Duration};
 use worterbuch_common::{
-    error::{ConfigError, ConfigIntContext, ConfigResult},
+    error::{ConfigIntContext, ConfigResult},
     Path,
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
-    pub separator: char,
-    pub wildcard: char,
-    pub multi_wildcard: char,
     pub port: u16,
     pub proto: String,
     pub bind_addr: IpAddr,
@@ -18,6 +15,7 @@ pub struct Config {
     pub single_threaded: bool,
     pub webapp: bool,
     pub web_root_path: String,
+    pub public_address: String,
 }
 
 impl Config {
@@ -26,18 +24,6 @@ impl Config {
     }
 
     pub fn load_env_with_prefix(&mut self, prefix: &str) -> ConfigResult<()> {
-        if let Ok(val) = env::var(prefix.to_owned() + "_SEPARATOR") {
-            self.separator = to_separator(val)?;
-        }
-
-        if let Ok(val) = env::var(prefix.to_owned() + "_WILDCARD") {
-            self.wildcard = to_wildcard(val)?;
-        }
-
-        if let Ok(val) = env::var(prefix.to_owned() + "_MULTI_WILDCARD") {
-            self.multi_wildcard = to_multi_wildcard(val)?;
-        }
-
         if let Ok(val) = env::var(prefix.to_owned() + "_PROTO") {
             self.proto = val;
         }
@@ -75,6 +61,10 @@ impl Config {
             self.web_root_path = val;
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS") {
+            self.public_address = val;
+        }
+
         Ok(())
     }
 
@@ -88,9 +78,6 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            separator: '/',
-            wildcard: '?',
-            multi_wildcard: '#',
             port: 8080,
             proto: "ws".to_owned(),
             bind_addr: [127, 0, 0, 1].into(),
@@ -100,45 +87,7 @@ impl Default for Config {
             single_threaded: false,
             webapp: true,
             web_root_path: "html".to_owned(),
-        }
-    }
-}
-
-fn to_separator(str: impl AsRef<str>) -> ConfigResult<char> {
-    let str = str.as_ref();
-    if str.len() != 1 {
-        Err(ConfigError::InvalidSeparator(str.to_owned()))
-    } else {
-        if let Some(ch) = str.chars().next() {
-            Ok(ch)
-        } else {
-            Err(ConfigError::InvalidSeparator(str.to_owned()))
-        }
-    }
-}
-
-fn to_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
-    let str = str.as_ref();
-    if str.len() != 1 {
-        Err(ConfigError::InvalidWildcard(str.to_owned()))
-    } else {
-        if let Some(ch) = str.chars().next() {
-            Ok(ch)
-        } else {
-            Err(ConfigError::InvalidWildcard(str.to_owned()))
-        }
-    }
-}
-
-fn to_multi_wildcard(str: impl AsRef<str>) -> ConfigResult<char> {
-    let str = str.as_ref();
-    if str.len() != 1 {
-        Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
-    } else {
-        if let Some(ch) = str.chars().next() {
-            Ok(ch)
-        } else {
-            Err(ConfigError::InvalidMultiWildcard(str.to_owned()))
+            public_address: "localhost".to_owned(),
         }
     }
 }

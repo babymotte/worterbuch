@@ -134,6 +134,7 @@ pub async fn start(
 ) -> Result<(), std::io::Error> {
     let port = config.port;
     let bind_addr = config.bind_addr;
+    let public_addr = config.public_address;
 
     let addr = format!("{bind_addr}:{port}");
 
@@ -141,12 +142,12 @@ pub async fn start(
         worterbuch: worterbuch.clone(),
     };
 
-    let host_addr = &format!("http://{bind_addr}:{port}/api");
+    let public_url = &format!("http://{public_addr}:{port}/api");
 
     let api_service =
-        OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(host_addr);
+        OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(public_url);
 
-    log::info!("Starting openapi service at {}", host_addr);
+    log::info!("Starting openapi service at {}", public_url);
 
     let openapi_explorer = api_service.openapi_explorer();
     let spec_json = api_service.spec_endpoint();
@@ -169,7 +170,7 @@ async fn serve(
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
-    // log::info!("New client connected: {client_id} ({remote_addr})");
+    log::info!("New client connected: {client_id} ({remote_addr})");
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 

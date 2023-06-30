@@ -158,15 +158,5 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
         log::info!("WS closed.")
     });
 
-    let separator = handshake.separator;
-    let wildcard = handshake.wildcard;
-    let multi_wildcard = handshake.multi_wildcard;
-
-    Ok(Connection::new(
-        cmd_tx,
-        result_tx,
-        separator,
-        wildcard,
-        multi_wildcard,
-    ))
+    Ok(Connection::new(cmd_tx, result_tx))
 }

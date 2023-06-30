@@ -26,26 +26,14 @@ pub struct Connection {
     cmd_tx: UnboundedSender<CM>,
     result_tx: broadcast::Sender<SM>,
     counter: Arc<Mutex<u64>>,
-    pub separator: char,
-    pub wildcard: char,
-    pub multi_wildcard: char,
 }
 
 impl Connection {
-    pub fn new(
-        cmd_tx: UnboundedSender<CM>,
-        result_tx: broadcast::Sender<SM>,
-        separator: char,
-        wildcard: char,
-        multi_wildcard: char,
-    ) -> Self {
+    pub fn new(cmd_tx: UnboundedSender<CM>, result_tx: broadcast::Sender<SM>) -> Self {
         Self {
             cmd_tx,
             result_tx,
             counter: Arc::new(Mutex::new(1)),
-            separator,
-            wildcard,
-            multi_wildcard,
         }
     }
 

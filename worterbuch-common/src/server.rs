@@ -1,6 +1,6 @@
 use crate::{
-    ErrorCode, KeyValuePair, KeyValuePairs, MetaData, MultiWildcard, ProtocolVersion,
-    RequestPattern, Separator, TransactionId, TypedKeyValuePair, Value, Wildcard,
+    ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
+    TransactionId, TypedKeyValuePair, Value,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
@@ -236,17 +236,17 @@ impl fmt::Display for Err {
 #[serde(rename_all = "camelCase")]
 pub struct Handshake {
     pub protocol_version: ProtocolVersion,
-    pub separator: Separator,
-    pub wildcard: Wildcard,
-    pub multi_wildcard: MultiWildcard,
 }
 
 impl fmt::Display for Handshake {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "handshake: separator: '{}', wildcard: '{}', multi-wildcard: '{}', supported protocol versions: {}",
-            self.separator, self.wildcard, self.multi_wildcard, format!("{}.{}",self.protocol_version.major,self.protocol_version.minor)
+            "handshake: supported protocol versions: {}",
+            format!(
+                "{}.{}",
+                self.protocol_version.major, self.protocol_version.minor
+            )
         )
     }
 }

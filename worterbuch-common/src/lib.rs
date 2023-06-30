@@ -19,26 +19,21 @@ pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type ErrorCode = u8;
 pub type MetaData = String;
 pub type Path = String;
-pub type Separator = char;
-pub type Wildcard = char;
-pub type MultiWildcard = char;
 pub type ProtocolVersionSegment = u16;
 pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = u8;
 
-pub const SEPARATOR: &str = "/";
-
 #[macro_export]
 macro_rules! topic {
-    ( $sep:expr, $( $x:expr ),+ ) => {
+    ($( $x:expr ),+ ) => {
         {
             let mut segments = Vec::new();
             $(
                 segments.push($x.to_string());
             )+
-            segments.join(&$sep.to_string())
+            segments.join("/")
         }
     };
 }
@@ -128,7 +123,7 @@ pub type RegularKeySegment = String;
 
 pub fn parse_segments(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
     let mut segments = Vec::new();
-    for segment in pattern.split(SEPARATOR) {
+    for segment in pattern.split("/") {
         let ks: KeySegment = segment.into();
         match ks {
             KeySegment::Regular(reg) => segments.push(reg),
@@ -194,7 +189,7 @@ impl From<&str> for KeySegment {
 
 impl KeySegment {
     pub fn parse(pattern: &str) -> Vec<KeySegment> {
-        let segments = pattern.split(SEPARATOR);
+        let segments = pattern.split("/");
         segments.map(KeySegment::from).collect()
     }
 }
@@ -232,6 +227,14 @@ mod test {
         assert_eq!(
             vec![PV::new(0, 4), PV::new(1, 2), PV::new(3, 5), PV::new(9, 0)],
             versions
+        );
+    }
+
+    #[test]
+    fn topic_macro_generates_topic_correctly() {
+        assert_eq!(
+            "hello/world/foo/bar",
+            topic!("hello", "world", "foo", "bar")
         );
     }
 }
