@@ -443,7 +443,7 @@ impl Worterbuch {
                 }
             }
         } else {
-            log::info!("Client {client_id} ({remote_addr}) has no last will.");
+            log::info!("Client {client_id} ({remote_addr}) has no grave goods.");
         }
 
         if let Some(last_wills) = self.last_wills.remove(&client_id) {
