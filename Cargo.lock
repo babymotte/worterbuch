@@ -1116,6 +1116,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0608069d4999c3c02d49dff261663f2e73a8f7b00b7cd364fb5e93e419dafa1"
 dependencies = [
  "async-trait",
+ "base64 0.21.0",
  "bytes",
  "chrono",
  "cookie",
@@ -1142,6 +1143,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite 0.18.0",
  "tokio-util",
  "tracing",
 ]

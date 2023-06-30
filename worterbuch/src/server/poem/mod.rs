@@ -1,13 +1,25 @@
-use crate::{Config, Worterbuch};
-use poem::http::StatusCode;
-use poem::Result;
-use poem::{listener::TcpListener, Route};
+use crate::{server::common::process_incoming_message, Config, Worterbuch};
+use futures::{sink::SinkExt, stream::StreamExt};
+use poem::{
+    get, handler,
+    http::StatusCode,
+    listener::TcpListener,
+    web::websocket::WebSocket,
+    web::{
+        websocket::{Message, WebSocketStream},
+        Data,
+    },
+    EndpointExt, IntoResponse, Request, Result, Route,
+};
 use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
 use serde_json::Value;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use worterbuch_common::error::WorterbuchError;
-use worterbuch_common::{KeyValuePair, KeyValuePairs, RegularKeySegment};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::{
+    spawn,
+    sync::{mpsc, RwLock},
+};
+use uuid::Uuid;
+use worterbuch_common::{error::WorterbuchError, KeyValuePair, KeyValuePairs, RegularKeySegment};
 
 struct Api {
     worterbuch: Arc<RwLock<Worterbuch>>,
@@ -97,6 +109,25 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<Json<T>> {
     }
 }
 
+#[handler]
+async fn ws(
+    ws: WebSocket,
+    worterbuch: Data<&Arc<RwLock<Worterbuch>>>,
+    req: &Request,
+) -> impl IntoResponse {
+    let wb: Arc<RwLock<Worterbuch>> = worterbuch.clone();
+    let remote = *req
+        .remote_addr()
+        .as_socket_addr()
+        .expect("Client has no remote address.");
+    ws.protocols(vec!["worterbuch"])
+        .on_upgrade(move |socket| async move {
+            if let Err(e) = serve(socket, wb, remote).await {
+                log::error!("Error in WS connection: {e}");
+            }
+        })
+}
+
 pub async fn start(
     worterbuch: Arc<RwLock<Worterbuch>>,
     config: Config,
@@ -106,9 +137,11 @@ pub async fn start(
 
     let addr = format!("{bind_addr}:{port}");
 
-    let api = Api { worterbuch };
+    let api = Api {
+        worterbuch: worterbuch.clone(),
+    };
 
-    let host_addr = "http://localhost:8080/api";
+    let host_addr = &format!("http://{bind_addr}:{port}/api");
 
     let api_service =
         OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(host_addr);
@@ -123,7 +156,60 @@ pub async fn start(
         .nest("/api", api_service)
         .nest("/doc", openapi_explorer)
         .nest("/json", spec_json)
-        .nest("/yaml", spec_yaml);
+        .nest("/yaml", spec_yaml)
+        .nest("/ws", get(ws.data(worterbuch)));
 
     poem::Server::new(TcpListener::bind(addr)).run(app).await
+}
+
+async fn serve(
+    websocket: WebSocketStream,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    remote_addr: SocketAddr,
+) -> anyhow::Result<()> {
+    let client_id = Uuid::new_v4();
+
+    // log::info!("New client connected: {client_id} ({remote_addr})");
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    let (mut client_write, mut client_read) = websocket.split();
+
+    {
+        let mut wb = worterbuch.write().await;
+        wb.connected(client_id, remote_addr);
+    }
+
+    spawn(async move {
+        while let Some(bytes) = rx.recv().await {
+            let msg = Message::text(bytes);
+            if let Err(e) = client_write.send(msg).await {
+                log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
+                break;
+            }
+        }
+    });
+
+    log::debug!("Receiving messages from client {client_id} ({remote_addr}) …");
+
+    loop {
+        if let Some(Ok(incoming_msg)) = client_read.next().await {
+            if let Message::Text(data) = incoming_msg {
+                if !process_incoming_message(client_id, &data, worterbuch.clone(), tx.clone())
+                    .await?
+                {
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
+
+    let mut wb = worterbuch.write().await;
+    wb.disconnected(client_id, remote_addr);
+
+    Ok(())
 }

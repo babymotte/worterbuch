@@ -35,7 +35,7 @@ urlencoding = "2.1.2"
 warp = { version = "0.3.3", optional = true }
 
 # poem feature dependencies
-poem = { version = "1.3.55", optional = true }
+poem = { version = "1.3.55", features = ["websocket"], optional = true }
 poem-openapi = { version = "2.0.26", features = [
     "openapi-explorer",
 ], optional = true }
