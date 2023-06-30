@@ -1184,9 +1184,9 @@ dependencies = [
 
 [[package]]
 name = "poem-openapi-derive"
-version = "2.0.26"
+version = "2.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75bf9dc3b9c42bb8744bc633f9581f740b429122e1840fa37c06beeefc35a719"
+checksum = "88c3e2975c930dc72c024e75b230c3b6058fb3a746d5739b83aa8f28ab1a42d4"
 dependencies = [
  "darling",
  "http",
@@ -2299,6 +2299,7 @@ dependencies = [
 name = "worterbuch-common"
 version = "0.34.0"
 dependencies = [
+ "poem-openapi",
  "serde",
  "serde_json",
  "tokio",

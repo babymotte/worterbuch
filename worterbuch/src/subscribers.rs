@@ -170,9 +170,10 @@ impl Subscribers {
 mod test {
     use super::*;
     use tokio::sync::mpsc::unbounded_channel;
+    use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
-        RegularKeySegment::parse(key).unwrap()
+        parse_segments(key).unwrap()
     }
 
     fn key_segs(key: &str) -> Vec<KeySegment> {

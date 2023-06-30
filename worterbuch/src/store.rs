@@ -340,9 +340,10 @@ fn concat_key(path: &[&str], key: Option<&str>, separator: char) -> String {
 mod test {
     use super::*;
     use serde_json::json;
+    use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
-        RegularKeySegment::parse(key).unwrap()
+        parse_segments(key).unwrap()
     }
 
     fn key_segs(key: &str) -> Vec<KeySegment> {

@@ -15,8 +15,9 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill, PStateEvent, Path,
-    ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, TransactionId,
+    parse_segments, topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill,
+    PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern,
+    TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
@@ -116,7 +117,7 @@ impl Worterbuch {
     }
 
     pub fn get(&self, key: Key) -> WorterbuchResult<(String, Value)> {
-        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         match self.store.get(&path) {
             Some(value) => {
@@ -128,7 +129,7 @@ impl Worterbuch {
     }
 
     pub fn set(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
-        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         let changed = self
             .store
@@ -141,7 +142,7 @@ impl Worterbuch {
     }
 
     pub fn publish(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
-        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         self.notify_subscribers(path, key, value, true, false);
 
@@ -222,7 +223,7 @@ impl Worterbuch {
         let imported_values = self.store.merge(store, self.config.separator);
 
         for (key, val) in &imported_values {
-            let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+            let path: Vec<RegularKeySegment> = parse_segments(&key)?;
             self.notify_subscribers(
                 path,
                 key.to_owned(),
@@ -321,9 +322,9 @@ impl Worterbuch {
     }
 
     pub fn delete(&mut self, key: Key) -> WorterbuchResult<(String, Value)> {
-        let path: Vec<RegularKeySegment> = RegularKeySegment::parse(&key)?;
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        if path.is_empty() || *path[0] == SYSTEM_TOPIC_ROOT {
+        if path.is_empty() || path[0] == SYSTEM_TOPIC_ROOT {
             return Err(WorterbuchError::ReadOnlyKey(key));
         }
 
@@ -354,7 +355,7 @@ impl Worterbuch {
 
         if let Ok(deleted) = &deleted {
             for kvp in deleted {
-                let path = RegularKeySegment::parse(&kvp.key)?;
+                let path = parse_segments(&kvp.key)?;
                 self.notify_subscribers(path, kvp.key.clone(), kvp.value.clone(), true, true);
             }
         }

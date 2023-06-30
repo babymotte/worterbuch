@@ -4,7 +4,7 @@ use poem::Result;
 use poem::{listener::TcpListener, Route};
 use poem_openapi::{
     param::Query,
-    payload::{Form, PlainText},
+    payload::{Form, Json},
     OpenApi, OpenApiService,
 };
 use serde_json::json;
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use worterbuch_common::error::WorterbuchError;
-use worterbuch_common::KeyValuePair;
+use worterbuch_common::{KeyValuePair, KeyValuePairs, RegularKeySegment};
 
 struct Api {
     worterbuch: Arc<RwLock<Worterbuch>>,
@@ -21,32 +21,28 @@ struct Api {
 #[OpenApi]
 impl Api {
     #[oai(path = "/get", method = "get")]
-    async fn get(&self, key: Query<String>) -> Result<PlainText<String>> {
+    async fn get(&self, key: Query<String>) -> Result<Json<KeyValuePair>> {
         let wb = self.worterbuch.read().await;
         match wb.get(key.0) {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
-                let json = serde_json::to_string(&kvp).expect("cannot fail");
-                Ok(PlainText(json))
+                Ok(Json(kvp))
             }
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/pget", method = "get")]
-    async fn pget(&self, pattern: Query<String>) -> Result<PlainText<String>> {
+    async fn pget(&self, pattern: Query<String>) -> Result<Json<KeyValuePairs>> {
         let wb = self.worterbuch.read().await;
         match wb.pget(&pattern.0) {
-            Ok(kvps) => {
-                let json = serde_json::to_string(&kvps).expect("cannot fail");
-                Ok(PlainText(json))
-            }
+            Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/set", method = "post")]
-    async fn set(&self, kvps: Form<HashMap<String, String>>) -> Result<PlainText<String>> {
+    async fn set(&self, kvps: Form<HashMap<String, String>>) -> Result<Json<&'static str>> {
         let mut wb = self.worterbuch.write().await;
         println!("{kvps:?}");
         for (key, value) in kvps.0 {
@@ -55,48 +51,41 @@ impl Api {
                 Err(e) => return to_error_response(e),
             }
         }
-        Ok(PlainText("Ok".to_owned()))
+        Ok(Json("Ok"))
     }
 
     #[oai(path = "/delete", method = "post")]
-    async fn delete(&self, key: Query<String>) -> Result<PlainText<String>> {
+    async fn delete(&self, key: Query<String>) -> Result<Json<KeyValuePair>> {
         let mut wb = self.worterbuch.write().await;
         match wb.delete(key.0) {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
-                let json = serde_json::to_string(&kvp).expect("cannot fail");
-                Ok(PlainText(json))
+                Ok(Json(kvp))
             }
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/pdelete", method = "post")]
-    async fn pdelete(&self, pattern: Query<String>) -> Result<PlainText<String>> {
+    async fn pdelete(&self, pattern: Query<String>) -> Result<Json<KeyValuePairs>> {
         let mut wb = self.worterbuch.write().await;
         match wb.pdelete(pattern.0) {
-            Ok(kvps) => {
-                let json = serde_json::to_string(&kvps).expect("cannot fail");
-                Ok(PlainText(json))
-            }
+            Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/ls", method = "get")]
-    async fn ls(&self, pattern: Query<Option<String>>) -> Result<PlainText<String>> {
+    async fn ls(&self, pattern: Query<Option<String>>) -> Result<Json<Vec<RegularKeySegment>>> {
         let wb = self.worterbuch.read().await;
         match wb.ls(pattern.0) {
-            Ok(kvps) => {
-                let json = serde_json::to_string(&kvps).expect("cannot fail");
-                Ok(PlainText(json))
-            }
+            Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
     }
 }
 
-fn to_error_response(e: WorterbuchError) -> Result<PlainText<String>> {
+fn to_error_response<T>(e: WorterbuchError) -> Result<Json<T>> {
     match e {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)

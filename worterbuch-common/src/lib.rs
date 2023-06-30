@@ -4,6 +4,7 @@ mod server;
 
 pub use client::*;
 use error::WorterbuchResult;
+use poem_openapi::Object;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use server::*;
 use std::{fmt, ops::Deref};
@@ -55,7 +56,7 @@ impl ProtocolVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValuePair {
     pub key: Key,
@@ -122,42 +123,26 @@ impl TryFrom<(&str, &str)> for KeyValuePair {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct RegularKeySegment(pub String);
+// #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Tags)]
+pub type RegularKeySegment = String;
 
-impl RegularKeySegment {
-    pub fn parse(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
-        let mut segments = Vec::new();
-        for segment in pattern.split(SEPARATOR) {
-            let ks: KeySegment = segment.into();
-            match ks {
-                KeySegment::Regular(reg) => segments.push(reg),
-                KeySegment::Wildcard => {
-                    return Err(error::WorterbuchError::IllegalWildcard(pattern.to_owned()))
-                }
-                KeySegment::MultiWildcard => {
-                    return Err(error::WorterbuchError::IllegalMultiWildcard(
-                        pattern.to_owned(),
-                    ))
-                }
+pub fn parse_segments(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
+    let mut segments = Vec::new();
+    for segment in pattern.split(SEPARATOR) {
+        let ks: KeySegment = segment.into();
+        match ks {
+            KeySegment::Regular(reg) => segments.push(reg),
+            KeySegment::Wildcard => {
+                return Err(error::WorterbuchError::IllegalWildcard(pattern.to_owned()))
+            }
+            KeySegment::MultiWildcard => {
+                return Err(error::WorterbuchError::IllegalMultiWildcard(
+                    pattern.to_owned(),
+                ))
             }
         }
-        Ok(segments)
     }
-}
-
-impl Deref for RegularKeySegment {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<String> for RegularKeySegment {
-    fn from(str: String) -> Self {
-        RegularKeySegment(str)
-    }
+    Ok(segments)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

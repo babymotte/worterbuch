@@ -15,3 +15,4 @@ tokio = { version = "1.26.0", features = ["sync"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
 tungstenite = "0.18.0"
+poem-openapi = "2.0.26"
