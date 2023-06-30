@@ -563,7 +563,7 @@ async fn ls(
 
     let response = LsState {
         transaction_id: msg.transaction_id,
-        children: children.into_iter().map(|it| it.0).collect(),
+        children,
     };
 
     match serde_json::to_string(&ServerMessage::LsState(response)) {
