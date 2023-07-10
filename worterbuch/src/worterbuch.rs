@@ -72,6 +72,10 @@ impl Worterbuch {
         self.store.len()
     }
 
+    pub fn supported_protocol_versions(&self) -> ProtocolVersions {
+        vec![ProtocolVersion { major: 0, minor: 6 }]
+    }
+
     pub fn handshake(
         &mut self,
         client_protocol_versions: &ProtocolVersions,
@@ -79,13 +83,7 @@ impl Worterbuch {
         grave_goods: GraveGoods,
         client_id: Uuid,
     ) -> WorterbuchResult<Handshake> {
-        // TODO implement protocol versions properly
-        let mut supported_protocol_versions = vec![
-            ProtocolVersion { major: 0, minor: 3 },
-            ProtocolVersion { major: 0, minor: 4 },
-            ProtocolVersion { major: 0, minor: 5 },
-            ProtocolVersion { major: 0, minor: 6 },
-        ];
+        let mut supported_protocol_versions = self.supported_protocol_versions();
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
         supported_protocol_versions.sort();

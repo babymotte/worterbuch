@@ -20,7 +20,7 @@ use tokio::{
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, RegularKeySegment,
+    error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
 };
 
 const ASYNC_API_YAML: &'static str = include_str!("../../../../worterbuch-common/asyncapi.yaml");
@@ -116,9 +116,11 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    worterbuch: Data<&Arc<RwLock<Worterbuch>>>,
+    data: Data<&(Arc<RwLock<Worterbuch>>, ProtocolVersion)>,
     req: &Request,
 ) -> impl IntoResponse {
+    let worterbuch = &data.0 .0;
+    let proto_version = data.0 .1.to_owned();
     let wb: Arc<RwLock<Worterbuch>> = worterbuch.clone();
     let remote = *req
         .remote_addr()
@@ -126,15 +128,18 @@ async fn ws(
         .expect("Client has no remote address.");
     ws.protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            if let Err(e) = serve(socket, wb, remote).await {
+            if let Err(e) = serve(socket, wb, remote, proto_version).await {
                 log::error!("Error in WS connection: {e}");
             }
         })
 }
 
 #[handler]
-fn asyncapi_spec_yaml(data: Data<&String>) -> Yaml<serde_yaml::Value> {
-    let yaml_string = ASYNC_API_YAML.replace("${SERVER_URL}", &quote(&data.0));
+fn asyncapi_spec_yaml(data: Data<&(String, String)>) -> Yaml<serde_yaml::Value> {
+    let yaml_string = ASYNC_API_YAML
+        .replace("${SERVER_URL}", &quote(&data.0 .0))
+        .replacen("${API_VERSION}", &quote(&data.0 .1), 1)
+        .replacen("${API_VERSION}", &data.0 .1, 1);
     let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
     Yaml(value)
 }
@@ -147,6 +152,10 @@ pub async fn start(
     let bind_addr = config.bind_addr;
     let public_addr = config.public_address;
     let proto = config.proto;
+    let proto_versions = {
+        let wb = worterbuch.read().await;
+        wb.supported_protocol_versions()
+    };
 
     let addr = format!("{bind_addr}:{port}");
 
@@ -165,16 +174,39 @@ pub async fn start(
     let oapi_spec_json = api_service.spec_endpoint();
     let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
-    let app = Route::new()
+    let mut app = Route::new()
         .nest("/openapi", api_service)
         .nest("/doc", openapi_explorer)
         .nest("/openapi/json", oapi_spec_json)
         .nest("/openapi/yaml", oapi_spec_yaml)
         .nest(
-            "/asyncapi/yaml",
-            get(asyncapi_spec_yaml.data(format!("{proto}://{public_addr}:{port}"))),
-        )
-        .nest("/ws", get(ws.data(worterbuch)));
+            format!("/ws"),
+            get(ws.data((
+                worterbuch.clone(),
+                proto_versions
+                    .iter()
+                    .last()
+                    .expect("cannot be none")
+                    .to_owned(),
+            ))),
+        );
+
+    for proto_ver in proto_versions {
+        let yaml_data = (
+            format!("{proto}://{public_addr}:{port}"),
+            format!("{proto_ver}"),
+        );
+        app = app
+            .nest(
+                format!("/asyncapi/{proto_ver}/yaml"),
+                get(asyncapi_spec_yaml.data(yaml_data)),
+            )
+            .nest(
+                format!("/ws/{proto_ver}"),
+                get(ws.data((worterbuch.clone(), proto_ver.to_owned()))),
+            );
+        log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}",)
+    }
 
     poem::Server::new(TcpListener::bind(addr)).run(app).await
 }
@@ -183,6 +215,7 @@ async fn serve(
     websocket: WebSocketStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
+    proto_version: ProtocolVersion,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
@@ -212,8 +245,14 @@ async fn serve(
     loop {
         if let Some(Ok(incoming_msg)) = client_read.next().await {
             if let Message::Text(data) = incoming_msg {
-                if !process_incoming_message(client_id, &data, worterbuch.clone(), tx.clone())
-                    .await?
+                if !process_incoming_message(
+                    client_id,
+                    &data,
+                    worterbuch.clone(),
+                    tx.clone(),
+                    &proto_version,
+                )
+                .await?
                 {
                     break;
                 }

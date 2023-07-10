@@ -1,11 +1,11 @@
 asyncapi: "2.6.0"
 info:
   title: Wörterbuch
-  version: 1.0.0
+  version: ${API_VERSION}
   description: Wörterbuch's websocket API
 
 channels:
-  /ws:
+  /ws/${API_VERSION}:
     publish:
       message:
         $ref: "#/components/messages/HandshakeRequest"
@@ -34,38 +34,46 @@ components:
   schemas:
     # common
     ProtocolVersion:
+      description: A protocol version with a major and minor version tag
       type: object
       properties:
         major:
+          description: The protocol's major version tag
           type: number
         minor:
+          description: The protocol's minor version tag
           type: number
       additionalProperties: false
       required:
         - major
         - minor
     KeyValuePair:
+      description: A key/value pair where the key is always a string and the value can be anything
       type: object
       properties:
         key:
+          description: The key
           type: string
         value:
-          type: object
+          description: The value
       additionalProperties: false
       required:
         - key
         - value
     LastWill:
+      description: A list of key/value pairs that will be set when a client disconnects from the server
       type: array
       items:
         $ref: "#/components/schemas/KeyValuePair"
     GraveGoods:
+      description: A list of keys that will be deleted when a client disconnects from the server
       type: array
       items:
         type: string
 
     # client
     HandshakeRequest:
+      description: A message sent by a client to initiate a handshake with the server
       type: object
       properties:
         supportedProtocolVersions:
@@ -84,7 +92,11 @@ components:
 
     # server
     Handshake:
+      description: A message sent by the server to indicate a successful handshake with the client
       type: object
       properties:
         protocolVersion:
           $ref: "#/components/schemas/ProtocolVersion"
+      additionalProperties: false
+      required:
+        - protocolVersion
