@@ -74,10 +74,6 @@ pub async fn start_worterbuch(config: Config) -> Result<Arc<RwLock<Worterbuch>>>
 
     spawn(track_stats(worterbuch_uptime));
 
-    #[cfg(feature = "warp")]
-    spawn(server::warp::start(worterbuch.clone(), config.clone()));
-
-    #[cfg(feature = "poem")]
     spawn(server::poem::start(worterbuch.clone(), config.clone()));
 
     Ok(worterbuch)
