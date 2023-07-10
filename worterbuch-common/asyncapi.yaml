@@ -1,0 +1,90 @@
+asyncapi: "2.6.0"
+info:
+  title: Wörterbuch
+  version: 1.0.0
+  description: Wörterbuch's websocket API
+
+channels:
+  /ws:
+    publish:
+      message:
+        $ref: "#/components/messages/HandshakeRequest"
+    subscribe:
+      message:
+        $ref: "#/components/messages/Handshake"
+
+servers:
+  public:
+    url: ${SERVER_URL}
+    protocol: ws
+    description: |-
+      Wörterbuch broker/database server
+
+components:
+  messages:
+    # client
+    HandshakeRequest:
+      payload:
+        $ref: "#/components/schemas/HandshakeRequest"
+    # server
+    Handshake:
+      payload:
+        $ref: "#/components/schemas/Handshake"
+
+  schemas:
+    # common
+    ProtocolVersion:
+      type: object
+      properties:
+        major:
+          type: number
+        minor:
+          type: number
+      additionalProperties: false
+      required:
+        - major
+        - minor
+    KeyValuePair:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: object
+      additionalProperties: false
+      required:
+        - key
+        - value
+    LastWill:
+      type: array
+      items:
+        $ref: "#/components/schemas/KeyValuePair"
+    GraveGoods:
+      type: array
+      items:
+        type: string
+
+    # client
+    HandshakeRequest:
+      type: object
+      properties:
+        supportedProtocolVersions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProtocolVersion"
+        lastWill:
+          $ref: "#/components/schemas/LastWill"
+        graveGoods:
+          $ref: "#/components/schemas/GraveGoods"
+      additionalProperties: false
+      required:
+        - supportedProtocolVersions
+        - lastWill
+        - graveGoods
+
+    # server
+    Handshake:
+      type: object
+      properties:
+        protocolVersion:
+          $ref: "#/components/schemas/ProtocolVersion"

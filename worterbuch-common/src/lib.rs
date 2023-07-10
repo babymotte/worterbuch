@@ -194,6 +194,15 @@ impl KeySegment {
     }
 }
 
+pub fn quote(str: impl AsRef<str>) -> String {
+    let str_ref = str.as_ref();
+    if str_ref.starts_with("\"") && str_ref.ends_with("\"") {
+        str_ref.to_owned()
+    } else {
+        format!("\"{str_ref}\"")
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::cmp::Ordering;

@@ -40,3 +40,4 @@ poem-openapi = { version = "2.0.26", features = [
     "openapi-explorer",
 ], optional = true }
 tracing-subscriber = { version = "0.3.16", optional = true }
+serde_yaml = "0.9.22"

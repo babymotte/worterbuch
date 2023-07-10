@@ -7,7 +7,7 @@ use poem::{
     web::websocket::WebSocket,
     web::{
         websocket::{Message, WebSocketStream},
-        Data,
+        Data, Yaml,
     },
     EndpointExt, IntoResponse, Request, Result, Route,
 };
@@ -19,7 +19,11 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 use uuid::Uuid;
-use worterbuch_common::{error::WorterbuchError, KeyValuePair, KeyValuePairs, RegularKeySegment};
+use worterbuch_common::{
+    error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, RegularKeySegment,
+};
+
+const ASYNC_API_YAML: &'static str = include_str!("../../../../worterbuch-common/asyncapi.yaml");
 
 struct Api {
     worterbuch: Arc<RwLock<Worterbuch>>,
@@ -98,7 +102,7 @@ impl Api {
     }
 }
 
-fn to_error_response<T>(e: WorterbuchError) -> Result<Json<T>> {
+fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match e {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
@@ -128,6 +132,13 @@ async fn ws(
         })
 }
 
+#[handler]
+fn asyncapi_spec_yaml(data: Data<&String>) -> Yaml<serde_yaml::Value> {
+    let yaml_string = ASYNC_API_YAML.replace("${SERVER_URL}", &quote(&data.0));
+    let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
+    Yaml(value)
+}
+
 pub async fn start(
     worterbuch: Arc<RwLock<Worterbuch>>,
     config: Config,
@@ -135,6 +146,7 @@ pub async fn start(
     let port = config.port;
     let bind_addr = config.bind_addr;
     let public_addr = config.public_address;
+    let proto = config.proto;
 
     let addr = format!("{bind_addr}:{port}");
 
@@ -142,7 +154,7 @@ pub async fn start(
         worterbuch: worterbuch.clone(),
     };
 
-    let public_url = &format!("http://{public_addr}:{port}/api");
+    let public_url = &format!("http://{public_addr}:{port}/openapi");
 
     let api_service =
         OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(public_url);
@@ -150,14 +162,18 @@ pub async fn start(
     log::info!("Starting openapi service at {}", public_url);
 
     let openapi_explorer = api_service.openapi_explorer();
-    let spec_json = api_service.spec_endpoint();
-    let spec_yaml = api_service.spec_endpoint_yaml();
+    let oapi_spec_json = api_service.spec_endpoint();
+    let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
     let app = Route::new()
-        .nest("/api", api_service)
+        .nest("/openapi", api_service)
         .nest("/doc", openapi_explorer)
-        .nest("/json", spec_json)
-        .nest("/yaml", spec_yaml)
+        .nest("/openapi/json", oapi_spec_json)
+        .nest("/openapi/yaml", oapi_spec_yaml)
+        .nest(
+            "/asyncapi/yaml",
+            get(asyncapi_spec_yaml.data(format!("{proto}://{public_addr}:{port}"))),
+        )
         .nest("/ws", get(ws.data(worterbuch)));
 
     poem::Server::new(TcpListener::bind(addr)).run(app).await

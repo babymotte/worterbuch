@@ -635,6 +635,12 @@ async fn handle_store_error(
             metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
                 .expect("failed to serialize metadata"),
         },
+        WorterbuchError::SerDeYamlError(e, meta) => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
+                .expect("failed to serialize metadata"),
+        },
         WorterbuchError::ProtocolNegotiationFailed => Err {
             error_code,
             transaction_id,
