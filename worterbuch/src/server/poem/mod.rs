@@ -62,6 +62,16 @@ impl Api {
         Ok(Json("Ok"))
     }
 
+    #[oai(path = "/publish/:key", method = "post")]
+    async fn publish(&self, key: Path<String>, value: Json<Value>) -> Result<Json<&'static str>> {
+        let mut wb = self.worterbuch.write().await;
+        match wb.publish(key.0, value.0) {
+            Ok(()) => {}
+            Err(e) => return to_error_response(e),
+        }
+        Ok(Json("Ok"))
+    }
+
     #[oai(path = "/delete/:key", method = "delete")]
     async fn delete(&self, key: Path<String>) -> Result<Json<KeyValuePair>> {
         let mut wb = self.worterbuch.write().await;
