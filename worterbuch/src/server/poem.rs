@@ -13,7 +13,7 @@ use poem::{
 };
 use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
 use serde_json::Value;
-use std::{net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc};
 use tokio::{
     spawn,
     sync::{mpsc, RwLock},
@@ -24,6 +24,7 @@ use worterbuch_common::{
 };
 
 const ASYNC_API_YAML: &'static str = include_str!("../../../worterbuch-common/asyncapi.yaml");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Api {
     worterbuch: Arc<RwLock<Worterbuch>>,
@@ -153,21 +154,33 @@ async fn ws(
 }
 
 #[handler]
-fn asyncapi_spec_yaml(Data(data): Data<&(String, String)>) -> Yaml<Value> {
-    let yaml_string = ASYNC_API_YAML
-        .replace("${SERVER_URL}", &quote(&data.0))
-        .replacen("${API_VERSION}", &quote(&data.1), 1);
-    let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
-    Yaml(value)
+fn asyncapi_spec_yaml(Data((server_url, api_version)): Data<&(String, String)>) -> Yaml<Value> {
+    Yaml(async_api(server_url, api_version))
 }
 
 #[handler]
-fn asyncapi_spec_json(Data(data): Data<&(String, String)>) -> Json<Value> {
+fn asyncapi_spec_json(Data((server_url, api_version)): Data<&(String, String)>) -> Json<Value> {
+    Json(async_api(server_url, api_version))
+}
+
+fn async_api(server_url: &str, api_version: &str) -> Value {
+    let (admin_name, admin_url, admin_email) = admin_data();
+
     let yaml_string = ASYNC_API_YAML
-        .replace("${SERVER_URL}", &quote(&data.0))
-        .replacen("${API_VERSION}", &quote(&data.1), 1);
-    let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
-    Json(value)
+        .replace("${WS_SERVER_URL}", &quote(&server_url))
+        .replace("${API_VERSION}", &quote(&api_version))
+        .replace("${WORTERBUCH_VERSION}", VERSION)
+        .replace("${WORTERBUCH_ADMIN_NAME}", &admin_name)
+        .replace("${WORTERBUCH_ADMIN_URL}", &admin_url)
+        .replace("${WORTERBUCH_ADMIN_EMAIL}", &admin_email);
+    serde_yaml::from_str(&yaml_string).expect("cannot fail")
+}
+
+fn admin_data() -> (String, String, String) {
+    let admin_name = env::var("WORTERBUCH_ADMIN_NAME").unwrap_or("<admin name>".to_owned());
+    let admin_url = env::var("WORTERBUCH_ADMIN_URL").unwrap_or("<admin url>".to_owned());
+    let admin_email = env::var("WORTERBUCH_ADMIN_EMAIL").unwrap_or("<admin email>".to_owned());
+    (admin_name, admin_url, admin_email)
 }
 
 pub async fn start(

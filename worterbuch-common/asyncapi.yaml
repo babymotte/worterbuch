@@ -1,14 +1,34 @@
 asyncapi: 2.6.0
+tags:
+  - name: worterbuch
+    description: Wörterbuch API specifiction
+  - name: broker
+    description: Message Broker
+  - name: database
+    description: Database
+id: https://github.com/babymotte/worterbuch
 info:
   title: Wörterbuch
   version: ${API_VERSION}
   description: Wörterbuch's websocket API
+  contact:
+    name: ${WORTERBUCH_ADMIN_NAME}
+    url: ${WORTERBUCH_ADMIN_URL}
+    email: ${WORTERBUCH_ADMIN_EMAIL}
+  license:
+    name: MIT
+    url: "https://raw.githubusercontent.com/babymotte/worterbuch/v${WORTERBUCH_VERSION}/LICENSE"
+defaultContentType: application/json
 channels:
   /ws:
     publish:
+      summary: A client request to the server.
+      operationId: onClientRequest
       message:
         $ref: "#/components/messages/ClientMessage"
     subscribe:
+      summary: A server side event or response.
+      operationId: onEvent
       message:
         $ref: "#/components/messages/ServerMessage"
 servers:
@@ -19,11 +39,331 @@ servers:
 components:
   messages:
     ClientMessage:
+      messageId: client-message
       payload:
-        $ref: "#/components/schemas/ClientMessage"
+        type: object
+        properties:
+          handshakeRequest:
+            description: A message sent by a client to initiate a handshake with the server
+            type: object
+            properties:
+              supportedProtocolVersions:
+                type: array
+                minItems: 1
+                items:
+                  $ref: "#/components/schemas/ProtocolVersion"
+              lastWill:
+                description: A list of key/value pairs that will be set when a client disconnects from the server
+                type: array
+                items:
+                  $ref: "#/components/schemas/KeyValuePair"
+              graveGoods:
+                description: A list of keys that will be deleted when a client disconnects from the server
+                type: array
+                items:
+                  type: string
+            additionalProperties: false
+            required:
+              - supportedProtocolVersions
+              - lastWill
+              - graveGoods
+          get:
+            description: A message sent by a client to request the value of the provided key from the server
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              key:
+                type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - key
+          pGet:
+            description: A message sent by a client to request the values of all keys matching the provided pattern from the server
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              requestPattern:
+                type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - requestPattern
+          set:
+            description: A message sent by a client to set a new value for a key
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              key:
+                description: The key for which to set the value
+                type: string
+              value:
+                description: The new value for the key
+            additionalProperties: false
+            required:
+              - transactionId
+              - key
+              - value
+          publish:
+            description: A message sent by a client to publish a new value for a key. The value will not be persisted on the server
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              key:
+                description: The key for which to publish the value
+                type: string
+              value:
+                description: The value to be published for the key
+            additionalProperties: false
+            required:
+              - transactionId
+              - key
+              - value
+          subscribe:
+            description: A message sent by a client to subscribe to values of the provided key
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              key:
+                description: The key to subscribe to
+                type: string
+              unique:
+                description: Indicate whether all or only unique values should be received
+                type: boolean
+            additionalProperties: false
+            required:
+              - transactionId
+              - key
+              - unique
+          pSubscribe:
+            description: A message sent by a client to subscribe to values of all keys matching the provided pattern
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              requestPattern:
+                description: The pattern to subscribe to
+                type: string
+              unique:
+                description: Indicate whether all or only unique values should be received
+                type: boolean
+            additionalProperties: false
+            required:
+              - transactionId
+              - requestPattern
+              - unique
+          unsubscribe:
+            description: A message sent by a client to request the cancellation of the subscription
+            type: object
+            properties:
+              transactionId:
+                description: The transaction ID of the subscription to be cancelled
+                type: number
+                format: u64
+            additionalProperties: false
+            required:
+              - transactionId
+          delete:
+            description: A message sent by a client to request the deletion of the value of the provided key
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              key:
+                description: The key to subscribe to
+                type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - key
+          pDelete:
+            description: A message sent by a client to request the deletion of the values of all keys matching the provided pattern
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              requestPattern:
+                description: The deletion pattern
+                type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - requestPattern
+          ls:
+            description: A message sent by a client to list all direct sub-key segments of the provided partial key
+            type: object
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              parent:
+                description: The parent partial key for which to list sub-key segments
+                type:
+                  - "null"
+                  - string
+            additionalProperties: false
+            required:
+              - transactionId
+              - parent
+        additionalProperties: false
+        oneOf:
+          - required:
+              - handshakeRequest
+          - required:
+              - get
+          - required:
+              - pGet
+          - required:
+              - set
+          - required:
+              - publish
+          - required:
+              - subscribe
+          - required:
+              - pSubscribe
+          - required:
+              - unsubscribe
+          - required:
+              - delete
+          - required:
+              - pDelete
+          - required:
+              - ls
     ServerMessage:
+      messageId: server-message
       payload:
-        $ref: "#/components/schemas/ServerMessage"
+        type: object
+        properties:
+          handshake:
+            description: A message sent by the server to indicate a successful handshake with the client
+            type: object
+            properties:
+              protocolVersion:
+                $ref: "#/components/schemas/ProtocolVersion"
+            additionalProperties: false
+            required:
+              - protocolVersion
+          state:
+            description: A message sent by the server in response to a Get or Delete message
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              keyValue:
+                $ref: "#/components/schemas/KeyValuePair"
+              deleted:
+                $ref: "#/components/schemas/KeyValuePair"
+            additionalProperties: false
+            required:
+              - transactionId
+            oneOf:
+              - required:
+                  - keyValue
+              - required:
+                  - deleted
+          pState:
+            description:
+              A message sent by the server in response to a PGet, PDelete or
+              Subscribe/PSubscribe message
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              requestPattern:
+                type: string
+              keyValuePairs:
+                $ref: "#/components/schemas/KeyValuePairs"
+              deleted:
+                $ref: "#/components/schemas/KeyValuePairs"
+            additionalProperties: false
+            required:
+              - transactionId
+              - requestPattern
+            oneOf:
+              - required:
+                  - keyValuePairs
+              - required:
+                  - deleted
+          ack:
+            description: A message sent by the server to confirm that a client message has been processed
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+            additionalProperties: false
+            required:
+              - transactionId
+          err:
+            description: A message sent by the server to indicate that there was an error processing a client message
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              errorCode:
+                type: number
+                format: u8
+              metadata:
+                type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - errorCode
+              - metadata
+          lsState:
+            description: A message sent by the server in response to an Ls message
+            properties:
+              transactionId:
+                description: A unique transaction ID
+                type: number
+                format: u64
+              children:
+                type: array
+                items:
+                  type: string
+            additionalProperties: false
+            required:
+              - transactionId
+              - children
+        additionalProperties: false
+        oneOf:
+          - required:
+              - handshake
+          - required:
+              - ack
+          - required:
+              - err
+          - required:
+              - state
+          - required:
+              - pState
+          - required:
+              - lsState
   schemas:
     ProtocolVersion:
       description: A protocol version with a major and minor version tag
@@ -42,9 +382,7 @@ components:
         - major
         - minor
     KeyValuePair:
-      description:
-        A key/value pair where the key is always a string and the value can be
-        anything
+      description: A key/value pair where the key is always a string and the value can be anything
       type: object
       properties:
         key:
@@ -58,317 +396,6 @@ components:
         - value
     KeyValuePairs:
       type: array
+      minItems: 1
       items:
         $ref: "#/components/schemas/KeyValuePair"
-    DeletedKeyValuePairs:
-      type: array
-      items:
-        $ref: "#/components/schemas/KeyValuePair"
-    LastWill:
-      description:
-        A list of key/value pairs that will be set when a client disconnects
-        from the server
-      type: array
-      items:
-        $ref: "#/components/schemas/KeyValuePair"
-    GraveGoods:
-      description:
-        A list of keys that will be deleted when a client disconnects from the
-        server
-      type: array
-      items:
-        type: string
-    ClientMessage:
-      description: Messages sent by the client to the server
-      oneOf:
-        - $ref: "#/components/schemas/handshakeRequest"
-        - $ref: "#/components/schemas/get"
-        - $ref: "#/components/schemas/pGet"
-        - $ref: "#/components/schemas/set"
-        - $ref: "#/components/schemas/publish"
-        - $ref: "#/components/schemas/subscribe"
-        - $ref: "#/components/schemas/pSubscribe"
-        - $ref: "#/components/schemas/unsubscribe"
-        - $ref: "#/components/schemas/delete"
-        - $ref: "#/components/schemas/pDelete"
-        - $ref: "#/components/schemas/ls"
-    ServerMessage:
-      description: Messages sent by the server back to the client
-      oneOf:
-        - $ref: "#/components/schemas/handshake"
-        - $ref: "#/components/schemas/state"
-        - $ref: "#/components/schemas/pState"
-        - $ref: "#/components/schemas/ack"
-        - $ref: "#/components/schemas/err"
-        - $ref: "#/components/schemas/lsState"
-    handshakeRequest:
-      description: A message sent by a client to initiate a handshake with the server
-      type: object
-      properties:
-        supportedProtocolVersions:
-          type: array
-          items:
-            $ref: "#/components/schemas/ProtocolVersion"
-        lastWill:
-          $ref: "#/components/schemas/LastWill"
-        graveGoods:
-          $ref: "#/components/schemas/GraveGoods"
-      additionalProperties: false
-      required:
-        - supportedProtocolVersions
-        - lastWill
-        - graveGoods
-    get:
-      description:
-        A message sent by a client to get the value of the provided key from the
-        server
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        key:
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - key
-    pGet:
-      description:
-        A message sent by a client to get all values of keys matching the
-        provided pattern from the server
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        requestPattern:
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - requestPattern
-    set:
-      description: A message sent by a client to set a new value for a key
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        key:
-          description: The key for which to set the value
-          type: string
-        value:
-          description: The new value for the key
-      additionalProperties: false
-      required:
-        - transactionId
-        - key
-        - value
-    publish:
-      description: A message sent by a client to publish a new value for a key. The value will not be persisted on the server
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        key:
-          description: The key for which to publish the value
-          type: string
-        value:
-          description: The value to be published for the key
-      additionalProperties: false
-      required:
-        - transactionId
-        - key
-        - value
-    subscribe:
-      description: A message sent by a client to subscribe to values of the provided key
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        key:
-          description: The key to subscribe to
-          type: string
-        unique:
-          description: Indicate whether all or only unique values should be received
-          type: boolean
-      additionalProperties: false
-      required:
-        - transactionId
-        - key
-        - unique
-    pSubscribe:
-      description: A message sent by a client to subscribe to values of keys matching the provided pattern
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        requestPattern:
-          description: The pattern to subscribe to
-          type: string
-        unique:
-          description: Indicate whether all or only unique values should be received
-          type: boolean
-      additionalProperties: false
-      required:
-        - transactionId
-        - requestPattern
-        - unique
-    unsubscribe:
-      description: A message sent by a client to request the cancellation of a subscription
-      properties:
-        transactionId:
-          description: The transaction ID of the subscription to be cancelled
-          type: number
-          format: u64
-      additionalProperties: false
-      required:
-        - transactionId
-    delete:
-      description: A message sent by a client to request the deletion of the value of the provided key
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        key:
-          description: The key to subscribe to
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - key
-    pDelete:
-      description: A message sent by a client to request the deletion of of all values with keys that match the provided pattern
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        requestPattern:
-          description: The deletion pattern
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - requestPattern
-    ls:
-      description: A message sent by a client to list all direct sub-key segments of the provided partial key
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        parent:
-          description: The parent partial key for which to list sub-key segments
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - parent
-    handshake:
-      description:
-        A message sent by the server to indicate a successful handshake with the
-        client
-      type: object
-      properties:
-        protocolVersion:
-          $ref: "#/components/schemas/ProtocolVersion"
-      additionalProperties: false
-      required:
-        - protocolVersion
-    StateEvent:
-      description: An event representing the state of a single key
-      oneOf:
-        - $ref: "#/components/schemas/keyValue"
-        - $ref: "#/components/schemas/deleted"
-    keyValue:
-      $ref: "#/components/schemas/KeyValuePair"
-    deleted:
-      $ref: "#/components/schemas/KeyValuePair"
-    state:
-      description: A message sent by the server in response to a Get or Delete message
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        event:
-          $ref: "#/components/schemas/StateEvent"
-      additionalProperties: false
-      required:
-        - transactionId
-        - event
-    PStateEvent:
-      description: An event representing the state of one or more keys
-      oneOf:
-        - $ref: "#/components/schemas/KeyValuePairs"
-        - $ref: "#/components/schemas/DeletedKeyValuePairs"
-    pState:
-      description:
-        A message sent by the server in response to a PGet, PDelete or
-        Subscribe/PSubscribe message
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        requestPattern:
-          type: string
-        event:
-          $ref: "#/components/schemas/PStateEvent"
-      additionalProperties: false
-      required:
-        - transactionId
-        - requestPattern
-        - event
-    ack:
-      description:
-        A message sent by the server to confirm that a client message has been
-        processed
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-      additionalProperties: false
-      required:
-        - transactionId
-    err:
-      description:
-        A message sent by the server to indicate that there was an error
-        processing a client message
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        errorCode:
-          type: number
-          format: u8
-        metadata:
-          type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - errorCode
-        - metadata
-    lsState:
-      description: A message sent by the server in response to an Ls message
-      properties:
-        transactionId:
-          description: A unique transaction ID
-          type: number
-          format: u64
-        children:
-          type: array
-          items:
-            type: string
-      additionalProperties: false
-      required:
-        - transactionId
-        - children
