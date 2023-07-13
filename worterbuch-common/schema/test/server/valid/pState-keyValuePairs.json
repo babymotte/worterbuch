@@ -1,0 +1,7 @@
+{
+  "pState": {
+    "transactionId": 1,
+    "requestPattern": "#",
+    "keyValuePairs": [{ "key": "$SYS/store/values/count", "value": 4 }]
+  }
+}

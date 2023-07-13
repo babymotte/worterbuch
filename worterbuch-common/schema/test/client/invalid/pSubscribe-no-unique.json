@@ -1,0 +1,6 @@
+{
+  "pSubscribe": {
+    "transactionId": 1,
+    "requestPattern": "hello"
+  }
+}

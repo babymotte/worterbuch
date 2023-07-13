@@ -1,0 +1,145 @@
+type: object
+properties:
+  handshake:
+    description: A message sent by the server to indicate a successful handshake with the client
+    type: object
+    properties:
+      protocolVersion:
+        $ref: "#/components/schemas/ProtocolVersion"
+    additionalProperties: false
+    required:
+      - protocolVersion
+  state:
+    description: A message sent by the server in response to a Get or Delete message
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      keyValue:
+        $ref: "#/components/schemas/KeyValuePair"
+      deleted:
+        $ref: "#/components/schemas/KeyValuePair"
+    additionalProperties: false
+    required:
+      - transactionId
+    oneOf:
+      - required:
+          - keyValue
+      - required:
+          - deleted
+  pState:
+    description: A message sent by the server in response to a PGet, PDelete or
+      Subscribe/PSubscribe message
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      requestPattern:
+        type: string
+      keyValuePairs:
+        $ref: "#/components/schemas/KeyValuePairs"
+      deleted:
+        $ref: "#/components/schemas/KeyValuePairs"
+    additionalProperties: false
+    required:
+      - transactionId
+      - requestPattern
+    oneOf:
+      - required:
+          - keyValuePairs
+      - required:
+          - deleted
+  ack:
+    description: A message sent by the server to confirm that a client message has been processed
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+    additionalProperties: false
+    required:
+      - transactionId
+  err:
+    description: A message sent by the server to indicate that there was an error processing a client message
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      errorCode:
+        type: number
+        format: u8
+      metadata:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - errorCode
+      - metadata
+  lsState:
+    description: A message sent by the server in response to an Ls message
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      children:
+        type: array
+        items:
+          type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - children
+additionalProperties: false
+oneOf:
+  - required:
+      - handshake
+  - required:
+      - ack
+  - required:
+      - err
+  - required:
+      - state
+  - required:
+      - pState
+  - required:
+      - lsState
+components:
+  schemas:
+    ProtocolVersion:
+      description: A protocol version with a major and minor version tag
+      type: object
+      properties:
+        major:
+          description: The protocol's major version tag
+          type: number
+          format: u16
+        minor:
+          description: The protocol's minor version tag
+          type: number
+          format: u16
+      additionalProperties: false
+      required:
+        - major
+        - minor
+    KeyValuePair:
+      description: A key/value pair where the key is always a string and the value can be anything
+      type: object
+      properties:
+        key:
+          description: The key
+          type: string
+        value:
+          description: The value
+      additionalProperties: false
+      required:
+        - key
+        - value
+    KeyValuePairs:
+      type: array
+      minItems: 1
+      items:
+        $ref: "#/components/schemas/KeyValuePair"

@@ -1,0 +1,6 @@
+{
+  "handshakeRequest": {
+    "supportedProtocolVersions": [{ "major": 0, "minor": 6 }],
+    "lastWill": [{ "key": "hello", "value": "world" }]
+  }
+}

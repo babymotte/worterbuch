@@ -1,0 +1,7 @@
+{
+  "err": {
+    "transactionId": 1,
+    "errorCode": 5,
+    "metadata": "\"no value for key 'hello'\""
+  }
+}

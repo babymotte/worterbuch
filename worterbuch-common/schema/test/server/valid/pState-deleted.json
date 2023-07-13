@@ -1,0 +1,7 @@
+{
+  "pState": {
+    "transactionId": 1,
+    "requestPattern": "#",
+    "deleted": [{ "key": "$SYS/store/values/count", "value": 4 }]
+  }
+}

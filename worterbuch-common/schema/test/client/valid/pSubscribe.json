@@ -1,0 +1,7 @@
+{
+  "pSubscribe": {
+    "transactionId": 1,
+    "requestPattern": "hello",
+    "unique": false
+  }
+}

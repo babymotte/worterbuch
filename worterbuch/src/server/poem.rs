@@ -32,9 +32,9 @@ struct Api {
 #[OpenApi]
 impl Api {
     #[oai(path = "/get/:key", method = "get")]
-    async fn get(&self, key: Path<String>) -> Result<Json<KeyValuePair>> {
+    async fn get(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
         let wb = self.worterbuch.read().await;
-        match wb.get(key.0) {
+        match wb.get(key) {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
@@ -44,18 +44,22 @@ impl Api {
     }
 
     #[oai(path = "/pget/:pattern", method = "get")]
-    async fn pget(&self, pattern: Path<String>) -> Result<Json<KeyValuePairs>> {
+    async fn pget(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
         let wb = self.worterbuch.read().await;
-        match wb.pget(&pattern.0) {
+        match wb.pget(&pattern) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/set/:key", method = "post")]
-    async fn set(&self, key: Path<String>, value: Json<Value>) -> Result<Json<&'static str>> {
+    async fn set(
+        &self,
+        Path(key): Path<String>,
+        Json(value): Json<Value>,
+    ) -> Result<Json<&'static str>> {
         let mut wb = self.worterbuch.write().await;
-        match wb.set(key.0, value.0) {
+        match wb.set(key, value) {
             Ok(()) => {}
             Err(e) => return to_error_response(e),
         }
@@ -63,9 +67,13 @@ impl Api {
     }
 
     #[oai(path = "/publish/:key", method = "post")]
-    async fn publish(&self, key: Path<String>, value: Json<Value>) -> Result<Json<&'static str>> {
+    async fn publish(
+        &self,
+        Path(key): Path<String>,
+        Json(value): Json<Value>,
+    ) -> Result<Json<&'static str>> {
         let mut wb = self.worterbuch.write().await;
-        match wb.publish(key.0, value.0) {
+        match wb.publish(key, value) {
             Ok(()) => {}
             Err(e) => return to_error_response(e),
         }
@@ -73,9 +81,9 @@ impl Api {
     }
 
     #[oai(path = "/delete/:key", method = "delete")]
-    async fn delete(&self, key: Path<String>) -> Result<Json<KeyValuePair>> {
+    async fn delete(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
         let mut wb = self.worterbuch.write().await;
-        match wb.delete(key.0) {
+        match wb.delete(key) {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
@@ -85,18 +93,18 @@ impl Api {
     }
 
     #[oai(path = "/pdelete/:pattern", method = "delete")]
-    async fn pdelete(&self, pattern: Path<String>) -> Result<Json<KeyValuePairs>> {
+    async fn pdelete(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
         let mut wb = self.worterbuch.write().await;
-        match wb.pdelete(pattern.0) {
+        match wb.pdelete(pattern) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/ls/:key", method = "get")]
-    async fn ls(&self, key: Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
+    async fn ls(&self, Path(key): Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
         let wb = self.worterbuch.read().await;
-        match wb.ls(Some(key.0)) {
+        match wb.ls(Some(key)) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -126,11 +134,11 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    data: Data<&(Arc<RwLock<Worterbuch>>, ProtocolVersion)>,
+    Data(data): Data<&(Arc<RwLock<Worterbuch>>, ProtocolVersion)>,
     req: &Request,
 ) -> impl IntoResponse {
-    let worterbuch = &data.0 .0;
-    let proto_version = data.0 .1.to_owned();
+    let worterbuch = &data.0;
+    let proto_version = data.1.to_owned();
     let wb: Arc<RwLock<Worterbuch>> = worterbuch.clone();
     let remote = *req
         .remote_addr()
@@ -145,13 +153,21 @@ async fn ws(
 }
 
 #[handler]
-fn asyncapi_spec_yaml(data: Data<&(String, String)>) -> Yaml<serde_yaml::Value> {
+fn asyncapi_spec_yaml(Data(data): Data<&(String, String)>) -> Yaml<Value> {
     let yaml_string = ASYNC_API_YAML
-        .replace("${SERVER_URL}", &quote(&data.0 .0))
-        .replacen("${API_VERSION}", &quote(&data.0 .1), 1)
-        .replacen("${API_VERSION}", &data.0 .1, 1);
+        .replace("${SERVER_URL}", &quote(&data.0))
+        .replacen("${API_VERSION}", &quote(&data.1), 1);
     let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
     Yaml(value)
+}
+
+#[handler]
+fn asyncapi_spec_json(Data(data): Data<&(String, String)>) -> Json<Value> {
+    let yaml_string = ASYNC_API_YAML
+        .replace("${SERVER_URL}", &quote(&data.0))
+        .replacen("${API_VERSION}", &quote(&data.1), 1);
+    let value = serde_yaml::from_str(&yaml_string).expect("cannot fail");
+    Json(value)
 }
 
 pub async fn start(
@@ -202,20 +218,30 @@ pub async fn start(
         );
 
     for proto_ver in proto_versions {
-        let yaml_data = (
-            format!("{proto}://{public_addr}:{port}"),
+        let spec_data = (
+            format!("{proto}://{public_addr}:{port}/ws"),
             format!("{proto_ver}"),
         );
         app = app
             .nest(
                 format!("/asyncapi/{proto_ver}/yaml"),
-                get(asyncapi_spec_yaml.data(yaml_data)),
+                get(asyncapi_spec_yaml.data(spec_data.clone())),
+            )
+            .nest(
+                format!("/asyncapi/{proto_ver}/json"),
+                get(asyncapi_spec_json.data(spec_data)),
             )
             .nest(
                 format!("/ws/{proto_ver}"),
                 get(ws.data((worterbuch.clone(), proto_ver.to_owned()))),
             );
-        log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}",)
+        log::info!(
+            "Serving asyncapi json at http://{public_addr}:{port}/asyncapi/{proto_ver}/json"
+        );
+        log::info!(
+            "Serving asyncapi yaml at http://{public_addr}:{port}/asyncapi/{proto_ver}/yaml"
+        );
+        log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}");
     }
 
     poem::Server::new(TcpListener::bind(addr)).run(app).await
@@ -241,8 +267,8 @@ async fn serve(
     }
 
     spawn(async move {
-        while let Some(bytes) = rx.recv().await {
-            let msg = Message::text(bytes);
+        while let Some(text) = rx.recv().await {
+            let msg = Message::text(text);
             if let Err(e) = client_write.send(msg).await {
                 log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
                 break;
@@ -254,10 +280,11 @@ async fn serve(
 
     loop {
         if let Some(Ok(incoming_msg)) = client_read.next().await {
-            if let Message::Text(data) = incoming_msg {
+            if let Message::Text(text) = incoming_msg {
+                eprintln!("{text}");
                 if !process_incoming_message(
                     client_id,
-                    &data,
+                    &text,
                     worterbuch.clone(),
                     tx.clone(),
                     &proto_version,

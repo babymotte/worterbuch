@@ -7,10 +7,10 @@ channels:
   /ws:
     publish:
       message:
-        $ref: '#/components/messages/ClientMessage'
+        $ref: "#/components/messages/ClientMessage"
     subscribe:
       message:
-        $ref: '#/components/messages/ServerMessage'
+        $ref: "#/components/messages/ServerMessage"
 servers:
   websocket:
     url: ${WS_SERVER_URL}
@@ -20,10 +20,10 @@ components:
   messages:
     ClientMessage:
       payload:
-        $ref: '#/components/schemas/ClientMessage'
+        $ref: "#/components/schemas/ClientMessage"
     ServerMessage:
       payload:
-        $ref: '#/components/schemas/ServerMessage'
+        $ref: "#/components/schemas/ServerMessage"
   schemas:
     ProtocolVersion:
       description: A protocol version with a major and minor version tag
@@ -42,7 +42,8 @@ components:
         - major
         - minor
     KeyValuePair:
-      description: A key/value pair where the key is always a string and the value can be
+      description:
+        A key/value pair where the key is always a string and the value can be
         anything
       type: object
       properties:
@@ -58,19 +59,21 @@ components:
     KeyValuePairs:
       type: array
       items:
-        $ref: '#/components/schemas/KeyValuePair'
+        $ref: "#/components/schemas/KeyValuePair"
     DeletedKeyValuePairs:
       type: array
       items:
-        $ref: '#/components/schemas/KeyValuePair'
+        $ref: "#/components/schemas/KeyValuePair"
     LastWill:
-      description: A list of key/value pairs that will be set when a client disconnects
+      description:
+        A list of key/value pairs that will be set when a client disconnects
         from the server
       type: array
       items:
-        $ref: '#/components/schemas/KeyValuePair'
+        $ref: "#/components/schemas/KeyValuePair"
     GraveGoods:
-      description: A list of keys that will be deleted when a client disconnects from the
+      description:
+        A list of keys that will be deleted when a client disconnects from the
         server
       type: array
       items:
@@ -78,17 +81,26 @@ components:
     ClientMessage:
       description: Messages sent by the client to the server
       oneOf:
-        - $ref: '#/components/schemas/handshakeRequest'
-        - $ref: '#/components/schemas/get'
-        - $ref: '#/components/schemas/pGet'
-        - $ref: '#/components/schemas/set'
-        - $ref: '#/components/schemas/publish'
-        - $ref: '#/components/schemas/subscribe'
-        - $ref: '#/components/schemas/pSubscribe'
-        - $ref: '#/components/schemas/unsubscribe'
-        - $ref: '#/components/schemas/delete'
-        - $ref: '#/components/schemas/pDelete'
-        - $ref: '#/components/schemas/ls'
+        - $ref: "#/components/schemas/handshakeRequest"
+        - $ref: "#/components/schemas/get"
+        - $ref: "#/components/schemas/pGet"
+        - $ref: "#/components/schemas/set"
+        - $ref: "#/components/schemas/publish"
+        - $ref: "#/components/schemas/subscribe"
+        - $ref: "#/components/schemas/pSubscribe"
+        - $ref: "#/components/schemas/unsubscribe"
+        - $ref: "#/components/schemas/delete"
+        - $ref: "#/components/schemas/pDelete"
+        - $ref: "#/components/schemas/ls"
+    ServerMessage:
+      description: Messages sent by the server back to the client
+      oneOf:
+        - $ref: "#/components/schemas/handshake"
+        - $ref: "#/components/schemas/state"
+        - $ref: "#/components/schemas/pState"
+        - $ref: "#/components/schemas/ack"
+        - $ref: "#/components/schemas/err"
+        - $ref: "#/components/schemas/lsState"
     handshakeRequest:
       description: A message sent by a client to initiate a handshake with the server
       type: object
@@ -96,18 +108,19 @@ components:
         supportedProtocolVersions:
           type: array
           items:
-            $ref: '#/components/schemas/ProtocolVersion'
+            $ref: "#/components/schemas/ProtocolVersion"
         lastWill:
-          $ref: '#/components/schemas/LastWill'
+          $ref: "#/components/schemas/LastWill"
         graveGoods:
-          $ref: '#/components/schemas/GraveGoods'
+          $ref: "#/components/schemas/GraveGoods"
       additionalProperties: false
       required:
         - supportedProtocolVersions
         - lastWill
         - graveGoods
     get:
-      description: A message sent by a client to get the value of the provided key from the
+      description:
+        A message sent by a client to get the value of the provided key from the
         server
       properties:
         transactionId:
@@ -121,7 +134,8 @@ components:
         - transactionId
         - key
     pGet:
-      description: A message sent by a client to get all values of keys matching the
+      description:
+        A message sent by a client to get all values of keys matching the
         provided pattern from the server
       properties:
         transactionId:
@@ -256,35 +270,26 @@ components:
       required:
         - transactionId
         - parent
-
-    ServerMessage:
-      description: Messages sent by the server back to the client
-      oneOf:
-        - $ref: '#/components/schemas/handshake'
-        - $ref: '#/components/schemas/state'
-        - $ref: '#/components/schemas/pState'
-        - $ref: '#/components/schemas/ack'
-        - $ref: '#/components/schemas/err'
-        - $ref: '#/components/schemas/lsState'
     handshake:
-      description: A message sent by the server to indicate a successful handshake with the
+      description:
+        A message sent by the server to indicate a successful handshake with the
         client
       type: object
       properties:
         protocolVersion:
-          $ref: '#/components/schemas/ProtocolVersion'
+          $ref: "#/components/schemas/ProtocolVersion"
       additionalProperties: false
       required:
         - protocolVersion
     StateEvent:
       description: An event representing the state of a single key
       oneOf:
-        - $ref: '#/components/schemas/keyValue'
-        - $ref: '#/components/schemas/deleted'
+        - $ref: "#/components/schemas/keyValue"
+        - $ref: "#/components/schemas/deleted"
     keyValue:
-      $ref: '#/components/schemas/KeyValuePair'
+      $ref: "#/components/schemas/KeyValuePair"
     deleted:
-      $ref: '#/components/schemas/KeyValuePair'
+      $ref: "#/components/schemas/KeyValuePair"
     state:
       description: A message sent by the server in response to a Get or Delete message
       properties:
@@ -293,7 +298,7 @@ components:
           type: number
           format: u64
         event:
-          $ref: '#/components/schemas/StateEvent'
+          $ref: "#/components/schemas/StateEvent"
       additionalProperties: false
       required:
         - transactionId
@@ -301,10 +306,11 @@ components:
     PStateEvent:
       description: An event representing the state of one or more keys
       oneOf:
-        - $ref: '#/components/schemas/KeyValuePairs'
-        - $ref: '#/components/schemas/DeletedKeyValuePairs'
+        - $ref: "#/components/schemas/KeyValuePairs"
+        - $ref: "#/components/schemas/DeletedKeyValuePairs"
     pState:
-      description: A message sent by the server in response to a PGet, PDelete or
+      description:
+        A message sent by the server in response to a PGet, PDelete or
         Subscribe/PSubscribe message
       properties:
         transactionId:
@@ -314,14 +320,15 @@ components:
         requestPattern:
           type: string
         event:
-          $ref: '#/components/schemas/PStateEvent'
+          $ref: "#/components/schemas/PStateEvent"
       additionalProperties: false
       required:
         - transactionId
         - requestPattern
         - event
     ack:
-      description: A message sent by the server to confirm that a client message has been
+      description:
+        A message sent by the server to confirm that a client message has been
         processed
       properties:
         transactionId:
@@ -332,7 +339,8 @@ components:
       required:
         - transactionId
     err:
-      description: A message sent by the server to indicate that there was an error
+      description:
+        A message sent by the server to indicate that there was an error
         processing a client message
       properties:
         transactionId:

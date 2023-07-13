@@ -1,0 +1,241 @@
+type: object
+properties:
+  handshakeRequest:
+    description: A message sent by a client to initiate a handshake with the server
+    type: object
+    properties:
+      supportedProtocolVersions:
+        type: array
+        minItems: 1
+        items:
+          $ref: "#/components/schemas/ProtocolVersion"
+      lastWill:
+        description: A list of key/value pairs that will be set when a client disconnects from the server
+        type: array
+        items:
+          $ref: "#/components/schemas/KeyValuePair"
+      graveGoods:
+        description: A list of keys that will be deleted when a client disconnects from the server
+        type: array
+        items:
+          type: string
+    additionalProperties: false
+    required:
+      - supportedProtocolVersions
+      - lastWill
+      - graveGoods
+  get:
+    description: A message sent by a client to request the value of the provided key from the server
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      key:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+  pGet:
+    description: A message sent by a client to request the values of all keys matching the provided pattern from the server
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      requestPattern:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - requestPattern
+  set:
+    description: A message sent by a client to set a new value for a key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      key:
+        description: The key for which to set the value
+        type: string
+      value:
+        description: The new value for the key
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+      - value
+  publish:
+    description: A message sent by a client to publish a new value for a key. The value will not be persisted on the server
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      key:
+        description: The key for which to publish the value
+        type: string
+      value:
+        description: The value to be published for the key
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+      - value
+  subscribe:
+    description: A message sent by a client to subscribe to values of the provided key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      key:
+        description: The key to subscribe to
+        type: string
+      unique:
+        description: Indicate whether all or only unique values should be received
+        type: boolean
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+      - unique
+  pSubscribe:
+    description: A message sent by a client to subscribe to values of all keys matching the provided pattern
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      requestPattern:
+        description: The pattern to subscribe to
+        type: string
+      unique:
+        description: Indicate whether all or only unique values should be received
+        type: boolean
+    additionalProperties: false
+    required:
+      - transactionId
+      - requestPattern
+      - unique
+  unsubscribe:
+    description: A message sent by a client to request the cancellation of the subscription
+    type: object
+    properties:
+      transactionId:
+        description: The transaction ID of the subscription to be cancelled
+        type: number
+        format: u64
+    additionalProperties: false
+    required:
+      - transactionId
+  delete:
+    description: A message sent by a client to request the deletion of the value of the provided key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      key:
+        description: The key to subscribe to
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+  pDelete:
+    description: A message sent by a client to request the deletion of the values of all keys matching the provided pattern
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      requestPattern:
+        description: The deletion pattern
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - requestPattern
+  ls:
+    description: A message sent by a client to list all direct sub-key segments of the provided partial key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      parent:
+        description: The parent partial key for which to list sub-key segments
+        type:
+          - "null"
+          - string
+    additionalProperties: false
+    required:
+      - transactionId
+      - parent
+additionalProperties: false
+oneOf:
+  - required:
+      - handshakeRequest
+  - required:
+      - get
+  - required:
+      - pGet
+  - required:
+      - set
+  - required:
+      - publish
+  - required:
+      - subscribe
+  - required:
+      - pSubscribe
+  - required:
+      - unsubscribe
+  - required:
+      - delete
+  - required:
+      - pDelete
+  - required:
+      - ls
+components:
+  schemas:
+    ProtocolVersion:
+      description: A protocol version with a major and minor version tag
+      type: object
+      properties:
+        major:
+          description: The protocol's major version tag
+          type: number
+          format: u16
+        minor:
+          description: The protocol's minor version tag
+          type: number
+          format: u16
+      additionalProperties: false
+      required:
+        - major
+        - minor
+    KeyValuePair:
+      description: A key/value pair where the key is always a string and the value can be anything
+      type: object
+      properties:
+        key:
+          description: The key
+          type: string
+        value:
+          description: The value
+      additionalProperties: false
+      required:
+        - key
+        - value
