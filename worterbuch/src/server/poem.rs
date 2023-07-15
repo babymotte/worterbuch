@@ -294,7 +294,6 @@ async fn serve(
     loop {
         if let Some(Ok(incoming_msg)) = client_read.next().await {
             if let Message::Text(text) = incoming_msg {
-                eprintln!("{text}");
                 if !process_incoming_message(
                     client_id,
                     &text,
