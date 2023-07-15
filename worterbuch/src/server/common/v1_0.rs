@@ -12,7 +12,7 @@ use worterbuch_common::{
     error::{Context, WorterbuchError},
     Ack, ClientMessage as CM, Delete, Err, ErrorCode, Export, Get, HandshakeRequest, Import,
     KeyValuePair, Ls, LsState, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish,
-    ServerMessage, Set, State, StateEvent, Subscribe, Unsubscribe,
+    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
 };
 
 pub async fn process_incoming_message(
@@ -59,6 +59,12 @@ pub async fn process_incoming_message(
         }
         Ok(Some(CM::Ls(msg))) => {
             ls(msg, worterbuch.clone(), tx.clone()).await?;
+        }
+        Ok(Some(CM::SubscribeLs(msg))) => {
+            subscribe_ls(msg, worterbuch.clone(), tx.clone()).await?;
+        }
+        Ok(Some(CM::UnsubscribeLs(msg))) => {
+            unsubscribe_ls(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(None) => {
             // client disconnected
@@ -577,6 +583,31 @@ async fn ls(
         })?,
         Err(e) => handle_encode_error(e, client).await?,
     }
+
+    Ok(())
+}
+
+async fn subscribe_ls(
+    msg: SubscribeLs,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<bool> {
+    let wb_unsub = worterbuch.clone();
+    let mut wb = worterbuch.write().await;
+
+    todo!();
+
+    Ok(true)
+}
+
+async fn unsubscribe_ls(
+    msg: UnsubscribeLs,
+    worterbuch: Arc<RwLock<Worterbuch>>,
+    client: UnboundedSender<String>,
+) -> WorterbuchResult<()> {
+    let wb = worterbuch.write().await;
+
+    todo!();
 
     Ok(())
 }

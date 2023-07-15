@@ -184,6 +184,23 @@ properties:
     required:
       - transactionId
       - parent
+  subscribeLs:
+    description: A message sent by a client to request a subscription to all direct sub-key segments of the provided partial key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: number
+        format: u64
+      parent:
+        description: The parent partial key for which to list sub-key segments
+        type:
+          - "null"
+          - string
+    additionalProperties: false
+    required:
+      - transactionId
+      - parent
 additionalProperties: false
 oneOf:
   - required:
