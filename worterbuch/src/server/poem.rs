@@ -35,7 +35,7 @@ impl Api {
     #[oai(path = "/get/:key", method = "get")]
     async fn get(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
         let wb = self.worterbuch.read().await;
-        match wb.get(key) {
+        match wb.get(&key) {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
@@ -105,7 +105,7 @@ impl Api {
     #[oai(path = "/ls/:key", method = "get")]
     async fn ls(&self, Path(key): Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
         let wb = self.worterbuch.read().await;
-        match wb.ls(Some(key)) {
+        match wb.ls(&Some(key)) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -114,7 +114,7 @@ impl Api {
     #[oai(path = "/ls", method = "get")]
     async fn ls_root(&self) -> Result<Json<Vec<RegularKeySegment>>> {
         let wb = self.worterbuch.read().await;
-        match wb.ls(None) {
+        match wb.ls(&None) {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }

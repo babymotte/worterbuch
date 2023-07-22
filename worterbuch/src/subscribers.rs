@@ -4,8 +4,13 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, TransactionId};
 
-type Subs = Vec<Subscriber>;
 type Tree = HashMap<KeySegment, Node>;
+
+#[derive(Debug, Clone, Default)]
+pub struct Subs {
+    pub subscribers: Vec<Subscriber>,
+    pub ls_subscribers: Vec<LsSubscriber>,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SubscriptionId {
@@ -22,7 +27,7 @@ impl SubscriptionId {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Subscriber {
     pattern: Vec<KeySegment>,
     tx: UnboundedSender<PStateEvent>,
@@ -55,6 +60,28 @@ impl Subscriber {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct LsSubscriber {
+    parent: Vec<KeySegment>,
+    tx: UnboundedSender<Vec<RegularKeySegment>>,
+    id: SubscriptionId,
+}
+
+impl LsSubscriber {
+    pub fn new(
+        id: SubscriptionId,
+        parent: Vec<KeySegment>,
+        tx: UnboundedSender<Vec<RegularKeySegment>>,
+    ) -> LsSubscriber {
+        LsSubscriber { parent, tx, id }
+    }
+
+    pub fn send(&self, children: Vec<RegularKeySegment>) -> Result<()> {
+        self.tx.send(children)?;
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct Node {
     pub subscribers: Subs,
@@ -71,6 +98,14 @@ impl Subscribers {
         let mut all_subscribers = Vec::new();
 
         self.add_matches(&self.data, key, &mut all_subscribers);
+
+        all_subscribers
+    }
+
+    pub fn get_ls_subscribers(&self, key: &[RegularKeySegment]) -> Vec<LsSubscriber> {
+        let mut all_subscribers = Vec::new();
+
+        self.add_ls_matches(&self.data, key, &mut all_subscribers);
 
         all_subscribers
     }
@@ -100,7 +135,35 @@ impl Subscribers {
                 return;
             }
         }
-        all_subscribers.extend(current.subscribers.clone());
+        all_subscribers.extend(current.subscribers.subscribers.clone());
+    }
+
+    fn add_ls_matches(
+        &self,
+        mut current: &Node,
+        remaining_path: &[RegularKeySegment],
+        all_subscribers: &mut Vec<LsSubscriber>,
+    ) {
+        let mut remaining_path = remaining_path;
+
+        for elem in remaining_path {
+            remaining_path = &remaining_path[1..];
+
+            if let Some(node) = current.tree.get(&KeySegment::Wildcard) {
+                self.add_ls_matches(&node, remaining_path, all_subscribers);
+            }
+
+            if let Some(node) = current.tree.get(&KeySegment::MultiWildcard) {
+                self.add_all_ls_children(node, all_subscribers);
+            }
+
+            if let Some(node) = current.tree.get(&elem.to_owned().into()) {
+                current = node;
+            } else {
+                return;
+            }
+        }
+        all_subscribers.extend(current.subscribers.ls_subscribers.clone());
     }
 
     pub fn add_subscriber(&mut self, pattern: &[KeySegment], subscriber: Subscriber) {
@@ -114,7 +177,21 @@ impl Subscribers {
             };
         }
 
-        current.subscribers.push(subscriber);
+        current.subscribers.subscribers.push(subscriber);
+    }
+
+    pub fn add_ls_subscriber(&mut self, parent: &[KeySegment], subscriber: LsSubscriber) {
+        log::debug!("Adding ls subscriber for parent {:?}", parent);
+        let mut current = &mut self.data;
+
+        for elem in parent {
+            current = match current.tree.entry(elem.to_owned().into()) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => e.insert(Node::default()),
+            };
+        }
+
+        current.subscribers.ls_subscribers.push(subscriber);
     }
 
     pub fn unsubscribe(&mut self, pattern: &[KeySegment], subscription: &SubscriptionId) -> bool {
@@ -129,11 +206,37 @@ impl Subscribers {
             }
         }
         let mut removed = false;
-        current.subscribers.retain(|s| {
+        current.subscribers.subscribers.retain(|s| {
             let retain = &s.id != subscription;
             removed = removed || !retain;
             if !retain {
                 log::debug!("Removing subscription {subscription:?} to pattern {pattern:?}");
+            }
+            retain
+        });
+        if !removed {
+            log::debug!("no matching subscription found")
+        }
+        removed
+    }
+
+    pub fn unsubscribe_ls(&mut self, parent: &[KeySegment], subscription: &SubscriptionId) -> bool {
+        let mut current = &mut self.data;
+
+        for elem in parent {
+            if let Some(node) = current.tree.get_mut(elem) {
+                current = node;
+            } else {
+                log::warn!("No subscriber found for pattern {:?}", parent);
+                return false;
+            }
+        }
+        let mut removed = false;
+        current.subscribers.ls_subscribers.retain(|s| {
+            let retain = &s.id != subscription;
+            removed = removed || !retain;
+            if !retain {
+                log::debug!("Removing subscription {subscription:?} to parent {parent:?}");
             }
             retain
         });
@@ -155,13 +258,41 @@ impl Subscribers {
             }
         }
 
-        current.subscribers.retain(|s| s.id != subscriber.id);
+        current
+            .subscribers
+            .subscribers
+            .retain(|s| s.id != subscriber.id);
+    }
+
+    pub fn remove_ls_subscriber(&mut self, subscriber: LsSubscriber) {
+        let mut current = &mut self.data;
+
+        for elem in &subscriber.parent {
+            if let Some(node) = current.tree.get_mut(elem) {
+                current = node;
+            } else {
+                log::warn!("No ls subscriber found for parent {:?}", subscriber.parent);
+                return;
+            }
+        }
+
+        current
+            .subscribers
+            .ls_subscribers
+            .retain(|s| s.id != subscriber.id);
     }
 
     fn add_all_children(&self, node: &Node, all_subscribers: &mut Vec<Subscriber>) {
-        all_subscribers.extend(node.subscribers.clone());
+        all_subscribers.extend(node.subscribers.subscribers.clone());
         for node in node.tree.values() {
             self.add_all_children(&node, all_subscribers);
+        }
+    }
+
+    fn add_all_ls_children(&self, node: &Node, all_subscribers: &mut Vec<LsSubscriber>) {
+        all_subscribers.extend(node.subscribers.ls_subscribers.clone());
+        for node in node.tree.values() {
+            self.add_all_ls_children(&node, all_subscribers);
         }
     }
 }

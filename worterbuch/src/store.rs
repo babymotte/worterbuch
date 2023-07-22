@@ -266,7 +266,11 @@ impl Store {
         Ok(matches)
     }
 
-    pub fn insert(&mut self, path: &[RegularKeySegment], value: Value) -> StoreResult<bool> {
+    pub fn insert(
+        &mut self,
+        path: &[RegularKeySegment],
+        value: Value,
+    ) -> StoreResult<(bool, bool)> {
         let mut current = &mut self.data;
 
         for elem in path {
@@ -288,14 +292,17 @@ impl Store {
             self.len += 1;
         }
 
-        Ok(changed)
+        Ok((changed, inserted))
     }
 
-    pub fn ls(&self, path: Vec<RegularKeySegment>) -> Option<Vec<RegularKeySegment>> {
+    pub fn ls<'s>(&self, mut path: &[&'s str]) -> Option<Vec<RegularKeySegment>> {
+        if path.is_empty() {
+            panic!("path must not be empty!");
+        }
         let mut current = &self.data;
 
         for elem in path {
-            current = match current.t.get(&elem) {
+            current = match current.t.get(*elem) {
                 Some(e) => e,
                 None => return None,
             }

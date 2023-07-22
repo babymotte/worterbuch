@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     stats::{SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT},
     store::{Store, StoreStats},
-    subscribers::{Subscriber, Subscribers, SubscriptionId},
+    subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
@@ -20,7 +20,8 @@ use worterbuch_common::{
     TransactionId,
 };
 
-pub type Subscriptions = HashMap<SubscriptionId, RequestPattern>;
+pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
+pub type LsSubscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
@@ -39,6 +40,7 @@ pub struct Worterbuch {
     config: Config,
     store: Store,
     subscriptions: Subscriptions,
+    ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     // len: usize,
     last_wills: HashMap<Uuid, LastWill>,
@@ -105,26 +107,29 @@ impl Worterbuch {
         Ok(handshake)
     }
 
-    pub fn get(&self, key: Key) -> WorterbuchResult<(String, Value)> {
-        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+    pub fn get(&self, key: &Key) -> WorterbuchResult<(String, Value)> {
+        let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
         match self.store.get(&path) {
             Some(value) => {
                 let key_value = (key.to_owned(), value.to_owned());
                 Ok(key_value)
             }
-            None => Err(WorterbuchError::NoSuchValue(key)),
+            None => Err(WorterbuchError::NoSuchValue(key.to_owned())),
         }
     }
 
     pub fn set(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        let changed = self
+        let (changed, new_child) = self
             .store
             .insert(&path, value.clone())
             .map_err(|e| e.for_pattern(key.clone()))?;
 
+        if new_child {
+            self.notify_ls_subscribers(path.split_last().map(|(_, it)| it).unwrap_or(&[]));
+        }
         self.notify_subscribers(path, key, value, changed, false);
 
         Ok(())
@@ -153,7 +158,7 @@ impl Worterbuch {
         unique: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
-        let matches = match self.get(key.clone()) {
+        let matches = match self.get(&key) {
             Ok((key, value)) => Some((key, value)),
             Err(WorterbuchError::NoSuchValue(_)) => None,
             Err(e) => return Err(e),
@@ -167,7 +172,7 @@ impl Worterbuch {
                 .expect("rx is neither closed nor dropped");
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
-        self.subscriptions.insert(subscription_id, key);
+        self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
         Ok((rx, subscription))
     }
@@ -193,8 +198,27 @@ impl Worterbuch {
         tx.send(PStateEvent::KeyValuePairs(matches))
             .expect("rx is neither closed nor dropped");
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
-        self.subscriptions.insert(subscription_id, pattern);
+        self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
+        Ok((rx, subscription))
+    }
+
+    pub fn subscribe_ls(
+        &mut self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+        parent: Option<String>,
+    ) -> WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)> {
+        let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
+        let path: Vec<KeySegment> = parent.map(KeySegment::parse).unwrap_or_else(|| Vec::new());
+        let (tx, rx) = unbounded_channel();
+        let subscription = SubscriptionId::new(client_id, transaction_id);
+        let subscriber = LsSubscriber::new(subscription.clone(), path.clone(), tx.clone());
+        self.subscribers.add_ls_subscriber(&path, subscriber);
+        tx.send(children).expect("rx is neither closed nor dropped");
+        let subscription_id = SubscriptionId::new(client_id, transaction_id);
+        self.ls_subscriptions.insert(subscription_id, path);
+        log::debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
         Ok((rx, subscription))
     }
 
@@ -263,10 +287,34 @@ impl Worterbuch {
     }
 
     fn do_unsubscribe(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
-        if let Some(pattern) = self.subscriptions.remove(&subscription) {
+        if let Some(path) = self.subscriptions.remove(&subscription) {
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
-            let pattern: Vec<KeySegment> = KeySegment::parse(&pattern);
-            if self.subscribers.unsubscribe(&pattern, &subscription) {
+            if self.subscribers.unsubscribe(&path, &subscription) {
+                Ok(())
+            } else {
+                Err(WorterbuchError::NotSubscribed)
+            }
+        } else {
+            Err(WorterbuchError::NotSubscribed)
+        }
+    }
+
+    pub fn unsubscribe_ls(
+        &mut self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+    ) -> WorterbuchResult<()> {
+        let subscription = SubscriptionId::new(client_id, transaction_id);
+        self.do_unsubscribe_ls(&subscription)
+    }
+
+    fn do_unsubscribe_ls(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
+        if let Some(path) = self.ls_subscriptions.remove(&subscription) {
+            log::debug!(
+                "Remaining ls subscriptions: {}",
+                self.ls_subscriptions.len()
+            );
+            if self.subscribers.unsubscribe_ls(&path, &subscription) {
                 Ok(())
             } else {
                 Err(WorterbuchError::NotSubscribed)
@@ -306,6 +354,30 @@ impl Worterbuch {
             } {
                 log::trace!("Error calling subscriber: {e}");
                 self.subscribers.remove_subscriber(subscriber)
+            }
+        }
+    }
+
+    fn notify_ls_subscribers(&mut self, path: &[RegularKeySegment]) {
+        let subscribers = self.subscribers.get_ls_subscribers(path);
+
+        if subscribers.is_empty() {
+            return;
+        }
+
+        let path: Vec<&str> = path.iter().map(String::as_str).collect();
+        let children = self.ls_path(&path).unwrap_or_else(|_| Vec::new());
+
+        log::trace!(
+            "Calling {} subscribers: ls {:?} => {:?}",
+            subscribers.len(),
+            path,
+            children
+        );
+        for subscriber in subscribers {
+            if let Err(e) = subscriber.send(children.clone()) {
+                log::trace!("Error calling subscriber: {e}");
+                self.subscribers.remove_ls_subscriber(subscriber)
             }
         }
     }
@@ -352,31 +424,24 @@ impl Worterbuch {
         deleted
     }
 
-    pub fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
-        let children = if let Some(parent) = parent.as_deref() {
-            let path = KeySegment::parse(&parent);
-            let mut cleaned_path = Vec::new();
-            for segment in path {
-                match segment {
-                    KeySegment::Regular(segment) => cleaned_path.push(segment),
-                    KeySegment::Wildcard => {
-                        return Err(WorterbuchError::IllegalWildcard(parent.to_owned()))
-                    }
-                    KeySegment::MultiWildcard => {
-                        return Err(WorterbuchError::IllegalMultiWildcard(parent.to_owned()))
-                    }
-                }
-            }
-            self.store.ls(cleaned_path)
+    pub fn ls(&self, parent: &Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let path = parent
+            .as_deref()
+            .map(|p| p.split("/").collect())
+            .unwrap_or_else(|| Vec::new());
+        self.ls_path(&path)
+    }
+
+    fn ls_path<'s>(&self, path: &[&'s str]) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let children = if !path.is_empty() {
+            self.store.ls(path)
         } else {
             Some(self.store.ls_root())
         };
 
         match children {
             Some(children) => Ok(children),
-            None => Err(WorterbuchError::NoSuchValue(
-                parent.unwrap_or("".to_owned()),
-            )),
+            None => Err(WorterbuchError::NoSuchValue(path.join("/"))),
         }
     }
 

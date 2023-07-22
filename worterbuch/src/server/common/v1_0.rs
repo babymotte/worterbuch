@@ -61,10 +61,10 @@ pub async fn process_incoming_message(
             ls(msg, worterbuch.clone(), tx.clone()).await?;
         }
         Ok(Some(CM::SubscribeLs(msg))) => {
-            subscribe_ls(msg, worterbuch.clone(), tx.clone()).await?;
+            subscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
         }
         Ok(Some(CM::UnsubscribeLs(msg))) => {
-            unsubscribe_ls(msg, worterbuch.clone(), tx.clone()).await?;
+            unsubscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
         }
         Ok(None) => {
             // client disconnected
@@ -117,7 +117,7 @@ async fn get(
 ) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
-    let key_value = match wb.get(msg.key) {
+    let key_value = match wb.get(&msg.key) {
         Ok(key_value) => key_value.into(),
         Err(e) => {
             handle_store_error(e, client.clone(), msg.transaction_id).await?;
@@ -561,7 +561,7 @@ async fn ls(
 ) -> WorterbuchResult<()> {
     let wb = worterbuch.read().await;
 
-    let children = match wb.ls(msg.parent.clone()) {
+    let children = match wb.ls(&msg.parent) {
         Ok(it) => it,
         Result::Err(e) => {
             handle_store_error(e, client.clone(), msg.transaction_id).await?;
@@ -589,25 +589,99 @@ async fn ls(
 
 async fn subscribe_ls(
     msg: SubscribeLs,
+    client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<String>,
 ) -> WorterbuchResult<bool> {
     let wb_unsub = worterbuch.clone();
     let mut wb = worterbuch.write().await;
 
-    todo!();
+    let (mut rx, subscription) =
+        match wb.subscribe_ls(client_id, msg.transaction_id, msg.parent.clone()) {
+            Ok(it) => it,
+            Err(e) => {
+                handle_store_error(e, client, msg.transaction_id).await?;
+                return Ok(false);
+            }
+        };
+
+    let response = Ack {
+        transaction_id: msg.transaction_id,
+    };
+
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client.clone()).await?,
+    }
+
+    let transaction_id = msg.transaction_id;
+
+    spawn(async move {
+        log::debug!("Receiving events for ls subscription {subscription:?} …");
+        while let Some(children) = rx.recv().await {
+            let state = LsState {
+                transaction_id: transaction_id.clone(),
+                children,
+            };
+            match serde_json::to_string(&ServerMessage::LsState(state)) {
+                Ok(data) => {
+                    if let Err(e) = client.clone().send(data) {
+                        log::error!("Error sending STATE message to client: {e}");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = handle_encode_error(e, client.clone()).await {
+                        log::error!("Error sending ERROR message to client: {e}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut wb = wb_unsub.write().await;
+        log::debug!("No more events, ending ls subscription {subscription:?}.");
+        match wb.unsubscribe_ls(client_id, transaction_id) {
+            Ok(()) => {
+                log::warn!("Ls Subscription {subscription:?} was not cleaned up properly!");
+            }
+            Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+            Err(e) => {
+                log::warn!("Error while unsubscribing ls: {e}");
+            }
+        }
+    });
 
     Ok(true)
 }
 
 async fn unsubscribe_ls(
     msg: UnsubscribeLs,
+    client_id: Uuid,
     worterbuch: Arc<RwLock<Worterbuch>>,
     client: UnboundedSender<String>,
 ) -> WorterbuchResult<()> {
-    let wb = worterbuch.write().await;
+    let mut wb = worterbuch.write().await;
 
-    todo!();
+    wb.unsubscribe_ls(client_id, msg.transaction_id)?;
+    let response = Ack {
+        transaction_id: msg.transaction_id,
+    };
+
+    match serde_json::to_string(&ServerMessage::Ack(response)) {
+        Ok(data) => client.send(data).context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?,
+        Err(e) => handle_encode_error(e, client.clone()).await?,
+    }
 
     Ok(())
 }

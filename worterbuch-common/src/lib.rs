@@ -154,6 +154,13 @@ pub enum KeySegment {
     // RegexWildcard(String),
 }
 
+pub fn format_path(path: &Vec<KeySegment>) -> String {
+    path.iter()
+        .map(|seg| format!("{seg}"))
+        .collect::<Vec<String>>()
+        .join("/")
+}
+
 impl From<RegularKeySegment> for KeySegment {
     fn from(reg: RegularKeySegment) -> Self {
         Self::Regular(reg)
@@ -194,8 +201,8 @@ impl From<&str> for KeySegment {
 }
 
 impl KeySegment {
-    pub fn parse(pattern: &str) -> Vec<KeySegment> {
-        let segments = pattern.split("/");
+    pub fn parse(pattern: impl AsRef<str>) -> Vec<KeySegment> {
+        let segments = pattern.as_ref().split("/");
         segments.map(KeySegment::from).collect()
     }
 }
