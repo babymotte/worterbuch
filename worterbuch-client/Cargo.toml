@@ -22,4 +22,4 @@ futures-util = { version = "0.3.27", default-features = false, features = [
     "sink",
     "std",
 ] }
-tokio-tungstenite = { version = "0.18.0" }
+tokio-tungstenite = "0.20.0"
