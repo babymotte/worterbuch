@@ -530,7 +530,7 @@ impl Connection {
     pub async fn psubscribe_values(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<PStateEvent, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, false).await
     }
 
@@ -545,7 +545,7 @@ impl Connection {
     pub async fn psubscribe_unique_values(
         &mut self,
         request_pattern: String,
-    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<PStateEvent, SubscriptionError>>> {
         self.do_psubscribe_values(request_pattern, true).await
     }
 
@@ -560,7 +560,7 @@ impl Connection {
         &mut self,
         request_pattern: String,
         unique: bool,
-    ) -> ConnectionResult<impl Stream<Item = Result<StateEvent, SubscriptionError>>> {
+    ) -> ConnectionResult<impl Stream<Item = Result<PStateEvent, SubscriptionError>>> {
         let mut subscr = self.responses();
         let i = self.inc_counter();
         let owned_pattern = request_pattern.clone();
@@ -590,18 +590,7 @@ impl Connection {
                                         if tid == i {
                                             match msg {
                                                 SM::PState(pstate) => {
-                                                    match pstate.event {
-                                                        PStateEvent::KeyValuePairs(kvps) => {
-                                                            for kvp in kvps {
-                                                                yield Ok(StateEvent::KeyValue(kvp));
-                                                            }
-                                                        },
-                                                        PStateEvent::Deleted(kvps) => {
-                                                            for kvp in kvps {
-                                                                yield Ok(StateEvent::Deleted(kvp));
-                                                            }
-                                                        },
-                                                    }
+                                                    yield Ok(pstate.event)
                                                 }
                                                 SM::Err(err) => {
                                                     log::error!("Error in subscription of {owned_pattern}: {err:?}");
