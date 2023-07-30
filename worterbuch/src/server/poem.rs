@@ -214,10 +214,10 @@ pub async fn start(
     let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
     let mut app = Route::new()
-        .nest("/openapi", api_service)
+        .nest("/api", api_service)
         .nest("/doc", openapi_explorer)
-        .nest("/openapi/json", oapi_spec_json)
-        .nest("/openapi/yaml", oapi_spec_yaml)
+        .nest("/api/json", oapi_spec_json)
+        .nest("/api/yaml", oapi_spec_yaml)
         .nest(
             format!("/ws"),
             get(ws.data((
