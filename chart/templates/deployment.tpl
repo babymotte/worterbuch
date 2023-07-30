@@ -39,17 +39,20 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:          
+            - name: WORTERBUCH_PUBLIC_ADDRESS
+              value: {{ (first .Values.ingress.hosts).host }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /
+              path: /api/get/%24SYS/uptime
               port: http
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/get/%24SYS/uptime
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

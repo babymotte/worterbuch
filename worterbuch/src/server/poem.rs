@@ -203,7 +203,7 @@ pub async fn start(
     };
 
     let api_path = "/api";
-    let public_url = &format!("http://{public_addr}:{port}/{api_path}");
+    let public_url = &format!("http://{public_addr}:{port}{api_path}");
 
     let api_service =
         OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(public_url);
