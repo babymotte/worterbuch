@@ -202,7 +202,8 @@ pub async fn start(
         worterbuch: worterbuch.clone(),
     };
 
-    let public_url = &format!("http://{public_addr}:{port}/openapi");
+    let api_path = "/api";
+    let public_url = &format!("http://{public_addr}:{port}/{api_path}");
 
     let api_service =
         OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(public_url);
@@ -214,7 +215,7 @@ pub async fn start(
     let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
     let mut app = Route::new()
-        .nest("/api", api_service)
+        .nest(api_path, api_service)
         .nest("/doc", openapi_explorer)
         .nest("/api/json", oapi_spec_json)
         .nest("/api/yaml", oapi_spec_yaml)
