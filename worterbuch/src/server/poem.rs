@@ -23,7 +23,7 @@ use worterbuch_common::{
     error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
 };
 
-const ASYNC_API_YAML: &'static str = include_str!("../../../worterbuch-common/asyncapi.yaml");
+const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Api {
