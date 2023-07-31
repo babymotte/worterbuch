@@ -77,12 +77,12 @@ async fn main() -> Result<()> {
 
     if let Some(patterns) = patterns {
         for pattern in patterns {
-            trans_id = con.pdelete(pattern.to_owned())?;
+            trans_id = con.pdelete_async(pattern.to_owned())?;
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
-            trans_id = con.pdelete(key)?;
+            trans_id = con.pdelete_async(key)?;
         }
     }
 

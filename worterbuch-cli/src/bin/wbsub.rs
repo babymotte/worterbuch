@@ -67,18 +67,18 @@ async fn main() -> Result<()> {
     if let Some(keys) = keys {
         for key in keys {
             if unique {
-                con.subscribe_unique(key.to_owned())?;
+                con.subscribe_unique_async(key.to_owned())?;
             } else {
-                con.subscribe(key.to_owned())?;
+                con.subscribe_async(key.to_owned())?;
             }
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
             if unique {
-                con.subscribe_unique(key)?;
+                con.subscribe_unique_async(key)?;
             } else {
-                con.subscribe(key)?;
+                con.subscribe_async(key)?;
             }
         }
     }

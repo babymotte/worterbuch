@@ -78,12 +78,12 @@ async fn main() -> Result<()> {
 
     if let Some(keys) = keys {
         for key in keys {
-            trans_id = con.delete(key.to_owned())?;
+            trans_id = con.delete_async(key.to_owned())?;
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
-            trans_id = con.delete(key)?;
+            trans_id = con.delete_async(key)?;
         }
     }
 

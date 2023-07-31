@@ -37,7 +37,7 @@ impl Connection {
         }
     }
 
-    pub fn set(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
+    pub fn set_value(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Set(Set {
             transaction_id: i,
@@ -47,11 +47,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn set_json<T: Serialize>(
-        &mut self,
-        key: String,
-        value: &T,
-    ) -> ConnectionResult<TransactionId> {
+    pub fn set<T: Serialize>(&mut self, key: String, value: &T) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         let value = serde_json::to_value(value)?;
         self.cmd_tx.send(CM::Set(Set {
@@ -62,7 +58,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn publish(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
+    pub fn publish_value(&mut self, key: String, value: Value) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Publish(Publish {
             transaction_id: i,
@@ -72,7 +68,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn publish_json<T: Serialize>(
+    pub fn publish<T: Serialize>(
         &mut self,
         key: String,
         value: &T,
@@ -87,7 +83,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn get(&mut self, key: String) -> ConnectionResult<TransactionId> {
+    pub fn get_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Get(Get {
             transaction_id: i,
@@ -96,7 +92,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn pget(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
+    pub fn pget_async(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PGet(PGet {
             transaction_id: i,
@@ -105,7 +101,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn delete(&mut self, key: String) -> ConnectionResult<TransactionId> {
+    pub fn delete_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Delete(Delete {
             transaction_id: i,
@@ -114,7 +110,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn pdelete(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
+    pub fn pdelete_async(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::PDelete(PDelete {
             transaction_id: i,
@@ -123,11 +119,11 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn subscribe(&mut self, key: String) -> ConnectionResult<TransactionId> {
+    pub fn subscribe_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
         self.do_subscribe(key, false)
     }
 
-    pub fn subscribe_unique(&mut self, key: String) -> ConnectionResult<TransactionId> {
+    pub fn subscribe_unique_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
         self.do_subscribe(key, true)
     }
 
@@ -141,11 +137,11 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn psubscribe(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
+    pub fn psubscribe_async(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
         self.do_psubscribe(request_pattern, false)
     }
 
-    pub fn psubscribe_unique(
+    pub fn psubscribe_unique_async(
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<TransactionId> {
@@ -166,7 +162,7 @@ impl Connection {
         Ok(i)
     }
 
-    pub fn ls(&mut self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
+    pub fn ls_async(&mut self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Ls(Ls {
             transaction_id: i,
@@ -215,10 +211,38 @@ impl Connection {
         }
     }
 
-    pub async fn get_json_value<T: DeserializeOwned>(
-        &mut self,
-        key: String,
-    ) -> ConnectionResult<T> {
+    pub async fn ls(&mut self, parent: Option<Key>) -> ConnectionResult<Vec<RegularKeySegment>> {
+        let mut subscr = self.responses();
+
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::Ls(Ls {
+            transaction_id: i,
+            parent,
+        }))?;
+
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::LsState(state) => return Ok(state.children),
+                            SM::Err(msg) => {
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ));
+                            }
+                            _ => { /* ignore */ }
+                        }
+                    }
+                    // TODO time out
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    pub async fn get<T: DeserializeOwned>(&mut self, key: String) -> ConnectionResult<T> {
         let mut subscr = self.responses();
 
         let i = self.inc_counter();
@@ -301,7 +325,7 @@ impl Connection {
         }
     }
 
-    pub async fn pget_json_values<T: DeserializeOwned>(
+    pub async fn pget<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<TypedKeyValuePairs<T>> {
@@ -347,7 +371,7 @@ impl Connection {
         self.do_subscribe_values(key, false).await
     }
 
-    pub async fn subscribe_json_values<T: DeserializeOwned>(
+    pub async fn subscribe<T: DeserializeOwned>(
         &mut self,
         key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
@@ -361,7 +385,7 @@ impl Connection {
         self.do_subscribe_values(key, true).await
     }
 
-    pub async fn subscribe_unique_json_values<T: DeserializeOwned>(
+    pub async fn subscribe_unique<T: DeserializeOwned>(
         &mut self,
         key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
@@ -516,7 +540,7 @@ impl Connection {
         self.do_psubscribe_values(request_pattern, false).await
     }
 
-    pub async fn psubscribe_json_values<T: DeserializeOwned>(
+    pub async fn psubscribe<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
@@ -531,7 +555,7 @@ impl Connection {
         self.do_psubscribe_values(request_pattern, true).await
     }
 
-    pub async fn psubscribe_unique_json_values<T: DeserializeOwned>(
+    pub async fn psubscribe_unique<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {

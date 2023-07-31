@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let trans_id = con.ls(parent)?;
+    let trans_id = con.ls_async(parent)?;
 
     loop {
         let acked = *acked.lock().expect("mutex is poisoned");

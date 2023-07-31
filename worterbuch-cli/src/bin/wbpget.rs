@@ -78,12 +78,12 @@ async fn main() -> Result<()> {
 
     if let Some(patterns) = patterns {
         for pattern in patterns {
-            trans_id = con.pget(pattern.to_owned())?;
+            trans_id = con.pget_async(pattern.to_owned())?;
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(pattern)) = lines.next_line().await {
-            trans_id = con.pget(pattern)?;
+            trans_id = con.pget_async(pattern)?;
         }
     }
 

@@ -52,11 +52,11 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    con.set("last_will/hello/world".to_owned(), json!("ONLINE"))?;
+    con.set_value("last_will/hello/world".to_owned(), json!("ONLINE"))?;
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(value)) = lines.next_line().await {
-        con.set("last_will/hello/world".to_owned(), json!(value))?;
+        con.set_value("last_will/hello/world".to_owned(), json!(value))?;
     }
 
     Ok(())

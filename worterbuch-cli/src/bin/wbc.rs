@@ -135,7 +135,7 @@ fn get<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
-        con.get(key)?;
+        con.get_async(key)?;
     }
     Ok(())
 }
@@ -144,7 +144,7 @@ fn pget<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no key specified");
     } else {
-        con.pget(pattern)?;
+        con.pget_async(pattern)?;
     }
     Ok(())
 }
@@ -165,7 +165,7 @@ fn set<'f>(key_value: String, con: &mut Connection) -> Result<()> {
             return Ok(());
         }
     };
-    con.set(key.to_owned(), json!(value))?;
+    con.set_value(key.to_owned(), json!(value))?;
     Ok(())
 }
 
@@ -173,7 +173,7 @@ fn sub<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
-        con.subscribe(key)?;
+        con.subscribe_async(key)?;
     }
     Ok(())
 }
@@ -182,7 +182,7 @@ fn psub<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no pattern specified");
     } else {
-        con.psubscribe(pattern)?;
+        con.psubscribe_async(pattern)?;
     }
     Ok(())
 }
@@ -191,7 +191,7 @@ fn subu<'f>(key: String, con: &mut Connection) -> Result<()> {
     if key.is_empty() {
         eprintln!("no key specified");
     } else {
-        con.subscribe_unique(key)?;
+        con.subscribe_unique_async(key)?;
     }
     Ok(())
 }
@@ -200,7 +200,7 @@ fn psubu<'f>(pattern: String, con: &mut Connection) -> Result<()> {
     if pattern.is_empty() {
         eprintln!("no pattern specified");
     } else {
-        con.psubscribe_unique(pattern)?;
+        con.psubscribe_unique_async(pattern)?;
     }
     Ok(())
 }

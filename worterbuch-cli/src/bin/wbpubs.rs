@@ -79,13 +79,13 @@ async fn main() -> Result<()> {
     while let Ok(Some(value)) = lines.next_line().await {
         if json {
             match serde_json::from_str::<Value>(&value) {
-                Ok(value) => trans_id = con.publish(key.to_owned(), value)?,
+                Ok(value) => trans_id = con.publish_value(key.to_owned(), value)?,
                 Err(e) => {
                     log::error!("Invalid input '{value}': {e}");
                 }
             }
         } else {
-            trans_id = con.publish(key.to_owned(), json!(value))?;
+            trans_id = con.publish_value(key.to_owned(), json!(value))?;
         }
     }
 

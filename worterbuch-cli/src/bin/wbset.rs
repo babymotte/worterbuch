@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<KeyValuePair>(&line) {
                 Ok(KeyValuePair { key, value }) => {
-                    trans_id = con.set(key, json!(value))?;
+                    trans_id = con.set_value(key, json!(value))?;
                 }
                 Err(e) => {
                     eprintln!("Error parsing json: {e}");
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = key_calue_pair.find('=') {
                     let key = &key_calue_pair[..index];
                     let val = &key_calue_pair[index + 1..];
-                    trans_id = con.set(key.to_owned(), json!(val))?;
+                    trans_id = con.set_value(key.to_owned(), json!(val))?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", key_calue_pair);
                 }
@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = line.find('=') {
                     let key = &line[..index];
                     let val = &line[index + 1..];
-                    trans_id = con.set(key.to_owned(), json!(val))?;
+                    trans_id = con.set_value(key.to_owned(), json!(val))?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
                 }

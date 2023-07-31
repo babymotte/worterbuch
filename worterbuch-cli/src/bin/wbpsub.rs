@@ -67,18 +67,18 @@ async fn main() -> Result<()> {
     if let Some(patterns) = patterns {
         for pattern in patterns {
             if unique {
-                con.psubscribe_unique(pattern.to_owned())?;
+                con.psubscribe_unique_async(pattern.to_owned())?;
             } else {
-                con.psubscribe(pattern.to_owned())?;
+                con.psubscribe_async(pattern.to_owned())?;
             }
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(pattern)) = lines.next_line().await {
             if unique {
-                con.psubscribe_unique(pattern)?;
+                con.psubscribe_unique_async(pattern)?;
             } else {
-                con.psubscribe(pattern)?;
+                con.psubscribe_async(pattern)?;
             }
         }
     }
