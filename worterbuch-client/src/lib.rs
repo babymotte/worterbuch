@@ -17,8 +17,8 @@ use tokio::sync::{
 };
 use worterbuch_common::{
     error::{ConnectionError, ConnectionResult, WorterbuchError},
-    ClientMessage as CM, Export, Get, Import, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM,
-    Set, Subscribe, Value,
+    ClientMessage as CM, Get, KeyValuePairs, PGet, PSubscribe, ServerMessage as SM, Set, Subscribe,
+    Value,
 };
 
 #[derive(Debug, Clone)]
@@ -162,24 +162,6 @@ impl Connection {
             transaction_id: i,
             request_pattern,
             unique,
-        }))?;
-        Ok(i)
-    }
-
-    pub fn export(&mut self, path: String) -> ConnectionResult<TransactionId> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Export(Export {
-            transaction_id: i,
-            path,
-        }))?;
-        Ok(i)
-    }
-
-    pub fn import(&mut self, path: String) -> ConnectionResult<TransactionId> {
-        let i = self.inc_counter();
-        self.cmd_tx.send(CM::Import(Import {
-            transaction_id: i,
-            path,
         }))?;
         Ok(i)
     }

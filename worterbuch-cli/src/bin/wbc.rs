@@ -122,8 +122,6 @@ fn process_line(
             Some("psub") => psub(tail, con)?,
             Some("subu") => subu(tail, con)?,
             Some("psubu") => psubu(tail, con)?,
-            Some("imp") => imp(tail, con)?,
-            Some("exp") => exp(tail, con)?,
             Some("") => {}
             Some(other) => eprintln!("unknown command: {other}"),
             None => {}
@@ -203,24 +201,6 @@ fn psubu<'f>(pattern: String, con: &mut Connection) -> Result<()> {
         eprintln!("no pattern specified");
     } else {
         con.psubscribe_unique(pattern)?;
-    }
-    Ok(())
-}
-
-fn imp<'f>(path: String, con: &mut Connection) -> Result<()> {
-    if path.is_empty() {
-        eprintln!("no path specified");
-    } else {
-        con.import(path)?;
-    }
-    Ok(())
-}
-
-fn exp<'f>(path: String, con: &mut Connection) -> Result<()> {
-    if path.is_empty() {
-        eprintln!("no path specified");
-    } else {
-        con.export(path)?;
     }
     Ok(())
 }
