@@ -4,7 +4,7 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use std::{future::Future, io};
-use tokio::{net::TcpStream, spawn, sync::broadcast, sync::mpsc};
+use tokio::{net::TcpStream, select, spawn, sync::broadcast, sync::mpsc};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{self, Message},
@@ -12,7 +12,7 @@ use tokio_tungstenite::{
 };
 use worterbuch_common::{
     error::{ConnectionError, ConnectionResult},
-    ClientMessage as CM, GraveGoods, Handshake, HandshakeRequest, LastWill, ProtocolVersion,
+    ClientMessage as CM, GraveGoods, HandshakeRequest, LastWill, ProtocolVersion,
     ServerMessage as SM,
 };
 
@@ -50,9 +50,6 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     log::debug!("Connected to server.");
     let (mut ws_tx, mut ws_rx) = server.split();
 
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-    let (result_tx, result_rx) = broadcast::channel(1_000);
-
     // TODO implement protocol versions properly
     let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
 
@@ -68,16 +65,10 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     match ws_rx.next().await {
         Some(Ok(msg)) => match msg.to_text() {
             Ok(data) => match serde_json::from_str::<SM>(data) {
-                Ok(SM::Handshake(handshake)) => connected(
-                    ws_tx,
-                    ws_rx,
-                    cmd_tx,
-                    cmd_rx,
-                    result_tx,
-                    result_rx,
-                    on_disconnect,
-                    handshake,
-                ),
+                Ok(SM::Handshake(handshake)) => {
+                    log::debug!("Handhsake complete: {handshake}");
+                    connected(ws_tx, ws_rx, on_disconnect)
+                }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid handshake message: {msg:?}"),
@@ -103,15 +94,12 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
 fn connected<F: Future<Output = ()> + Send + 'static>(
     mut ws_tx: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     mut ws_rx: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    cmd_tx: mpsc::UnboundedSender<CM>,
-    mut cmd_rx: mpsc::UnboundedReceiver<CM>,
-    result_tx: broadcast::Sender<SM>,
-    result_rx: broadcast::Receiver<SM>,
     on_disconnect: F,
-    handshake: Handshake,
 ) -> Result<Connection, ConnectionError> {
+    let (stop_tx, mut stop_rx) = mpsc::channel(1);
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
+    let (result_tx, result_rx) = broadcast::channel(1_000);
     let result_tx_recv = result_tx.clone();
-    log::debug!("Handhsake complete: {handshake}");
 
     spawn(async move {
         while let Some(msg) = cmd_rx.recv().await {
@@ -126,37 +114,44 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
                 break;
             }
         }
-        // make sure initial rx is not dropped as long as stdin is read
-        drop(result_rx);
+        log::info!("ws send loop stopped");
     });
 
     spawn(async move {
         loop {
-            if let Some(Ok(incoming_msg)) = ws_rx.next().await {
-                if incoming_msg.is_text() {
-                    if let Ok(data) = incoming_msg.to_text() {
-                        log::debug!("Received {data}");
-                        match serde_json::from_str(data) {
-                            Ok(msg) => {
-                                if let Err(e) = result_tx_recv.send(msg) {
-                                    log::error!("Error forwarding server message: {e}");
+            select! {
+                recv = ws_rx.next() => {
+                    if let Some(Ok(incoming_msg)) = recv {
+                        if incoming_msg.is_text() {
+                            if let Ok(data) = incoming_msg.to_text() {
+                                log::debug!("Received {data}");
+                                match serde_json::from_str(data) {
+                                    Ok(msg) => {
+                                        if let Err(e) = result_tx_recv.send(msg) {
+                                            log::error!("Error forwarding server message: {e}");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!("Error decoding message: {e}");
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                log::error!("Error decoding message: {e}");
-                            }
                         }
+                    } else {
+                        log::error!("Connection to server lost.");
+                        on_disconnect.await;
+                        break;
                     }
                 }
-            } else {
-                log::error!("Connection to server lost.");
-                on_disconnect.await;
-                break;
+                _ = stop_rx.recv() => break,
             }
         }
 
-        log::info!("WS closed.")
+        // make sure initial rx is not dropped as long as websocket is read
+        drop(result_rx);
+
+        log::info!("ws receive loop stopped");
     });
 
-    Ok(Connection::new(cmd_tx, result_tx))
+    Ok(Connection::new(cmd_tx, result_tx, stop_tx))
 }

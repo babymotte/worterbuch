@@ -13,7 +13,7 @@ use futures_core::stream::Stream;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{
     broadcast::{self},
-    mpsc::UnboundedSender,
+    mpsc::{self, UnboundedSender},
 };
 use worterbuch_common::{
     error::{ConnectionError, ConnectionResult, WorterbuchError},
@@ -26,14 +26,20 @@ pub struct Connection {
     cmd_tx: UnboundedSender<CM>,
     result_tx: broadcast::Sender<SM>,
     counter: Arc<Mutex<u64>>,
+    stop_tx: mpsc::Sender<()>,
 }
 
 impl Connection {
-    pub fn new(cmd_tx: UnboundedSender<CM>, result_tx: broadcast::Sender<SM>) -> Self {
+    pub fn new(
+        cmd_tx: UnboundedSender<CM>,
+        result_tx: broadcast::Sender<SM>,
+        stop_tx: mpsc::Sender<()>,
+    ) -> Self {
         Self {
             cmd_tx,
             result_tx,
             counter: Arc::new(Mutex::new(1)),
+            stop_tx,
         }
     }
 
@@ -120,14 +126,18 @@ impl Connection {
     }
 
     pub fn subscribe_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
-        self.do_subscribe(key, false)
+        self.do_subscribe_async(key, false)
+    }
+
+    pub fn unsubscribe_async(&mut self, transaction_id: TransactionId) -> ConnectionResult<()> {
+        self.do_unsubscribe_async(transaction_id)
     }
 
     pub fn subscribe_unique_async(&mut self, key: String) -> ConnectionResult<TransactionId> {
-        self.do_subscribe(key, true)
+        self.do_subscribe_async(key, true)
     }
 
-    fn do_subscribe(&mut self, key: String, unique: bool) -> Result<u64, ConnectionError> {
+    fn do_subscribe_async(&mut self, key: String, unique: bool) -> Result<u64, ConnectionError> {
         let i = self.inc_counter();
         self.cmd_tx.send(CM::Subscribe(Subscribe {
             transaction_id: i,
@@ -137,18 +147,56 @@ impl Connection {
         Ok(i)
     }
 
+    fn do_unsubscribe_async(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<(), ConnectionError> {
+        self.cmd_tx
+            .send(CM::Unsubscribe(Unsubscribe { transaction_id }))?;
+        Ok(())
+    }
+
+    pub fn subscribe_ls_async(
+        &mut self,
+        parent: Option<String>,
+    ) -> ConnectionResult<TransactionId> {
+        self.do_subscribe_ls_async(parent)
+    }
+
+    pub fn unsubscribe_ls_async(&mut self, transaction_id: TransactionId) -> ConnectionResult<()> {
+        self.do_unsubscribe_ls_async(transaction_id)
+    }
+
+    fn do_subscribe_ls_async(&mut self, parent: Option<String>) -> Result<u64, ConnectionError> {
+        let i = self.inc_counter();
+        self.cmd_tx.send(CM::SubscribeLs(SubscribeLs {
+            transaction_id: i,
+            parent,
+        }))?;
+        Ok(i)
+    }
+
+    fn do_unsubscribe_ls_async(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<(), ConnectionError> {
+        self.cmd_tx
+            .send(CM::UnsubscribeLs(UnsubscribeLs { transaction_id }))?;
+        Ok(())
+    }
+
     pub fn psubscribe_async(&mut self, request_pattern: String) -> ConnectionResult<TransactionId> {
-        self.do_psubscribe(request_pattern, false)
+        self.do_psubscribe_async(request_pattern, false)
     }
 
     pub fn psubscribe_unique_async(
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<TransactionId> {
-        self.do_psubscribe(request_pattern, true)
+        self.do_psubscribe_async(request_pattern, true)
     }
 
-    fn do_psubscribe(
+    fn do_psubscribe_async(
         &mut self,
         request_pattern: String,
         unique: bool,
@@ -375,7 +423,7 @@ impl Connection {
         &mut self,
         key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
-        self.do_subscribe_json_values(key, false).await
+        self.do_subscribe(key, false).await
     }
 
     pub async fn subscribe_unique_values(
@@ -389,7 +437,7 @@ impl Connection {
         &mut self,
         key: String,
     ) -> ConnectionResult<impl Stream<Item = Result<Option<T>, SubscriptionError>>> {
-        self.do_subscribe_json_values(key, true).await
+        self.do_subscribe(key, true).await
     }
 
     async fn do_subscribe_values(
@@ -464,7 +512,7 @@ impl Connection {
         ))
     }
 
-    async fn do_subscribe_json_values<T: DeserializeOwned>(
+    async fn do_subscribe<T: DeserializeOwned>(
         &mut self,
         key: String,
         unique: bool,
@@ -533,6 +581,82 @@ impl Connection {
         ))
     }
 
+    pub async fn subscribe_ls(
+        &mut self,
+        parent: Option<String>,
+    ) -> ConnectionResult<impl Stream<Item = Result<Vec<RegularKeySegment>, SubscriptionError>>>
+    {
+        self.do_subscribe_ls(parent).await
+    }
+
+    async fn do_subscribe_ls(
+        &mut self,
+        parent: Option<String>,
+    ) -> ConnectionResult<impl Stream<Item = Result<Vec<RegularKeySegment>, SubscriptionError>>>
+    {
+        let mut subscr = self.responses();
+        let i = self.inc_counter();
+        let owned_parent = parent.clone();
+        self.cmd_tx.send(CM::SubscribeLs(SubscribeLs {
+            transaction_id: i,
+            parent,
+        }))?;
+        loop {
+            match subscr.recv().await {
+                Ok(msg) => {
+                    let tid = msg.transaction_id();
+                    if tid == i {
+                        match msg {
+                            SM::Err(msg) => {
+                                log::warn!("subscription {tid} to key {owned_parent:?} failed");
+                                return Err(ConnectionError::WorterbuchError(
+                                    WorterbuchError::ServerResponse(msg),
+                                ));
+                            }
+                            SM::Ack(_) => {
+                                return Ok(stream! {
+                                    loop {
+                                        match subscr.recv().await{
+                                            Ok(msg) =>{let tid = msg.transaction_id();
+                                                if tid == i {
+                                                    match msg {
+                                                        SM::LsState(state) => {
+                                                            yield Ok(state.children);
+                                                        }
+                                                        SM::Err(err) => {
+                                                            log::error!("Error in ls subscription of {owned_parent:?}: {err:?}");
+                                                            yield Err(SubscriptionError::ServerError(err));
+                                                                break;
+                                                        }
+                                                        msg => log::warn!(
+                                                            "received unrelated msg with subscription tid {tid}: {msg:?}"
+                                                        ),
+                                                    }
+                                                }}
+                                            Err(e) => {
+                                                yield Err(SubscriptionError::RecvError(e));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            msg => log::warn!(
+                                "received unrelated msg with subscription tid {tid}: {msg:?}"
+                            ),
+                        }
+                        break;
+                    }
+                    // TODO time out
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(ConnectionError::WorterbuchError(
+            WorterbuchError::NotSubscribed,
+        ))
+    }
+
     pub async fn psubscribe_values(
         &mut self,
         request_pattern: String,
@@ -544,8 +668,7 @@ impl Connection {
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
-        self.do_psubscribe_json_values::<T>(request_pattern, false)
-            .await
+        self.do_psubscribe::<T>(request_pattern, false).await
     }
 
     pub async fn psubscribe_unique_values(
@@ -559,7 +682,7 @@ impl Connection {
         &mut self,
         request_pattern: String,
     ) -> ConnectionResult<impl Stream<Item = Result<TypedStateEvent<T>, SubscriptionError>>> {
-        self.do_psubscribe_json_values(request_pattern, true).await
+        self.do_psubscribe(request_pattern, true).await
     }
 
     async fn do_psubscribe_values(
@@ -633,7 +756,7 @@ impl Connection {
         ))
     }
 
-    async fn do_psubscribe_json_values<T: DeserializeOwned>(
+    async fn do_psubscribe<T: DeserializeOwned>(
         &mut self,
         request_pattern: String,
         unique: bool,
@@ -723,6 +846,10 @@ impl Connection {
         let current = *counter;
         *counter += 1;
         current
+    }
+
+    pub async fn close(&self) {
+        self.stop_tx.send(()).await.ok();
     }
 }
 

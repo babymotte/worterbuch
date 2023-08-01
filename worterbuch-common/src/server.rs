@@ -232,6 +232,8 @@ impl fmt::Display for Err {
     }
 }
 
+impl std::error::Error for Err {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Handshake {
