@@ -13,7 +13,7 @@ categories = ["database"]
 [dependencies]
 worterbuch-common = "0.36.0"
 log = "0.4.17"
-tokio = { version = "1.26.0", features = ["sync", "rt", "io-util", "time"] }
+tokio = { version = "1.26.0", features = ["sync", "rt", "macros", "time"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
 async-stream = "0.3.4"
