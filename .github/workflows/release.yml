@@ -156,6 +156,6 @@ jobs:
           override: true
 
       - name: Publish to crates.io
-        run: cd worterbuch-common && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch-client && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch-cli && cargo publish --token ${CRATES_TOKEN} ; echo done
+        run: ./publish.sh
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
