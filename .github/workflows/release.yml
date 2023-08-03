@@ -6,7 +6,7 @@ on:
       - "v*.*.*"
 
 jobs:
-  build:
+  release:
     runs-on: ${{ matrix.image }}
 
     strategy:
@@ -48,4 +48,22 @@ jobs:
         with:
           files: worterbuch-${{ matrix.target }}.zip
 
-      # TODO publish to crates.io
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Publish to crates.io
+        run: cd worterbuch-common && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch-client && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch && cargo publish --token ${CRATES_TOKEN} ; cd ../worterbuch-cli && cargo publish --token ${CRATES_TOKEN} ; echo done
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
