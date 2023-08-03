@@ -4,6 +4,7 @@ mod server;
 
 pub use client::*;
 use error::WorterbuchResult;
+#[cfg(feature = "web")]
 use poem_openapi::Object;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub use server::*;
@@ -57,7 +58,8 @@ impl fmt::Display for ProtocolVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "web", derive(Object))]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValuePair {
     pub key: Key,

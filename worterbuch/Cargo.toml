@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [dependencies]
-worterbuch-common = "0.36.0"
+worterbuch-common = { version = "0.36.0", features = ["web"] }
 tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
 log = "0.4.17"
 env_logger = "0.10.0"
