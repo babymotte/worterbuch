@@ -56,16 +56,15 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let (mut con, mut responses) =
+        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut responses = con.responses();
-
     spawn(async move {
-        while let Ok(msg) = responses.recv().await {
+        while let Some(msg) = responses.recv().await {
             let tid = msg.transaction_id();
             let mut acked = acked_recv.lock().expect("mutex is poisoned");
             if tid > *acked {
@@ -79,13 +78,13 @@ async fn main() -> Result<()> {
     while let Ok(Some(value)) = lines.next_line().await {
         if json {
             match serde_json::from_str::<Value>(&value) {
-                Ok(value) => trans_id = con.publish_value(key.to_owned(), value)?,
+                Ok(value) => trans_id = con.publish_value(key.to_owned(), value).await?,
                 Err(e) => {
                     log::error!("Invalid input '{value}': {e}");
                 }
             }
         } else {
-            trans_id = con.publish_value(key.to_owned(), json!(value))?;
+            trans_id = con.publish_value(key.to_owned(), json!(value)).await?;
         }
     }
 

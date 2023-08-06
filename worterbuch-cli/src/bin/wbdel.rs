@@ -55,16 +55,15 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let (mut con, mut responses) =
+        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut responses = con.responses();
-
     spawn(async move {
-        while let Ok(msg) = responses.recv().await {
+        while let Some(msg) = responses.recv().await {
             let tid = msg.transaction_id();
             {
                 let mut acked = acked_recv.lock().expect("mutex is poisoned");
@@ -78,12 +77,12 @@ async fn main() -> Result<()> {
 
     if let Some(keys) = keys {
         for key in keys {
-            trans_id = con.delete_async(key.to_owned())?;
+            trans_id = con.delete_async(key.to_owned()).await?;
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
-            trans_id = con.delete_async(key)?;
+            trans_id = con.delete_async(key).await?;
         }
     }
 

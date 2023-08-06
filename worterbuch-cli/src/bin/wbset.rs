@@ -57,16 +57,15 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let (mut con, mut responses) =
+        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let mut trans_id = 0;
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut responses = con.responses();
-
     spawn(async move {
-        while let Ok(msg) = responses.recv().await {
+        while let Some(msg) = responses.recv().await {
             let tid = msg.transaction_id();
             let mut acked = acked_recv.lock().expect("mutex is poisoned");
             if tid > *acked {
@@ -81,7 +80,7 @@ async fn main() -> Result<()> {
         while let Ok(Some(line)) = lines.next_line().await {
             match serde_json::from_str::<KeyValuePair>(&line) {
                 Ok(KeyValuePair { key, value }) => {
-                    trans_id = con.set_value(key, json!(value))?;
+                    trans_id = con.set_value(key, json!(value)).await?;
                 }
                 Err(e) => {
                     eprintln!("Error parsing json: {e}");
@@ -94,7 +93,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = key_calue_pair.find('=') {
                     let key = &key_calue_pair[..index];
                     let val = &key_calue_pair[index + 1..];
-                    trans_id = con.set_value(key.to_owned(), json!(val))?;
+                    trans_id = con.set_value(key.to_owned(), json!(val)).await?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", key_calue_pair);
                 }
@@ -105,7 +104,7 @@ async fn main() -> Result<()> {
                 if let Some(index) = line.find('=') {
                     let key = &line[..index];
                     let val = &line[index + 1..];
-                    trans_id = con.set_value(key.to_owned(), json!(val))?;
+                    trans_id = con.set_value(key.to_owned(), json!(val)).await?;
                 } else {
                     eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
                 }

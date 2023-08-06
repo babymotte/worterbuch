@@ -1,5 +1,6 @@
 use crate::{
-    GraveGoods, Key, LastWill, Path, ProtocolVersions, RequestPattern, TransactionId, Value,
+    GraveGoods, Key, LastWill, Path, ProtocolVersions, RequestPattern, TransactionId, UniqueFlag,
+    Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -87,7 +88,7 @@ pub struct Publish {
 pub struct Subscribe {
     pub transaction_id: TransactionId,
     pub key: RequestPattern,
-    pub unique: bool,
+    pub unique: UniqueFlag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -95,7 +96,7 @@ pub struct Subscribe {
 pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
-    pub unique: bool,
+    pub unique: UniqueFlag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

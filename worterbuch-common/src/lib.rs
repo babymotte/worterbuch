@@ -3,11 +3,12 @@ pub mod error;
 mod server;
 
 pub use client::*;
+pub use server::*;
+
 use error::WorterbuchResult;
 #[cfg(feature = "web")]
 use poem_openapi::Object;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-pub use server::*;
 use std::{fmt, ops::Deref};
 
 pub type TransactionId = u64;
@@ -24,7 +25,7 @@ pub type ProtocolVersionSegment = u16;
 pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
-pub type UniqueFlag = u8;
+pub type UniqueFlag = bool;
 
 #[macro_export]
 macro_rules! topic {

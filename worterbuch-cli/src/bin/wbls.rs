@@ -51,15 +51,14 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let (mut con, mut responses) =
+        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     let acked = Arc::new(Mutex::new(0));
     let acked_recv = acked.clone();
 
-    let mut responses = con.responses();
-
     spawn(async move {
-        while let Ok(msg) = responses.recv().await {
+        while let Some(msg) = responses.recv().await {
             let tid = msg.transaction_id();
             {
                 let mut acked = acked_recv.lock().expect("mutex is poisoned");
@@ -71,7 +70,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let trans_id = con.ls_async(parent)?;
+    let trans_id = con.ls_async(parent).await?;
 
     loop {
         let acked = *acked.lock().expect("mutex is poisoned");

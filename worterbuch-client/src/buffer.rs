@@ -1,3 +1,4 @@
+use crate::Command;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -5,12 +6,13 @@ use std::{
 };
 use tokio::{
     spawn,
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{self},
+        oneshot,
+    },
     time::sleep,
 };
 use worterbuch_common::{error::ConnectionResult, Key, KeyValuePair, Value};
-
-use crate::Connection;
 
 type Buffer = Arc<Mutex<HashMap<Key, Value>>>;
 
@@ -19,17 +21,17 @@ const LOCK_MSG: &str = "the lock scope must not contain code that can panic!";
 #[derive(Clone)]
 pub struct SendBuffer {
     delay: Duration,
-    set_tx: UnboundedSender<KeyValuePair>,
-    _publish_tx: UnboundedSender<KeyValuePair>,
+    set_tx: mpsc::Sender<KeyValuePair>,
+    publish_tx: mpsc::Sender<KeyValuePair>,
     set_buffer: Buffer,
     publish_buffer: Buffer,
-    conn: Connection,
+    commands: mpsc::Sender<Command>,
 }
 
 impl SendBuffer {
-    pub async fn new(conn: Connection, delay: Duration) -> Self {
-        let (set_tx, set_rx) = mpsc::unbounded_channel();
-        let (_publish_tx, publish_rx) = mpsc::unbounded_channel();
+    pub(crate) async fn new(commands: mpsc::Sender<Command>, delay: Duration) -> Self {
+        let (set_tx, set_rx) = mpsc::channel(1);
+        let (publish_tx, publish_rx) = mpsc::channel(1);
 
         let set_buffer = Buffer::default();
         let publish_buffer = Buffer::default();
@@ -37,10 +39,10 @@ impl SendBuffer {
         let buf = Self {
             delay,
             set_tx,
-            _publish_tx,
+            publish_tx,
             set_buffer,
             publish_buffer,
-            conn,
+            commands,
         };
 
         spawn(buf.clone().buffer_set_messages(set_rx));
@@ -49,22 +51,17 @@ impl SendBuffer {
         buf
     }
 
-    pub fn set_later(&self, key: Key, value: Value) -> ConnectionResult<()> {
-        self.set_tx.send(KeyValuePair { key, value })?;
+    pub async fn set_later(&self, key: Key, value: Value) -> ConnectionResult<()> {
+        self.set_tx.send(KeyValuePair { key, value }).await?;
         Ok(())
     }
 
-    pub fn publish_later(&self, _key: Key, _value: Value) -> ConnectionResult<()> {
-        todo!("publish isn't implemented on worterbuch yet");
-        // self.publish_tx.send(KeyValuePair { key, value })?;
-        // Ok(())
+    pub async fn publish_later(&self, key: Key, value: Value) -> ConnectionResult<()> {
+        self.publish_tx.send(KeyValuePair { key, value }).await?;
+        Ok(())
     }
 
-    pub fn conn(&mut self) -> &mut Connection {
-        &mut self.conn
-    }
-
-    async fn buffer_set_messages(self, mut rx: UnboundedReceiver<KeyValuePair>) {
+    async fn buffer_set_messages(self, mut rx: mpsc::Receiver<KeyValuePair>) {
         while let Some(KeyValuePair { key, value }) = rx.recv().await {
             let previous = self
                 .set_buffer
@@ -77,7 +74,7 @@ impl SendBuffer {
         }
     }
 
-    async fn buffer_publish_messages(self, mut rx: UnboundedReceiver<KeyValuePair>) {
+    async fn buffer_publish_messages(self, mut rx: mpsc::Receiver<KeyValuePair>) {
         while let Some(KeyValuePair { key, value }) = rx.recv().await {
             let previous = self
                 .set_buffer
@@ -90,24 +87,37 @@ impl SendBuffer {
         }
     }
 
-    async fn set_value(mut self, key: Key) {
+    async fn set_value(self, key: Key) {
         sleep(self.delay).await;
         let value = self.set_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value {
-            if let Err(e) = self.conn.set_value(key, value) {
+            if let Err(e) = self.do_set_value(key, value).await {
                 log::error!("Error sending set message: {e}");
             }
         }
     }
 
+    async fn do_set_value(&self, key: Key, value: Value) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::Set(key, value, tx)).await?;
+        rx.await.ok();
+        Ok(())
+    }
+
     async fn publish_value(self, key: Key) {
         sleep(self.delay).await;
         let value = self.publish_buffer.lock().expect(LOCK_MSG).remove(&key);
-        if let Some(_value) = value {
-            // TODO uncomment once pusblish is implemented
-            // if let Err(e) = self.conn.publish(&key, &value) {
-            //     log::error!("Error setting key {key} to value {value}: {e}");
-            // }
+        if let Some(value) = value {
+            if let Err(e) = self.do_publish_value(key, value).await {
+                log::error!("Error sending publish message: {e}");
+            }
         }
+    }
+
+    async fn do_publish_value(&self, key: Key, value: Value) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::Publish(key, value, tx)).await?;
+        rx.await.ok();
+        Ok(())
     }
 }

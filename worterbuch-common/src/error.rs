@@ -159,6 +159,7 @@ pub enum ConnectionError {
     WorterbuchError(WorterbuchError),
     ConfigError(ConfigError),
     SerdeError(serde_json::Error),
+    AckError(broadcast::error::SendError<u64>),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -175,6 +176,7 @@ impl fmt::Display for ConnectionError {
             Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
+            Self::AckError(e) => fmt::Display::fmt(&e, f),
         }
     }
 }
@@ -220,6 +222,12 @@ impl From<ConfigError> for ConnectionError {
 impl From<serde_json::Error> for ConnectionError {
     fn from(e: serde_json::Error) -> Self {
         Self::SerdeError(e)
+    }
+}
+
+impl From<broadcast::error::SendError<u64>> for ConnectionError {
+    fn from(e: broadcast::error::SendError<u64>) -> Self {
+        Self::AckError(e)
     }
 }
 

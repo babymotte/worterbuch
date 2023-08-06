@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(
+    let (mut con, _) = connect(
         &proto,
         &host_addr,
         port,
@@ -52,11 +52,13 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    con.set_value("last_will/hello/world".to_owned(), json!("ONLINE"))?;
+    con.set_value("last_will/hello/world".to_owned(), json!("ONLINE"))
+        .await?;
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(value)) = lines.next_line().await {
-        con.set_value("last_will/hello/world".to_owned(), json!(value))?;
+        con.set_value("last_will/hello/world".to_owned(), json!(value))
+            .await?;
     }
 
     Ok(())

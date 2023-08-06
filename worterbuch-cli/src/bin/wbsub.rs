@@ -54,12 +54,11 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let mut con = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
-
-    let mut responses = con.responses();
+    let (mut con, mut responses) =
+        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
 
     spawn(async move {
-        while let Ok(msg) = responses.recv().await {
+        while let Some(msg) = responses.recv().await {
             print_message(&msg, json);
         }
     });
@@ -67,18 +66,18 @@ async fn main() -> Result<()> {
     if let Some(keys) = keys {
         for key in keys {
             if unique {
-                con.subscribe_unique_async(key.to_owned())?;
+                con.subscribe_unique_async(key.to_owned()).await?;
             } else {
-                con.subscribe_async(key.to_owned())?;
+                con.subscribe_async(key.to_owned()).await?;
             }
         }
     } else {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         while let Ok(Some(key)) = lines.next_line().await {
             if unique {
-                con.subscribe_unique_async(key)?;
+                con.subscribe_unique_async(key).await?;
             } else {
-                con.subscribe_async(key)?;
+                con.subscribe_async(key).await?;
             }
         }
     }
