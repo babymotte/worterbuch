@@ -1,11 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use std::{
-    process,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{spawn, time::sleep};
+use std::process;
+use tokio::{select, signal};
 use worterbuch_cli::print_message;
 use worterbuch_client::config::Config;
 use worterbuch_client::connect;
@@ -51,33 +47,25 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let (mut con, mut responses) =
-        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut responses = wb.all_messages().await?;
 
-    let acked = Arc::new(Mutex::new(0));
-    let acked_recv = acked.clone();
-
-    spawn(async move {
-        while let Some(msg) = responses.recv().await {
-            let tid = msg.transaction_id();
-            {
-                let mut acked = acked_recv.lock().expect("mutex is poisoned");
-                if tid > *acked {
-                    *acked = tid;
-                }
-            }
-            print_message(&msg, json);
-        }
-    });
-
-    let trans_id = con.ls_async(parent).await?;
+    let trans_id = wb.ls_async(parent).await?;
+    let mut acked = 0;
 
     loop {
-        let acked = *acked.lock().expect("mutex is poisoned");
-        if acked < trans_id {
-            sleep(Duration::from_millis(100)).await;
-        } else {
+        if acked >= trans_id {
             break;
+        }
+        select! {
+            _ = signal::ctrl_c() => break,
+            msg = responses.recv() => if let Some(msg) = msg {
+                let tid = msg.transaction_id();
+                if tid > acked {
+                    acked = tid;
+                }
+                print_message(&msg, json);
+            },
         }
     }
 

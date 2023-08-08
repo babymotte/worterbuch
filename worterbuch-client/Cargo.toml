@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
 [dependencies]
-worterbuch-common = "0.36.1"
+worterbuch-common = { path = "../worterbuch-common" }
 log = "0.4.17"
 tokio = { version = "1.26.0", features = ["sync", "rt", "macros", "time"] }
 serde = { version = "1.0.157", features = ["derive"] }

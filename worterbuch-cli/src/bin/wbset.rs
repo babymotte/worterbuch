@@ -1,20 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use serde_json::json;
-use std::{
-    process,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    spawn,
-    time::sleep,
-};
-use worterbuch_cli::print_message;
+use std::process;
+use tokio::{select, signal};
+use worterbuch_cli::{next_key_value, print_message, provide_key_value_pairs};
 use worterbuch_client::config::Config;
 use worterbuch_client::connect;
-use worterbuch_client::KeyValuePair;
 
 #[derive(Parser)]
 #[command(author, version, about = "Set values of keys on a Wörterbuch.", long_about = None)]
@@ -57,67 +47,35 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let (mut con, mut responses) =
-        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;
-    let acked = Arc::new(Mutex::new(0));
-    let acked_recv = acked.clone();
+    let mut acked = 0;
 
-    spawn(async move {
-        while let Some(msg) = responses.recv().await {
-            let tid = msg.transaction_id();
-            let mut acked = acked_recv.lock().expect("mutex is poisoned");
-            if tid > *acked {
-                *acked = tid;
-            }
-            print_message(&msg, json);
-        }
-    });
+    let mut rx = provide_key_value_pairs(key_value_pairs, json);
 
-    if json {
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            match serde_json::from_str::<KeyValuePair>(&line) {
-                Ok(KeyValuePair { key, value }) => {
-                    trans_id = con.set_value(key, json!(value)).await?;
-                }
-                Err(e) => {
-                    eprintln!("Error parsing json: {e}");
-                }
-            }
-        }
-    } else {
-        if let Some(key_calue_pairs) = key_value_pairs {
-            for key_calue_pair in key_calue_pairs {
-                if let Some(index) = key_calue_pair.find('=') {
-                    let key = &key_calue_pair[..index];
-                    let val = &key_calue_pair[index + 1..];
-                    trans_id = con.set_value(key.to_owned(), json!(val)).await?;
-                } else {
-                    eprintln!("no key/value pair (e.g. 'a=b'): {}", key_calue_pair);
-                }
-            }
-        } else {
-            let mut lines = BufReader::new(tokio::io::stdin()).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(index) = line.find('=') {
-                    let key = &line[..index];
-                    let val = &line[index + 1..];
-                    trans_id = con.set_value(key.to_owned(), json!(val)).await?;
-                } else {
-                    eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
-                }
-            }
-        }
-    }
+    let mut done = false;
 
     loop {
-        let acked = *acked.lock().expect("mutex is poisoned");
-        if acked < trans_id {
-            sleep(Duration::from_millis(100)).await;
-        } else {
+        if done && acked >= trans_id {
             break;
+        }
+        select! {
+            _ = signal::ctrl_c() => break,
+            msg = responses.recv() => if let Some(msg) = msg {
+                let tid = msg.transaction_id();
+                if tid > acked {
+                    acked = tid;
+                }
+                print_message(&msg, json);
+            },
+            recv = next_key_value(&mut rx, done) => match recv {
+                Some((key, value)) => trans_id = wb.set(key, &value).await?,
+                None => {
+                    done = true;
+                }
+            },
         }
     }
 

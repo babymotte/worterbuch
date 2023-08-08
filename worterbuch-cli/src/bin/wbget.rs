@@ -1,16 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use std::{
-    process,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    spawn,
-    time::sleep,
-};
-use worterbuch_cli::print_message;
+use std::process;
+use tokio::{select, signal};
+use worterbuch_cli::{next_key, print_message, provide_keys};
 use worterbuch_client::{config::Config, connect};
 
 #[derive(Parser)]
@@ -54,43 +46,35 @@ async fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let (mut con, mut responses) =
-        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;
-    let acked = Arc::new(Mutex::new(0));
-    let acked_recv = acked.clone();
+    let mut acked = 0;
 
-    spawn(async move {
-        while let Some(msg) = responses.recv().await {
-            let tid = msg.transaction_id();
-            {
-                let mut acked = acked_recv.lock().expect("mutex is poisoned");
-                if tid > *acked {
-                    *acked = tid;
-                }
-            }
-            print_message(&msg, json);
-        }
-    });
+    let mut rx = provide_keys(keys);
 
-    if let Some(keys) = keys {
-        for key in keys {
-            trans_id = con.get_async(key.to_owned()).await?;
-        }
-    } else {
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-        while let Ok(Some(key)) = lines.next_line().await {
-            trans_id = con.get_async(key).await?;
-        }
-    }
+    let mut done = false;
 
     loop {
-        let acked = *acked.lock().expect("mutex is poisoned");
-        if acked < trans_id {
-            sleep(Duration::from_millis(100)).await;
-        } else {
+        if done && acked >= trans_id {
             break;
+        }
+        select! {
+            _ = signal::ctrl_c() => break,
+            msg = responses.recv() => if let Some(msg) = msg {
+                let tid = msg.transaction_id();
+                if tid > acked {
+                    acked = tid;
+                }
+                print_message(&msg, json);
+            },
+            recv = next_key(&mut rx, done) => match recv {
+                Some(key ) => trans_id = wb.get_async(key).await?,
+                None => {
+                    done = true;
+                }
+            },
         }
     }
 
