@@ -34,33 +34,41 @@ pub(crate) enum Command {
     Set(Key, Value, oneshot::Sender<TransactionId>),
     Publish(Key, Value, oneshot::Sender<TransactionId>),
     Get(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
+    GetAsync(Key, oneshot::Sender<TransactionId>),
     PGet(Key, oneshot::Sender<(KeyValuePairs, TransactionId)>),
+    PGetAsync(Key, oneshot::Sender<TransactionId>),
     Delete(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
+    DeleteAsync(Key, oneshot::Sender<TransactionId>),
     PDelete(Key, oneshot::Sender<(KeyValuePairs, TransactionId)>),
+    PDeleteAsync(Key, oneshot::Sender<TransactionId>),
     Ls(
         Option<Key>,
         oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
     ),
+    LsAsync(Option<Key>, oneshot::Sender<TransactionId>),
     Subscribe(
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
         mpsc::Sender<Option<Value>>,
     ),
+    SubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
     PSubscribe(
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
         mpsc::Sender<PStateEvent>,
     ),
+    PSubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
     Unsubscribe(TransactionId),
     SubscribeLs(
         Option<Key>,
         oneshot::Sender<TransactionId>,
         mpsc::Sender<Vec<RegularKeySegment>>,
     ),
+    SubscribeLsAsync(Option<Key>, oneshot::Sender<TransactionId>),
     UnsubscribeLs(TransactionId),
-    Ack(mpsc::UnboundedSender<TransactionId>),
+    AllMessages(mpsc::UnboundedSender<ServerMessage>),
 }
 
 pub struct Worterbuch {
@@ -115,6 +123,16 @@ impl Worterbuch {
         self.publish_generic(key, value).await
     }
 
+    pub async fn get_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::GetAsync(key, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
     pub async fn get_generic(
         &mut self,
         key: Key,
@@ -138,6 +156,16 @@ impl Worterbuch {
         })
     }
 
+    pub async fn pget_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::PGetAsync(key, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
     pub async fn pget_generic(
         &mut self,
         key: Key,
@@ -158,6 +186,16 @@ impl Worterbuch {
         let (kvps, tid) = self.pget_generic(key).await?;
         let typed_kvps = deserialize_key_value_pairs(kvps)?;
         Ok((typed_kvps, tid))
+    }
+
+    pub async fn delete_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::DeleteAsync(key, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let tid = rx.await?;
+        Ok(tid)
     }
 
     pub async fn delete_generic(
@@ -185,6 +223,16 @@ impl Worterbuch {
         })
     }
 
+    pub async fn pdelete_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::PDeleteAsync(key, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
     pub async fn pdelete_generic(
         &mut self,
         key: Key,
@@ -207,6 +255,16 @@ impl Worterbuch {
         Ok((typed_kvps, tid))
     }
 
+    pub async fn ls_async(&mut self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::LsAsync(parent, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
     pub async fn ls(
         &mut self,
         parent: Option<Key>,
@@ -218,6 +276,15 @@ impl Worterbuch {
         log::debug!("Command queued.");
         let children = rx.await?;
         Ok(children)
+    }
+
+    pub async fn subscribe_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::SubscribeAsync(key, false, tx))
+            .await?;
+        let tid = rx.await?;
+        Ok(tid)
     }
 
     pub async fn subscribe_generic(
@@ -243,6 +310,15 @@ impl Worterbuch {
         Ok((typed_val_rx, transaction_id))
     }
 
+    pub async fn subscribe_unique_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::SubscribeAsync(key, true, tx))
+            .await?;
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
     pub async fn subscribe_unique_generic(
         &mut self,
         key: Key,
@@ -264,6 +340,18 @@ impl Worterbuch {
         let (typed_val_tx, typed_val_rx) = mpsc::channel(1);
         spawn(deserialize_values(val_rx, typed_val_tx));
         Ok((typed_val_rx, transaction_id))
+    }
+
+    pub async fn psubscribe_async(
+        &mut self,
+        request_pattern: RequestPattern,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::PSubscribeAsync(request_pattern, false, tx))
+            .await?;
+        let tid = rx.await?;
+        Ok(tid)
     }
 
     pub async fn psubscribe_generic(
@@ -292,6 +380,18 @@ impl Worterbuch {
         let (typed_event_tx, typed_event_rx) = mpsc::channel(1);
         spawn(deserialize_events(event_rx, typed_event_tx));
         Ok((typed_event_rx, transaction_id))
+    }
+
+    pub async fn psubscribe_unique_async(
+        &mut self,
+        request_pattern: RequestPattern,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::PSubscribeAsync(request_pattern, true, tx))
+            .await?;
+        let tid = rx.await?;
+        Ok(tid)
     }
 
     pub async fn psubscribe_unique_generic(
@@ -324,6 +424,18 @@ impl Worterbuch {
         Ok(())
     }
 
+    pub async fn subscribe_ls_async(
+        &mut self,
+        parent: Option<Key>,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::SubscribeLsAsync(parent, tx))
+            .await?;
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
     pub async fn subscribe_ls(
         &mut self,
         parent: Option<Key>,
@@ -334,7 +446,6 @@ impl Worterbuch {
             .send(Command::SubscribeLs(parent, tid_tx, children_tx))
             .await?;
         let transaction_id = tid_rx.await?;
-
         Ok((children_rx, transaction_id))
     }
 
@@ -354,9 +465,11 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn acks(&mut self) -> ConnectionResult<mpsc::UnboundedReceiver<TransactionId>> {
+    pub async fn all_messages(
+        &mut self,
+    ) -> ConnectionResult<mpsc::UnboundedReceiver<ServerMessage>> {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.commands.send(Command::Ack(tx)).await?;
+        self.commands.send(Command::AllMessages(tx)).await?;
         Ok(rx)
     }
 }
@@ -408,7 +521,7 @@ async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
 
 #[derive(Default)]
 struct Callbacks {
-    ack: Vec<mpsc::UnboundedSender<TransactionId>>,
+    all: Vec<mpsc::UnboundedSender<ServerMessage>>,
     get: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
     pget: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
     del: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
@@ -582,17 +695,37 @@ async fn process_incoming_command(
             Command::Get(key, callback) => {
                 get(tid, key, websocket, callback, callbacks).await?;
             }
+            Command::GetAsync(key, callback) => {
+                callback.send(tid).expect("error in callback");
+                get_async(tid, key, websocket).await?;
+            }
             Command::PGet(request_pattern, callback) => {
                 pget(tid, request_pattern, websocket, callback, callbacks).await?;
+            }
+            Command::PGetAsync(key, callback) => {
+                callback.send(tid).expect("error in callback");
+                pget_async(tid, key, websocket).await?;
             }
             Command::Delete(key, callback) => {
                 delete(tid, key, websocket, callback, callbacks).await?;
             }
+            Command::DeleteAsync(key, callback) => {
+                callback.send(tid).expect("error in callback");
+                delete_async(tid, key, websocket).await?;
+            }
             Command::PDelete(request_pattern, callback) => {
                 pdelete(tid, request_pattern, websocket, callback, callbacks).await?;
             }
+            Command::PDeleteAsync(request_pattern, callback) => {
+                callback.send(tid).expect("error in callback");
+                pdelete_async(tid, request_pattern, websocket).await?;
+            }
             Command::Ls(parent, callback) => {
                 ls(tid, parent, websocket, callback, callbacks).await?;
+            }
+            Command::LsAsync(parent, callback) => {
+                callback.send(tid).expect("error in callback");
+                ls_async(tid, parent, websocket).await?;
             }
             Command::Subscribe(key, unique, tid_callback, value_callback) => {
                 subscribe(
@@ -606,6 +739,10 @@ async fn process_incoming_command(
                 )
                 .await?;
             }
+            Command::SubscribeAsync(key, unique, callback) => {
+                callback.send(tid).expect("error in callback");
+                subscribe_async(tid, key, unique, websocket).await?;
+            }
             Command::PSubscribe(request_pattern, unique, tid_callback, event_callback) => {
                 psubscribe(
                     tid,
@@ -617,6 +754,10 @@ async fn process_incoming_command(
                     callbacks,
                 )
                 .await?;
+            }
+            Command::PSubscribeAsync(request_pattern, unique, callback) => {
+                callback.send(tid).expect("error in callback");
+                psubscribe_async(tid, request_pattern, unique, websocket).await?;
             }
             Command::Unsubscribe(transaction_id) => {
                 unsubscribe(transaction_id, websocket, callbacks).await?;
@@ -632,11 +773,15 @@ async fn process_incoming_command(
                 )
                 .await?;
             }
+            Command::SubscribeLsAsync(parent, callback) => {
+                callback.send(tid).expect("error in callback");
+                subscribels_async(tid, parent, websocket).await?;
+            }
             Command::UnsubscribeLs(transaction_id) => {
                 unsubscribels(transaction_id, websocket, callbacks).await?;
             }
-            Command::Ack(tx) => {
-                callbacks.ack.push(tx);
+            Command::AllMessages(tx) => {
+                callbacks.all.push(tx);
             }
         }
     } else {
@@ -694,6 +839,16 @@ async fn get(
     callback: oneshot::Sender<(Option<Value>, TransactionId)>,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    get_async(transaction_id, key, websocket).await?;
+    callbacks.get.insert(transaction_id, callback);
+    Ok(())
+}
+
+async fn get_async(
+    transaction_id: TransactionId,
+    key: Key,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::Get(Get {
         transaction_id,
         key,
@@ -702,7 +857,6 @@ async fn get(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.get.insert(transaction_id, callback);
     Ok(())
 }
 
@@ -713,6 +867,16 @@ async fn pget(
     callback: oneshot::Sender<(KeyValuePairs, TransactionId)>,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    pget_async(transaction_id, request_pattern, websocket).await?;
+    callbacks.pget.insert(transaction_id, callback);
+    Ok(())
+}
+
+async fn pget_async(
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::PGet(PGet {
         transaction_id,
         request_pattern,
@@ -721,7 +885,6 @@ async fn pget(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.pget.insert(transaction_id, callback);
     Ok(())
 }
 
@@ -732,6 +895,16 @@ async fn delete(
     callback: oneshot::Sender<(Option<Value>, TransactionId)>,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    delete_async(transaction_id, key, websocket).await?;
+    callbacks.del.insert(transaction_id, callback);
+    Ok(())
+}
+
+async fn delete_async(
+    transaction_id: TransactionId,
+    key: String,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::Delete(Delete {
         transaction_id,
         key,
@@ -740,7 +913,6 @@ async fn delete(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.del.insert(transaction_id, callback);
     Ok(())
 }
 
@@ -751,6 +923,16 @@ async fn pdelete(
     callback: oneshot::Sender<(KeyValuePairs, TransactionId)>,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    pdelete_async(transaction_id, request_pattern, websocket).await?;
+    callbacks.pdel.insert(transaction_id, callback);
+    Ok(())
+}
+
+async fn pdelete_async(
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::PDelete(PDelete {
         transaction_id,
         request_pattern,
@@ -759,7 +941,6 @@ async fn pdelete(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.pdel.insert(transaction_id, callback);
     Ok(())
 }
 
@@ -770,6 +951,16 @@ async fn ls(
     callback: oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    ls_async(transaction_id, parent, websocket).await?;
+    callbacks.ls.insert(transaction_id, callback);
+    Ok(())
+}
+
+async fn ls_async(
+    transaction_id: TransactionId,
+    parent: Option<Key>,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::Ls(Ls {
         transaction_id,
         parent,
@@ -778,7 +969,6 @@ async fn ls(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.ls.insert(transaction_id, callback);
     Ok(())
 }
 
@@ -791,6 +981,20 @@ async fn subscribe(
     websocket: &mut WebSocket,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    subscribe_async(transaction_id, key, unique, websocket).await?;
+    callbacks.sub.insert(transaction_id, value_callback);
+    tid_callback
+        .send(transaction_id)
+        .expect("error in callback");
+    Ok(())
+}
+
+async fn subscribe_async(
+    transaction_id: TransactionId,
+    key: Key,
+    unique: UniqueFlag,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::Subscribe(Subscribe {
         transaction_id,
         key,
@@ -800,10 +1004,6 @@ async fn subscribe(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.sub.insert(transaction_id, value_callback);
-    tid_callback
-        .send(transaction_id)
-        .expect("error in callback");
     Ok(())
 }
 
@@ -816,6 +1016,20 @@ async fn psubscribe(
     websocket: &mut WebSocket,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    psubscribe_async(transaction_id, request_pattern, unique, websocket).await?;
+    callbacks.psub.insert(transaction_id, event_callback);
+    tid_callback
+        .send(transaction_id)
+        .expect("error in callback");
+    Ok(())
+}
+
+async fn psubscribe_async(
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    unique: UniqueFlag,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::PSubscribe(PSubscribe {
         transaction_id,
         request_pattern,
@@ -825,10 +1039,6 @@ async fn psubscribe(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.psub.insert(transaction_id, event_callback);
-    tid_callback
-        .send(transaction_id)
-        .expect("error in callback");
     Ok(())
 }
 
@@ -837,13 +1047,21 @@ async fn unsubscribe(
     websocket: &mut WebSocket,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    unsubscribe_async(transaction_id, websocket).await?;
+    callbacks.sub.remove(&transaction_id);
+    callbacks.psub.remove(&transaction_id);
+    Ok(())
+}
+
+async fn unsubscribe_async(
+    transaction_id: TransactionId,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::Unsubscribe(Unsubscribe { transaction_id });
     let json = json::to_string(&msg)?;
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.sub.remove(&transaction_id);
-    callbacks.psub.remove(&transaction_id);
     Ok(())
 }
 
@@ -855,6 +1073,19 @@ async fn subscribels(
     websocket: &mut WebSocket,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    subscribels_async(transaction_id, parent, websocket).await?;
+    callbacks.subls.insert(transaction_id, children_callback);
+    tid_callback
+        .send(transaction_id)
+        .expect("error in callback");
+    Ok(())
+}
+
+async fn subscribels_async(
+    transaction_id: TransactionId,
+    parent: Option<Key>,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::SubscribeLs(SubscribeLs {
         transaction_id,
         parent,
@@ -863,10 +1094,6 @@ async fn subscribels(
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.subls.insert(transaction_id, children_callback);
-    tid_callback
-        .send(transaction_id)
-        .expect("error in callback");
     Ok(())
 }
 
@@ -875,12 +1102,20 @@ async fn unsubscribels(
     websocket: &mut WebSocket,
     callbacks: &mut Callbacks,
 ) -> Result<(), ConnectionError> {
+    unsubscribels_async(transaction_id, websocket).await?;
+    callbacks.subls.remove(&transaction_id);
+    Ok(())
+}
+
+async fn unsubscribels_async(
+    transaction_id: TransactionId,
+    websocket: &mut WebSocket,
+) -> Result<(), ConnectionError> {
     let msg = CM::UnsubscribeLs(UnsubscribeLs { transaction_id });
     let json = json::to_string(&msg)?;
     log::debug!("Sending message: {json}");
     let ws_msg = Message::Text(json);
     websocket.send(ws_msg).await?;
-    callbacks.subls.remove(&transaction_id);
     Ok(())
 }
 
@@ -892,14 +1127,17 @@ async fn process_incoming_server_message(
         if let Message::Text(json) = msg {
             log::debug!("Received message: {json}");
             match json::from_str::<SM>(&json) {
-                Ok(msg) => match msg {
-                    SM::Ack(ack) => deliver_ack(ack, callbacks).await?,
-                    SM::State(state) => deliver_state(state, callbacks).await?,
-                    SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
-                    SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
-                    SM::Err(err) => deliver_err(err, callbacks).await,
-                    SM::Handshake(_) => (),
-                },
+                Ok(msg) => {
+                    deliver_generic(&msg, callbacks);
+                    match msg {
+                        SM::Ack(_) => (),
+                        SM::State(state) => deliver_state(state, callbacks).await?,
+                        SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
+                        SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
+                        SM::Err(err) => deliver_err(err, callbacks).await,
+                        SM::Handshake(_) => (),
+                    }
+                }
                 Err(e) => {
                     log::error!("Error decoding message: {e}");
                 }
@@ -913,11 +1151,14 @@ async fn process_incoming_server_message(
     Ok(ControlFlow::Continue(()))
 }
 
-async fn deliver_ack(ack: Ack, callbacks: &mut Callbacks) -> ConnectionResult<()> {
-    for tx in &callbacks.ack {
-        tx.send(ack.transaction_id)?;
-    }
-    Ok(())
+fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
+    callbacks.all.retain(|tx| match tx.send(msg.clone()) {
+        Ok(_) => true,
+        Err(e) => {
+            log::error!("Removing callback due to failure to deliver message to receiver: {e}");
+            false
+        }
+    });
 }
 
 async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionResult<()> {
