@@ -20,7 +20,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
@@ -64,7 +64,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
@@ -146,7 +146,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
