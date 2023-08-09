@@ -1,15 +1,16 @@
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::{ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    select, signal, spawn,
+    select, spawn,
     sync::mpsc,
     time::sleep,
 };
+use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_client::{Err, Key, KeyValuePair, LsState, PState, ServerMessage as SM, State};
 
-pub async fn next_key(rx: &mut mpsc::Receiver<String>, done: bool) -> Option<String> {
+pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
     if done {
         sleep(Duration::from_secs(10)).await;
         None
@@ -18,19 +19,7 @@ pub async fn next_key(rx: &mut mpsc::Receiver<String>, done: bool) -> Option<Str
     }
 }
 
-pub async fn next_key_value(
-    rx: &mut mpsc::Receiver<(Key, Value)>,
-    done: bool,
-) -> Option<(String, Value)> {
-    if done {
-        sleep(Duration::from_secs(10)).await;
-        None
-    } else {
-        rx.recv().await
-    }
-}
-
-pub fn provide_keys(keys: Option<Vec<String>>) -> mpsc::Receiver<String> {
+pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle) -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel(1);
 
     if let Some(keys) = keys {
@@ -47,7 +36,7 @@ pub fn provide_keys(keys: Option<Vec<String>>) -> mpsc::Receiver<String> {
             let mut lines = BufReader::new(tokio::io::stdin()).lines();
             loop {
                 select! {
-                    _ = signal::ctrl_c() => break,
+                    _ = subsys.on_shutdown_requested() => break,
                     recv = lines.next_line() => if let Ok(Some(key)) = recv {
                         if tx.send(key).await.is_err() {
                             break;
@@ -63,62 +52,103 @@ pub fn provide_keys(keys: Option<Vec<String>>) -> mpsc::Receiver<String> {
     rx
 }
 
-pub fn provide_key_value_pairs(
-    key_value_pairs: Option<Vec<String>>,
-    json: bool,
-) -> mpsc::Receiver<(Key, Value)> {
+pub fn provide_values(json: bool, subsys: SubsystemHandle) -> mpsc::Receiver<Value> {
     let (tx, rx) = mpsc::channel(1);
 
-    if json {
-        spawn(async move {
-            let mut lines = BufReader::new(tokio::io::stdin()).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                match serde_json::from_str::<KeyValuePair>(&line) {
-                    Ok(KeyValuePair { key, value }) => {
-                        if tx.send((key, value)).await.is_err() {
+    spawn(async move {
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        loop {
+            select! {
+                _ = subsys.on_shutdown_requested() => break,
+                recv = lines.next_line() => if let Ok(Some(line)) = recv {
+                    if json {
+                        match serde_json::from_str::<Value>(&line) {
+                            Ok(value) => {
+                                if tx.send(value).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error parsing json: {e}");
+                            }
+                        }
+                    } else {
+                        if tx.send(json!(line)).await.is_err() {
                             break;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error parsing json: {e}");
-                    }
+                }
+            }
+        }
+    });
+
+    rx
+}
+
+pub fn provide_key_value_pairs(
+    key_value_pairs: Option<Vec<String>>,
+    json: bool,
+    subsys: SubsystemHandle,
+) -> mpsc::Receiver<(Key, Value)> {
+    let (tx, rx) = mpsc::channel(1);
+
+    if let Some(key_value_pairs) = key_value_pairs {
+        spawn(async move {
+            for kvp in key_value_pairs {
+                if let ControlFlow::Break(_) = provide_key_value_pair(json, kvp, &tx).await {
+                    break;
                 }
             }
         });
     } else {
-        if let Some(key_calue_pairs) = key_value_pairs {
-            spawn(async move {
-                for key_calue_pair in key_calue_pairs {
-                    if let Some(index) = key_calue_pair.find('=') {
-                        let key = key_calue_pair[..index].to_owned();
-                        let value = key_calue_pair[index + 1..].to_owned();
-                        if tx.send((key, json!(value))).await.is_err() {
+        spawn(async move {
+            let mut lines = BufReader::new(tokio::io::stdin()).lines();
+            loop {
+                select! {
+                    _ = subsys.on_shutdown_requested() => break,
+                    recv = lines.next_line() => if let Ok(Some(kvp)) = recv {
+                        if let ControlFlow::Break(_) = provide_key_value_pair(json, kvp, &tx).await {
                             break;
                         }
                     } else {
-                        eprintln!("no key/value pair (e.g. 'a=b'): {}", key_calue_pair);
+                        break;
                     }
                 }
-            });
-        } else {
-            spawn(async move {
-                let mut lines = BufReader::new(tokio::io::stdin()).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(index) = line.find('=') {
-                        let key = line[..index].to_owned();
-                        let value = line[index + 1..].to_owned();
-                        if tx.send((key, json!(value))).await.is_err() {
-                            break;
-                        }
-                    } else {
-                        eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
-                    }
-                }
-            });
-        }
+            }
+        });
     }
 
     rx
+}
+
+async fn provide_key_value_pair(
+    json: bool,
+    kvp: String,
+    tx: &mpsc::Sender<(String, Value)>,
+) -> ControlFlow<()> {
+    if json {
+        match serde_json::from_str::<KeyValuePair>(&kvp) {
+            Ok(KeyValuePair { key, value }) => {
+                if tx.send((key, value)).await.is_err() {
+                    return ControlFlow::Break(());
+                }
+            }
+            Err(e) => {
+                eprintln!("Error parsing json: {e}");
+            }
+        }
+    } else {
+        if let Some(index) = kvp.find('=') {
+            let key = kvp[..index].to_owned();
+            let value = kvp[index + 1..].to_owned();
+            if tx.send((key, json!(value))).await.is_err() {
+                return ControlFlow::Break(());
+            }
+        } else {
+            eprintln!("no key/value pair (e.g. 'a=b'): {}", kvp);
+        }
+    }
+    ControlFlow::Continue(())
 }
 
 pub fn print_message(msg: &SM, json: bool) {

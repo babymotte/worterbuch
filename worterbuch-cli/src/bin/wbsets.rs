@@ -1,17 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use serde_json::{json, Value};
-use std::{
-    process,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    spawn,
-    time::sleep,
-};
-use worterbuch_cli::print_message;
+use std::time::Duration;
+use tokio::select;
+use tokio::sync::mpsc;
+use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use worterbuch_cli::{next_item, print_message, provide_values};
 use worterbuch_client::config::Config;
 use worterbuch_client::connect;
 
@@ -38,6 +31,16 @@ struct Args {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
+    Toplevel::new()
+        .start("wbsets", run)
+        .catch_signals()
+        .handle_shutdown_requests(Duration::from_millis(1000))
+        .await?;
+
+    Ok(())
+}
+
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new()?;
     let args: Args = Args::parse();
 
@@ -51,49 +54,44 @@ async fn main() -> Result<()> {
     let json = args.json;
     let key = args.key;
 
+    let (disco_tx, mut disco_rx) = mpsc::channel(1);
     let on_disconnect = async move {
-        log::warn!("Connection to server lost.");
-        process::exit(1);
+        disco_tx.send(()).await.ok();
     };
 
-    let (mut con, mut responses) =
-        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;
-    let acked = Arc::new(Mutex::new(0));
-    let acked_recv = acked.clone();
+    let mut acked = 0;
 
-    spawn(async move {
-        while let Some(msg) = responses.recv().await {
-            let tid = msg.transaction_id();
-            let mut acked = acked_recv.lock().expect("mutex is poisoned");
-            if tid > *acked {
-                *acked = tid;
-            }
-            print_message(&msg, json);
-        }
-    });
+    let mut rx = provide_values(json, subsys.clone());
 
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    while let Ok(Some(value)) = lines.next_line().await {
-        if json {
-            match serde_json::from_str::<Value>(&value) {
-                Ok(value) => trans_id = con.set_value(key.to_owned(), value).await?,
-                Err(e) => {
-                    log::error!("Invalid input '{value}': {e}");
-                }
-            }
-        } else {
-            trans_id = con.set_value(key.to_owned(), json!(value)).await?;
-        }
-    }
+    let mut done = false;
 
     loop {
-        let acked = *acked.lock().expect("mutex is poisoned");
-        if acked < trans_id {
-            sleep(Duration::from_millis(100)).await;
-        } else {
+        if done && acked >= trans_id {
             break;
+        }
+        select! {
+            _ = subsys.on_shutdown_requested() => break,
+            _ = disco_rx.recv() => {
+                log::warn!("Connection to server lost.");
+                subsys.request_global_shutdown();
+            }
+            msg = responses.recv() => if let Some(msg) = msg {
+                let tid = msg.transaction_id();
+                if tid > acked {
+                    acked = tid;
+                }
+                print_message(&msg, json);
+            },
+            recv = next_item(&mut rx, done) => match recv {
+                Some(value) => trans_id = wb.set(key.clone(), &value).await?,
+                None => {
+                    done = true;
+                }
+            },
         }
     }
 

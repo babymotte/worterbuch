@@ -11,14 +11,9 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 
 [dependencies]
-worterbuch-client = { path = "../worterbuch-client" }
-tokio = { version = "1.26.0", features = [
-    "rt",
-    "macros",
-    "io-std",
-    "time",
-    "signal",
-] }
+worterbuch-client = "0.36.1"
+tokio = { version = "1.26.0", features = ["rt", "macros", "io-std", "time"] }
+tokio-graceful-shutdown = "0.13.0"
 dotenv = "0.15.0"
 anyhow = "1.0.70"
 serde = "1.0.157"

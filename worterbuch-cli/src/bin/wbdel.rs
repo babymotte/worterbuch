@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use std::process;
-use tokio::{select, signal};
-use worterbuch_cli::{next_key, print_message, provide_keys};
+use std::time::Duration;
+use tokio::{select, sync::mpsc};
+use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use worterbuch_cli::{next_item, print_message, provide_keys};
 use worterbuch_client::{config::Config, connect};
 
 #[derive(Parser)]
@@ -28,6 +29,16 @@ struct Args {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
+    Toplevel::new()
+        .start("wbdel", wbdel)
+        .catch_signals()
+        .handle_shutdown_requests(Duration::from_millis(1000))
+        .await?;
+
+    Ok(())
+}
+
+async fn wbdel(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new()?;
     let args: Args = Args::parse();
 
@@ -41,9 +52,9 @@ async fn main() -> Result<()> {
     let json = args.json;
     let keys = args.keys;
 
+    let (disco_tx, mut disco_rx) = mpsc::channel(1);
     let on_disconnect = async move {
-        log::warn!("Connection to server lost.");
-        process::exit(1);
+        disco_tx.send(()).await.ok();
     };
 
     let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
@@ -52,7 +63,7 @@ async fn main() -> Result<()> {
     let mut trans_id = 0;
     let mut acked = 0;
 
-    let mut rx = provide_keys(keys);
+    let mut rx = provide_keys(keys, subsys.clone());
 
     let mut done = false;
 
@@ -61,7 +72,11 @@ async fn main() -> Result<()> {
             break;
         }
         select! {
-            _ = signal::ctrl_c() => break,
+            _ = subsys.on_shutdown_requested() => break,
+            _ = disco_rx.recv() => {
+                log::warn!("Connection to server lost.");
+                subsys.request_global_shutdown();
+            }
             msg = responses.recv() => if let Some(msg) = msg {
                 let tid = msg.transaction_id();
                 if tid > acked {
@@ -69,7 +84,7 @@ async fn main() -> Result<()> {
                 }
                 print_message(&msg, json);
             },
-            recv = next_key(&mut rx, done) => match recv {
+            recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => trans_id = wb.delete_async(key).await?,
                 None => {
                     done = true;

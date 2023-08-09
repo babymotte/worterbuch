@@ -1,13 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
-use std::{process, time::Duration};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    spawn,
-    time::sleep,
-};
-use worterbuch_cli::print_message;
-use worterbuch_client::{config::Config, connect};
+use std::time::Duration;
+use tokio::select;
+use tokio::sync::mpsc;
+use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use worterbuch_cli::{next_item, print_message, provide_keys};
+use worterbuch_client::config::Config;
+use worterbuch_client::connect;
 
 #[derive(Parser)]
 #[command(author, version, about = "Subscribe to values of Wörterbuch keys.", long_about = None)]
@@ -35,6 +34,16 @@ struct Args {
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
+    Toplevel::new()
+        .start("wbsub", run)
+        .catch_signals()
+        .handle_shutdown_requests(Duration::from_millis(1000))
+        .await?;
+
+    Ok(())
+}
+
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new()?;
     let args: Args = Args::parse();
 
@@ -49,40 +58,36 @@ async fn main() -> Result<()> {
     let keys = args.keys;
     let unique = args.unique.unwrap_or(false);
 
+    let (disco_tx, mut disco_rx) = mpsc::channel(1);
     let on_disconnect = async move {
-        log::warn!("Connection to server lost.");
-        process::exit(1);
+        disco_tx.send(()).await.ok();
     };
 
-    let (mut con, mut responses) =
-        connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut responses = wb.all_messages().await?;
 
-    spawn(async move {
-        while let Some(msg) = responses.recv().await {
-            print_message(&msg, json);
-        }
-    });
-
-    if let Some(keys) = keys {
-        for key in keys {
-            if unique {
-                con.subscribe_unique_async(key.to_owned()).await?;
-            } else {
-                con.subscribe_async(key.to_owned()).await?;
-            }
-        }
-    } else {
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
-        while let Ok(Some(key)) = lines.next_line().await {
-            if unique {
-                con.subscribe_unique_async(key).await?;
-            } else {
-                con.subscribe_async(key).await?;
-            }
-        }
-    }
+    let mut rx = provide_keys(keys, subsys.clone());
 
     loop {
-        sleep(Duration::from_secs(1)).await;
+        select! {
+            _ = subsys.on_shutdown_requested() => break,
+            _ = disco_rx.recv() => {
+                log::warn!("Connection to server lost.");
+                subsys.request_global_shutdown();
+            }
+            msg = responses.recv() => if let Some(msg) = msg {
+                print_message(&msg, json);
+            },
+            recv = next_item(&mut rx, false) => match recv {
+                Some(key ) => if unique {
+                        wb.subscribe_unique_async(key).await?;
+                    } else {
+                        wb.subscribe_async(key).await?;
+                    },
+                None => {}
+            },
+        }
     }
+
+    Ok(())
 }
