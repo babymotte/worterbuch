@@ -79,9 +79,10 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 subsys.request_global_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
-                let tid = msg.transaction_id();
-                if tid > acked {
-                    acked = tid;
+                if let Some(tid) = msg.transaction_id() {
+                    if tid > acked {
+                        acked = tid;
+                    }
                 }
                 print_message(&msg, json);
             },

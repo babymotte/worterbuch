@@ -22,26 +22,29 @@ pub enum ClientMessage {
     Ls(Ls),
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
+    #[serde(rename = "")]
+    Keepalive,
 }
 
 impl ClientMessage {
-    pub fn transaction_id(&self) -> TransactionId {
+    pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
-            ClientMessage::HandshakeRequest(_) => 0,
-            ClientMessage::Get(m) => m.transaction_id,
-            ClientMessage::PGet(m) => m.transaction_id,
-            ClientMessage::Set(m) => m.transaction_id,
-            ClientMessage::Publish(m) => m.transaction_id,
-            ClientMessage::Subscribe(m) => m.transaction_id,
-            ClientMessage::PSubscribe(m) => m.transaction_id,
-            ClientMessage::Export(m) => m.transaction_id,
-            ClientMessage::Import(m) => m.transaction_id,
-            ClientMessage::Unsubscribe(m) => m.transaction_id,
-            ClientMessage::Delete(m) => m.transaction_id,
-            ClientMessage::PDelete(m) => m.transaction_id,
-            ClientMessage::Ls(m) => m.transaction_id,
-            ClientMessage::SubscribeLs(m) => m.transaction_id,
-            ClientMessage::UnsubscribeLs(m) => m.transaction_id,
+            ClientMessage::HandshakeRequest(_) => Some(0),
+            ClientMessage::Get(m) => Some(m.transaction_id),
+            ClientMessage::PGet(m) => Some(m.transaction_id),
+            ClientMessage::Set(m) => Some(m.transaction_id),
+            ClientMessage::Publish(m) => Some(m.transaction_id),
+            ClientMessage::Subscribe(m) => Some(m.transaction_id),
+            ClientMessage::PSubscribe(m) => Some(m.transaction_id),
+            ClientMessage::Export(m) => Some(m.transaction_id),
+            ClientMessage::Import(m) => Some(m.transaction_id),
+            ClientMessage::Unsubscribe(m) => Some(m.transaction_id),
+            ClientMessage::Delete(m) => Some(m.transaction_id),
+            ClientMessage::PDelete(m) => Some(m.transaction_id),
+            ClientMessage::Ls(m) => Some(m.transaction_id),
+            ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
+            ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
+            ClientMessage::Keepalive => None,
         }
     }
 }

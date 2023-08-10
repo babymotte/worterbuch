@@ -20,63 +20,67 @@ pub async fn process_incoming_message(
     msg: &str,
     worterbuch: Arc<RwLock<Worterbuch>>,
     tx: UnboundedSender<String>,
-) -> WorterbuchResult<bool> {
-    // TODO process message according to protocol version
+) -> WorterbuchResult<(bool, bool)> {
+    let mut hs = false;
     match serde_json::from_str(msg) {
-        Ok(Some(CM::HandshakeRequest(msg))) => {
-            handshake(msg, worterbuch.clone(), tx.clone(), client_id.clone()).await?;
-        }
-        Ok(Some(CM::Get(msg))) => {
-            get(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::PGet(msg))) => {
-            pget(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::Set(msg))) => {
-            set(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::Publish(msg))) => {
-            publish(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::Subscribe(msg))) => {
-            let unique = msg.unique;
-            subscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
-        }
-        Ok(Some(CM::PSubscribe(msg))) => {
-            let unique = msg.unique;
-            psubscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
-        }
-        Ok(Some(CM::Export(msg))) => export(msg, worterbuch.clone(), tx.clone()).await?,
-        Ok(Some(CM::Import(msg))) => import(msg, worterbuch.clone(), tx.clone()).await?,
-        Ok(Some(CM::Unsubscribe(msg))) => {
-            unsubscribe(msg, worterbuch.clone(), tx.clone(), client_id).await?
-        }
-        Ok(Some(CM::Delete(msg))) => {
-            delete(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::PDelete(msg))) => {
-            pdelete(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::Ls(msg))) => {
-            ls(msg, worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::SubscribeLs(msg))) => {
-            subscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
-        }
-        Ok(Some(CM::UnsubscribeLs(msg))) => {
-            unsubscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
-        }
+        Ok(Some(msg)) => match msg {
+            CM::HandshakeRequest(msg) => {
+                hs = true;
+                handshake(msg, worterbuch.clone(), tx.clone(), client_id.clone()).await?;
+            }
+            CM::Get(msg) => {
+                get(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::PGet(msg) => {
+                pget(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::Set(msg) => {
+                set(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::Publish(msg) => {
+                publish(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::Subscribe(msg) => {
+                let unique = msg.unique;
+                subscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
+            }
+            CM::PSubscribe(msg) => {
+                let unique = msg.unique;
+                psubscribe(msg, client_id, worterbuch.clone(), tx.clone(), unique).await?;
+            }
+            CM::Export(msg) => export(msg, worterbuch.clone(), tx.clone()).await?,
+            CM::Import(msg) => import(msg, worterbuch.clone(), tx.clone()).await?,
+            CM::Unsubscribe(msg) => {
+                unsubscribe(msg, worterbuch.clone(), tx.clone(), client_id).await?
+            }
+            CM::Delete(msg) => {
+                delete(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::PDelete(msg) => {
+                pdelete(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::Ls(msg) => {
+                ls(msg, worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::SubscribeLs(msg) => {
+                subscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::UnsubscribeLs(msg) => {
+                unsubscribe_ls(msg, client_id.clone(), worterbuch.clone(), tx.clone()).await?;
+            }
+            CM::Keepalive => (),
+        },
         Ok(None) => {
             // client disconnected
-            return Ok(false);
+            return Ok((false, hs));
         }
         Err(e) => {
             log::error!("Error decoding message: {e}");
-            return Ok(false);
+            return Ok((false, hs));
         }
     }
 
-    Ok(true)
+    Ok((true, hs))
 }
 
 async fn handshake(

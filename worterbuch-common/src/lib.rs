@@ -223,7 +223,7 @@ pub fn quote(str: impl AsRef<str>) -> String {
 mod test {
     use std::cmp::Ordering;
 
-    use crate::ProtocolVersion as PV;
+    use crate::{ClientMessage, ProtocolVersion as PV, ServerMessage};
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {
@@ -260,6 +260,38 @@ mod test {
         assert_eq!(
             "hello/world/foo/bar",
             topic!("hello", "world", "foo", "bar")
+        );
+    }
+
+    #[test]
+    fn server_keepalive_can_be_serialized() {
+        assert_eq!(
+            r#""""#,
+            serde_json::to_string(&ServerMessage::Keepalive).unwrap()
+        );
+    }
+
+    #[test]
+    fn server_keepalive_can_be_deserialized() {
+        assert_eq!(
+            ServerMessage::Keepalive,
+            serde_json::from_str(r#""""#).unwrap()
+        );
+    }
+
+    #[test]
+    fn client_keepalive_can_be_serialized() {
+        assert_eq!(
+            r#""""#,
+            serde_json::to_string(&ClientMessage::Keepalive).unwrap()
+        );
+    }
+
+    #[test]
+    fn client_keepalive_can_be_deserialized() {
+        assert_eq!(
+            ClientMessage::Keepalive,
+            serde_json::from_str(r#""""#).unwrap()
         );
     }
 }

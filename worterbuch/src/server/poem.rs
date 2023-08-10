@@ -13,14 +13,21 @@ use poem::{
 };
 use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
 use serde_json::Value;
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{
+    env,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
-    spawn,
+    select,
     sync::{mpsc, RwLock},
+    time::sleep,
 };
 use uuid::Uuid;
 use worterbuch_common::{
     error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
+    ServerMessage,
 };
 
 const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
@@ -262,7 +269,7 @@ pub async fn start(
 }
 
 async fn serve(
-    websocket: WebSocketStream,
+    mut websocket: WebSocketStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
     proto_version: ProtocolVersion,
@@ -273,49 +280,87 @@ async fn serve(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
-    let (mut client_write, mut client_read) = websocket.split();
-
     {
         let mut wb = worterbuch.write().await;
         wb.connected(client_id, remote_addr);
     }
 
-    spawn(async move {
-        while let Some(text) = rx.recv().await {
-            let msg = Message::text(text);
-            if let Err(e) = client_write.send(msg).await {
-                log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
-                break;
-            }
-        }
-    });
-
     log::debug!("Receiving messages from client {client_id} ({remote_addr}) …");
 
+    let mut handshake_complete = false;
+    let mut last_keepalive_rx = Instant::now();
+    let mut last_keepalive_tx = Instant::now();
+
     loop {
-        if let Some(Ok(incoming_msg)) = client_read.next().await {
-            if let Message::Text(text) = incoming_msg {
-                if !process_incoming_message(
-                    client_id,
-                    &text,
-                    worterbuch.clone(),
-                    tx.clone(),
-                    &proto_version,
-                )
-                .await?
-                {
+        select! {
+            recv = websocket.next() => if let Some(Ok(incoming_msg)) = recv {
+                last_keepalive_rx = Instant::now();
+                if last_keepalive_tx.elapsed().as_secs() >= 1 {
+                    last_keepalive_tx = Instant::now();
+                    if let Err(e) = send_keepalive(&mut websocket).await {
+                        log::error!("Error sending keepalive signal: {e}");
+                        break;
+                    }
+                }
+                if let Message::Text(text) = incoming_msg {
+                    let (msg_processed, handshake) = process_incoming_message(
+                        client_id,
+                        &text,
+                        worterbuch.clone(),
+                        tx.clone(),
+                        &proto_version,
+                    )
+                    .await?;
+                    handshake_complete |= msg_processed && handshake;
+                    if !msg_processed
+                    {
+                        break;
+                    }
+                }
+            } else {
+                log::warn!("WS stream of client {client_id} ({remote_addr}) closed.");
+                break;
+            },
+            recv = rx.recv() => if let Some(text) = recv {
+                if handshake_complete && last_keepalive_rx.elapsed().as_secs() >= 2 {
+                    log::warn!("Client has been inactive for too long. Disconnecting.");
                     break;
                 }
+                last_keepalive_tx = Instant::now();
+                let msg = Message::text(text);
+                if let Err(e) = websocket.send(msg).await {
+                    log::error!("Error sending message to client {client_id} ({remote_addr}): {e}");
+                    break;
+                }
+            } else {
+                break;
+            },
+            _ = sleep(Duration::from_secs(1)) => {
+                if handshake_complete && last_keepalive_rx.elapsed().as_secs() >= 2 {
+                    log::warn!("Client has been inactive for too long. Disconnecting.");
+                    break;
+                }
+                if last_keepalive_tx.elapsed().as_secs() >= 1 {
+                    last_keepalive_tx = Instant::now();
+                    if let Err(e) = send_keepalive(&mut websocket).await {
+                        log::error!("Error sending keepalive signal: {e}");
+                        break;
+                    }
+                }
             }
-        } else {
-            break;
         }
     }
-
-    log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
 
     let mut wb = worterbuch.write().await;
     wb.disconnected(client_id, remote_addr);
 
+    Ok(())
+}
+
+async fn send_keepalive(websocket: &mut WebSocketStream) -> anyhow::Result<()> {
+    log::trace!("Sending keepalive");
+    let json = serde_json::to_string(&ServerMessage::Keepalive)?;
+    let msg = Message::Text(json);
+    websocket.send(msg).await?;
     Ok(())
 }

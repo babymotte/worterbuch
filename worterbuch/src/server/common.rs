@@ -12,7 +12,7 @@ pub async fn process_incoming_message(
     worterbuch: Arc<RwLock<Worterbuch>>,
     tx: UnboundedSender<String>,
     protocol_version: &ProtocolVersion,
-) -> WorterbuchResult<bool> {
+) -> WorterbuchResult<(bool, bool)> {
     match protocol_version {
         ProtocolVersion { major, minor } if *major < 1 || (*major == 1 && *minor == 0) => {
             v1_0::process_incoming_message(client_id, msg, worterbuch, tx).await

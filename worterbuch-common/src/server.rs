@@ -26,17 +26,20 @@ pub enum ServerMessage {
     Err(Err),
     Handshake(Handshake),
     LsState(LsState),
+    #[serde(rename = "")]
+    Keepalive,
 }
 
 impl ServerMessage {
-    pub fn transaction_id(&self) -> u64 {
+    pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
-            ServerMessage::PState(msg) => msg.transaction_id,
-            ServerMessage::Ack(msg) => msg.transaction_id,
-            ServerMessage::State(msg) => msg.transaction_id,
-            ServerMessage::Err(msg) => msg.transaction_id,
-            ServerMessage::LsState(msg) => msg.transaction_id,
-            ServerMessage::Handshake(_) => 0,
+            ServerMessage::PState(msg) => Some(msg.transaction_id),
+            ServerMessage::Ack(msg) => Some(msg.transaction_id),
+            ServerMessage::State(msg) => Some(msg.transaction_id),
+            ServerMessage::Err(msg) => Some(msg.transaction_id),
+            ServerMessage::LsState(msg) => Some(msg.transaction_id),
+            ServerMessage::Handshake(_) => Some(0),
+            ServerMessage::Keepalive => None,
         }
     }
 }
