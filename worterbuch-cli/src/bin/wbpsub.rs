@@ -67,6 +67,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut responses = wb.all_messages().await?;
 
     let mut rx = provide_keys(patterns, subsys.clone());
+    let mut done = false;
 
     loop {
         select! {
@@ -78,13 +79,13 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             msg = responses.recv() => if let Some(msg) = msg {
                 print_message(&msg, json);
             },
-            recv = next_item(&mut rx, false) => match recv {
+            recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => if unique {
                         wb.psubscribe_unique_async(key).await?;
                     } else {
                         wb.psubscribe_async(key).await?;
                     },
-                None => {}
+                None => done = true,
             },
         }
     }

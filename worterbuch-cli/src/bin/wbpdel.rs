@@ -65,7 +65,6 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut acked = 0;
 
     let mut rx = provide_keys(patterns, subsys.clone());
-
     let mut done = false;
 
     loop {
@@ -88,9 +87,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => trans_id = wb.pdelete_async(key).await?,
-                None => {
-                    done = true;
-                }
+                None => done = true,
             },
         }
     }

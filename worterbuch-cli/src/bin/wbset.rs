@@ -66,7 +66,6 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut acked = 0;
 
     let mut rx = provide_key_value_pairs(key_value_pairs, json, subsys.clone());
-
     let mut done = false;
 
     loop {

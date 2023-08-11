@@ -659,7 +659,7 @@ async fn run(
     let mut last_keepalive_rx = Instant::now();
     let mut last_keepalive_tx = Instant::now();
     loop {
-        log::debug!("loop: wait for command / ws message / shutdown request");
+        log::trace!("loop: wait for command / ws message / shutdown request");
         select! {
             _ = stop_rx.recv() => {
                 log::info!("Shutdown request received.");
@@ -680,7 +680,7 @@ async fn run(
                         log::error!("Error processing server message: {e}");
                         break;
                     },
-                    _ => log::debug!("websocket message processing done")
+                    _ => log::trace!("websocket message processing done")
                 }
             },
             cmd = cmd_rx.recv() => {
