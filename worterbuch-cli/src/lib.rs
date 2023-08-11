@@ -77,6 +77,8 @@ pub fn provide_values(json: bool, subsys: SubsystemHandle) -> mpsc::Receiver<Val
                             break;
                         }
                     }
+                } else {
+                    break;
                 }
             }
         }
