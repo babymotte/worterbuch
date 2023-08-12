@@ -658,6 +658,7 @@ async fn run(
     let mut transaction_ids = TransactionIds::default();
     let mut last_keepalive_rx = Instant::now();
     let mut last_keepalive_tx = Instant::now();
+    let mut last_log = Instant::now();
     loop {
         log::trace!("loop: wait for command / ws message / shutdown request");
         select! {
@@ -684,9 +685,15 @@ async fn run(
                 }
             },
             cmd = cmd_rx.recv() => {
-                if last_keepalive_rx.elapsed().as_secs() >= 2 {
-                    log::error!("Server has been inactive for too long. Disconnecting.");
-                    break;
+                if last_keepalive_rx.elapsed().as_secs() > 1 {
+                    if last_log.elapsed().as_secs() >= 1 {
+                        last_log = Instant::now();
+                        log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
+                    }
+                    if (last_keepalive_rx - last_keepalive_tx).as_secs() >= 5 {
+                        log::error!("Server has been inactive for too long. Disconnecting.");
+                        break;
+                    }
                 }
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
@@ -704,9 +711,15 @@ async fn run(
                 }
             },
             _ = sleep(Duration::from_secs(1)) => {
-                if last_keepalive_rx.elapsed().as_secs() >= 2 {
-                    log::error!("Server has been inactive for too long. Disconnecting.");
-                    break;
+                if last_keepalive_rx.elapsed().as_secs() > 1 {
+                    if last_log.elapsed().as_secs() >= 1 {
+                        last_log = Instant::now();
+                        log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
+                    }
+                    if (last_keepalive_rx - last_keepalive_tx).as_secs() >= 5 {
+                        log::error!("Server has been inactive for too long. Disconnecting.");
+                        break;
+                    }
                 }
                 if last_keepalive_tx.elapsed().as_secs() >= 1 {
                     last_keepalive_tx = Instant::now();
