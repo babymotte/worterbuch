@@ -57,21 +57,21 @@ pub(crate) enum Command {
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
-        mpsc::Sender<Option<Value>>,
+        mpsc::UnboundedSender<Option<Value>>,
     ),
     SubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
     PSubscribe(
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
-        mpsc::Sender<PStateEvent>,
+        mpsc::UnboundedSender<PStateEvent>,
     ),
     PSubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
     Unsubscribe(TransactionId),
     SubscribeLs(
         Option<Key>,
         oneshot::Sender<TransactionId>,
-        mpsc::Sender<Vec<RegularKeySegment>>,
+        mpsc::UnboundedSender<Vec<RegularKeySegment>>,
     ),
     SubscribeLsAsync(Option<Key>, oneshot::Sender<TransactionId>),
     UnsubscribeLs(TransactionId),
@@ -297,9 +297,9 @@ impl Worterbuch {
     pub async fn subscribe_generic(
         &mut self,
         key: Key,
-    ) -> ConnectionResult<(mpsc::Receiver<Option<Value>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
-        let (val_tx, val_rx) = mpsc::channel(1);
+        let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
             .send(Command::Subscribe(key, false, tid_tx, val_tx))
             .await?;
@@ -310,9 +310,9 @@ impl Worterbuch {
     pub async fn subscribe<T: DeserializeOwned + Send + 'static>(
         &mut self,
         key: Key,
-    ) -> ConnectionResult<(mpsc::Receiver<Option<T>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
         let (val_rx, transaction_id) = self.subscribe_generic(key).await?;
-        let (typed_val_tx, typed_val_rx) = mpsc::channel(1);
+        let (typed_val_tx, typed_val_rx) = mpsc::unbounded_channel();
         spawn(deserialize_values(val_rx, typed_val_tx));
         Ok((typed_val_rx, transaction_id))
     }
@@ -329,9 +329,9 @@ impl Worterbuch {
     pub async fn subscribe_unique_generic(
         &mut self,
         key: Key,
-    ) -> ConnectionResult<(mpsc::Receiver<Option<Value>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
-        let (val_tx, val_rx) = mpsc::channel(1);
+        let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
             .send(Command::Subscribe(key, true, tid_tx, val_tx))
             .await?;
@@ -342,9 +342,9 @@ impl Worterbuch {
     pub async fn subscribe_unique<T: DeserializeOwned + Send + 'static>(
         &mut self,
         key: Key,
-    ) -> ConnectionResult<(mpsc::Receiver<Option<T>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
         let (val_rx, transaction_id) = self.subscribe_unique_generic(key).await?;
-        let (typed_val_tx, typed_val_rx) = mpsc::channel(1);
+        let (typed_val_tx, typed_val_rx) = mpsc::unbounded_channel();
         spawn(deserialize_values(val_rx, typed_val_tx));
         Ok((typed_val_rx, transaction_id))
     }
@@ -364,9 +364,9 @@ impl Worterbuch {
     pub async fn psubscribe_generic(
         &mut self,
         request_pattern: RequestPattern,
-    ) -> ConnectionResult<(mpsc::Receiver<PStateEvent>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
         self.commands
             .send(Command::PSubscribe(
                 request_pattern,
@@ -382,9 +382,9 @@ impl Worterbuch {
     pub async fn psubscribe<T: DeserializeOwned + Send + 'static>(
         &mut self,
         request_pattern: RequestPattern,
-    ) -> ConnectionResult<(mpsc::Receiver<TypedStateEvents<T>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
         let (event_rx, transaction_id) = self.psubscribe_generic(request_pattern).await?;
-        let (typed_event_tx, typed_event_rx) = mpsc::channel(1);
+        let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
         Ok((typed_event_rx, transaction_id))
     }
@@ -404,9 +404,9 @@ impl Worterbuch {
     pub async fn psubscribe_unique_generic(
         &mut self,
         request_pattern: RequestPattern,
-    ) -> ConnectionResult<(mpsc::Receiver<PStateEvent>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
         self.commands
             .send(Command::PSubscribe(request_pattern, true, tid_tx, event_tx))
             .await?;
@@ -417,9 +417,9 @@ impl Worterbuch {
     pub async fn psubscribe_unique<T: DeserializeOwned + Send + 'static>(
         &mut self,
         request_pattern: RequestPattern,
-    ) -> ConnectionResult<(mpsc::Receiver<TypedStateEvents<T>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
         let (event_rx, transaction_id) = self.psubscribe_unique_generic(request_pattern).await?;
-        let (typed_event_tx, typed_event_rx) = mpsc::channel(1);
+        let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
         Ok((typed_event_rx, transaction_id))
     }
@@ -446,9 +446,12 @@ impl Worterbuch {
     pub async fn subscribe_ls(
         &mut self,
         parent: Option<Key>,
-    ) -> ConnectionResult<(mpsc::Receiver<Vec<RegularKeySegment>>, TransactionId)> {
+    ) -> ConnectionResult<(
+        mpsc::UnboundedReceiver<Vec<RegularKeySegment>>,
+        TransactionId,
+    )> {
         let (tid_tx, tid_rx) = oneshot::channel();
-        let (children_tx, children_rx) = mpsc::channel(1);
+        let (children_tx, children_rx) = mpsc::unbounded_channel();
         self.commands
             .send(Command::SubscribeLs(parent, tid_tx, children_tx))
             .await?;
@@ -482,14 +485,14 @@ impl Worterbuch {
 }
 
 async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
-    mut val_rx: mpsc::Receiver<Option<Value>>,
-    typed_val_tx: mpsc::Sender<Option<T>>,
+    mut val_rx: mpsc::UnboundedReceiver<Option<Value>>,
+    typed_val_tx: mpsc::UnboundedSender<Option<T>>,
 ) {
     while let Some(val) = val_rx.recv().await {
         match val {
             Some(val) => match json::from_value(val) {
                 Ok(typed_val) => {
-                    if typed_val_tx.send(typed_val).await.is_err() {
+                    if typed_val_tx.send(typed_val).is_err() {
                         break;
                     }
                 }
@@ -499,7 +502,7 @@ async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
                 }
             },
             None => {
-                if typed_val_tx.send(None).await.is_err() {
+                if typed_val_tx.send(None).is_err() {
                     break;
                 }
             }
@@ -508,13 +511,13 @@ async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
 }
 
 async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
-    mut event_rx: mpsc::Receiver<PStateEvent>,
-    typed_event_tx: mpsc::Sender<TypedStateEvents<T>>,
+    mut event_rx: mpsc::UnboundedReceiver<PStateEvent>,
+    typed_event_tx: mpsc::UnboundedSender<TypedStateEvents<T>>,
 ) {
     while let Some(evt) = event_rx.recv().await {
         match deserialize_pstate_event(evt) {
             Ok(typed_event) => {
-                if typed_event_tx.send(typed_event).await.is_err() {
+                if typed_event_tx.send(typed_event).is_err() {
                     break;
                 }
             }
@@ -534,9 +537,9 @@ struct Callbacks {
     del: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
     pdel: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
     ls: HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>,
-    sub: HashMap<TransactionId, mpsc::Sender<Option<Value>>>,
-    psub: HashMap<TransactionId, mpsc::Sender<PStateEvent>>,
-    subls: HashMap<TransactionId, mpsc::Sender<Vec<RegularKeySegment>>>,
+    sub: HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>,
+    psub: HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>,
+    subls: HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>,
 }
 
 struct TransactionIds {
@@ -972,7 +975,7 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
             StateEvent::KeyValue(kv) => Some(kv.value),
             StateEvent::Deleted(_) => None,
         };
-        cb.send(value).await?;
+        cb.send(value)?;
     }
     Ok(())
 }
@@ -991,7 +994,7 @@ async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> Connection
         }
     }
     if let Some(cb) = callbacks.psub.get(&pstate.transaction_id) {
-        cb.send(pstate.event).await?;
+        cb.send(pstate.event)?;
     }
     Ok(())
 }
@@ -1002,7 +1005,7 @@ async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<
             .expect("error in callback");
     }
     if let Some(cb) = callbacks.subls.get(&ls.transaction_id) {
-        cb.send(ls.children).await?;
+        cb.send(ls.children)?;
     }
 
     Ok(())
