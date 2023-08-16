@@ -48,11 +48,11 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /api/get/%24SYS/uptime
+              path: /api/get/%24SYS%2Fuptime
               port: http
           readinessProbe:
             httpGet:
-              path: /api/get/%24SYS/uptime
+              path: /api/get/%24SYS%2Fuptime
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
