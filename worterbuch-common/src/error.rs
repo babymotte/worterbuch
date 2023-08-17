@@ -1,14 +1,6 @@
+use crate::{server::Err, ErrorCode, Key, MetaData, RequestPattern};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
-
-use crate::{
-    server::{
-        Err, ILLEGAL_MULTI_WILDCARD, ILLEGAL_WILDCARD, IO_ERROR,
-        MULTI_WILDCARD_AT_ILLEGAL_POSITION, NOT_SUBSCRIBED, NO_SUCH_VALUE, OTHER,
-        PROTOCOL_NEGOTIATION_FAILED, SERDE_ERROR,
-    },
-    ErrorCode, Key, MetaData, RequestPattern, INVALID_SERVER_RESPONSE, READ_ONLY_KEY,
-};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -234,21 +226,21 @@ impl From<broadcast::error::SendError<u64>> for ConnectionError {
 impl From<&WorterbuchError> for ErrorCode {
     fn from(e: &WorterbuchError) -> Self {
         match e {
-            WorterbuchError::IllegalWildcard(_) => ILLEGAL_WILDCARD,
-            WorterbuchError::IllegalMultiWildcard(_) => ILLEGAL_MULTI_WILDCARD,
+            WorterbuchError::IllegalWildcard(_) => ErrorCode::IllegalWildcard,
+            WorterbuchError::IllegalMultiWildcard(_) => ErrorCode::IllegalMultiWildcard,
             WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
-                MULTI_WILDCARD_AT_ILLEGAL_POSITION
+                ErrorCode::MultiWildcardAtIllegalPosition
             }
-            WorterbuchError::NoSuchValue(_) => NO_SUCH_VALUE,
-            WorterbuchError::NotSubscribed => NOT_SUBSCRIBED,
-            WorterbuchError::IoError(_, _) => IO_ERROR,
-            WorterbuchError::SerDeError(_, _) => SERDE_ERROR,
+            WorterbuchError::NoSuchValue(_) => ErrorCode::NoSuchValue,
+            WorterbuchError::NotSubscribed => ErrorCode::NotSubscribed,
+            WorterbuchError::IoError(_, _) => ErrorCode::IoError,
+            WorterbuchError::SerDeError(_, _) => ErrorCode::SerdeError,
             #[cfg(feature = "web")]
-            WorterbuchError::SerDeYamlError(_, _) => SERDE_ERROR,
-            WorterbuchError::ProtocolNegotiationFailed => PROTOCOL_NEGOTIATION_FAILED,
-            WorterbuchError::InvalidServerResponse(_) => INVALID_SERVER_RESPONSE,
-            WorterbuchError::ReadOnlyKey(_) => READ_ONLY_KEY,
-            WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => OTHER,
+            WorterbuchError::SerDeYamlError(_, _) => ErrorCode::SerdeError,
+            WorterbuchError::ProtocolNegotiationFailed => ErrorCode::ProtocolNegotiationFailed,
+            WorterbuchError::InvalidServerResponse(_) => ErrorCode::InvalidServerResponse,
+            WorterbuchError::ReadOnlyKey(_) => ErrorCode::ReadOnlyKey,
+            WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }
 }

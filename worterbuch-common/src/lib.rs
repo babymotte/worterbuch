@@ -9,6 +9,7 @@ use error::WorterbuchResult;
 #[cfg(feature = "web")]
 use poem_openapi::Object;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_repr::*;
 use std::{fmt, ops::Deref};
 
 pub type TransactionId = u64;
@@ -18,7 +19,6 @@ pub type Key = String;
 pub type Value = serde_json::Value;
 pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
-pub type ErrorCode = u8;
 pub type MetaData = String;
 pub type Path = String;
 pub type ProtocolVersionSegment = u16;
@@ -26,6 +26,28 @@ pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = bool;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
+pub enum ErrorCode {
+    IllegalWildcard = 0b00000000,
+    IllegalMultiWildcard = 0b00000001,
+    MultiWildcardAtIllegalPosition = 0b00000010,
+    IoError = 0b00000011,
+    SerdeError = 0b00000100,
+    NoSuchValue = 0b00000101,
+    NotSubscribed = 0b00000110,
+    ProtocolNegotiationFailed = 0b00000111,
+    InvalidServerResponse = 0b00001000,
+    ReadOnlyKey = 0b00001001,
+    Other = 0b11111111,
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (self.to_owned() as u8).fmt(f)
+    }
+}
 
 #[macro_export]
 macro_rules! topic {
@@ -223,7 +245,7 @@ pub fn quote(str: impl AsRef<str>) -> String {
 mod test {
     use std::cmp::Ordering;
 
-    use crate::{ClientMessage, ProtocolVersion as PV, ServerMessage};
+    use crate::{ClientMessage, ErrorCode, ProtocolVersion as PV, ServerMessage};
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {
@@ -293,5 +315,21 @@ mod test {
             ClientMessage::Keepalive,
             serde_json::from_str(r#""""#).unwrap()
         );
+    }
+
+    #[test]
+    fn error_codes_are_serialized_as_numbers() {
+        assert_eq!(
+            "1",
+            serde_json::to_string(&ErrorCode::IllegalMultiWildcard).unwrap()
+        )
+    }
+
+    #[test]
+    fn error_codes_are_deserialized_from_numbers() {
+        assert_eq!(
+            ErrorCode::ProtocolNegotiationFailed,
+            serde_json::from_str("7").unwrap()
+        )
     }
 }

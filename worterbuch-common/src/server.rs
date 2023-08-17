@@ -5,18 +5,6 @@ use crate::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
 
-pub const ILLEGAL_WILDCARD: ErrorCode = 0b00000000;
-pub const ILLEGAL_MULTI_WILDCARD: ErrorCode = 0b00000001;
-pub const MULTI_WILDCARD_AT_ILLEGAL_POSITION: ErrorCode = 0b00000010;
-pub const IO_ERROR: ErrorCode = 0b00000011;
-pub const SERDE_ERROR: ErrorCode = 0b00000100;
-pub const NO_SUCH_VALUE: ErrorCode = 0b00000101;
-pub const NOT_SUBSCRIBED: ErrorCode = 0b00000110;
-pub const PROTOCOL_NEGOTIATION_FAILED: ErrorCode = 0b00000111;
-pub const INVALID_SERVER_RESPONSE: ErrorCode = 0b00001000;
-pub const READ_ONLY_KEY: ErrorCode = 0b00001001;
-pub const OTHER: ErrorCode = 0b11111111;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ServerMessage {
