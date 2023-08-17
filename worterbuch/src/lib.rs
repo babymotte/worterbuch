@@ -4,8 +4,6 @@ mod server;
 mod stats;
 mod store;
 mod subscribers;
-#[cfg(feature = "warp")]
-pub mod warp;
 mod worterbuch;
 
 pub use crate::worterbuch::*;

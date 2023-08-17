@@ -6,10 +6,7 @@ use std::{
 };
 use tokio::{
     spawn,
-    sync::{
-        mpsc::{self},
-        oneshot,
-    },
+    sync::{mpsc, oneshot},
     time::sleep,
 };
 use worterbuch_common::{error::ConnectionResult, Key, KeyValuePair, Value};
