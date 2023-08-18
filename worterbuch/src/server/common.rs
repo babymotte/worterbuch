@@ -17,6 +17,6 @@ pub async fn process_incoming_message(
         ProtocolVersion { major, minor } if *major < 1 || (*major == 1 && *minor == 0) => {
             v1_0::process_incoming_message(client_id, msg, worterbuch, tx).await
         }
-        _ => todo!(),
+        _ => panic!("looks like the server accidentally accepted a connection to a client that speaks an unsupported protocol version"),
     }
 }
