@@ -337,22 +337,29 @@ impl ClientHandler {
             // - send a websocket message if none has been sent for over a second
             select! {
                 recv = self.websocket.next() => if let Some(msg) = recv {
-                    // received websocket message, no need to check how long it has been since the last one
-                    self.last_keepalive_rx = Instant::now();
-                    let incoming_msg = msg.context("Error in WebSocket connection")?;
-                    // send a message if none has been sent for over a second
-                    self.send_keepalive().await.context("Error sending keepalive signal")?;
-                    if let Message::Text(text) = incoming_msg {
-                        let (msg_processed, handshake) = process_incoming_message(
-                            self.client_id,
-                            &text,
-                            self.worterbuch.clone(),
-                            tx.clone(),
-                            &self.proto_version,
-                        )
-                        .await.context("Error processing incoming message")?;
-                        self.handshake_complete |= msg_processed && handshake;
-                        if !msg_processed {
+                    match msg {
+                        Ok(incoming_msg) => {
+                            // received websocket message, no need to check how long it has been since the last one
+                            self.last_keepalive_rx = Instant::now();
+                            // send a message if none has been sent for over a second
+                            self.send_keepalive().await.context("Error sending keepalive signal")?;
+                            if let Message::Text(text) = incoming_msg {
+                                let (msg_processed, handshake) = process_incoming_message(
+                                    self.client_id,
+                                    &text,
+                                    self.worterbuch.clone(),
+                                    tx.clone(),
+                                    &self.proto_version,
+                                )
+                                .await.context("Error processing incoming message")?;
+                                self.handshake_complete |= msg_processed && handshake;
+                                if !msg_processed {
+                                    break;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            log::error!("Error in WebSocket connection: {e}");
                             break;
                         }
                     }
@@ -366,7 +373,7 @@ impl ClientHandler {
                     // send websocket message, no need to check when the last one was sent
                     self.last_keepalive_tx = Instant::now();
                     let msg = Message::text(text);
-                    self.websocket.send(msg).await.context("Error sending keepalive signal")?;
+                    self.send_with_timeout(msg).await.context("Error sending keepalive signal")?;
                 } else {
                     break;
                 },
@@ -388,7 +395,7 @@ impl ClientHandler {
             log::trace!("Sending keepalive");
             let json = serde_json::to_string(&ServerMessage::Keepalive)?;
             let msg = Message::Text(json);
-            self.websocket.send(msg).await?;
+            self.send_with_timeout(msg).await?;
         }
 
         Ok(())
@@ -414,6 +421,13 @@ impl ClientHandler {
             Err(anyhow!("Client has been inactive for too long"))
         } else {
             Ok(())
+        }
+    }
+
+    async fn send_with_timeout(&mut self, msg: Message) -> anyhow::Result<()> {
+        select! {
+            r = self.websocket.send(msg) => Ok(r?),
+            _ = sleep(Duration::from_secs(1)) => Err(anyhow!("Send timeout")),
         }
     }
 }
