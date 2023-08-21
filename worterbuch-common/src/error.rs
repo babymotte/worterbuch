@@ -152,6 +152,7 @@ pub enum ConnectionError {
     ConfigError(ConfigError),
     SerdeError(serde_json::Error),
     AckError(broadcast::error::SendError<u64>),
+    Timeout,
 }
 
 impl std::error::Error for ConnectionError {}
@@ -169,6 +170,7 @@ impl fmt::Display for ConnectionError {
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
             Self::AckError(e) => fmt::Display::fmt(&e, f),
+            Self::Timeout => fmt::Display::fmt("timeout", f),
         }
     }
 }

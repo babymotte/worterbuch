@@ -736,6 +736,13 @@ async fn run(
     }
 }
 
+async fn send_with_timeout(ws: &mut WebSocket, msg: Message) -> ConnectionResult<()> {
+    select! {
+        r = ws.send(msg) => Ok(r?),
+        _ = sleep(Duration::from_secs(1)) => Err(ConnectionError::Timeout),
+    }
+}
+
 async fn process_incoming_command(
     cmd: Option<Command>,
     callbacks: &mut Callbacks,
@@ -911,7 +918,7 @@ async fn send_client_message(cm: CM, websocket: &mut WebSocket) -> ConnectionRes
     let json = serde_json::to_string(&cm)?;
     log::debug!("Sending message: {json}");
     let msg = Message::Text(json);
-    websocket.send(msg).await?;
+    send_with_timeout(websocket, msg).await?;
     Ok(())
 }
 
@@ -1026,7 +1033,7 @@ async fn send_keepalive(websocket: &mut WebSocket) -> ConnectionResult<()> {
     log::trace!("Sending keepalive");
     let json = serde_json::to_string(&ClientMessage::Keepalive)?;
     let msg = Message::Text(json);
-    websocket.send(msg).await?;
+    send_with_timeout(websocket, msg).await?;
     Ok(())
 }
 
