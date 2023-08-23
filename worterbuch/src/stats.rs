@@ -9,6 +9,7 @@ use worterbuch_common::error::WorterbuchResult;
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
+pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS: &str = "supportedProtocolVersions";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn track_stats(wb: Arc<RwLock<Worterbuch>>) -> WorterbuchResult<()> {

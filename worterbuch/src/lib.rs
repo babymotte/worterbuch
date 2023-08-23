@@ -8,6 +8,8 @@ mod worterbuch;
 
 pub use crate::worterbuch::*;
 pub use config::*;
+use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS};
+use worterbuch_common::topic;
 
 use crate::stats::track_stats;
 use anyhow::Result;
@@ -56,11 +58,16 @@ pub async fn start_worterbuch(config: Config) -> Result<Arc<RwLock<Worterbuch>>>
 
     let use_persistence = config.use_persistence;
 
-    let worterbuch = if use_persistence {
+    let mut worterbuch = if use_persistence {
         persistence::load(config.clone()).await?
     } else {
         Worterbuch::with_config(config.clone())
     };
+
+    worterbuch.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS),
+        serde_json::to_value(worterbuch.supported_protocol_versions()).expect("cannot fail"),
+    )?;
 
     let worterbuch = Arc::new(RwLock::new(worterbuch));
     let worterbuch_pers = worterbuch.clone();
