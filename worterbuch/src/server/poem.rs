@@ -370,7 +370,7 @@ impl ClientHandler {
                 },
                 recv = rx.recv() => if let Some(text) = recv {
                     let msg = Message::text(text);
-                    self.send_with_timeout(msg).await.context("Error sending keepalive signal")?;
+                    self.send_with_timeout(msg).await.context("Error sending message to client")?;
                 } else {
                     break;
                 },
@@ -425,7 +425,10 @@ impl ClientHandler {
                 self.last_keepalive_tx = Instant::now();
                 Ok(r?)
             },
-            _ = sleep(Duration::from_secs(1)) => Err(anyhow!("Send timeout")),
+            _ = sleep(Duration::from_secs(5)) => {
+                log::error!("Send timeout");
+                Err(anyhow!("Send timeout"))
+            },
         }
     }
 }
