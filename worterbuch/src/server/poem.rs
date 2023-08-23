@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    select,
+    select, spawn,
     sync::{mpsc, RwLock},
     time::sleep,
 };
@@ -276,7 +276,6 @@ struct ClientHandler {
     last_keepalive_rx: Instant,
     last_keepalive_tx: Instant,
     max_inactive_seconds: u64,
-    last_log: Instant,
     websocket: WebSocketStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
@@ -296,7 +295,6 @@ impl ClientHandler {
             last_keepalive_rx: Instant::now(),
             last_keepalive_tx: Instant::now(),
             max_inactive_seconds: 5,
-            last_log: Instant::now(),
             proto_version,
             remote_addr,
             websocket,
@@ -331,18 +329,21 @@ impl ClientHandler {
         let client_id = self.client_id.clone();
         let remote_addr = self.remote_addr;
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let (keepalive_tx, mut keepalive_rx) = mpsc::channel(1);
+        spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                if keepalive_tx.send(()).await.is_err() {
+                    break;
+                }
+            }
+        });
         loop {
-            // every branch of this select must
-            // - receive a websocket message or raise an error if none has been received for too long and
-            // - send a websocket message if none has been sent for over a second
             select! {
                 recv = self.websocket.next() => if let Some(msg) = recv {
                     match msg {
                         Ok(incoming_msg) => {
-                            // received websocket message, no need to check how long it has been since the last one
                             self.last_keepalive_rx = Instant::now();
-                            // send a message if none has been sent for over a second
-                            self.send_keepalive().await.context("Error sending keepalive signal")?;
                             if let Message::Text(text) = incoming_msg {
                                 let (msg_processed, handshake) = process_incoming_message(
                                     self.client_id,
@@ -368,16 +369,12 @@ impl ClientHandler {
                     break;
                 },
                 recv = rx.recv() => if let Some(text) = recv {
-                    // check how long ago the last websocket message was received
-                    self.check_client_keepalive()?;
-                    // send websocket message, no need to check when the last one was sent
-                    self.last_keepalive_tx = Instant::now();
                     let msg = Message::text(text);
                     self.send_with_timeout(msg).await.context("Error sending keepalive signal")?;
                 } else {
                     break;
                 },
-                _ = sleep(Duration::from_secs(1)) => {
+                _ = keepalive_rx.recv() => {
                     // check how long ago the last websocket message was received
                     self.check_client_keepalive()?;
                     // send out websocket message if the last has been more than a second ago
@@ -391,7 +388,6 @@ impl ClientHandler {
 
     async fn send_keepalive(&mut self) -> anyhow::Result<()> {
         if self.last_keepalive_tx.elapsed().as_secs() >= 1 {
-            self.last_keepalive_tx = Instant::now();
             log::trace!("Sending keepalive");
             let json = serde_json::to_string(&ServerMessage::Keepalive)?;
             let msg = Message::Text(json);
@@ -402,18 +398,17 @@ impl ClientHandler {
     }
 
     fn check_client_keepalive(&mut self) -> anyhow::Result<()> {
-        let last_log_elapsed = self.last_log.elapsed().as_secs();
-        let last_keepalive_elapsed = self.last_keepalive_rx.elapsed().as_secs();
+        let lag = (self.last_keepalive_rx - self.last_keepalive_tx).as_secs();
 
-        if self.handshake_complete && last_keepalive_elapsed >= 2 && last_log_elapsed >= 1 {
-            self.last_log = Instant::now();
+        if self.handshake_complete && lag >= 2 {
             log::warn!(
                 "Client {} has been inactive for {} seconds …",
                 self.client_id,
-                last_keepalive_elapsed
+                self.last_keepalive_rx.elapsed().as_secs()
             );
         }
-        if self.handshake_complete && last_keepalive_elapsed >= self.max_inactive_seconds {
+
+        if self.handshake_complete && lag >= self.max_inactive_seconds {
             log::warn!(
                 "Client {} has been inactive for too long. Disconnecting.",
                 self.client_id
@@ -426,7 +421,10 @@ impl ClientHandler {
 
     async fn send_with_timeout(&mut self, msg: Message) -> anyhow::Result<()> {
         select! {
-            r = self.websocket.send(msg) => Ok(r?),
+            r = self.websocket.send(msg) => {
+                self.last_keepalive_tx = Instant::now();
+                Ok(r?)
+            },
             _ = sleep(Duration::from_secs(1)) => Err(anyhow!("Send timeout")),
         }
     }

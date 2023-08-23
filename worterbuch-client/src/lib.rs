@@ -661,7 +661,18 @@ async fn run(
     let mut transaction_ids = TransactionIds::default();
     let mut last_keepalive_rx = Instant::now();
     let mut last_keepalive_tx = Instant::now();
-    let mut last_log = Instant::now();
+
+    let (keepalive_tx, mut keepalive_rx) = mpsc::channel(1);
+
+    spawn(async move {
+        loop {
+            sleep(Duration::from_secs(1)).await;
+            if keepalive_tx.send(()).await.is_err() {
+                break;
+            }
+        }
+    });
+
     loop {
         log::trace!("loop: wait for command / ws message / shutdown request");
         select! {
@@ -671,13 +682,6 @@ async fn run(
             },
             ws_msg = websocket.next() => {
                 last_keepalive_rx = Instant::now();
-                if last_keepalive_tx.elapsed().as_secs() >= 1 {
-                    last_keepalive_tx = Instant::now();
-                    if let Err(e) = send_keepalive(&mut websocket).await {
-                        log::error!("Error sending keepalive signal: {e}");
-                        break;
-                    }
-                }
                 match process_incoming_server_message(ws_msg, &mut callbacks).await {
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {
@@ -688,16 +692,6 @@ async fn run(
                 }
             },
             cmd = cmd_rx.recv() => {
-                if last_keepalive_rx.elapsed().as_secs() > 1 {
-                    if last_log.elapsed().as_secs() >= 1 {
-                        last_log = Instant::now();
-                        log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
-                    }
-                    if (last_keepalive_rx - last_keepalive_tx).as_secs() >= 5 {
-                        log::error!("Server has been inactive for too long. Disconnecting.");
-                        break;
-                    }
-                }
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         last_keepalive_tx = Instant::now();
@@ -713,16 +707,15 @@ async fn run(
                     },
                 }
             },
-            _ = sleep(Duration::from_secs(1)) => {
-                if last_keepalive_rx.elapsed().as_secs() > 1 {
-                    if last_log.elapsed().as_secs() >= 1 {
-                        last_log = Instant::now();
-                        log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
-                    }
-                    if (last_keepalive_rx - last_keepalive_tx).as_secs() >= 5 {
-                        log::error!("Server has been inactive for too long. Disconnecting.");
-                        break;
-                    }
+            _ = keepalive_rx.recv() => {
+                let lag = (last_keepalive_rx - last_keepalive_tx).as_secs();
+
+                if lag >= 2 {
+                    log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
+                }
+                if lag >= 5 {
+                    log::error!("Server has been inactive for too long. Disconnecting.");
+                    break;
                 }
                 if last_keepalive_tx.elapsed().as_secs() >= 1 {
                     last_keepalive_tx = Instant::now();
