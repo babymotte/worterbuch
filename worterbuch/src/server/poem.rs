@@ -410,7 +410,7 @@ impl ClientHandler {
             log::warn!(
                 "Client {} has been inactive for {} seconds …",
                 self.client_id,
-                self.last_keepalive_rx.elapsed().as_secs()
+                lag.as_secs()
             );
         }
 
