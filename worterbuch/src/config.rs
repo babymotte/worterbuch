@@ -16,6 +16,8 @@ pub struct Config {
     pub webapp: bool,
     pub web_root_path: String,
     pub public_address: String,
+    pub keepalive_timeout: Duration,
+    pub send_timeout: Duration,
 }
 
 impl Config {
@@ -65,6 +67,16 @@ impl Config {
             self.public_address = val;
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_TIMEOUT") {
+            let secs = val.parse().as_interval()?;
+            self.keepalive_timeout = Duration::from_secs(secs);
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_SEND_TIMEOUT") {
+            let secs = val.parse().as_interval()?;
+            self.send_timeout = Duration::from_secs(secs);
+        }
+
         Ok(())
     }
 
@@ -88,6 +100,8 @@ impl Default for Config {
             webapp: true,
             web_root_path: "html".to_owned(),
             public_address: "localhost".to_owned(),
+            keepalive_timeout: Duration::from_secs(5),
+            send_timeout: Duration::from_secs(5),
         }
     }
 }

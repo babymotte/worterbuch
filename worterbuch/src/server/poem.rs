@@ -155,7 +155,7 @@ async fn ws(
         .expect("Client has no remote address.");
     ws.protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            let mut client_handler = ClientHandler::new(socket, wb, remote, proto_version);
+            let mut client_handler = ClientHandler::new(socket, wb, remote, proto_version).await;
             if let Err(e) = client_handler.serve().await {
                 log::error!("Error in WS connection: {e}");
             }
@@ -275,7 +275,8 @@ struct ClientHandler {
     handshake_complete: bool,
     last_keepalive_rx: Instant,
     last_keepalive_tx: Instant,
-    max_inactive_seconds: u64,
+    keepalive_timeout: Duration,
+    send_timeout: Duration,
     websocket: WebSocketStream,
     worterbuch: Arc<RwLock<Worterbuch>>,
     remote_addr: SocketAddr,
@@ -283,18 +284,23 @@ struct ClientHandler {
 }
 
 impl ClientHandler {
-    fn new(
+    async fn new(
         websocket: WebSocketStream,
         worterbuch: Arc<RwLock<Worterbuch>>,
         remote_addr: SocketAddr,
         proto_version: ProtocolVersion,
     ) -> Self {
+        let wb = worterbuch.clone();
+        let wb = wb.read().await;
+        let keepalive_timeout = wb.config().keepalive_timeout.clone();
+        let send_timeout = wb.config().send_timeout.clone();
         Self {
             client_id: Uuid::new_v4(),
             handshake_complete: false,
             last_keepalive_rx: Instant::now(),
             last_keepalive_tx: Instant::now(),
-            max_inactive_seconds: 5,
+            keepalive_timeout,
+            send_timeout,
             proto_version,
             remote_addr,
             websocket,
@@ -398,9 +404,9 @@ impl ClientHandler {
     }
 
     fn check_client_keepalive(&mut self) -> anyhow::Result<()> {
-        let lag = (self.last_keepalive_rx - self.last_keepalive_tx).as_secs();
+        let lag = self.last_keepalive_rx - self.last_keepalive_tx;
 
-        if self.handshake_complete && lag >= 2 {
+        if self.handshake_complete && lag >= Duration::from_secs(2) {
             log::warn!(
                 "Client {} has been inactive for {} seconds …",
                 self.client_id,
@@ -408,7 +414,7 @@ impl ClientHandler {
             );
         }
 
-        if self.handshake_complete && lag >= self.max_inactive_seconds {
+        if self.handshake_complete && lag >= self.keepalive_timeout {
             log::warn!(
                 "Client {} has been inactive for too long. Disconnecting.",
                 self.client_id
@@ -425,7 +431,7 @@ impl ClientHandler {
                 self.last_keepalive_tx = Instant::now();
                 Ok(r?)
             },
-            _ = sleep(Duration::from_secs(5)) => {
+            _ = sleep(self.send_timeout) => {
                 log::error!("Send timeout");
                 Err(anyhow!("Send timeout"))
             },
