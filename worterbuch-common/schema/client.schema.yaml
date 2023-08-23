@@ -201,6 +201,17 @@ properties:
     required:
       - transactionId
       - parent
+  unsubscribeLs:
+    description: A message sent by a client to request the cancellation of an ls subscription
+    type: object
+    properties:
+      transactionId:
+        description: The transaction ID of the ls subscription to be cancelled
+        type: number
+        format: u64
+    additionalProperties: false
+    required:
+      - transactionId
 additionalProperties: false
 oneOf:
   - required:
@@ -225,6 +236,10 @@ oneOf:
       - pDelete
   - required:
       - ls
+  - required:
+      - subscribeLs
+  - required:
+      - unsubscribeLs
 components:
   schemas:
     ProtocolVersion:
