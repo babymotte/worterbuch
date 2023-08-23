@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "0.37.5"
+version = "0.37.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "0.37.5"
+version = "0.37.6"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -2223,7 +2223,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "0.37.5"
+version = "0.37.6"
 dependencies = [
  "poem-openapi",
  "serde",
