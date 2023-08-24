@@ -41,16 +41,16 @@ async fn main() -> Result<()> {
 }
 
 async fn run(subsys: SubsystemHandle) -> Result<()> {
-    let config = Config::new()?;
+    let mut config = Config::new();
     let args: Args = Args::parse();
 
-    let proto = if args.ssl {
+    config.proto = if args.ssl {
         "wss".to_owned()
     } else {
         "ws".to_owned()
     };
-    let host_addr = args.addr.unwrap_or(config.host_addr);
-    let port = args.port.unwrap_or(config.port);
+    config.host_addr = args.addr.unwrap_or(config.host_addr);
+    config.port = args.port.unwrap_or(config.port);
     let json = args.json;
     let keys = args.keys;
 
@@ -59,7 +59,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         disco_tx.send(()).await.ok();
     };
 
-    let mut wb = connect(&proto, &host_addr, port, vec![], vec![], on_disconnect).await?;
+    let mut wb = connect(config, vec![], vec![], on_disconnect).await?;
     let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;

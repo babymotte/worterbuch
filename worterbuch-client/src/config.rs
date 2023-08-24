@@ -1,15 +1,16 @@
-use std::env;
-use worterbuch_common::error::{ConfigIntContext, ConfigResult};
+use std::{env, time::Duration};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
     pub host_addr: String,
     pub port: u16,
+    pub keepalive_timeout: Duration,
+    pub send_timeout: Duration,
 }
 
 impl Config {
-    pub fn load_env(&mut self) -> ConfigResult<()> {
+    pub fn load_env(&mut self) {
         if let Ok(val) = env::var("WORTERBUCH_PROTO") {
             self.proto = val;
         }
@@ -19,29 +20,55 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
-            if let Ok(port) = val.parse().as_port() {
+            if let Ok(port) = val.parse() {
                 self.port = port;
             }
         }
 
-        Ok(())
+        if let Ok(val) = env::var("WORTERBUCH_KEEPALIVE_TIMEOUT") {
+            if let Ok(secs) = val.parse() {
+                self.keepalive_timeout = Duration::from_secs(secs);
+            }
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_SEND_TIMEOUT") {
+            if let Ok(secs) = val.parse() {
+                self.send_timeout = Duration::from_secs(secs);
+            }
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        let proto = "ws".to_owned();
+        let host_addr = "localhost".to_owned();
+        let port = 8080;
+        let keepalive_timeout = Duration::from_secs(5);
+        let send_timeout = Duration::from_secs(5);
+
+        Config {
+            proto,
+            host_addr,
+            port,
+            keepalive_timeout,
+            send_timeout,
+        }
     }
 }
 
 impl Config {
-    pub fn new() -> ConfigResult<Self> {
-        let proto = "ws".to_owned();
-        let host_addr = "localhost".to_owned();
-        let port = 8080;
+    pub fn new() -> Self {
+        let mut config = Config::default();
+        config.load_env();
+        config
+    }
 
-        let mut config = Config {
-            proto,
-            host_addr,
-            port,
-        };
-
-        config.load_env()?;
-
-        Ok(config)
+    pub fn with_address(proto: String, host_addr: String, port: u16) -> Self {
+        let mut config = Config::new();
+        config.proto = proto;
+        config.host_addr = host_addr;
+        config.port = port;
+        config
     }
 }

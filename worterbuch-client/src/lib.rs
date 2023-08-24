@@ -567,27 +567,20 @@ pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static
     grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<(Worterbuch, Config)> {
-    let config = Config::new()?;
-    let conn = connect(
-        &config.proto,
-        &config.host_addr,
-        config.port,
-        last_will,
-        grave_goods,
-        on_disconnect,
-    )
-    .await?;
+    let config = Config::new();
+    let conn = connect(config.clone(), last_will, grave_goods, on_disconnect).await?;
     Ok((conn, config))
 }
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
-    proto: &str,
-    host_addr: &str,
-    port: u16,
+    config: Config,
     last_will: LastWill,
     grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<Worterbuch> {
+    let proto = &config.proto;
+    let host_addr = &config.host_addr;
+    let port = config.port;
     let url = format!("{proto}://{host_addr}:{port}/ws");
     log::debug!("Connecting to server {url} …");
     let (mut websocket, _) = connect_async(url).await?;
@@ -610,7 +603,7 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
             Ok(data) => match json::from_str::<SM>(data) {
                 Ok(SM::Handshake(handshake)) => {
                     log::debug!("Handhsake complete: {handshake}");
-                    connected(websocket, on_disconnect)
+                    connected(websocket, on_disconnect, config)
                 }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -639,12 +632,13 @@ type WebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 fn connected<F: Future<Output = ()> + Send + 'static>(
     websocket: WebSocket,
     on_disconnect: F,
+    config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let (stop_tx, stop_rx) = mpsc::channel(1);
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 
     spawn(async move {
-        run(cmd_rx, websocket, stop_rx).await;
+        run(cmd_rx, websocket, stop_rx, config).await;
         log::info!("WebSocket closed.");
         on_disconnect.await;
     });
@@ -656,6 +650,7 @@ async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
     mut websocket: WebSocket,
     mut stop_rx: mpsc::Receiver<()>,
+    config: Config,
 ) {
     let mut callbacks = Callbacks::default();
     let mut transaction_ids = TransactionIds::default();
@@ -695,7 +690,7 @@ async fn run(
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         last_keepalive_tx = Instant::now();
-                        if let Err(e) = send_client_message(msg, &mut websocket).await {
+                        if let Err(e) = send_client_message(msg, &mut websocket, config.send_timeout).await {
                             log::error!("Error sending message to server: {e}");
                             break;
                         }
@@ -708,18 +703,18 @@ async fn run(
                 }
             },
             _ = keepalive_rx.recv() => {
-                let lag = (last_keepalive_rx - last_keepalive_tx).as_secs();
+                let lag = last_keepalive_rx - last_keepalive_tx;
 
-                if lag >= 2 {
-                    log::warn!("Server has been inactive for {} seconds", last_keepalive_rx.elapsed().as_secs());
+                if lag >= Duration::from_secs(2) {
+                    log::warn!("Server has been inactive for {} seconds", lag.as_secs());
                 }
-                if lag >= 5 {
+                if lag >= config.keepalive_timeout {
                     log::error!("Server has been inactive for too long. Disconnecting.");
                     break;
                 }
                 if last_keepalive_tx.elapsed().as_secs() >= 1 {
                     last_keepalive_tx = Instant::now();
-                    if let Err(e) = send_keepalive(&mut websocket).await {
+                    if let Err(e) = send_keepalive(&mut websocket, config.send_timeout).await {
                         log::error!("Error sending keepalive signal: {e}");
                         break;
                     }
@@ -729,10 +724,14 @@ async fn run(
     }
 }
 
-async fn send_with_timeout(ws: &mut WebSocket, msg: Message) -> ConnectionResult<()> {
+async fn send_with_timeout(
+    ws: &mut WebSocket,
+    msg: Message,
+    timeout: Duration,
+) -> ConnectionResult<()> {
     select! {
         r = ws.send(msg) => Ok(r?),
-        _ = sleep(Duration::from_secs(1)) => Err(ConnectionError::Timeout),
+        _ = sleep(timeout) => Err(ConnectionError::Timeout),
     }
 }
 
@@ -907,11 +906,15 @@ async fn process_incoming_command(
     }
 }
 
-async fn send_client_message(cm: CM, websocket: &mut WebSocket) -> ConnectionResult<()> {
+async fn send_client_message(
+    cm: CM,
+    websocket: &mut WebSocket,
+    timeout: Duration,
+) -> ConnectionResult<()> {
     let json = serde_json::to_string(&cm)?;
     log::debug!("Sending message: {json}");
     let msg = Message::Text(json);
-    send_with_timeout(websocket, msg).await?;
+    send_with_timeout(websocket, msg, timeout).await?;
     Ok(())
 }
 
@@ -1022,11 +1025,11 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     }
 }
 
-async fn send_keepalive(websocket: &mut WebSocket) -> ConnectionResult<()> {
+async fn send_keepalive(websocket: &mut WebSocket, timeout: Duration) -> ConnectionResult<()> {
     log::trace!("Sending keepalive");
     let json = serde_json::to_string(&ClientMessage::Keepalive)?;
     let msg = Message::Text(json);
-    send_with_timeout(websocket, msg).await?;
+    send_with_timeout(websocket, msg, timeout).await?;
     Ok(())
 }
 
