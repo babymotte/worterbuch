@@ -1,5 +1,5 @@
 use crate::{server::common::process_incoming_message, Config, Worterbuch};
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures::{sink::SinkExt, stream::StreamExt};
 use poem::{
     get, handler,
@@ -358,7 +358,7 @@ impl ClientHandler {
                                     tx.clone(),
                                     &self.proto_version,
                                 )
-                                .await.context("Error processing incoming message")?;
+                                .await?;
                                 self.handshake_complete |= msg_processed && handshake;
                                 if !msg_processed {
                                     break;
@@ -376,7 +376,7 @@ impl ClientHandler {
                 },
                 recv = rx.recv() => if let Some(text) = recv {
                     let msg = Message::text(text);
-                    self.send_with_timeout(msg).await.context("Error sending message to client")?;
+                    self.send_with_timeout(msg).await?;
                 } else {
                     break;
                 },
@@ -384,7 +384,7 @@ impl ClientHandler {
                     // check how long ago the last websocket message was received
                     self.check_client_keepalive()?;
                     // send out websocket message if the last has been more than a second ago
-                    self.send_keepalive().await.context("Error sending keepalive signal")?;
+                    self.send_keepalive().await?;
                 }
             }
         }

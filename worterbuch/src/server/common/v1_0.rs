@@ -473,7 +473,10 @@ async fn unsubscribe(
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
 
-    wb.unsubscribe(client_id, msg.transaction_id)?;
+    if let Err(e) = wb.unsubscribe(client_id, msg.transaction_id) {
+        handle_store_error(e, client, msg.transaction_id).await?;
+        return Ok(());
+    };
     let response = Ack {
         transaction_id: msg.transaction_id,
     };
@@ -672,7 +675,10 @@ async fn unsubscribe_ls(
 ) -> WorterbuchResult<()> {
     let mut wb = worterbuch.write().await;
 
-    wb.unsubscribe_ls(client_id, msg.transaction_id)?;
+    if let Err(e) = wb.unsubscribe_ls(client_id, msg.transaction_id) {
+        handle_store_error(e, client, msg.transaction_id).await?;
+        return Ok(());
+    }
     let response = Ack {
         transaction_id: msg.transaction_id,
     };
