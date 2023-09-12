@@ -7,7 +7,7 @@ use buffer::SendBuffer;
 use error::SubscriptionError;
 use futures_util::{SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{self as json, Value};
+use serde_json::{self as json};
 use std::{
     collections::HashMap,
     future::Future,
