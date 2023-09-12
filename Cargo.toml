@@ -5,6 +5,7 @@ members = [
     "worterbuch",
     "worterbuch-cli",
 ]
+resolver = "2"
 
 [patch.crates-io]
 worterbuch-common = { path = "./worterbuch-common" }
