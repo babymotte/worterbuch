@@ -21,9 +21,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    select, spawn,
+    select,
     sync::{mpsc, RwLock},
-    time::sleep,
+    time::{sleep, MissedTickBehavior},
 };
 use uuid::Uuid;
 use worterbuch_common::{
@@ -335,15 +335,8 @@ impl ClientHandler {
         let client_id = self.client_id.clone();
         let remote_addr = self.remote_addr;
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        let (keepalive_tx, mut keepalive_rx) = mpsc::channel(1);
-        spawn(async move {
-            loop {
-                sleep(Duration::from_secs(1)).await;
-                if keepalive_tx.send(()).await.is_err() {
-                    break;
-                }
-            }
-        });
+        let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
+        keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             select! {
                 recv = self.websocket.next() => if let Some(msg) = recv {
@@ -380,7 +373,7 @@ impl ClientHandler {
                 } else {
                     break;
                 },
-                _ = keepalive_rx.recv() => {
+                _ = keepalive_timer.tick() => {
                     // check how long ago the last websocket message was received
                     self.check_client_keepalive()?;
                     // send out websocket message if the last has been more than a second ago
