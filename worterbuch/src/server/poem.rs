@@ -326,7 +326,7 @@ impl ClientHandler {
         }
 
         let mut wb = self.worterbuch.write().await;
-        wb.disconnected(client_id, remote_addr);
+        wb.disconnected(client_id, remote_addr)?;
 
         Ok(())
     }

@@ -171,6 +171,26 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
+        self.set(
+            topic!("$SYS", "subscriptions"),
+            json!(self.subscriptions.len()),
+        )?;
+
+        let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+        self.set(
+            topic!(
+                subs_key,
+                key.replace("/", "%2F")
+                    .replace("?", "%3F")
+                    .replace("#", "%23")
+            ),
+            json!(transaction_id),
+        )?;
+        let subs = self.ls(&Some(subs_key))?.len();
+        self.set(
+            topic!("$SYS", "clients", client_id, "subscriptions"),
+            json!(subs),
+        )?;
         Ok((rx, subscription))
     }
 
@@ -197,6 +217,26 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
+        self.set(
+            topic!("$SYS", "subscriptions"),
+            json!(self.subscriptions.len()),
+        )?;
+        let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+        self.set(
+            topic!(
+                subs_key,
+                pattern
+                    .replace("/", "%2F")
+                    .replace("?", "%3F")
+                    .replace("#", "%23")
+            ),
+            json!(transaction_id),
+        )?;
+        let subs = self.ls(&Some(subs_key))?.len();
+        self.set(
+            topic!("$SYS", "clients", client_id, "subscriptions"),
+            json!(subs),
+        )?;
         Ok((rx, subscription))
     }
 
@@ -282,12 +322,36 @@ impl Worterbuch {
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
         let subscription = SubscriptionId::new(client_id, transaction_id);
-        self.do_unsubscribe(&subscription)
+        self.do_unsubscribe(&subscription, client_id)
     }
 
-    fn do_unsubscribe(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
+    fn do_unsubscribe(
+        &mut self,
+        subscription: &SubscriptionId,
+        client_id: Uuid,
+    ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(&subscription) {
+            self.internal_delete(
+                topic!(
+                    "$SYS",
+                    "clients",
+                    client_id,
+                    "subscriptions",
+                    path.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<String>>()
+                        .join("/")
+                        .replace("/", "%2F")
+                        .replace("?", "%3F")
+                        .replace("#", "%23")
+                ),
+                true,
+            )?;
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
+            self.set(
+                topic!("$SYS", "subscriptions"),
+                json!(self.subscriptions.len()),
+            )?;
             if self.subscribers.unsubscribe(&path, &subscription) {
                 Ok(())
             } else {
@@ -369,12 +433,19 @@ impl Worterbuch {
     }
 
     pub fn delete(&mut self, key: Key) -> WorterbuchResult<(String, Value)> {
+        self.internal_delete(key, false)
+    }
+
+    fn internal_delete(
+        &mut self,
+        key: Key,
+        allow_delete_sys: bool,
+    ) -> WorterbuchResult<(String, Value)> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        if path.is_empty() || path[0] == SYSTEM_TOPIC_ROOT {
+        if path.is_empty() || (path[0] == SYSTEM_TOPIC_ROOT && !allow_delete_sys) {
             return Err(WorterbuchError::ReadOnlyKey(key));
         }
-
         match self.store.delete(&path) {
             Some((value, ls_subscribers)) => {
                 let key_value = (key.to_owned(), value.to_owned());
@@ -387,10 +458,18 @@ impl Worterbuch {
     }
 
     pub fn pdelete(&mut self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
+        self.internal_pdelete(pattern, false)
+    }
+
+    fn internal_pdelete(
+        &mut self,
+        pattern: RequestPattern,
+        allow_delete_sys: bool,
+    ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
         if path.is_empty()
-            || &*(path[0]) == SYSTEM_TOPIC_ROOT
+            || (&*(path[0]) == SYSTEM_TOPIC_ROOT && !allow_delete_sys)
             || path[0] == KeySegment::MultiWildcard
         {
             return Err(WorterbuchError::ReadOnlyKey(pattern));
@@ -442,7 +521,12 @@ impl Worterbuch {
         }
     }
 
-    pub fn disconnected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
+    pub fn disconnected(
+        &mut self,
+        client_id: Uuid,
+        remote_addr: SocketAddr,
+    ) -> WorterbuchResult<()> {
+        self.internal_pdelete(topic!("$SYS", "clients", client_id, "#"), true)?;
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
@@ -460,7 +544,7 @@ impl Worterbuch {
             subscription_keys.len()
         );
         for subscription in subscription_keys {
-            if let Err(e) = self.do_unsubscribe(&subscription) {
+            if let Err(e) = self.do_unsubscribe(&subscription, client_id) {
                 log::error!("Inconsistent subscription state: {e}");
             }
         }
@@ -497,5 +581,12 @@ impl Worterbuch {
         } else {
             log::info!("Client {client_id} ({remote_addr}) has no last will.");
         }
+
+        self.set(
+            topic!("$SYS", "subscriptions"),
+            json!(self.subscriptions.len()),
+        )?;
+
+        Ok(())
     }
 }
