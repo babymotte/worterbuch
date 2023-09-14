@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-client"
-version = "0.37.7"
+version = "0.38.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Client library for Wörterbuch."
@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
 [dependencies]
-worterbuch-common = "0.37.0"
+worterbuch-common = "0.38.0"
 log = "0.4.17"
 tokio = { version = "1.26.0", features = ["sync", "rt", "macros", "time"] }
 serde = { version = "1.0.157", features = ["derive"] }

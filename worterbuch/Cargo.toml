@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch"
-version = "0.37.8"
+version = "0.38.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "A message broker / database hybrid."
@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [dependencies]
-worterbuch-common = { version = "0.37.0", features = ["web"] }
+worterbuch-common = { version = "0.38.0", features = ["web"] }
 tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
 tokio-graceful-shutdown = "0.13.0"
 log = "0.4.17"
