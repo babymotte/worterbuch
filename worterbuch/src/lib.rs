@@ -15,7 +15,6 @@ use worterbuch_common::topic;
 
 use crate::stats::track_stats;
 use anyhow::Result;
-#[cfg(not(target_os = "windows"))]
 use tokio::{select, sync::mpsc};
 
 pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
