@@ -1,6 +1,10 @@
 use crate::{server::Err, ErrorCode, Key, MetaData, RequestPattern};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
-use tokio::sync::{broadcast, mpsc::error::SendError, oneshot};
+use tokio::sync::{
+    broadcast,
+    mpsc::{self, error::SendError},
+    oneshot,
+};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -135,6 +139,18 @@ impl<T, V: fmt::Debug + 'static + Send + Sync> Context<T, SendError<V>>
 {
     fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError> {
         self.map_err(|e| WorterbuchError::Other(Box::new(e), metadata()))
+    }
+}
+
+impl<T: Send + Sync + 'static> From<mpsc::error::SendError<T>> for WorterbuchError {
+    fn from(value: mpsc::error::SendError<T>) -> Self {
+        WorterbuchError::Other(Box::new(value), "Internal server error".to_owned())
+    }
+}
+
+impl From<oneshot::error::RecvError> for WorterbuchError {
+    fn from(value: oneshot::error::RecvError) -> Self {
+        WorterbuchError::Other(Box::new(value), "Internal server error".to_owned())
     }
 }
 

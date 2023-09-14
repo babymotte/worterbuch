@@ -1,4 +1,7 @@
-use crate::{server::common::process_incoming_message, Config, Worterbuch};
+use crate::{
+    server::common::{process_incoming_message, CloneableWbApi},
+    Config,
+};
 use anyhow::anyhow;
 use futures::{sink::SinkExt, stream::StreamExt};
 use poem::{
@@ -17,12 +20,11 @@ use serde_json::Value;
 use std::{
     env,
     net::SocketAddr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     select,
-    sync::{mpsc, RwLock},
+    sync::mpsc,
     time::{sleep, MissedTickBehavior},
 };
 use uuid::Uuid;
@@ -35,15 +37,14 @@ const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Api {
-    worterbuch: Arc<RwLock<Worterbuch>>,
+    worterbuch: CloneableWbApi,
 }
 
 #[OpenApi]
 impl Api {
     #[oai(path = "/get/:key", method = "get")]
     async fn get(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
-        let wb = self.worterbuch.read().await;
-        match wb.get(&key) {
+        match self.worterbuch.get(key).await {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
@@ -54,8 +55,7 @@ impl Api {
 
     #[oai(path = "/pget/:pattern", method = "get")]
     async fn pget(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
-        let wb = self.worterbuch.read().await;
-        match wb.pget(&pattern) {
+        match self.worterbuch.pget(pattern).await {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -67,8 +67,7 @@ impl Api {
         Path(key): Path<String>,
         Json(value): Json<Value>,
     ) -> Result<Json<&'static str>> {
-        let mut wb = self.worterbuch.write().await;
-        match wb.set(key, value) {
+        match self.worterbuch.set(key, value).await {
             Ok(()) => {}
             Err(e) => return to_error_response(e),
         }
@@ -81,8 +80,7 @@ impl Api {
         Path(key): Path<String>,
         Json(value): Json<Value>,
     ) -> Result<Json<&'static str>> {
-        let mut wb = self.worterbuch.write().await;
-        match wb.publish(key, value) {
+        match self.worterbuch.publish(key, value).await {
             Ok(()) => {}
             Err(e) => return to_error_response(e),
         }
@@ -91,8 +89,7 @@ impl Api {
 
     #[oai(path = "/delete/:key", method = "delete")]
     async fn delete(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
-        let mut wb = self.worterbuch.write().await;
-        match wb.delete(key) {
+        match self.worterbuch.delete(key).await {
             Ok(kvp) => {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
@@ -103,8 +100,7 @@ impl Api {
 
     #[oai(path = "/pdelete/:pattern", method = "delete")]
     async fn pdelete(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
-        let mut wb = self.worterbuch.write().await;
-        match wb.pdelete(pattern) {
+        match self.worterbuch.pdelete(pattern).await {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -112,8 +108,7 @@ impl Api {
 
     #[oai(path = "/ls/:key", method = "get")]
     async fn ls(&self, Path(key): Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
-        let wb = self.worterbuch.read().await;
-        match wb.ls(&Some(key)) {
+        match self.worterbuch.ls(Some(key)).await {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -121,8 +116,7 @@ impl Api {
 
     #[oai(path = "/ls", method = "get")]
     async fn ls_root(&self) -> Result<Json<Vec<RegularKeySegment>>> {
-        let wb = self.worterbuch.read().await;
-        match wb.ls(&None) {
+        match self.worterbuch.ls(None).await {
             Ok(kvps) => Ok(Json(kvps)),
             Err(e) => to_error_response(e),
         }
@@ -143,19 +137,20 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    Data(data): Data<&(Arc<RwLock<Worterbuch>>, ProtocolVersion)>,
+    Data(data): Data<&(CloneableWbApi, ProtocolVersion)>,
     req: &Request,
 ) -> impl IntoResponse {
-    let worterbuch = &data.0;
+    log::info!("Client connected");
+    let worterbuch = data.0.clone();
     let proto_version = data.1.to_owned();
-    let wb: Arc<RwLock<Worterbuch>> = worterbuch.clone();
     let remote = *req
         .remote_addr()
         .as_socket_addr()
         .expect("Client has no remote address.");
     ws.protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            let mut client_handler = ClientHandler::new(socket, wb, remote, proto_version).await;
+            let mut client_handler =
+                ClientHandler::new(socket, worterbuch, remote, proto_version).await;
             if let Err(e) = client_handler.serve().await {
                 log::error!("Error in WS connection: {e}");
             }
@@ -192,18 +187,15 @@ fn admin_data() -> (String, String, String) {
     (admin_name, admin_url, admin_email)
 }
 
-pub async fn start(
-    worterbuch: Arc<RwLock<Worterbuch>>,
-    config: Config,
-) -> Result<(), std::io::Error> {
+pub async fn start(worterbuch: CloneableWbApi, config: Config) -> Result<(), std::io::Error> {
     let port = config.port;
     let bind_addr = config.bind_addr;
     let public_addr = config.public_address;
     let proto = config.proto;
-    let proto_versions = {
-        let wb = worterbuch.read().await;
-        wb.supported_protocol_versions()
-    };
+    let proto_versions = worterbuch
+        .supported_protocol_versions()
+        .await
+        .unwrap_or(Vec::new());
 
     let addr = format!("{bind_addr}:{port}");
 
@@ -278,7 +270,7 @@ struct ClientHandler {
     keepalive_timeout: Duration,
     send_timeout: Duration,
     websocket: WebSocketStream,
-    worterbuch: Arc<RwLock<Worterbuch>>,
+    worterbuch: CloneableWbApi,
     remote_addr: SocketAddr,
     proto_version: ProtocolVersion,
 }
@@ -286,14 +278,14 @@ struct ClientHandler {
 impl ClientHandler {
     async fn new(
         websocket: WebSocketStream,
-        worterbuch: Arc<RwLock<Worterbuch>>,
+        worterbuch: CloneableWbApi,
         remote_addr: SocketAddr,
         proto_version: ProtocolVersion,
     ) -> Self {
-        let wb = worterbuch.clone();
-        let wb = wb.read().await;
-        let keepalive_timeout = wb.config().keepalive_timeout.clone();
-        let send_timeout = wb.config().send_timeout.clone();
+        let config = worterbuch.config().await.ok();
+        let (keepalive_timeout, send_timeout) = config
+            .map(|c| (c.keepalive_timeout, c.send_timeout))
+            .unwrap_or((Duration::from_secs(10), Duration::from_secs(10)));
         Self {
             client_id: Uuid::new_v4(),
             handshake_complete: false,
@@ -309,15 +301,12 @@ impl ClientHandler {
     }
 
     async fn serve(&mut self) -> anyhow::Result<()> {
-        let client_id = self.client_id.clone();
+        let client_id = self.client_id;
         let remote_addr = self.remote_addr;
 
         log::info!("New client connected: {client_id} ({remote_addr})");
 
-        {
-            let mut wb = self.worterbuch.write().await;
-            wb.connected(self.client_id, remote_addr);
-        }
+        self.worterbuch.connected(client_id, remote_addr).await?;
 
         log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
@@ -325,8 +314,7 @@ impl ClientHandler {
             log::error!("Error in serve loop: {e}");
         }
 
-        let mut wb = self.worterbuch.write().await;
-        wb.disconnected(client_id, remote_addr);
+        self.worterbuch.disconnected(client_id, remote_addr).await?;
 
         Ok(())
     }
@@ -347,7 +335,7 @@ impl ClientHandler {
                                 let (msg_processed, handshake) = process_incoming_message(
                                     self.client_id,
                                     &text,
-                                    self.worterbuch.clone(),
+                                    &mut self.worterbuch,
                                     tx.clone(),
                                     &self.proto_version,
                                 )

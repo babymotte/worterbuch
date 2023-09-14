@@ -1,6 +1,5 @@
 use crate::{
-    GraveGoods, Key, LastWill, Path, ProtocolVersions, RequestPattern, TransactionId, UniqueFlag,
-    Value,
+    GraveGoods, Key, LastWill, ProtocolVersions, RequestPattern, TransactionId, UniqueFlag, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +13,6 @@ pub enum ClientMessage {
     Publish(Publish),
     Subscribe(Subscribe),
     PSubscribe(PSubscribe),
-    Export(Export),
-    Import(Import),
     Unsubscribe(Unsubscribe),
     Delete(Delete),
     PDelete(PDelete),
@@ -36,8 +33,6 @@ impl ClientMessage {
             ClientMessage::Publish(m) => Some(m.transaction_id),
             ClientMessage::Subscribe(m) => Some(m.transaction_id),
             ClientMessage::PSubscribe(m) => Some(m.transaction_id),
-            ClientMessage::Export(m) => Some(m.transaction_id),
-            ClientMessage::Import(m) => Some(m.transaction_id),
             ClientMessage::Unsubscribe(m) => Some(m.transaction_id),
             ClientMessage::Delete(m) => Some(m.transaction_id),
             ClientMessage::PDelete(m) => Some(m.transaction_id),
@@ -100,20 +95,6 @@ pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub unique: UniqueFlag,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Export {
-    pub transaction_id: TransactionId,
-    pub path: Path,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Import {
-    pub transaction_id: TransactionId,
-    pub path: Path,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

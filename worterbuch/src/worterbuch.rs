@@ -204,7 +204,7 @@ impl Worterbuch {
         &mut self,
         client_id: Uuid,
         transaction_id: TransactionId,
-        parent: Option<String>,
+        parent: Option<Key>,
     ) -> WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)> {
         let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
         let path: Vec<RegularKeySegment> = parent
@@ -368,7 +368,7 @@ impl Worterbuch {
         }
     }
 
-    pub fn delete(&mut self, key: Key) -> WorterbuchResult<(String, Value)> {
+    pub fn delete(&mut self, key: Key) -> WorterbuchResult<(Key, Value)> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         if path.is_empty() || path[0] == SYSTEM_TOPIC_ROOT {
