@@ -27,6 +27,7 @@ use tokio::{
     sync::mpsc,
     time::{sleep, MissedTickBehavior},
 };
+use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
     error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
@@ -38,6 +39,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Api {
     worterbuch: CloneableWbApi,
+    _subsys: SubsystemHandle,
 }
 
 #[OpenApi]
@@ -137,7 +139,7 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    Data(data): Data<&(CloneableWbApi, ProtocolVersion)>,
+    Data(data): Data<&(CloneableWbApi, ProtocolVersion, SubsystemHandle)>,
     req: &Request,
 ) -> impl IntoResponse {
     log::info!("Client connected");
@@ -187,7 +189,11 @@ fn admin_data() -> (String, String, String) {
     (admin_name, admin_url, admin_email)
 }
 
-pub async fn start(worterbuch: CloneableWbApi, config: Config) -> Result<(), std::io::Error> {
+pub async fn start(
+    worterbuch: CloneableWbApi,
+    config: Config,
+    subsys: SubsystemHandle,
+) -> Result<(), std::io::Error> {
     let port = config.port;
     let bind_addr = config.bind_addr;
     let public_addr = config.public_address;
@@ -201,6 +207,7 @@ pub async fn start(worterbuch: CloneableWbApi, config: Config) -> Result<(), std
 
     let api = Api {
         worterbuch: worterbuch.clone(),
+        _subsys: subsys.clone(),
     };
 
     let api_path = "/api";
@@ -229,6 +236,7 @@ pub async fn start(worterbuch: CloneableWbApi, config: Config) -> Result<(), std
                     .last()
                     .expect("cannot be none")
                     .to_owned(),
+                subsys.clone(),
             ))),
         );
 
@@ -259,7 +267,13 @@ pub async fn start(worterbuch: CloneableWbApi, config: Config) -> Result<(), std
         log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}");
     }
 
-    poem::Server::new(TcpListener::bind(addr)).run(app).await
+    poem::Server::new(TcpListener::bind(addr))
+        .run_with_graceful_shutdown(
+            app,
+            subsys.on_shutdown_requested(),
+            Some(Duration::from_secs(1)),
+        )
+        .await
 }
 
 struct ClientHandler {

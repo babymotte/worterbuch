@@ -2402,6 +2402,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tokio",
+ "tokio-graceful-shutdown",
  "tracing-subscriber",
  "urlencoding",
  "uuid",

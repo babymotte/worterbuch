@@ -5,16 +5,26 @@ use std::path::PathBuf;
 use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
-    time::sleep,
+    select,
+    time::interval,
 };
+use tokio_graceful_shutdown::SubsystemHandle;
 
-pub(crate) async fn periodic(worterbuch: CloneableWbApi, config: Config) -> Result<()> {
-    let interval = config.persistence_interval;
+pub(crate) async fn periodic(
+    worterbuch: CloneableWbApi,
+    config: Config,
+    subsys: SubsystemHandle,
+) -> Result<()> {
+    let mut interval = interval(config.persistence_interval);
 
     loop {
-        sleep(interval).await;
-        once(&worterbuch, config.clone()).await?;
+        select! {
+            _ = interval.tick() => once(&worterbuch, config.clone()).await?,
+            _ = subsys.on_shutdown_requested() => break,
+        }
     }
+
+    Ok(())
 }
 
 pub(crate) async fn once(worterbuch: &CloneableWbApi, config: Config) -> Result<()> {

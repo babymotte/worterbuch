@@ -1,7 +1,11 @@
 use crate::server::common::CloneableWbApi;
 use serde_json::json;
 use std::time::Duration;
-use tokio::time::{sleep, Instant};
+use tokio::{
+    select,
+    time::{interval, Instant},
+};
+use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_common::error::WorterbuchResult;
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
@@ -9,14 +13,21 @@ pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS: &str = "supportedProtocolVersions";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn track_stats(wb: CloneableWbApi) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
     let start = Instant::now();
     wb.set(format!("{SYSTEM_TOPIC_ROOT}/version"), json!(VERSION))
         .await?;
+
+    let mut interval = interval(Duration::from_secs(1));
+
     loop {
-        update_stats(&wb, start).await?;
-        sleep(Duration::from_secs(1)).await;
+        select! {
+            _ = interval.tick() => update_stats(&wb, start).await?,
+            _ = subsys.on_shutdown_requested() => break,
+        }
     }
+
+    Ok(())
 }
 
 async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<()> {

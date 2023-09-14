@@ -10,15 +10,16 @@ pub use crate::worterbuch::*;
 pub use config::*;
 use server::common::{CloneableWbApi, WbFunction};
 use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS};
+use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_common::topic;
 
 use crate::stats::track_stats;
 use anyhow::Result;
 #[cfg(not(target_os = "windows"))]
-use tokio::signal::unix::{signal, SignalKind};
-use tokio::{select, spawn, sync::mpsc};
+use tokio::{select, sync::mpsc};
 
-pub async fn run_worterbuch(config: Config) -> Result<()> {
+pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
+    let config = Config::new()?;
     let config_pers = config.clone();
 
     let use_persistence = config.use_persistence;
@@ -41,14 +42,17 @@ pub async fn run_worterbuch(config: Config) -> Result<()> {
     let worterbuch_uptime = api.clone();
 
     if use_persistence {
-        spawn(persistence::periodic(worterbuch_pers, config_pers));
+        subsys.start("persistence", |subsys| {
+            persistence::periodic(worterbuch_pers, config_pers, subsys)
+        });
     }
 
-    spawn(track_stats(worterbuch_uptime));
-
-    spawn(server::poem::start(api.clone(), config.clone()));
-
-    let (_terminate_tx, mut terminate_rx) = mpsc::channel(1);
+    let sapi = api.clone();
+    let sconf = config.clone();
+    subsys.start("stats", |subsys| track_stats(worterbuch_uptime, subsys));
+    subsys.start("webserver", |subsys| {
+        server::poem::start(sapi, sconf, subsys)
+    });
 
     loop {
         select! {
@@ -56,23 +60,9 @@ pub async fn run_worterbuch(config: Config) -> Result<()> {
                 Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
-            _ = terminate_rx.recv() => break,
+            _ = subsys.on_shutdown_requested() => break,
         }
     }
-
-    #[cfg(not(target_os = "windows"))]
-    spawn(async move {
-        match signal(SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-                log::info!("SIGTERM received.");
-                if let Err(_) = _terminate_tx.send(()).await {
-                    log::error!("Error sending terminate signal");
-                }
-            }
-            Err(e) => log::error!("Error registring SIGTERM handler: {e}"),
-        }
-    });
 
     log::info!("Shutting down.");
 
