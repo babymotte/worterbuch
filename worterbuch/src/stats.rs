@@ -1,10 +1,11 @@
-use crate::worterbuch::Worterbuch;
+use crate::server::common::CloneableWbApi;
 use serde_json::json;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::{
-    sync::RwLock,
-    time::{sleep, Instant},
+    select,
+    time::{interval, Instant},
 };
+use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_common::error::WorterbuchResult;
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
@@ -12,35 +13,42 @@ pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS: &str = "supportedProtocolVersions";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn track_stats(wb: Arc<RwLock<Worterbuch>>) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
     let start = Instant::now();
-    wb.write()
-        .await
-        .set(format!("{SYSTEM_TOPIC_ROOT}/version"), json!(VERSION))?;
-    loop {
-        update_stats(&wb, start).await?;
-        sleep(Duration::from_secs(10)).await;
-    }
-}
+    wb.set(format!("{SYSTEM_TOPIC_ROOT}/version"), json!(VERSION))
+        .await?;
 
-async fn update_stats(wb: &Arc<RwLock<Worterbuch>>, start: Instant) -> WorterbuchResult<()> {
-    let mut wb_write = wb.write().await;
-    update_uptime(&mut wb_write, start.elapsed())?;
-    update_message_count(&mut wb_write)?;
+    let mut interval = interval(Duration::from_secs(1));
+
+    loop {
+        select! {
+            _ = interval.tick() => update_stats(&wb, start).await?,
+            _ = subsys.on_shutdown_requested() => break,
+        }
+    }
+
     Ok(())
 }
 
-fn update_uptime(wb: &mut Worterbuch, uptime: Duration) -> WorterbuchResult<()> {
+async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<()> {
+    update_uptime(wb, start.elapsed()).await?;
+    update_message_count(wb).await?;
+    Ok(())
+}
+
+async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResult<()> {
     wb.set(
         format!("{SYSTEM_TOPIC_ROOT}/uptime"),
         json!(uptime.as_secs()),
     )
+    .await
 }
 
-fn update_message_count(wb: &mut Worterbuch) -> WorterbuchResult<()> {
-    let len = wb.len();
+async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
+    let len = wb.len().await?;
     wb.set(
         format!("{SYSTEM_TOPIC_ROOT}/store/values/count"),
         json!(len),
     )
+    .await
 }

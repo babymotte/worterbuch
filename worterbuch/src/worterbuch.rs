@@ -171,7 +171,8 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
-        self.set(
+	// TODO config flag this        
+	self.set(
             topic!("$SYS", "subscriptions"),
             json!(self.subscriptions.len()),
         )?;
@@ -217,7 +218,8 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
-        self.set(
+        // TODO config flag this
+	self.set(
             topic!("$SYS", "subscriptions"),
             json!(self.subscriptions.len()),
         )?;
@@ -244,7 +246,7 @@ impl Worterbuch {
         &mut self,
         client_id: Uuid,
         transaction_id: TransactionId,
-        parent: Option<String>,
+        parent: Option<Key>,
     ) -> WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)> {
         let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
         let path: Vec<RegularKeySegment> = parent
@@ -331,6 +333,7 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(&subscription) {
+        // TODO config flag this
             self.internal_delete(
                 topic!(
                     "$SYS",
@@ -348,6 +351,7 @@ impl Worterbuch {
                 true,
             )?;
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
+        // TODO config flag this
             self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
@@ -526,6 +530,7 @@ impl Worterbuch {
         client_id: Uuid,
         remote_addr: SocketAddr,
     ) -> WorterbuchResult<()> {
+        // TODO config flag this
         self.internal_pdelete(topic!("$SYS", "clients", client_id, "#"), true)?;
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
@@ -582,6 +587,7 @@ impl Worterbuch {
             log::info!("Client {client_id} ({remote_addr}) has no last will.");
         }
 
+        // TODO config flag this
         self.set(
             topic!("$SYS", "subscriptions"),
             json!(self.subscriptions.len()),

@@ -19,7 +19,7 @@ use tokio::{
     net::TcpStream,
     select, spawn,
     sync::{mpsc, oneshot},
-    time::sleep,
+    time::{interval, sleep, MissedTickBehavior},
 };
 use tokio_tungstenite::{
     connect_async,
@@ -656,17 +656,8 @@ async fn run(
     let mut transaction_ids = TransactionIds::default();
     let mut last_keepalive_rx = Instant::now();
     let mut last_keepalive_tx = Instant::now();
-
-    let (keepalive_tx, mut keepalive_rx) = mpsc::channel(1);
-
-    spawn(async move {
-        loop {
-            sleep(Duration::from_secs(1)).await;
-            if keepalive_tx.send(()).await.is_err() {
-                break;
-            }
-        }
-    });
+    let mut keepalive_timer = interval(Duration::from_secs(1));
+    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         log::trace!("loop: wait for command / ws message / shutdown request");
@@ -674,6 +665,24 @@ async fn run(
             _ = stop_rx.recv() => {
                 log::info!("Shutdown request received.");
                 break;
+            },
+            _ = keepalive_timer.tick() => {
+                let lag = last_keepalive_rx - last_keepalive_tx;
+
+                if lag >= Duration::from_secs(2) {
+                    log::warn!("Server has been inactive for {} seconds", lag.as_secs());
+                }
+                if lag >= config.keepalive_timeout {
+                    log::error!("Server has been inactive for too long. Disconnecting.");
+                    break;
+                }
+                if last_keepalive_tx.elapsed().as_secs() >= 1 {
+                    last_keepalive_tx = Instant::now();
+                    if let Err(e) = send_keepalive(&mut websocket, config.send_timeout).await {
+                        log::error!("Error sending keepalive signal: {e}");
+                        break;
+                    }
+                }
             },
             ws_msg = websocket.next() => {
                 last_keepalive_rx = Instant::now();
@@ -700,24 +709,6 @@ async fn run(
                         log::error!("Error processing command: {e}");
                         break;
                     },
-                }
-            },
-            _ = keepalive_rx.recv() => {
-                let lag = last_keepalive_rx - last_keepalive_tx;
-
-                if lag >= Duration::from_secs(2) {
-                    log::warn!("Server has been inactive for {} seconds", lag.as_secs());
-                }
-                if lag >= config.keepalive_timeout {
-                    log::error!("Server has been inactive for too long. Disconnecting.");
-                    break;
-                }
-                if last_keepalive_tx.elapsed().as_secs() >= 1 {
-                    last_keepalive_tx = Instant::now();
-                    if let Err(e) = send_keepalive(&mut websocket, config.send_timeout).await {
-                        log::error!("Error sending keepalive signal: {e}");
-                        break;
-                    }
                 }
             }
         }

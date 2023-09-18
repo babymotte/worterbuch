@@ -1,29 +1,36 @@
-use crate::{config::Config, worterbuch::Worterbuch};
+use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
-    sync::RwLock,
-    time::sleep,
+    select,
+    time::interval,
 };
+use tokio_graceful_shutdown::SubsystemHandle;
 
-pub(crate) async fn periodic(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
-    let interval = config.persistence_interval;
+pub(crate) async fn periodic(
+    worterbuch: CloneableWbApi,
+    config: Config,
+    subsys: SubsystemHandle,
+) -> Result<()> {
+    let mut interval = interval(config.persistence_interval);
 
     loop {
-        sleep(interval).await;
-        once(worterbuch.clone(), config.clone()).await?;
+        select! {
+            _ = interval.tick() => once(&worterbuch, config.clone()).await?,
+            _ = subsys.on_shutdown_requested() => break,
+        }
     }
+
+    Ok(())
 }
 
-pub(crate) async fn once(worterbuch: Arc<RwLock<Worterbuch>>, config: Config) -> Result<()> {
-    let wb = worterbuch.read().await;
-
+pub(crate) async fn once(worterbuch: &CloneableWbApi, config: Config) -> Result<()> {
     let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(&config);
 
-    let json = wb.export()?.to_string();
+    let json = worterbuch.export().await?.to_string();
 
     let mut hasher = Sha256::new();
     hasher.update(&json);
