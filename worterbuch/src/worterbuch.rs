@@ -171,27 +171,31 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
-	// TODO config flag this        
-	self.set(
-            topic!("$SYS", "subscriptions"),
-            json!(self.subscriptions.len()),
-        )?;
 
-        let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
-        self.set(
-            topic!(
-                subs_key,
-                key.replace("/", "%2F")
-                    .replace("?", "%3F")
-                    .replace("#", "%23")
-            ),
-            json!(transaction_id),
-        )?;
-        let subs = self.ls(&Some(subs_key))?.len();
-        self.set(
-            topic!("$SYS", "clients", client_id, "subscriptions"),
-            json!(subs),
-        )?;
+        if self.config.extended_monitoring {
+            self.set(
+                topic!("$SYS", "subscriptions"),
+                json!(self.subscriptions.len()),
+            )?;
+
+            let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+            self.set(
+                topic!(
+                    subs_key,
+                    key.replace("/", "%2F")
+                        .replace("?", "%3F")
+                        .replace("#", "%23")
+                ),
+                json!(transaction_id),
+            )?;
+
+            let subs = self.ls(&Some(subs_key))?.len();
+            self.set(
+                topic!("$SYS", "clients", client_id, "subscriptions"),
+                json!(subs),
+            )?;
+        }
+
         Ok((rx, subscription))
     }
 
@@ -218,27 +222,30 @@ impl Worterbuch {
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
-        // TODO config flag this
-	self.set(
-            topic!("$SYS", "subscriptions"),
-            json!(self.subscriptions.len()),
-        )?;
-        let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
-        self.set(
-            topic!(
-                subs_key,
-                pattern
-                    .replace("/", "%2F")
-                    .replace("?", "%3F")
-                    .replace("#", "%23")
-            ),
-            json!(transaction_id),
-        )?;
-        let subs = self.ls(&Some(subs_key))?.len();
-        self.set(
-            topic!("$SYS", "clients", client_id, "subscriptions"),
-            json!(subs),
-        )?;
+
+        if self.config.extended_monitoring {
+            self.set(
+                topic!("$SYS", "subscriptions"),
+                json!(self.subscriptions.len()),
+            )?;
+            let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+            self.set(
+                topic!(
+                    subs_key,
+                    pattern
+                        .replace("/", "%2F")
+                        .replace("?", "%3F")
+                        .replace("#", "%23")
+                ),
+                json!(transaction_id),
+            )?;
+            let subs = self.ls(&Some(subs_key))?.len();
+            self.set(
+                topic!("$SYS", "clients", client_id, "subscriptions"),
+                json!(subs),
+            )?;
+        }
+
         Ok((rx, subscription))
     }
 
@@ -333,29 +340,32 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(&subscription) {
-        // TODO config flag this
-            self.internal_delete(
-                topic!(
-                    "$SYS",
-                    "clients",
-                    client_id,
-                    "subscriptions",
-                    path.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<String>>()
-                        .join("/")
-                        .replace("/", "%2F")
-                        .replace("?", "%3F")
-                        .replace("#", "%23")
-                ),
-                true,
-            )?;
+            if self.config.extended_monitoring {
+                self.internal_delete(
+                    topic!(
+                        "$SYS",
+                        "clients",
+                        client_id,
+                        "subscriptions",
+                        path.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<String>>()
+                            .join("/")
+                            .replace("/", "%2F")
+                            .replace("?", "%3F")
+                            .replace("#", "%23")
+                    ),
+                    true,
+                )?;
+            }
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
-        // TODO config flag this
-            self.set(
-                topic!("$SYS", "subscriptions"),
-                json!(self.subscriptions.len()),
-            )?;
+
+            if self.config.extended_monitoring {
+                self.set(
+                    topic!("$SYS", "subscriptions"),
+                    json!(self.subscriptions.len()),
+                )?;
+            }
             if self.subscribers.unsubscribe(&path, &subscription) {
                 Ok(())
             } else {
@@ -530,8 +540,11 @@ impl Worterbuch {
         client_id: Uuid,
         remote_addr: SocketAddr,
     ) -> WorterbuchResult<()> {
-        // TODO config flag this
-        self.internal_pdelete(topic!("$SYS", "clients", client_id, "#"), true)?;
+        let pattern = topic!("$SYS", "clients", client_id, "#");
+        if self.config.extended_monitoring {
+            log::info!("Deleting {pattern}");
+            self.internal_pdelete(pattern, true)?;
+        }
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
@@ -587,11 +600,12 @@ impl Worterbuch {
             log::info!("Client {client_id} ({remote_addr}) has no last will.");
         }
 
-        // TODO config flag this
-        self.set(
-            topic!("$SYS", "subscriptions"),
-            json!(self.subscriptions.len()),
-        )?;
+        if self.config.extended_monitoring {
+            self.set(
+                topic!("$SYS", "subscriptions"),
+                json!(self.subscriptions.len()),
+            )?;
+        }
 
         Ok(())
     }

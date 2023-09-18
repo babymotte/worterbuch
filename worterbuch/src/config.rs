@@ -19,6 +19,7 @@ pub struct Config {
     pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
     pub channel_buffer_size: usize,
+    pub extended_monitoring: bool,
 }
 
 impl Config {
@@ -83,6 +84,12 @@ impl Config {
             self.channel_buffer_size = size;
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_EXTENDED_MONITORING") {
+            let enabled = val.to_lowercase();
+            let enabled = enabled.trim();
+            self.extended_monitoring = enabled == "true" || enabled == "1";
+        }
+
         Ok(())
     }
 
@@ -109,6 +116,7 @@ impl Default for Config {
             keepalive_timeout: Duration::from_secs(5),
             send_timeout: Duration::from_secs(5),
             channel_buffer_size: 1_000,
+            extended_monitoring: true,
         }
     }
 }

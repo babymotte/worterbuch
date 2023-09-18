@@ -130,7 +130,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             worterbuch.connected(client_id, remote_addr);
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
-            worterbuch.disconnected(client_id, remote_addr);
+            worterbuch.disconnected(client_id, remote_addr).ok();
         }
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();
