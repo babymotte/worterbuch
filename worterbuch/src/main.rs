@@ -9,7 +9,7 @@ use worterbuch::run_worterbuch;
 #[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
 struct Args {}
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
