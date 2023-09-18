@@ -18,6 +18,7 @@ pub struct Config {
     pub public_address: String,
     pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
+    pub channel_buffer_size: usize,
 }
 
 impl Config {
@@ -77,6 +78,11 @@ impl Config {
             self.send_timeout = Duration::from_secs(secs);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_SIZE") {
+            let size = val.parse().as_interval()?;
+            self.channel_buffer_size = size;
+        }
+
         Ok(())
     }
 
@@ -102,6 +108,7 @@ impl Default for Config {
             public_address: "localhost".to_owned(),
             keepalive_timeout: Duration::from_secs(5),
             send_timeout: Duration::from_secs(5),
+            channel_buffer_size: 1_000,
         }
     }
 }

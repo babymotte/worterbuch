@@ -21,6 +21,8 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new()?;
     let config_pers = config.clone();
 
+    let channel_buffer_size = config.channel_buffer_size;
+
     let use_persistence = config.use_persistence;
 
     let mut worterbuch = if use_persistence {
@@ -34,7 +36,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         serde_json::to_value(worterbuch.supported_protocol_versions()).expect("cannot fail"),
     )?;
 
-    let (api_tx, mut api_rx) = mpsc::channel(1);
+    let (api_tx, mut api_rx) = mpsc::channel(channel_buffer_size);
     let api = CloneableWbApi::new(api_tx);
 
     let worterbuch_pers = api.clone();
