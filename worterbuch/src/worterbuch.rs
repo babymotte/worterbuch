@@ -173,13 +173,15 @@ impl Worterbuch {
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring {
-            self.set(
+            if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
-            )?;
+            ) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
 
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
-            self.set(
+            if let Err(e) = self.set(
                 topic!(
                     subs_key,
                     key.replace("/", "%2F")
@@ -187,7 +189,9 @@ impl Worterbuch {
                         .replace("#", "%23")
                 ),
                 json!(transaction_id),
-            )?;
+            ) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
 
             let subs = self.ls(&Some(subs_key))?.len();
             self.set(
@@ -224,12 +228,14 @@ impl Worterbuch {
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring {
-            self.set(
+            if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
-            )?;
+            ) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
-            self.set(
+            if let Err(e) = self.set(
                 topic!(
                     subs_key,
                     pattern
@@ -238,12 +244,22 @@ impl Worterbuch {
                         .replace("#", "%23")
                 ),
                 json!(transaction_id),
-            )?;
-            let subs = self.ls(&Some(subs_key))?.len();
-            self.set(
-                topic!("$SYS", "clients", client_id, "subscriptions"),
-                json!(subs),
-            )?;
+            ) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
+
+            if let Err(e) = self
+                .ls(&Some(subs_key))
+                .map(|ls| ls.len())
+                .and_then(|subs| {
+                    self.set(
+                        topic!("$SYS", "clients", client_id, "subscriptions"),
+                        json!(subs),
+                    )
+                })
+            {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
         }
 
         Ok((rx, subscription))
@@ -341,7 +357,7 @@ impl Worterbuch {
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(&subscription) {
             if self.config.extended_monitoring {
-                self.internal_delete(
+                if let Err(e) = self.internal_delete(
                     topic!(
                         "$SYS",
                         "clients",
@@ -356,15 +372,19 @@ impl Worterbuch {
                             .replace("#", "%23")
                     ),
                     true,
-                )?;
+                ) {
+                    log::warn!("Error in subscription monitoring: {e}");
+                }
             }
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
             if self.config.extended_monitoring {
-                self.set(
+                if let Err(e) = self.set(
                     topic!("$SYS", "subscriptions"),
                     json!(self.subscriptions.len()),
-                )?;
+                ) {
+                    log::warn!("Error in subscription monitoring: {e}");
+                }
             }
             if self.subscribers.unsubscribe(&path, &subscription) {
                 Ok(())
@@ -543,7 +563,9 @@ impl Worterbuch {
         let pattern = topic!("$SYS", "clients", client_id, "#");
         if self.config.extended_monitoring {
             log::info!("Deleting {pattern}");
-            self.internal_pdelete(pattern, true)?;
+            if let Err(e) = self.internal_pdelete(pattern, true) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
         }
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
@@ -601,10 +623,12 @@ impl Worterbuch {
         }
 
         if self.config.extended_monitoring {
-            self.set(
+            if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
-            )?;
+            ) {
+                log::warn!("Error in subscription monitoring: {e}");
+            }
         }
 
         Ok(())
