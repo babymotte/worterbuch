@@ -15,8 +15,8 @@ worterbuch-client = { path = "./worterbuch-client" }
 lto = true
 codegen-units = 1
 panic = "abort"
-# strip = true
-debug = 1
+strip = true
+# debug = 1
 
 [profile.release-web]
 inherits = "release"
