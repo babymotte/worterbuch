@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tokio::{spawn, sync::mpsc::UnboundedSender};
+use tokio::{spawn, sync::mpsc};
 use uuid::Uuid;
 use worterbuch_common::{
     error::WorterbuchResult,
@@ -15,50 +15,50 @@ pub async fn process_incoming_message(
     client_id: Uuid,
     msg: &str,
     worterbuch: &CloneableWbApi,
-    tx: UnboundedSender<String>,
+    tx: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<(bool, bool)> {
     let mut hs = false;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
             CM::HandshakeRequest(msg) => {
                 hs = true;
-                handshake(msg, worterbuch, &tx, client_id.clone()).await?;
+                handshake(msg, worterbuch, tx, client_id.clone()).await?;
             }
             CM::Get(msg) => {
-                get(msg, worterbuch, &tx).await?;
+                get(msg, worterbuch, tx).await?;
             }
             CM::PGet(msg) => {
-                pget(msg, worterbuch, &tx).await?;
+                pget(msg, worterbuch, tx).await?;
             }
             CM::Set(msg) => {
-                set(msg, worterbuch, &tx).await?;
+                set(msg, worterbuch, tx).await?;
             }
             CM::Publish(msg) => {
-                publish(msg, worterbuch, &tx).await?;
+                publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
                 let unique = msg.unique;
-                subscribe(msg, client_id, worterbuch, &tx, unique).await?;
+                subscribe(msg, client_id, worterbuch, tx, unique).await?;
             }
             CM::PSubscribe(msg) => {
                 let unique = msg.unique;
-                psubscribe(msg, client_id, worterbuch, &tx, unique).await?;
+                psubscribe(msg, client_id, worterbuch, tx, unique).await?;
             }
-            CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, &tx, client_id).await?,
+            CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, tx, client_id).await?,
             CM::Delete(msg) => {
-                delete(msg, worterbuch, &tx).await?;
+                delete(msg, worterbuch, tx).await?;
             }
             CM::PDelete(msg) => {
-                pdelete(msg, worterbuch, &tx).await?;
+                pdelete(msg, worterbuch, tx).await?;
             }
             CM::Ls(msg) => {
-                ls(msg, worterbuch, &tx).await?;
+                ls(msg, worterbuch, tx).await?;
             }
             CM::SubscribeLs(msg) => {
-                subscribe_ls(msg, client_id, worterbuch, &tx).await?;
+                subscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::UnsubscribeLs(msg) => {
-                unsubscribe_ls(msg, client_id, worterbuch, &tx).await?;
+                unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::Keepalive => (),
         },
@@ -78,7 +78,7 @@ pub async fn process_incoming_message(
 async fn handshake(
     msg: HandshakeRequest,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
     client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let response = match worterbuch
@@ -97,12 +97,10 @@ async fn handshake(
         }
     };
 
-    match serde_json::to_string(&ServerMessage::Handshake(response)) {
-        Ok(data) => client
-            .send(data)
-            .context(|| format!("Error sending HANDSHAKE message",))?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+    client
+        .send(ServerMessage::Handshake(response))
+        .await
+        .context(|| format!("Error sending HANDSHAKE message",))?;
 
     Ok(())
 }
@@ -110,7 +108,7 @@ async fn handshake(
 async fn get(
     msg: Get,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let key_value = match worterbuch.get(msg.key).await {
         Ok(key_value) => key_value.into(),
@@ -125,15 +123,15 @@ async fn get(
         event: StateEvent::KeyValue(key_value),
     };
 
-    match serde_json::to_string(&ServerMessage::State(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::State(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending STATE message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -141,7 +139,7 @@ async fn get(
 async fn pget(
     msg: PGet,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let values = match worterbuch.pget(msg.request_pattern.clone()).await {
         Ok(values) => values.into_iter().map(KeyValuePair::from).collect(),
@@ -157,15 +155,15 @@ async fn pget(
         event: PStateEvent::KeyValuePairs(values),
     };
 
-    match serde_json::to_string(&ServerMessage::PState(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::PState(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending PSTATE message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -173,7 +171,7 @@ async fn pget(
 async fn set(
     msg: Set,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch.set(msg.key, msg.value).await {
         handle_store_error(e, client, msg.transaction_id).await?;
@@ -184,15 +182,15 @@ async fn set(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -200,7 +198,7 @@ async fn set(
 async fn publish(
     msg: Publish,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch.publish(msg.key, msg.value).await {
         handle_store_error(e, client, msg.transaction_id).await?;
@@ -211,15 +209,15 @@ async fn publish(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -228,7 +226,7 @@ async fn subscribe(
     msg: Subscribe,
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
     unique: bool,
 ) -> WorterbuchResult<bool> {
     let (mut rx, subscription) = match worterbuch
@@ -246,15 +244,15 @@ async fn subscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     let transaction_id = msg.transaction_id;
 
@@ -271,20 +269,10 @@ async fn subscribe(
                     transaction_id: transaction_id.clone(),
                     event,
                 };
-                match serde_json::to_string(&ServerMessage::State(state)) {
-                    Ok(data) => {
-                        if let Err(e) = client_sub.send(data) {
-                            log::error!("Error sending STATE message to client: {e}");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if let Err(e) = handle_encode_error(e).await {
-                            log::error!("Error sending ERROR message to client: {e}");
-                            break;
-                        }
-                    }
-                }
+                if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
+                    log::error!("Error sending STATE message to client: {e}");
+                    break;
+                };
             }
         }
 
@@ -306,7 +294,7 @@ async fn psubscribe(
     msg: PSubscribe,
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
     unique: bool,
 ) -> WorterbuchResult<bool> {
     let (mut rx, subscription) = match worterbuch
@@ -329,15 +317,15 @@ async fn psubscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     let transaction_id = msg.transaction_id;
     let request_pattern = msg.request_pattern;
@@ -353,19 +341,9 @@ async fn psubscribe(
                 request_pattern: request_pattern.clone(),
                 event,
             };
-            match serde_json::to_string(&ServerMessage::PState(event)) {
-                Ok(data) => {
-                    if let Err(e) = client_sub.send(data) {
-                        log::error!("Error sending STATE message to client: {e}");
-                        break;
-                    }
-                }
-                Err(e) => {
-                    if let Err(e) = handle_encode_error(e).await {
-                        log::error!("Error sending ERROR message to client: {e}");
-                        break;
-                    }
-                }
+            if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
+                log::error!("Error sending STATE message to client: {e}");
+                break;
             }
         }
 
@@ -386,7 +364,7 @@ async fn psubscribe(
 async fn unsubscribe(
     msg: Unsubscribe,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
     client_id: Uuid,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch.unsubscribe(client_id, msg.transaction_id).await {
@@ -397,15 +375,15 @@ async fn unsubscribe(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -413,7 +391,7 @@ async fn unsubscribe(
 async fn delete(
     msg: Delete,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let key_value = match worterbuch.delete(msg.key).await {
         Ok(key_value) => key_value.into(),
@@ -428,15 +406,15 @@ async fn delete(
         event: StateEvent::Deleted(key_value),
     };
 
-    match serde_json::to_string(&ServerMessage::State(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::State(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending STATE message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -444,7 +422,7 @@ async fn delete(
 async fn pdelete(
     msg: PDelete,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let deleted = match worterbuch.pdelete(msg.request_pattern.clone()).await {
         Ok(it) => it,
@@ -460,15 +438,15 @@ async fn pdelete(
         event: PStateEvent::Deleted(deleted),
     };
 
-    match serde_json::to_string(&ServerMessage::PState(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::PState(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending PSTATE message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -476,7 +454,7 @@ async fn pdelete(
 async fn ls(
     msg: Ls,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let children = match worterbuch.ls(msg.parent).await {
         Ok(it) => it,
@@ -491,15 +469,15 @@ async fn ls(
         children,
     };
 
-    match serde_json::to_string(&ServerMessage::LsState(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::LsState(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending LSSTATE message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
@@ -508,7 +486,7 @@ async fn subscribe_ls(
     msg: SubscribeLs,
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<bool> {
     let (mut rx, subscription) = match worterbuch
         .subscribe_ls(client_id, msg.transaction_id, msg.parent.clone())
@@ -525,15 +503,15 @@ async fn subscribe_ls(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     let transaction_id = msg.transaction_id;
 
@@ -547,20 +525,10 @@ async fn subscribe_ls(
                 transaction_id: transaction_id.clone(),
                 children,
             };
-            match serde_json::to_string(&ServerMessage::LsState(state)) {
-                Ok(data) => {
-                    if let Err(e) = client_sub.send(data) {
-                        log::error!("Error sending STATE message to client: {e}");
-                        break;
-                    }
-                }
-                Err(e) => {
-                    if let Err(e) = handle_encode_error(e).await {
-                        log::error!("Error sending ERROR message to client: {e}");
-                        break;
-                    }
-                }
-            }
+            if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
+                log::error!("Error sending STATE message to client: {e}");
+                break;
+            };
         }
 
         match wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
@@ -581,7 +549,7 @@ async fn unsubscribe_ls(
     msg: UnsubscribeLs,
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch
         .unsubscribe_ls(client_id, msg.transaction_id)
@@ -594,26 +562,22 @@ async fn unsubscribe_ls(
         transaction_id: msg.transaction_id,
     };
 
-    match serde_json::to_string(&ServerMessage::Ack(response)) {
-        Ok(data) => client.send(data).context(|| {
+    client
+        .send(ServerMessage::Ack(response))
+        .await
+        .context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
                 msg.transaction_id
             )
-        })?,
-        Err(e) => handle_encode_error(e).await?,
-    }
+        })?;
 
     Ok(())
 }
 
-async fn handle_encode_error(e: serde_json::Error) -> WorterbuchResult<()> {
-    panic!("Failed to encode a value to JSON: {e}");
-}
-
 async fn handle_store_error(
     e: WorterbuchError,
-    client: &UnboundedSender<String>,
+    client: &mpsc::Sender<ServerMessage>,
     transaction_id: u64,
 ) -> WorterbuchResult<()> {
     let error_code = ErrorCode::from(&e);
@@ -689,10 +653,9 @@ async fn handle_store_error(
                 .expect("failed to serialize error message"),
         },
     };
-    let msg = serde_json::to_string(&ServerMessage::Err(err_msg))
-        .expect(&format!("failed to encode error message"));
     client
-        .send(msg)
+        .send(ServerMessage::Err(err_msg))
+        .await
         .context(|| format!("Error sending ERR message to client"))
 }
 
