@@ -3,20 +3,20 @@ mod v1_0;
 use crate::{subscribers::SubscriptionId, Config};
 use std::net::SocketAddr;
 use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, UnboundedReceiver},
     oneshot,
 };
 use uuid::Uuid;
 use worterbuch_common::{
     error::WorterbuchResult, Handshake, Key, KeyValuePairs, PStateEvent, ProtocolVersion,
-    ProtocolVersions, RegularKeySegment, RequestPattern, TransactionId, Value,
+    ProtocolVersions, RegularKeySegment, RequestPattern, ServerMessage, TransactionId, Value,
 };
 
 pub async fn process_incoming_message(
     client_id: Uuid,
     msg: &str,
     worterbuch: &CloneableWbApi,
-    tx: UnboundedSender<String>,
+    tx: &mpsc::Sender<ServerMessage>,
     protocol_version: &ProtocolVersion,
 ) -> WorterbuchResult<(bool, bool)> {
     match protocol_version {

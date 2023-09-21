@@ -3,7 +3,10 @@ use crate::{
     Config,
 };
 use anyhow::anyhow;
-use futures::{sink::SinkExt, stream::StreamExt};
+use futures::{
+    sink::SinkExt,
+    stream::{SplitSink, StreamExt},
+};
 use poem::{
     get, handler,
     http::StatusCode,
@@ -23,7 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    select,
+    select, spawn,
     sync::mpsc,
     time::{sleep, MissedTickBehavior},
 };
@@ -145,15 +148,14 @@ async fn ws(
     log::info!("Client connected");
     let worterbuch = data.0.clone();
     let proto_version = data.1.to_owned();
+    let subsys = data.2.to_owned();
     let remote = *req
         .remote_addr()
         .as_socket_addr()
         .expect("Client has no remote address.");
     ws.protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            let mut client_handler =
-                ClientHandler::new(socket, worterbuch, remote, proto_version).await;
-            if let Err(e) = client_handler.serve().await {
+            if let Err(e) = serve(remote, worterbuch, socket, proto_version, subsys).await {
                 log::error!("Error in WS connection: {e}");
             }
         })
@@ -276,160 +278,195 @@ pub async fn start(
         .await
 }
 
-struct ClientHandler {
-    client_id: Uuid,
-    handshake_complete: bool,
-    last_keepalive_rx: Instant,
-    last_keepalive_tx: Instant,
-    keepalive_timeout: Duration,
-    send_timeout: Duration,
-    websocket: WebSocketStream,
-    worterbuch: CloneableWbApi,
+async fn serve(
     remote_addr: SocketAddr,
+    worterbuch: CloneableWbApi,
+    websocket: WebSocketStream,
     proto_version: ProtocolVersion,
+    subsys: SubsystemHandle,
+) -> anyhow::Result<()> {
+    let client_id = Uuid::new_v4();
+
+    log::info!("New client connected: {client_id} ({remote_addr})");
+
+    worterbuch.connected(client_id, remote_addr).await?;
+
+    log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+
+    if let Err(e) = serve_loop(
+        client_id,
+        remote_addr,
+        worterbuch.clone(),
+        websocket,
+        proto_version,
+        subsys,
+    )
+    .await
+    {
+        log::error!("Error in serve loop: {e}");
+    }
+
+    worterbuch.disconnected(client_id, remote_addr).await?;
+
+    Ok(())
 }
 
-impl ClientHandler {
-    async fn new(
-        websocket: WebSocketStream,
-        worterbuch: CloneableWbApi,
-        remote_addr: SocketAddr,
-        proto_version: ProtocolVersion,
-    ) -> Self {
-        let config = worterbuch.config().await.ok();
-        let (keepalive_timeout, send_timeout) = config
-            .map(|c| (c.keepalive_timeout, c.send_timeout))
-            .unwrap_or((Duration::from_secs(10), Duration::from_secs(10)));
-        Self {
-            client_id: Uuid::new_v4(),
-            handshake_complete: false,
-            last_keepalive_rx: Instant::now(),
-            last_keepalive_tx: Instant::now(),
-            keepalive_timeout,
-            send_timeout,
-            proto_version,
-            remote_addr,
-            websocket,
-            worterbuch,
+type WebSocketSender = SplitSink<WebSocketStream, poem::web::websocket::Message>;
+
+async fn serve_loop(
+    client_id: Uuid,
+    remote_addr: SocketAddr,
+    worterbuch: CloneableWbApi,
+    websocket: WebSocketStream,
+    proto_version: ProtocolVersion,
+    subsys: SubsystemHandle,
+) -> anyhow::Result<()> {
+    let config = worterbuch.config().await?;
+    let send_timeout = config.send_timeout;
+    let keepalive_timeout = config.keepalive_timeout;
+    let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
+    let mut last_keepalive_tx = Instant::now();
+    let mut last_keepalive_rx = Instant::now();
+    let mut handshake_complete = false;
+    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    let (mut ws_tx, mut ws_rx) = websocket.split();
+    let (ws_send_tx, mut ws_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::unbounded_channel();
+
+    // websocket send loop
+    let subsys_send = subsys.clone();
+    spawn(async move {
+        while let Some(msg) = ws_send_rx.recv().await {
+            send_with_timeout(
+                msg,
+                &mut ws_tx,
+                send_timeout,
+                &keepalive_tx_tx,
+                &subsys_send,
+            )
+            .await;
         }
-    }
+    });
 
-    async fn serve(&mut self) -> anyhow::Result<()> {
-        let client_id = self.client_id;
-        let remote_addr = self.remote_addr;
-
-        log::info!("New client connected: {client_id} ({remote_addr})");
-
-        self.worterbuch.connected(client_id, remote_addr).await?;
-
-        log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
-
-        if let Err(e) = self.serve_loop().await {
-            log::error!("Error in serve loop: {e}");
-        }
-
-        self.worterbuch.disconnected(client_id, remote_addr).await?;
-
-        Ok(())
-    }
-
-    async fn serve_loop(&mut self) -> anyhow::Result<()> {
-        let client_id = self.client_id.clone();
-        let remote_addr = self.remote_addr;
-        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
-        keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            select! {
-                recv = self.websocket.next() => if let Some(msg) = recv {
-                    match msg {
-                        Ok(incoming_msg) => {
-                            self.last_keepalive_rx = Instant::now();
-                            if let Message::Text(text) = incoming_msg {
-                                let (msg_processed, handshake) = process_incoming_message(
-                                    self.client_id,
-                                    &text,
-                                    &mut self.worterbuch,
-                                    tx.clone(),
-                                    &self.proto_version,
-                                )
-                                .await?;
-                                self.handshake_complete |= msg_processed && handshake;
-                                if !msg_processed {
-                                    break;
-                                }
+    loop {
+        select! {
+            recv = ws_rx.next() => if let Some(msg) = recv {
+                match msg {
+                    Ok(incoming_msg) => {
+                        last_keepalive_rx = Instant::now();
+                        if let Message::Text(text) = incoming_msg {
+                            let (msg_processed, handshake) = process_incoming_message(
+                                client_id,
+                                &text,
+                                &worterbuch,
+                                &ws_send_tx,
+                                &proto_version,
+                            )
+                            .await?;
+                            handshake_complete |= msg_processed && handshake;
+                            if !msg_processed {
+                                break;
                             }
-                        },
-                        Err(e) => {
-                            log::error!("Error in WebSocket connection: {e}");
-                            break;
                         }
+                    },
+                    Err(e) => {
+                        log::error!("Error in WebSocket connection: {e}");
+                        break;
                     }
-                } else {
-                    log::warn!("WS stream of client {client_id} ({remote_addr}) closed.");
-                    break;
-                },
-                recv = rx.recv() => if let Some(text) = recv {
-                    let msg = Message::text(text);
-                    self.send_with_timeout(msg).await?;
-                } else {
-                    break;
-                },
-                _ = keepalive_timer.tick() => {
-                    // check how long ago the last websocket message was received
-                    self.check_client_keepalive()?;
-                    // send out websocket message if the last has been more than a second ago
-                    self.send_keepalive().await?;
                 }
+            } else {
+                log::warn!("WS stream of client {client_id} ({remote_addr}) closed.");
+                break;
+            },
+            recv = keepalive_tx_rx.recv() => match recv {
+                Some(keepalive) => last_keepalive_tx = keepalive?,
+                None => break,
+            },
+            _ = keepalive_timer.tick() => {
+                // check how long ago the last websocket message was received
+                check_client_keepalive(last_keepalive_rx, last_keepalive_tx, handshake_complete, client_id, keepalive_timeout)?;
+                // send out websocket message if the last has been more than a second ago
+                send_keepalive(last_keepalive_tx, &ws_send_tx, ).await?;
             }
         }
+    }
 
+    Ok(())
+}
+
+async fn send_keepalive(
+    last_keepalive_tx: Instant,
+    ws_send_tx: &mpsc::Sender<ServerMessage>,
+) -> anyhow::Result<()> {
+    if last_keepalive_tx.elapsed().as_secs() >= 1 {
+        log::trace!("Sending keepalive");
+        ws_send_tx.send(ServerMessage::Keepalive).await?;
+    }
+    Ok(())
+}
+
+fn check_client_keepalive(
+    last_keepalive_rx: Instant,
+    last_keepalive_tx: Instant,
+    handshake_complete: bool,
+    client_id: Uuid,
+    keepalive_timeout: Duration,
+) -> anyhow::Result<()> {
+    let lag = last_keepalive_rx - last_keepalive_tx;
+
+    if handshake_complete && lag >= Duration::from_secs(2) {
+        log::warn!(
+            "Client {} has been inactive for {} seconds …",
+            client_id,
+            lag.as_secs()
+        );
+    }
+
+    if handshake_complete && lag >= keepalive_timeout {
+        log::warn!(
+            "Client {} has been inactive for too long. Disconnecting.",
+            client_id
+        );
+        Err(anyhow!("Client has been inactive for too long"))
+    } else {
         Ok(())
     }
+}
 
-    async fn send_keepalive(&mut self) -> anyhow::Result<()> {
-        if self.last_keepalive_tx.elapsed().as_secs() >= 1 {
-            log::trace!("Sending keepalive");
-            let json = serde_json::to_string(&ServerMessage::Keepalive)?;
-            let msg = Message::Text(json);
-            self.send_with_timeout(msg).await?;
+async fn send_with_timeout(
+    msg: ServerMessage,
+    websocket: &mut WebSocketSender,
+    send_timeout: Duration,
+    result_handler: &mpsc::UnboundedSender<anyhow::Result<Instant>>,
+    subsys: &SubsystemHandle,
+) {
+    let json = match serde_json::to_string(&msg) {
+        Ok(it) => it,
+        Err(e) => {
+            handle_encode_error(e, subsys);
+            return;
         }
+    };
 
-        Ok(())
+    let msg = Message::Text(json);
+
+    select! {
+        r = websocket.send(msg) => {
+            if let Err(e) = r {
+                result_handler.send(Err(e.into())).ok();
+            } else {
+                result_handler.send(Ok(Instant::now())).ok();
+            }
+        },
+        _ = sleep(send_timeout) => {
+            log::error!("Send timeout");
+            result_handler.send(Err(anyhow!("Send timeout"))).ok();
+        },
     }
+}
 
-    fn check_client_keepalive(&mut self) -> anyhow::Result<()> {
-        let lag = self.last_keepalive_rx - self.last_keepalive_tx;
-
-        if self.handshake_complete && lag >= Duration::from_secs(2) {
-            log::warn!(
-                "Client {} has been inactive for {} seconds …",
-                self.client_id,
-                lag.as_secs()
-            );
-        }
-
-        if self.handshake_complete && lag >= self.keepalive_timeout {
-            log::warn!(
-                "Client {} has been inactive for too long. Disconnecting.",
-                self.client_id
-            );
-            Err(anyhow!("Client has been inactive for too long"))
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn send_with_timeout(&mut self, msg: Message) -> anyhow::Result<()> {
-        select! {
-            r = self.websocket.send(msg) => {
-                self.last_keepalive_tx = Instant::now();
-                Ok(r?)
-            },
-            _ = sleep(self.send_timeout) => {
-                log::error!("Send timeout");
-                Err(anyhow!("Send timeout"))
-            },
-        }
-    }
+fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
+    log::error!("Failed to encode a value to JSON: {e}");
+    subsys.request_global_shutdown();
 }
