@@ -337,7 +337,8 @@ async fn psubscribe(
     let client_sub = client.clone();
 
     // TODO do not force an aggregate duration once properly tested
-    if let Some(aggregate_duration) = msg.aggregate_events.or(Some(Duration::from_millis(50))) {
+    let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
+    if let Some(aggregate_duration) = aggregate_events {
         spawn(aggregate_psub_events(
             rx,
             transaction_id,
