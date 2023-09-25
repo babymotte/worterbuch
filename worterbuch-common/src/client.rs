@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{
     GraveGoods, Key, LastWill, ProtocolVersions, RequestPattern, TransactionId, UniqueFlag, Value,
 };
@@ -95,6 +97,7 @@ pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub unique: UniqueFlag,
+    pub aggregate_events: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

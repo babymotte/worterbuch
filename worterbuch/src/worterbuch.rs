@@ -6,22 +6,26 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
-use std::{collections::HashMap, fmt::Display, net::SocketAddr};
+use std::{collections::HashMap, fmt::Display, net::SocketAddr, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    select, spawn,
+    sync::mpsc::{self, unbounded_channel, UnboundedReceiver},
+    time::sleep,
 };
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    parse_segments, topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill,
+    parse_segments, topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill, PState,
     PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern,
-    TransactionId,
+    ServerMessage, TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
+
+type Map<K, V> = HashMap<K, V>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
@@ -32,6 +36,166 @@ impl Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = serde_json::to_string(self).expect("serialization cannot fail");
         write!(f, "{str}")
+    }
+}
+
+struct PStateAggregatorState {
+    aggregate_duration: Duration,
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    set_buffer: Map<Key, Value>,
+    deleted_buffer: Map<Key, Value>,
+    client_sub: mpsc::Sender<ServerMessage>,
+    send_is_scheduled: bool,
+}
+
+impl PStateAggregatorState {
+    async fn aggregate_loop(mut self, mut aggregate_rx: UnboundedReceiver<PStateEvent>) {
+        let (send_trigger_tx, mut send_trigger_rx) = mpsc::channel::<()>(1);
+
+        loop {
+            select! {
+                event = aggregate_rx.recv() => if let Some(event) = event {
+                    if let Err(e) = self.aggregate(event, &send_trigger_tx).await {
+                        log::error!("Error aggregating PState event: {e}");
+                        break;
+                    }
+                } else {
+                    break;
+                },
+                tick = send_trigger_rx.recv() => if let Some(_) = tick {
+                    if let Err(e) = self.send_current_state().await {
+                        log::error!("Error sending PState event: {e}");
+                        break;
+                    }
+                } else {
+                    break;
+                },
+            }
+        }
+    }
+
+    async fn aggregate(
+        &mut self,
+        event: PStateEvent,
+        send_trigger_tx: &mpsc::Sender<()>,
+    ) -> WorterbuchResult<()> {
+        if !self.send_is_scheduled {
+            self.schedule_send(send_trigger_tx.clone(), self.aggregate_duration);
+        }
+
+        match event {
+            PStateEvent::KeyValuePairs(kvps) => {
+                if !self.deleted_buffer.is_empty() || self.key_already_buffered(&kvps) {
+                    self.send_current_state().await?;
+                }
+
+                for kvp in kvps {
+                    self.set_buffer.insert(kvp.key, kvp.value);
+                }
+            }
+            PStateEvent::Deleted(kvps) => {
+                if !self.set_buffer.is_empty() || self.key_already_buffered(&kvps) {
+                    self.send_current_state().await?;
+                }
+
+                for kvp in kvps {
+                    self.deleted_buffer.insert(kvp.key, kvp.value);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send_current_state(&mut self) -> WorterbuchResult<()> {
+        if !self.set_buffer.is_empty() {
+            self.send_set_event().await?;
+        }
+
+        if !self.deleted_buffer.is_empty() {
+            self.send_deleted_event().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn send_set_event(&mut self) -> WorterbuchResult<()> {
+        let kvps: KeyValuePairs = self.set_buffer.drain().map(Into::into).collect();
+        let event = PStateEvent::KeyValuePairs(kvps);
+        self.send_aggregated_pstate(event).await?;
+        Ok(())
+    }
+
+    async fn send_deleted_event(&mut self) -> WorterbuchResult<()> {
+        let kvps: KeyValuePairs = self.deleted_buffer.drain().map(Into::into).collect();
+        let event = PStateEvent::Deleted(kvps);
+        self.send_aggregated_pstate(event).await?;
+        Ok(())
+    }
+
+    async fn send_aggregated_pstate(&mut self, event: PStateEvent) -> Result<(), WorterbuchError> {
+        let pstate = PState {
+            transaction_id: self.transaction_id,
+            request_pattern: self.request_pattern.clone(),
+            event,
+        };
+        self.client_sub.send(ServerMessage::PState(pstate)).await?;
+        Ok(())
+    }
+
+    fn key_already_buffered(&self, kvps: &KeyValuePairs) -> bool {
+        kvps.iter()
+            .any(|kvp| self.set_buffer.contains_key(&kvp.key))
+            || kvps
+                .iter()
+                .any(|kvp| self.deleted_buffer.contains_key(&kvp.key))
+    }
+
+    fn schedule_send(&mut self, send_trigger: mpsc::Sender<()>, aggregate_duration: Duration) {
+        self.send_is_scheduled = true;
+        spawn(async move {
+            sleep(aggregate_duration).await;
+            if let Err(e) = send_trigger.try_send(()) {
+                log::error!("Error triggering send of aggregated PState: {e}");
+            }
+        });
+    }
+}
+
+pub struct PStateAggregator {
+    aggregate: mpsc::UnboundedSender<PStateEvent>,
+}
+
+impl PStateAggregator {
+    pub fn new(
+        client_sub: mpsc::Sender<ServerMessage>,
+        request_pattern: RequestPattern,
+        aggregate_duration: Duration,
+        transaction_id: TransactionId,
+    ) -> Self {
+        let aggregator_state = PStateAggregatorState {
+            aggregate_duration,
+            request_pattern,
+            client_sub,
+            set_buffer: Map::new(),
+            deleted_buffer: Map::new(),
+            send_is_scheduled: false,
+            transaction_id,
+        };
+
+        let (aggregate_tx, aggregate_rx) = mpsc::unbounded_channel();
+
+        spawn(aggregator_state.aggregate_loop(aggregate_rx));
+
+        PStateAggregator {
+            aggregate: aggregate_tx,
+        }
+    }
+
+    pub async fn aggregate(&self, event: PStateEvent) -> WorterbuchResult<()> {
+        self.aggregate.send(event)?;
+        Ok(())
     }
 }
 
