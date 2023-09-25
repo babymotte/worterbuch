@@ -81,9 +81,9 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => if unique {
-                        wb.psubscribe_unique_async(key).await?;
+                        wb.psubscribe_unique_async(key, Some(Duration::from_millis(1))).await?;
                     } else {
-                        wb.psubscribe_async(key).await?;
+                        wb.psubscribe_async(key, Some(Duration::from_millis(1))).await?;
                     },
                 None => done = true,
             },

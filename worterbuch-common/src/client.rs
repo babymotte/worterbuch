@@ -95,6 +95,8 @@ pub struct PSubscribe {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
     pub unique: UniqueFlag,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_events: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -186,6 +188,71 @@ mod test {
                 transaction_id: 2,
                 key: "hello/world".to_owned(),
                 value: json!({ "this value": "is a ", "complex": "JSON object"}),
+            })
+        );
+    }
+
+    #[test]
+    fn psubscribe_without_aggregation_is_serialized_correctly() {
+        let msg = ClientMessage::PSubscribe(PSubscribe {
+            transaction_id: 1,
+            request_pattern: "hello/world".to_owned(),
+            unique: true,
+            aggregate_events: None,
+        });
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true}}"#
+        );
+    }
+
+    #[test]
+    fn psubscribe_with_aggregation_is_serialized_correctly() {
+        let msg = ClientMessage::PSubscribe(PSubscribe {
+            transaction_id: 1,
+            request_pattern: "hello/world".to_owned(),
+            unique: true,
+            aggregate_events: Some(10),
+        });
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#
+        );
+    }
+
+    #[test]
+    fn psubscribe_without_aggregation_is_deserialized_correctly() {
+        let json =
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true}}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::PSubscribe(PSubscribe {
+                transaction_id: 1,
+                request_pattern: "hello/world".to_owned(),
+                unique: true,
+                aggregate_events: None,
+            })
+        );
+    }
+
+    #[test]
+    fn psubscribe_with_aggregation_is_deserialized_correctly() {
+        let json = r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::PSubscribe(PSubscribe {
+                transaction_id: 1,
+                request_pattern: "hello/world".to_owned(),
+                unique: true,
+                aggregate_events: Some(10),
             })
         );
     }
