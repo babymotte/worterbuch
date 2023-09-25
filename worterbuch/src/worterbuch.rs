@@ -109,6 +109,8 @@ impl PStateAggregatorState {
     }
 
     async fn send_current_state(&mut self) -> WorterbuchResult<()> {
+        self.send_is_scheduled = false;
+
         if !self.set_buffer.is_empty() {
             self.send_set_event().await?;
         }
@@ -156,7 +158,7 @@ impl PStateAggregatorState {
         self.send_is_scheduled = true;
         spawn(async move {
             sleep(aggregate_duration).await;
-            if let Err(e) = send_trigger.try_send(()) {
+            if let Err(e) = send_trigger.send(()).await {
                 log::error!("Error triggering send of aggregated PState: {e}");
             }
         });
