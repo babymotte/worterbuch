@@ -4,6 +4,7 @@ use crate::{
     store::{Store, StoreStats},
     subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
+use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
 use std::{collections::HashMap, fmt::Display, net::SocketAddr, time::Duration};
@@ -25,7 +26,7 @@ use worterbuch_common::{
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
 
-type Map<K, V> = HashMap<K, V>;
+type Map<K, V> = LinkedHashMap<K, V>;
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stats {

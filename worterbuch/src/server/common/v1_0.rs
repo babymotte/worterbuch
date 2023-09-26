@@ -336,7 +336,6 @@ async fn psubscribe(
     let wb_unsub = worterbuch.clone();
     let client_sub = client.clone();
 
-    // TODO do not force an aggregate duration once properly tested
     let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
     if let Some(aggregate_duration) = aggregate_events {
         spawn(aggregate_psub_events(
