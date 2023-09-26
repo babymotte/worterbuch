@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch"
-version = "0.39.0"
+version = "0.39.1"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "A message broker / database hybrid."
