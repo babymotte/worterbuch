@@ -121,6 +121,10 @@ properties:
       unique:
         description: Indicate whether all or only unique values should be received
         type: boolean
+      aggregateEvents:
+        description: Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
+        type: number
+        format: u64
     additionalProperties: false
     required:
       - transactionId
