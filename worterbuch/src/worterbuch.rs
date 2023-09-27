@@ -7,7 +7,7 @@ use crate::{
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
-use std::{collections::HashMap, fmt::Display, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, fmt::Display, net::SocketAddr, ops::Deref, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -339,7 +339,7 @@ impl Worterbuch {
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
-        if self.config.extended_monitoring {
+        if self.config.extended_monitoring && &key != "$SYS" && !key.starts_with("$SYS/") {
             if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
@@ -394,7 +394,11 @@ impl Worterbuch {
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
-        if self.config.extended_monitoring {
+        if self.config.extended_monitoring
+            && &pattern != "#"
+            && &pattern != "$SYS"
+            && !pattern.starts_with("$SYS/")
+        {
             if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
@@ -523,7 +527,10 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(&subscription) {
-            if self.config.extended_monitoring {
+            if self.config.extended_monitoring
+                && path[0] != KeySegment::MultiWildcard
+                && path[0].deref() != "$SYS"
+            {
                 if let Err(e) = self.internal_delete(
                     topic!(
                         "$SYS",
@@ -540,7 +547,10 @@ impl Worterbuch {
                     ),
                     true,
                 ) {
-                    log::warn!("Error in subscription monitoring: {e}");
+                    match e {
+                        WorterbuchError::NoSuchValue(_) => (/* will happen on disconnect */),
+                        _ => log::warn!("Error in subscription monitoring: {e}"),
+                    }
                 }
             }
             log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
@@ -729,7 +739,7 @@ impl Worterbuch {
     ) -> WorterbuchResult<()> {
         let pattern = topic!("$SYS", "clients", client_id, "#");
         if self.config.extended_monitoring {
-            log::info!("Deleting {pattern}");
+            log::debug!("Deleting {pattern}");
             if let Err(e) = self.internal_pdelete(pattern, true) {
                 log::warn!("Error in subscription monitoring: {e}");
             }

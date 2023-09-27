@@ -376,7 +376,7 @@ async fn serve_loop(
                     }
                 }
             } else {
-                log::warn!("WS stream of client {client_id} ({remote_addr}) closed.");
+                log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
                 break;
             },
             recv = keepalive_tx_rx.recv() => match recv {
