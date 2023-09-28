@@ -63,7 +63,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         disco_tx.send(()).await.ok();
     };
 
-    let mut wb = connect(config, vec![], vec![], on_disconnect).await?;
+    let wb = connect(config, vec![], vec![], on_disconnect).await?;
     let mut responses = wb.all_messages().await?;
 
     let mut rx = provide_keys(patterns, subsys.clone());
