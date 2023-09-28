@@ -79,6 +79,7 @@ pub(crate) enum Command {
     AllMessages(mpsc::UnboundedSender<ServerMessage>),
 }
 
+#[derive(Clone)]
 pub struct Worterbuch {
     commands: mpsc::Sender<Command>,
     stop: mpsc::Sender<()>,
