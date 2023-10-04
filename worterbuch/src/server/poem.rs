@@ -18,7 +18,11 @@ use poem::{
     },
     EndpointExt, IntoResponse, Request, Result, Route,
 };
-use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
+use poem_openapi::{
+    param::Path,
+    payload::{Json, PlainText},
+    OpenApi, OpenApiService,
+};
 use serde_json::Value;
 use std::{
     env,
@@ -33,8 +37,8 @@ use tokio::{
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
-    ServerMessage,
+    error::{Context, WorterbuchError, WorterbuchResult},
+    quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment, ServerMessage,
 };
 
 const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
@@ -54,6 +58,17 @@ impl Api {
                 let kvp: KeyValuePair = kvp.into();
                 Ok(Json(kvp))
             }
+            Err(e) => to_error_response(e),
+        }
+    }
+
+    #[oai(path = "/get/raw/:key", method = "get")]
+    async fn get_raw(&self, Path(key): Path<String>) -> Result<PlainText<String>> {
+        match self.worterbuch.get(key.clone()).await {
+            Ok((_, value)) => match to_raw_string(value) {
+                Ok(text) => Ok(PlainText(text)),
+                Err(e) => to_error_response(e),
+            },
             Err(e) => to_error_response(e),
         }
     }
@@ -469,4 +484,14 @@ async fn send_with_timeout(
 fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
     log::error!("Failed to encode a value to JSON: {e}");
     subsys.request_global_shutdown();
+}
+
+fn to_raw_string(value: Value) -> WorterbuchResult<String> {
+    match value {
+        Value::String(text) => Ok(text),
+        other => {
+            let text = serde_json::to_string(&other).context(|| "invalid json".to_owned())?;
+            Ok(text)
+        }
+    }
 }
