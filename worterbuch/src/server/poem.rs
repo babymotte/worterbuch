@@ -14,7 +14,7 @@ use poem::{
     web::websocket::WebSocket,
     web::{
         websocket::{Message, WebSocketStream},
-        Data, Yaml,
+        Data, Query, Yaml,
     },
     EndpointExt, IntoResponse, Request, Result, Route,
 };
@@ -25,6 +25,7 @@ use poem_openapi::{
 };
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     env,
     net::SocketAddr,
     time::{Duration, Instant},
@@ -52,23 +53,59 @@ struct Api {
 #[OpenApi]
 impl Api {
     #[oai(path = "/get/:key", method = "get")]
-    async fn get(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
+    async fn get(
+        &self,
+        Path(key): Path<String>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<Json<KeyValuePair>> {
+        let pointer = params.get("extract");
         match self.worterbuch.get(key).await {
-            Ok(kvp) => {
-                let kvp: KeyValuePair = kvp.into();
-                Ok(Json(kvp))
+            Ok((key, value)) => {
+                if let Some(pointer) = pointer {
+                    let key = key + pointer;
+                    let extracted = value.pointer(pointer);
+                    if let Some(extracted) = extracted {
+                        Ok(Json(KeyValuePair {
+                            key,
+                            value: extracted.to_owned(),
+                        }))
+                    } else {
+                        to_error_response(WorterbuchError::NoSuchValue(key))
+                    }
+                } else {
+                    Ok(Json(KeyValuePair { key, value }))
+                }
             }
             Err(e) => to_error_response(e),
         }
     }
 
     #[oai(path = "/get/raw/:key", method = "get")]
-    async fn get_raw(&self, Path(key): Path<String>) -> Result<PlainText<String>> {
+    async fn get_raw(
+        &self,
+        Path(key): Path<String>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<PlainText<String>> {
+        let pointer = params.get("extract");
         match self.worterbuch.get(key.clone()).await {
-            Ok((_, value)) => match to_raw_string(value) {
-                Ok(text) => Ok(PlainText(text)),
-                Err(e) => to_error_response(e),
-            },
+            Ok((_, value)) => {
+                if let Some(pointer) = pointer {
+                    let extracted = value.pointer(&pointer);
+                    if let Some(value) = extracted {
+                        match to_raw_string(value.to_owned()) {
+                            Ok(text) => Ok(PlainText(text)),
+                            Err(e) => to_error_response(e),
+                        }
+                    } else {
+                        to_error_response(WorterbuchError::NoSuchValue(key + pointer))
+                    }
+                } else {
+                    match to_raw_string(value) {
+                        Ok(text) => Ok(PlainText(text)),
+                        Err(e) => to_error_response(e),
+                    }
+                }
+            }
             Err(e) => to_error_response(e),
         }
     }
