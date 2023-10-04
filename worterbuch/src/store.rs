@@ -127,7 +127,11 @@ impl Store {
             Some(&self.subscribers),
             &mut ls_subscribers,
         )?;
-        self.len -= matches.len();
+        if self.len < matches.len() {
+            self.len = 0;
+        } else {
+            self.len -= matches.len();
+        }
         // TODO notify subscribers
         Ok((matches, ls_subscribers))
     }
