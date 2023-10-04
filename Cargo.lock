@@ -2415,7 +2415,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "0.39.2"
+version = "0.39.3"
 dependencies = [
  "anyhow",
  "clap",
