@@ -272,13 +272,13 @@ pub async fn start(
 
     log::info!("Starting openapi service at {}", public_url);
 
-    let openapi_explorer = api_service.openapi_explorer();
+    let swagger_ui = api_service.swagger_ui();
     let oapi_spec_json = api_service.spec_endpoint();
     let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
     let mut app = Route::new()
         .nest(api_path, api_service)
-        .nest("/doc", openapi_explorer)
+        .nest("/doc", swagger_ui)
         .nest("/api/json", oapi_spec_json)
         .nest("/api/yaml", oapi_spec_yaml)
         .nest(
