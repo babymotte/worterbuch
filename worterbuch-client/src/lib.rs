@@ -677,7 +677,7 @@ async fn run(
                 break;
             },
             _ = keepalive_timer.tick() => {
-                let lag = last_keepalive_rx - last_keepalive_tx;
+                let lag = last_keepalive_tx - last_keepalive_rx;
 
                 if lag >= Duration::from_secs(2) {
                     log::warn!("Server has been inactive for {} seconds", lag.as_secs());

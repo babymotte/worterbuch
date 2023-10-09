@@ -465,7 +465,7 @@ fn check_client_keepalive(
     client_id: Uuid,
     keepalive_timeout: Duration,
 ) -> anyhow::Result<()> {
-    let lag = last_keepalive_rx - last_keepalive_tx;
+    let lag = last_keepalive_tx - last_keepalive_rx;
 
     if handshake_complete && lag >= Duration::from_secs(2) {
         log::warn!(
