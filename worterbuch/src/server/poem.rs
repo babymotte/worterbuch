@@ -1,7 +1,4 @@
-use crate::{
-    server::common::{process_incoming_message, CloneableWbApi},
-    Config,
-};
+use crate::server::common::{process_incoming_message, CloneableWbApi};
 use anyhow::anyhow;
 use futures::{
     sink::SinkExt,
@@ -14,15 +11,20 @@ use poem::{
     web::websocket::WebSocket,
     web::{
         websocket::{Message, WebSocketStream},
-        Data, Yaml,
+        Data, Query, Yaml,
     },
     EndpointExt, IntoResponse, Request, Result, Route,
 };
-use poem_openapi::{param::Path, payload::Json, OpenApi, OpenApiService};
+use poem_openapi::{
+    param::Path,
+    payload::{Json, PlainText},
+    OpenApi, OpenApiService,
+};
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     env,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -33,8 +35,8 @@ use tokio::{
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment,
-    ServerMessage,
+    error::{Context, WorterbuchError, WorterbuchResult},
+    quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment, ServerMessage,
 };
 
 const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
@@ -48,11 +50,58 @@ struct Api {
 #[OpenApi]
 impl Api {
     #[oai(path = "/get/:key", method = "get")]
-    async fn get(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
+    async fn get(
+        &self,
+        Path(key): Path<String>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<Json<KeyValuePair>> {
+        let pointer = params.get("extract");
         match self.worterbuch.get(key).await {
-            Ok(kvp) => {
-                let kvp: KeyValuePair = kvp.into();
-                Ok(Json(kvp))
+            Ok((key, value)) => {
+                if let Some(pointer) = pointer {
+                    let key = key + pointer;
+                    let extracted = value.pointer(pointer);
+                    if let Some(extracted) = extracted {
+                        Ok(Json(KeyValuePair {
+                            key,
+                            value: extracted.to_owned(),
+                        }))
+                    } else {
+                        to_error_response(WorterbuchError::NoSuchValue(key))
+                    }
+                } else {
+                    Ok(Json(KeyValuePair { key, value }))
+                }
+            }
+            Err(e) => to_error_response(e),
+        }
+    }
+
+    #[oai(path = "/get/raw/:key", method = "get")]
+    async fn get_raw(
+        &self,
+        Path(key): Path<String>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Result<PlainText<String>> {
+        let pointer = params.get("extract");
+        match self.worterbuch.get(key.clone()).await {
+            Ok((_, value)) => {
+                if let Some(pointer) = pointer {
+                    let extracted = value.pointer(&pointer);
+                    if let Some(value) = extracted {
+                        match to_raw_string(value.to_owned()) {
+                            Ok(text) => Ok(PlainText(text)),
+                            Err(e) => to_error_response(e),
+                        }
+                    } else {
+                        to_error_response(WorterbuchError::NoSuchValue(key + pointer))
+                    }
+                } else {
+                    match to_raw_string(value) {
+                        Ok(text) => Ok(PlainText(text)),
+                        Err(e) => to_error_response(e),
+                    }
+                }
             }
             Err(e) => to_error_response(e),
         }
@@ -193,13 +242,14 @@ fn admin_data() -> (String, String, String) {
 
 pub async fn start(
     worterbuch: CloneableWbApi,
-    config: Config,
+    tls: bool,
+    bind_addr: IpAddr,
+    port: u16,
+    public_addr: String,
     subsys: SubsystemHandle,
 ) -> Result<(), std::io::Error> {
-    let port = config.port;
-    let bind_addr = config.bind_addr;
-    let public_addr = config.public_address;
-    let proto = config.proto;
+    let proto = if tls { "wss" } else { "ws" };
+
     let proto_versions = worterbuch
         .supported_protocol_versions()
         .await
@@ -220,13 +270,13 @@ pub async fn start(
 
     log::info!("Starting openapi service at {}", public_url);
 
-    let openapi_explorer = api_service.openapi_explorer();
+    let swagger_ui = api_service.swagger_ui();
     let oapi_spec_json = api_service.spec_endpoint();
     let oapi_spec_yaml = api_service.spec_endpoint_yaml();
 
     let mut app = Route::new()
         .nest(api_path, api_service)
-        .nest("/doc", openapi_explorer)
+        .nest("/doc", swagger_ui)
         .nest("/api/json", oapi_spec_json)
         .nest("/api/yaml", oapi_spec_yaml)
         .nest(
@@ -376,7 +426,7 @@ async fn serve_loop(
                     }
                 }
             } else {
-                log::warn!("WS stream of client {client_id} ({remote_addr}) closed.");
+                log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
                 break;
             },
             recv = keepalive_tx_rx.recv() => match recv {
@@ -413,7 +463,7 @@ fn check_client_keepalive(
     client_id: Uuid,
     keepalive_timeout: Duration,
 ) -> anyhow::Result<()> {
-    let lag = last_keepalive_rx - last_keepalive_tx;
+    let lag = last_keepalive_tx - last_keepalive_rx;
 
     if handshake_complete && lag >= Duration::from_secs(2) {
         log::warn!(
@@ -469,4 +519,14 @@ async fn send_with_timeout(
 fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
     log::error!("Failed to encode a value to JSON: {e}");
     subsys.request_global_shutdown();
+}
+
+fn to_raw_string(value: Value) -> WorterbuchResult<String> {
+    match value {
+        Value::String(text) => Ok(text),
+        other => {
+            let text = serde_json::to_string(&other).context(|| "invalid json".to_owned())?;
+            Ok(text)
+        }
+    }
 }

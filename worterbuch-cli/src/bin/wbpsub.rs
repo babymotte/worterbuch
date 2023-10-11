@@ -63,7 +63,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         disco_tx.send(()).await.ok();
     };
 
-    let mut wb = connect(config, vec![], vec![], on_disconnect).await?;
+    let wb = connect(config, vec![], vec![], on_disconnect).await?;
     let mut responses = wb.all_messages().await?;
 
     let mut rx = provide_keys(patterns, subsys.clone());
@@ -81,9 +81,9 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => if unique {
-                        wb.psubscribe_unique_async(key).await?;
+                        wb.psubscribe_unique_async(key, Some(Duration::from_millis(1))).await?;
                     } else {
-                        wb.psubscribe_async(key).await?;
+                        wb.psubscribe_async(key, Some(Duration::from_millis(1))).await?;
                     },
                 None => done = true,
             },

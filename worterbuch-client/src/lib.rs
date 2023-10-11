@@ -65,8 +65,9 @@ pub(crate) enum Command {
         UniqueFlag,
         oneshot::Sender<TransactionId>,
         mpsc::UnboundedSender<PStateEvent>,
+        Option<u64>,
     ),
-    PSubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
+    PSubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>, Option<u64>),
     Unsubscribe(TransactionId),
     SubscribeLs(
         Option<Key>,
@@ -78,6 +79,7 @@ pub(crate) enum Command {
     AllMessages(mpsc::UnboundedSender<ServerMessage>),
 }
 
+#[derive(Clone)]
 pub struct Worterbuch {
     commands: mpsc::Sender<Command>,
     stop: mpsc::Sender<()>,
@@ -88,7 +90,7 @@ impl Worterbuch {
         Self { commands, stop }
     }
 
-    pub async fn set_generic(&mut self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
+    pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -98,20 +100,12 @@ impl Worterbuch {
         Ok(transaction_id)
     }
 
-    pub async fn set<T: Serialize>(
-        &mut self,
-        key: Key,
-        value: &T,
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn set<T: Serialize>(&self, key: Key, value: &T) -> ConnectionResult<TransactionId> {
         let value = json::to_value(value)?;
         self.set_generic(key, value).await
     }
 
-    pub async fn publish_generic(
-        &mut self,
-        key: Key,
-        value: Value,
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Publish(key, value, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -122,7 +116,7 @@ impl Worterbuch {
     }
 
     pub async fn publish<T: Serialize>(
-        &mut self,
+        &self,
         key: Key,
         value: &T,
     ) -> ConnectionResult<TransactionId> {
@@ -130,7 +124,7 @@ impl Worterbuch {
         self.publish_generic(key, value).await
     }
 
-    pub async fn get_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn get_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::GetAsync(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -140,10 +134,7 @@ impl Worterbuch {
         Ok(res)
     }
 
-    pub async fn get_generic(
-        &mut self,
-        key: Key,
-    ) -> ConnectionResult<(Option<Value>, TransactionId)> {
+    pub async fn get_generic(&self, key: Key) -> ConnectionResult<(Option<Value>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Get(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -154,7 +145,7 @@ impl Worterbuch {
     }
 
     pub async fn get<T: DeserializeOwned>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(Option<T>, TransactionId)> {
         Ok(match self.get_generic(key).await? {
@@ -163,7 +154,7 @@ impl Worterbuch {
         })
     }
 
-    pub async fn pget_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn pget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGetAsync(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -173,10 +164,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
-    pub async fn pget_generic(
-        &mut self,
-        key: Key,
-    ) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
+    pub async fn pget_generic(&self, key: Key) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGet(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -187,7 +175,7 @@ impl Worterbuch {
     }
 
     pub async fn pget<T: DeserializeOwned>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(TypedKeyValuePairs<T>, TransactionId)> {
         let (kvps, tid) = self.pget_generic(key).await?;
@@ -195,7 +183,7 @@ impl Worterbuch {
         Ok((typed_kvps, tid))
     }
 
-    pub async fn delete_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn delete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::DeleteAsync(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -206,7 +194,7 @@ impl Worterbuch {
     }
 
     pub async fn delete_generic(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(Option<Value>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
@@ -221,7 +209,7 @@ impl Worterbuch {
     }
 
     pub async fn delete<T: DeserializeOwned>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(Option<T>, TransactionId)> {
         Ok(match self.delete_generic(key).await? {
@@ -230,7 +218,7 @@ impl Worterbuch {
         })
     }
 
-    pub async fn pdelete_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn pdelete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDeleteAsync(key, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -241,7 +229,7 @@ impl Worterbuch {
     }
 
     pub async fn pdelete_generic(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
         let (tx, rx) = oneshot::channel();
@@ -254,7 +242,7 @@ impl Worterbuch {
     }
 
     pub async fn pdelete<T: DeserializeOwned>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(TypedKeyValuePairs<T>, TransactionId)> {
         let (kvps, tid) = self.pdelete_generic(key).await?;
@@ -262,7 +250,7 @@ impl Worterbuch {
         Ok((typed_kvps, tid))
     }
 
-    pub async fn ls_async(&mut self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
+    pub async fn ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::LsAsync(parent, tx);
         log::debug!("Queuing command {cmd:?}");
@@ -273,7 +261,7 @@ impl Worterbuch {
     }
 
     pub async fn ls(
-        &mut self,
+        &self,
         parent: Option<Key>,
     ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
@@ -285,7 +273,7 @@ impl Worterbuch {
         Ok(children)
     }
 
-    pub async fn subscribe_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn subscribe_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
             .send(Command::SubscribeAsync(key, false, tx))
@@ -295,7 +283,7 @@ impl Worterbuch {
     }
 
     pub async fn subscribe_generic(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
@@ -308,7 +296,7 @@ impl Worterbuch {
     }
 
     pub async fn subscribe<T: DeserializeOwned + Send + 'static>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
         let (val_rx, transaction_id) = self.subscribe_generic(key).await?;
@@ -317,7 +305,7 @@ impl Worterbuch {
         Ok((typed_val_rx, transaction_id))
     }
 
-    pub async fn subscribe_unique_async(&mut self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn subscribe_unique_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
             .send(Command::SubscribeAsync(key, true, tx))
@@ -327,7 +315,7 @@ impl Worterbuch {
     }
 
     pub async fn subscribe_unique_generic(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
@@ -340,7 +328,7 @@ impl Worterbuch {
     }
 
     pub async fn subscribe_unique<T: DeserializeOwned + Send + 'static>(
-        &mut self,
+        &self,
         key: Key,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
         let (val_rx, transaction_id) = self.subscribe_unique_generic(key).await?;
@@ -350,20 +338,27 @@ impl Worterbuch {
     }
 
     pub async fn psubscribe_async(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::PSubscribeAsync(request_pattern, false, tx))
+            .send(Command::PSubscribeAsync(
+                request_pattern,
+                false,
+                tx,
+                aggregation_duration.map(|d| d.as_millis() as u64),
+            ))
             .await?;
         let tid = rx.await?;
         Ok(tid)
     }
 
     pub async fn psubscribe_generic(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -373,6 +368,7 @@ impl Worterbuch {
                 false,
                 tid_tx,
                 event_tx,
+                aggregation_duration.map(|d| d.as_millis() as u64),
             ))
             .await?;
         let transaction_id = tid_rx.await?;
@@ -380,45 +376,64 @@ impl Worterbuch {
     }
 
     pub async fn psubscribe<T: DeserializeOwned + Send + 'static>(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
-        let (event_rx, transaction_id) = self.psubscribe_generic(request_pattern).await?;
+        let (event_rx, transaction_id) = self
+            .psubscribe_generic(request_pattern, aggregation_duration)
+            .await?;
         let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
         Ok((typed_event_rx, transaction_id))
     }
 
     pub async fn psubscribe_unique_async(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::PSubscribeAsync(request_pattern, true, tx))
+            .send(Command::PSubscribeAsync(
+                request_pattern,
+                true,
+                tx,
+                aggregation_duration.map(|d| d.as_millis() as u64),
+            ))
             .await?;
         let tid = rx.await?;
         Ok(tid)
     }
 
     pub async fn psubscribe_unique_generic(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         self.commands
-            .send(Command::PSubscribe(request_pattern, true, tid_tx, event_tx))
+            .send(Command::PSubscribe(
+                request_pattern,
+                true,
+                tid_tx,
+                event_tx,
+                aggregation_duration.map(|d| d.as_millis() as u64),
+            ))
             .await?;
         let transaction_id = tid_rx.await?;
         Ok((event_rx, transaction_id))
     }
 
     pub async fn psubscribe_unique<T: DeserializeOwned + Send + 'static>(
-        &mut self,
+        &self,
         request_pattern: RequestPattern,
+        aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
-        let (event_rx, transaction_id) = self.psubscribe_unique_generic(request_pattern).await?;
+        let (event_rx, transaction_id) = self
+            .psubscribe_unique_generic(request_pattern, aggregation_duration)
+            .await?;
         let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
         Ok((typed_event_rx, transaction_id))
@@ -431,10 +446,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn subscribe_ls_async(
-        &mut self,
-        parent: Option<Key>,
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn subscribe_ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
             .send(Command::SubscribeLsAsync(parent, tx))
@@ -444,7 +456,7 @@ impl Worterbuch {
     }
 
     pub async fn subscribe_ls(
-        &mut self,
+        &self,
         parent: Option<Key>,
     ) -> ConnectionResult<(
         mpsc::UnboundedReceiver<Vec<RegularKeySegment>>,
@@ -470,14 +482,12 @@ impl Worterbuch {
         SendBuffer::new(self.commands.clone(), delay).await
     }
 
-    pub async fn close(&mut self) -> ConnectionResult<()> {
+    pub async fn close(&self) -> ConnectionResult<()> {
         self.stop.send(()).await?;
         Ok(())
     }
 
-    pub async fn all_messages(
-        &mut self,
-    ) -> ConnectionResult<mpsc::UnboundedReceiver<ServerMessage>> {
+    pub async fn all_messages(&self) -> ConnectionResult<mpsc::UnboundedReceiver<ServerMessage>> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.commands.send(Command::AllMessages(tx)).await?;
         Ok(rx)
@@ -667,7 +677,7 @@ async fn run(
                 break;
             },
             _ = keepalive_timer.tick() => {
-                let lag = last_keepalive_rx - last_keepalive_tx;
+                let lag = last_keepalive_tx - last_keepalive_rx;
 
                 if lag >= Duration::from_secs(2) {
                     log::warn!("Server has been inactive for {} seconds", lag.as_secs());
@@ -840,7 +850,13 @@ async fn process_incoming_command(
                     unique,
                 }))
             }
-            Command::PSubscribe(request_pattern, unique, tid_callback, event_callback) => {
+            Command::PSubscribe(
+                request_pattern,
+                unique,
+                tid_callback,
+                event_callback,
+                aggregate_events,
+            ) => {
                 callbacks.psub.insert(transaction_id, event_callback);
                 tid_callback
                     .send(transaction_id)
@@ -849,14 +865,16 @@ async fn process_incoming_command(
                     transaction_id,
                     request_pattern,
                     unique,
+                    aggregate_events,
                 }))
             }
-            Command::PSubscribeAsync(request_pattern, unique, callback) => {
+            Command::PSubscribeAsync(request_pattern, unique, callback, aggregate_events) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
                     unique,
+                    aggregate_events,
                 }))
             }
             Command::Unsubscribe(transaction_id) => {

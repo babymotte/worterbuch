@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::Serialize;
 use tokio::{spawn, sync::mpsc};
 use uuid::Uuid;
@@ -5,9 +7,12 @@ use worterbuch_common::{
     error::WorterbuchResult,
     error::{Context, WorterbuchError},
     Ack, ClientMessage as CM, Delete, Err, ErrorCode, Get, HandshakeRequest, KeyValuePair, Ls,
-    LsState, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish, ServerMessage, Set,
-    State, StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
+    LsState, MetaData, PDelete, PGet, PState, PStateEvent, PSubscribe, Publish, RequestPattern,
+    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
+    UnsubscribeLs,
 };
+
+use crate::{subscribers::SubscriptionId, PStateAggregator};
 
 use super::CloneableWbApi;
 
@@ -17,6 +22,7 @@ pub async fn process_incoming_message(
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<(bool, bool)> {
+    log::debug!("Received message: {msg}");
     let mut hs = false;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
@@ -41,8 +47,7 @@ pub async fn process_incoming_message(
                 subscribe(msg, client_id, worterbuch, tx, unique).await?;
             }
             CM::PSubscribe(msg) => {
-                let unique = msg.unique;
-                psubscribe(msg, client_id, worterbuch, tx, unique).await?;
+                psubscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, tx, client_id).await?,
             CM::Delete(msg) => {
@@ -295,14 +300,13 @@ async fn psubscribe(
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    unique: bool,
 ) -> WorterbuchResult<bool> {
-    let (mut rx, subscription) = match worterbuch
+    let (rx, subscription) = match worterbuch
         .psubscribe(
             client_id,
             msg.transaction_id,
             msg.request_pattern.clone(),
-            unique,
+            msg.unique,
         )
         .await
     {
@@ -333,32 +337,101 @@ async fn psubscribe(
     let wb_unsub = worterbuch.clone();
     let client_sub = client.clone();
 
-    spawn(async move {
-        log::debug!("Receiving events for subscription {subscription:?} …");
-        while let Some(event) = rx.recv().await {
-            let event = PState {
-                transaction_id: transaction_id.clone(),
-                request_pattern: request_pattern.clone(),
-                event,
-            };
-            if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
-                log::error!("Error sending STATE message to client: {e}");
-                break;
-            }
-        }
-
-        match wb_unsub.unsubscribe(client_id, transaction_id).await {
-            Ok(()) => {
-                log::warn!("Subscription was not cleaned up properly!");
-            }
-            Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-            Err(e) => {
-                log::warn!("Error while unsubscribing: {e}");
-            }
-        }
-    });
+    let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
+    if let Some(aggregate_duration) = aggregate_events {
+        spawn(aggregate_psub_events(
+            rx,
+            transaction_id,
+            request_pattern,
+            client_sub,
+            wb_unsub,
+            client_id,
+            subscription,
+            aggregate_duration,
+        ));
+    } else {
+        spawn(forward_psub_events(
+            rx,
+            transaction_id,
+            request_pattern,
+            client_sub,
+            wb_unsub,
+            client_id,
+            subscription,
+        ));
+    }
 
     Ok(true)
+}
+
+async fn forward_psub_events(
+    mut rx: mpsc::UnboundedReceiver<PStateEvent>,
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    client_sub: mpsc::Sender<ServerMessage>,
+    wb_unsub: CloneableWbApi,
+    client_id: Uuid,
+    subscription: SubscriptionId,
+) {
+    log::debug!("Receiving events for subscription {subscription:?} …");
+    while let Some(event) = rx.recv().await {
+        let event = PState {
+            transaction_id: transaction_id.clone(),
+            request_pattern: request_pattern.clone(),
+            event,
+        };
+        if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
+            log::error!("Error sending STATE message to client: {e}");
+            break;
+        }
+    }
+
+    match wb_unsub.unsubscribe(client_id, transaction_id).await {
+        Ok(()) => {
+            log::warn!("Subscription was not cleaned up properly!");
+        }
+        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+        Err(e) => {
+            log::warn!("Error while unsubscribing: {e}");
+        }
+    }
+}
+
+async fn aggregate_psub_events(
+    mut rx: mpsc::UnboundedReceiver<PStateEvent>,
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    client_sub: mpsc::Sender<ServerMessage>,
+    wb_unsub: CloneableWbApi,
+    client_id: Uuid,
+    subscription: SubscriptionId,
+    aggregate_duration: Duration,
+) {
+    log::debug!("Aggregating events for subscription {subscription:?} …");
+
+    let aggregator = PStateAggregator::new(
+        client_sub,
+        request_pattern,
+        aggregate_duration,
+        transaction_id,
+    );
+
+    while let Some(event) = rx.recv().await {
+        if let Err(e) = aggregator.aggregate(event).await {
+            log::error!("Error sending STATE message to client: {e}");
+            break;
+        }
+    }
+
+    match wb_unsub.unsubscribe(client_id, transaction_id).await {
+        Ok(()) => {
+            log::warn!("Subscription was not cleaned up properly!");
+        }
+        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+        Err(e) => {
+            log::warn!("Error while unsubscribing: {e}");
+        }
+    }
 }
 
 async fn unsubscribe(
