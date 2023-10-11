@@ -22,6 +22,7 @@ pub async fn process_incoming_message(
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<(bool, bool)> {
+    log::debug!("Received message: {msg}");
     let mut hs = false;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {

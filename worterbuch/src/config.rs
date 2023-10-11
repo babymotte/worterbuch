@@ -5,17 +5,27 @@ use worterbuch_common::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Config {
-    pub port: u16,
-    pub proto: String,
+pub struct Endpoint {
+    pub tls: bool,
     pub bind_addr: IpAddr,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WsEndpoint {
+    pub endpoint: Endpoint,
+    pub public_addr: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Config {
+    pub ws_endpoint: Option<WsEndpoint>,
+    pub tcp_endpoint: Option<Endpoint>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub data_dir: Path,
     pub single_threaded: bool,
-    pub webapp: bool,
-    pub web_root_path: String,
-    pub public_address: String,
+    pub web_root_path: Option<String>,
     pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
     pub channel_buffer_size: usize,
@@ -28,16 +38,40 @@ impl Config {
     }
 
     pub fn load_env_with_prefix(&mut self, prefix: &str) -> ConfigResult<()> {
-        if let Ok(val) = env::var(prefix.to_owned() + "_PROTO") {
-            self.proto = val;
+        if let Ok(val) = env::var(prefix.to_owned() + "_WS_TLS") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.endpoint.tls = val.to_lowercase() == "true" || val == "1";
+            }
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_SERVER_PORT") {
-            self.port = val.parse().as_port()?;
+        if let Ok(val) = env::var(prefix.to_owned() + "_WS_SERVER_PORT") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.endpoint.port = val.parse().as_port()?;
+            }
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_BIND_ADDRESS") {
-            self.bind_addr = val.parse()?;
+        if let Ok(val) = env::var(prefix.to_owned() + "_WS_BIND_ADDRESS") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.endpoint.bind_addr = val.parse()?;
+            }
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.public_addr = val;
+            }
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_TCP_SERVER_PORT") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.endpoint.port = val.parse().as_port()?;
+            }
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_TCP_BIND_ADDRESS") {
+            if let Some(ep) = &mut self.ws_endpoint {
+                ep.endpoint.bind_addr = val.parse()?;
+            }
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_USE_PERSISTENCE") {
@@ -57,16 +91,8 @@ impl Config {
             self.single_threaded = val.to_lowercase() == "true";
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_WEBAPP") {
-            self.webapp = val.to_lowercase() == "true";
-        }
-
         if let Ok(val) = env::var(prefix.to_owned() + "_WEBROOT_PATH") {
-            self.web_root_path = val;
-        }
-
-        if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS") {
-            self.public_address = val;
+            self.web_root_path = Some(val);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_TIMEOUT") {
@@ -103,16 +129,24 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            port: 8080,
-            proto: "ws".to_owned(),
-            bind_addr: [127, 0, 0, 1].into(),
+            ws_endpoint: Some(WsEndpoint {
+                endpoint: Endpoint {
+                    tls: false,
+                    bind_addr: [127, 0, 0, 1].into(),
+                    port: 8080,
+                },
+                public_addr: "localhost".to_owned(),
+            }),
+            tcp_endpoint: Some(Endpoint {
+                tls: false,
+                bind_addr: [127, 0, 0, 1].into(),
+                port: 8081,
+            }),
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             data_dir: "./data".into(),
             single_threaded: false,
-            webapp: true,
-            web_root_path: "html".to_owned(),
-            public_address: "localhost".to_owned(),
+            web_root_path: None,
             keepalive_timeout: Duration::from_secs(5),
             send_timeout: Duration::from_secs(5),
             channel_buffer_size: 1_000,

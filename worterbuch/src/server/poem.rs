@@ -1,7 +1,4 @@
-use crate::{
-    server::common::{process_incoming_message, CloneableWbApi},
-    Config,
-};
+use crate::server::common::{process_incoming_message, CloneableWbApi};
 use anyhow::anyhow;
 use futures::{
     sink::SinkExt,
@@ -27,7 +24,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     env,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -245,13 +242,14 @@ fn admin_data() -> (String, String, String) {
 
 pub async fn start(
     worterbuch: CloneableWbApi,
-    config: Config,
+    tls: bool,
+    bind_addr: IpAddr,
+    port: u16,
+    public_addr: String,
     subsys: SubsystemHandle,
 ) -> Result<(), std::io::Error> {
-    let port = config.port;
-    let bind_addr = config.bind_addr;
-    let public_addr = config.public_address;
-    let proto = config.proto;
+    let proto = if tls { "wss" } else { "ws" };
+
     let proto_versions = worterbuch
         .supported_protocol_versions()
         .await

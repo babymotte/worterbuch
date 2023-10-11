@@ -48,12 +48,40 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         });
     }
 
-    let sapi = api.clone();
-    let sconf = config.clone();
     subsys.start("stats", |subsys| track_stats(worterbuch_uptime, subsys));
-    subsys.start("webserver", |subsys| {
-        server::poem::start(sapi, sconf, subsys)
-    });
+
+    if let Some(WsEndpoint {
+        endpoint: Endpoint {
+            tls,
+            bind_addr,
+            port,
+        },
+        public_addr,
+    }) = &config.ws_endpoint
+    {
+        let sapi = api.clone();
+        let tls = tls.to_owned();
+        let bind_addr = bind_addr.to_owned();
+        let port = port.to_owned();
+        let public_addr = public_addr.to_owned();
+        subsys.start("webserver", move |subsys| {
+            server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys)
+        });
+    }
+
+    if let Some(Endpoint {
+        tls: _,
+        bind_addr,
+        port,
+    }) = &config.tcp_endpoint
+    {
+        let sapi = api.clone();
+        let bind_addr = bind_addr.to_owned();
+        let port = port.to_owned();
+        subsys.start("tcpserver", move |subsys| {
+            server::tcp::start(sapi, bind_addr, port, subsys)
+        });
+    }
 
     loop {
         select! {
