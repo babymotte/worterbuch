@@ -63,14 +63,14 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_SERVER_PORT") {
-            if let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.port = val.parse().as_port()?;
+            if let Some(ep) = &mut self.tcp_endpoint {
+                ep.port = val.parse().as_port()?;
             }
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_BIND_ADDRESS") {
-            if let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.bind_addr = val.parse()?;
+            if let Some(ep) = &mut self.tcp_endpoint {
+                ep.bind_addr = val.parse()?;
             }
         }
 
