@@ -1,6 +1,7 @@
 mod client;
 pub mod error;
 mod server;
+pub mod tcp;
 
 pub use client::*;
 pub use server::*;

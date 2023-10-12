@@ -1,6 +1,8 @@
 pub mod buffer;
 pub mod config;
 pub mod error;
+pub mod tcp;
+pub mod ws;
 
 use crate::config::Config;
 use buffer::SendBuffer;
@@ -15,17 +17,16 @@ use std::{
     ops::ControlFlow,
     time::{Duration, Instant},
 };
+use tcp::TcpClientSocket;
 use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
     select, spawn,
     sync::{mpsc, oneshot},
     time::{interval, sleep, MissedTickBehavior},
 };
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{self, Message},
-    MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
 pub use worterbuch_common::{
@@ -77,6 +78,27 @@ pub(crate) enum Command {
     SubscribeLsAsync(Option<Key>, oneshot::Sender<TransactionId>),
     UnsubscribeLs(TransactionId),
     AllMessages(mpsc::UnboundedSender<ServerMessage>),
+}
+
+enum ClientSocket {
+    Tcp(TcpClientSocket),
+    Ws(WsClientSocket),
+}
+
+impl ClientSocket {
+    pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {
+        match self {
+            ClientSocket::Tcp(sock) => sock.send_msg(msg).await,
+            ClientSocket::Ws(sock) => sock.send_msg(msg).await,
+        }
+    }
+
+    pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
+        match self {
+            ClientSocket::Tcp(sock) => sock.receive_msg().await,
+            ClientSocket::Ws(sock) => sock.receive_msg().await,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -591,8 +613,36 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     let proto = &config.proto;
     let host_addr = &config.host_addr;
     let port = config.port;
-    let url = format!("{proto}://{host_addr}:{port}/ws");
-    log::debug!("Connecting to server {url} …");
+    let tcp = proto == "tcp";
+    let path = if tcp { "" } else { "/ws" };
+    let url = format!("{proto}://{host_addr}:{port}{path}",);
+
+    log::debug!("Got server url from config: {url}");
+
+    if tcp {
+        connect_tcp(
+            host_addr.to_owned(),
+            port,
+            last_will,
+            grave_goods,
+            on_disconnect,
+            config,
+        )
+        .await
+    } else {
+        connect_ws(url, last_will, grave_goods, on_disconnect, config).await
+    }
+}
+
+async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
+    url: String,
+    last_will: Vec<KeyValuePair>,
+    grave_goods: Vec<String>,
+    on_disconnect: F,
+    config: Config,
+) -> Result<Worterbuch, ConnectionError> {
+    log::debug!("Connecting to server {url} over websocket …");
+
     let (mut websocket, _) = connect_async(url).await?;
     log::debug!("Connected to server.");
 
@@ -613,7 +663,11 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
             Ok(data) => match json::from_str::<SM>(data) {
                 Ok(SM::Handshake(handshake)) => {
                     log::debug!("Handhsake complete: {handshake}");
-                    connected(websocket, on_disconnect, config)
+                    connected(
+                        ClientSocket::Ws(WsClientSocket::new(websocket)),
+                        on_disconnect,
+                        config,
+                    )
                 }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -637,10 +691,72 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     }
 }
 
-type WebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
+    host_addr: String,
+    port: u16,
+    last_will: Vec<KeyValuePair>,
+    grave_goods: Vec<String>,
+    on_disconnect: F,
+    config: Config,
+) -> Result<Worterbuch, ConnectionError> {
+    log::debug!("Connecting to server {host_addr}:{port} over tcp …");
+
+    let stream = TcpStream::connect(format!("{host_addr}:{port}")).await?;
+    let (tcp_rx, mut tcp_tx) = stream.into_split();
+    let mut tcp_rx = BufReader::new(tcp_rx);
+
+    log::debug!("Connected to server.");
+
+    // TODO implement protocol versions properly
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
+
+    let handshake = HandshakeRequest {
+        supported_protocol_versions,
+        last_will,
+        grave_goods,
+    };
+    let mut msg = json::to_string(&CM::HandshakeRequest(handshake))?;
+    msg.push('\n');
+    log::debug!("Sending handshake message: {msg}");
+    tcp_tx.write(msg.as_bytes()).await?;
+
+    let mut line_buf = String::new();
+
+    match tcp_rx.read_line(&mut line_buf).await {
+        Ok(0) => {
+            return Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "connection closed before handshake",
+            )))
+        }
+        Ok(_) => {
+            let msg = json::from_str::<SM>(&line_buf);
+            line_buf.clear();
+            match msg {
+                Ok(SM::Handshake(handshake)) => {
+                    log::debug!("Handhsake complete: {handshake}");
+                    connected(
+                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx)),
+                        on_disconnect,
+                        config,
+                    )
+                }
+                Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid handshake message: {msg:?}"),
+                ))),
+                Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid handshake message: {e}"),
+                ))),
+            }
+        }
+        Err(e) => Err(ConnectionError::IoError(e)),
+    }
+}
 
 fn connected<F: Future<Output = ()> + Send + 'static>(
-    websocket: WebSocket,
+    websocket: ClientSocket,
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
@@ -658,7 +774,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
 
 async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
-    mut websocket: WebSocket,
+    mut websocket: ClientSocket,
     mut stop_rx: mpsc::Receiver<()>,
     config: Config,
 ) {
@@ -694,7 +810,7 @@ async fn run(
                     }
                 }
             },
-            ws_msg = websocket.next() => {
+            ws_msg = websocket.receive_msg() => {
                 last_keepalive_rx = Instant::now();
                 match process_incoming_server_message(ws_msg, &mut callbacks).await {
                     Ok(ControlFlow::Break(_)) => break,
@@ -709,7 +825,7 @@ async fn run(
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         last_keepalive_tx = Instant::now();
-                        if let Err(e) = send_client_message(msg, &mut websocket, config.send_timeout).await {
+                        if let Err(e) = send_with_timeout(&mut websocket, &msg, config.send_timeout).await {
                             log::error!("Error sending message to server: {e}");
                             break;
                         }
@@ -726,12 +842,12 @@ async fn run(
 }
 
 async fn send_with_timeout(
-    ws: &mut WebSocket,
-    msg: Message,
+    ws: &mut ClientSocket,
+    msg: &ClientMessage,
     timeout: Duration,
 ) -> ConnectionResult<()> {
     select! {
-        r = ws.send(msg) => Ok(r?),
+        r = ws.send_msg (msg) => Ok(r?),
         _ = sleep(timeout) => Err(ConnectionError::Timeout),
     }
 }
@@ -915,48 +1031,32 @@ async fn process_incoming_command(
     }
 }
 
-async fn send_client_message(
-    cm: CM,
-    websocket: &mut WebSocket,
-    timeout: Duration,
-) -> ConnectionResult<()> {
-    let json = serde_json::to_string(&cm)?;
-    log::debug!("Sending message: {json}");
-    let msg = Message::Text(json);
-    send_with_timeout(websocket, msg, timeout).await?;
-    Ok(())
-}
-
 async fn process_incoming_server_message(
-    msg: Option<Result<Message, tungstenite::Error>>,
+    msg: ConnectionResult<Option<ServerMessage>>,
     callbacks: &mut Callbacks,
 ) -> ConnectionResult<ControlFlow<()>> {
-    if let Some(Ok(msg)) = msg {
-        if let Message::Text(json) = msg {
-            log::debug!("Received message: {json}");
-            match json::from_str::<SM>(&json) {
-                Ok(msg) => {
-                    deliver_generic(&msg, callbacks);
-                    match msg {
-                        SM::Ack(_) => (),
-                        SM::State(state) => deliver_state(state, callbacks).await?,
-                        SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
-                        SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
-                        SM::Err(err) => deliver_err(err, callbacks).await,
-                        SM::Handshake(_) | SM::Keepalive => (),
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error decoding message: {e}");
-                }
+    match msg {
+        Ok(Some(msg)) => {
+            deliver_generic(&msg, callbacks);
+            match msg {
+                SM::Ack(_) => (),
+                SM::State(state) => deliver_state(state, callbacks).await?,
+                SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
+                SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
+                SM::Err(err) => deliver_err(err, callbacks).await,
+                SM::Handshake(_) | SM::Keepalive => (),
             }
+            Ok(ControlFlow::Continue(()))
         }
-    } else {
-        log::error!("Connection to server lost.");
-        return Ok(ControlFlow::Break(()));
+        Ok(None) => {
+            log::warn!("Connection closed.");
+            return Ok(ControlFlow::Break(()));
+        }
+        Err(e) => {
+            log::error!("Error receiving message: {e}");
+            return Ok(ControlFlow::Break(()));
+        }
     }
-
-    Ok(ControlFlow::Continue(()))
 }
 
 fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
@@ -1034,11 +1134,9 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     }
 }
 
-async fn send_keepalive(websocket: &mut WebSocket, timeout: Duration) -> ConnectionResult<()> {
+async fn send_keepalive(websocket: &mut ClientSocket, timeout: Duration) -> ConnectionResult<()> {
     log::trace!("Sending keepalive");
-    let json = serde_json::to_string(&ClientMessage::Keepalive)?;
-    let msg = Message::Text(json);
-    send_with_timeout(websocket, msg, timeout).await?;
+    send_with_timeout(websocket, &ClientMessage::Keepalive, timeout).await?;
     Ok(())
 }
 
