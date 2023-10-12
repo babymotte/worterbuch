@@ -736,7 +736,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                 Ok(SM::Handshake(handshake)) => {
                     log::debug!("Handhsake complete: {handshake}");
                     connected(
-                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx)),
+                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines())),
                         on_disconnect,
                         config,
                     )
@@ -756,7 +756,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
 }
 
 fn connected<F: Future<Output = ()> + Send + 'static>(
-    websocket: ClientSocket,
+    client_socket: ClientSocket,
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
@@ -764,7 +764,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 
     spawn(async move {
-        run(cmd_rx, websocket, stop_rx, config).await;
+        run(cmd_rx, client_socket, stop_rx, config).await;
         log::info!("WebSocket closed.");
         on_disconnect.await;
     });
@@ -774,7 +774,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
 
 async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
-    mut websocket: ClientSocket,
+    mut client_socket: ClientSocket,
     mut stop_rx: mpsc::Receiver<()>,
     config: Config,
 ) {
@@ -804,13 +804,13 @@ async fn run(
                 }
                 if last_keepalive_tx.elapsed().as_secs() >= 1 {
                     last_keepalive_tx = Instant::now();
-                    if let Err(e) = send_keepalive(&mut websocket, config.send_timeout).await {
+                    if let Err(e) = send_keepalive(&mut client_socket, config.send_timeout).await {
                         log::error!("Error sending keepalive signal: {e}");
                         break;
                     }
                 }
             },
-            ws_msg = websocket.receive_msg() => {
+            ws_msg = client_socket.receive_msg() => {
                 last_keepalive_rx = Instant::now();
                 match process_incoming_server_message(ws_msg, &mut callbacks).await {
                     Ok(ControlFlow::Break(_)) => break,
@@ -825,7 +825,7 @@ async fn run(
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         last_keepalive_tx = Instant::now();
-                        if let Err(e) = send_with_timeout(&mut websocket, &msg, config.send_timeout).await {
+                        if let Err(e) = send_with_timeout(&mut client_socket, &msg, config.send_timeout).await {
                             log::error!("Error sending message to server: {e}");
                             break;
                         }
