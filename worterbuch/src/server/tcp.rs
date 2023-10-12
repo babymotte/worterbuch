@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
     select, spawn,
     sync::mpsc,
@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::{ProtocolVersion, ServerMessage};
+use worterbuch_common::{tcp::write_line_and_flush, ProtocolVersion, ServerMessage};
 
 pub async fn start(
     worterbuch: CloneableWbApi,
@@ -39,10 +39,9 @@ pub async fn start(
             con = listener.accept() => {
                 let (socket, remote_addr) = con?;
                 let worterbuch = worterbuch.clone();
-                let subsys = subsys.clone();
                 let proto_version = proto_version.clone();
                 spawn(async move {
-                    if let Err(e) = serve(remote_addr, worterbuch, socket, proto_version, subsys).await {
+                    if let Err(e) = serve(remote_addr, worterbuch, socket, proto_version).await {
                         log::error!("Connection to client {remote_addr} closed with error: {e}");
                     }
                 });
@@ -59,7 +58,6 @@ async fn serve(
     worterbuch: CloneableWbApi,
     socket: TcpStream,
     proto_version: ProtocolVersion,
-    subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
@@ -75,7 +73,6 @@ async fn serve(
         worterbuch.clone(),
         socket,
         proto_version,
-        subsys,
     )
     .await
     {
@@ -95,7 +92,6 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     socket: TcpStream,
     proto_version: ProtocolVersion,
-    subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
     let send_timeout = config.send_timeout;
@@ -106,26 +102,18 @@ async fn serve_loop(
     let mut handshake_complete = false;
     keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-    let (ws_rx, mut ws_tx) = socket.into_split();
-    let (ws_send_tx, mut ws_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let (tcp_rx, mut tcp_tx) = socket.into_split();
+    let (tcp_send_tx, mut tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
     let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::unbounded_channel();
 
     // websocket send loop
-    let subsys_send = subsys.clone();
     spawn(async move {
-        while let Some(msg) = ws_send_rx.recv().await {
-            send_with_timeout(
-                msg,
-                &mut ws_tx,
-                send_timeout,
-                &keepalive_tx_tx,
-                &subsys_send,
-            )
-            .await;
+        while let Some(msg) = tcp_send_rx.recv().await {
+            send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx).await;
         }
     });
 
-    let mut tcp_rx = BufReader::new(ws_rx);
+    let mut tcp_rx = BufReader::new(tcp_rx);
 
     let mut line_buf = String::new();
 
@@ -139,7 +127,7 @@ async fn serve_loop(
                         client_id,
                         &line_buf,
                         &worterbuch,
-                        &ws_send_tx,
+                        &tcp_send_tx,
                         &proto_version,
                     ).await?;
                     line_buf.clear();
@@ -161,7 +149,7 @@ async fn serve_loop(
                 // check how long ago the last websocket message was received
                 check_client_keepalive(last_keepalive_rx, last_keepalive_tx, handshake_complete, client_id, keepalive_timeout)?;
                 // send out websocket message if the last has been more than a second ago
-                send_keepalive(last_keepalive_tx, &ws_send_tx, ).await?;
+                send_keepalive(last_keepalive_tx, &tcp_send_tx, ).await?;
             }
         }
     }
@@ -213,20 +201,9 @@ async fn send_with_timeout<'a>(
     tcp: &mut TcpSender,
     send_timeout: Duration,
     result_handler: &mpsc::UnboundedSender<anyhow::Result<Instant>>,
-    subsys: &SubsystemHandle,
 ) {
-    let mut json = match serde_json::to_string(&msg) {
-        Ok(it) => it,
-        Err(e) => {
-            handle_encode_error(e, subsys);
-            return;
-        }
-    };
-
-    json.push('\n');
-
     select! {
-        r = tcp.write(&json.as_bytes())  => {
+        r = write_line_and_flush(&msg, tcp)  => {
             if let Err(e) = r {
                 result_handler.send(Err(e.into())).ok();
             } else {
@@ -238,9 +215,4 @@ async fn send_with_timeout<'a>(
             result_handler.send(Err(anyhow!("Send timeout"))).ok();
         },
     }
-}
-
-fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
-    log::error!("Failed to encode a value to JSON: {e}");
-    subsys.request_global_shutdown();
 }

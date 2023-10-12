@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-client"
-version = "0.39.2"
+version = "0.40.0"
 edition = "2021"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Client library for Wörterbuch."
