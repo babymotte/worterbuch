@@ -1,5 +1,5 @@
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{BufReader, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 use worterbuch_common::{
@@ -8,17 +8,12 @@ use worterbuch_common::{
 
 pub struct TcpClientSocket {
     tx: OwnedWriteHalf,
-    rx: BufReader<OwnedReadHalf>,
-    buf: String,
+    rx: Lines<BufReader<OwnedReadHalf>>,
 }
 
 impl TcpClientSocket {
-    pub fn new(tx: OwnedWriteHalf, rx: BufReader<OwnedReadHalf>) -> Self {
-        Self {
-            tx,
-            rx,
-            buf: String::new(),
-        }
+    pub fn new(tx: OwnedWriteHalf, rx: Lines<BufReader<OwnedReadHalf>>) -> Self {
+        Self { tx, rx }
     }
 
     pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {
@@ -27,14 +22,15 @@ impl TcpClientSocket {
     }
 
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
-        let read = self.rx.read_line(&mut self.buf).await;
+        let read = self.rx.next_line().await;
         match read {
-            Ok(0) => Ok(None),
-            Ok(_) => {
-                let res = self.buf.clone();
-                self.buf.clear();
-                let sm = serde_json::from_str(&res)?;
-                Ok(sm)
+            Ok(None) => Ok(None),
+            Ok(Some(json)) => {
+                let sm = serde_json::from_str(&json);
+                if let Err(e) = &sm {
+                    log::error!("Error deserializing message '{json}': {e}")
+                }
+                Ok(sm?)
             }
             Err(e) => Err(e.into()),
         }

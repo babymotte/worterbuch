@@ -113,29 +113,28 @@ async fn serve_loop(
         }
     });
 
-    let mut tcp_rx = BufReader::new(tcp_rx);
-
-    let mut line_buf = String::new();
+    let tcp_rx = BufReader::new(tcp_rx);
+    let mut tcp_rx = tcp_rx.lines();
 
     loop {
         select! {
-            recv = tcp_rx.read_line(&mut line_buf) => match recv {
-                Ok(0) => break,
-                Ok(_) =>  {
+            recv = tcp_rx.next_line() => match recv {
+                Ok(Some(json)) => {
                     last_keepalive_rx = Instant::now();
-                    let (msg_processed, handshake) = process_incoming_message(
+                    let res = process_incoming_message(
                         client_id,
-                        &line_buf,
+                        &json,
                         &worterbuch,
                         &tcp_send_tx,
                         &proto_version,
-                    ).await?;
-                    line_buf.clear();
+                    ).await;
+                    let (msg_processed, handshake) = res?;
                     handshake_complete |= msg_processed && handshake;
                     if !msg_processed {
                         break;
                     }
                 },
+                Ok(None) =>  break,
                 Err(e) => {
                     log::info!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
                     break;

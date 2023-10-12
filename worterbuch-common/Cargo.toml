@@ -22,3 +22,4 @@ tungstenite = "0.20.0"
 serde_yaml = { version = "0.9.22", optional = true }
 poem-openapi = { version = "3.0.0", optional = true }
 serde_repr = "0.1.16"
+log = "0.4.20"
