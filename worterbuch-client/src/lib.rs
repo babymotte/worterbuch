@@ -59,16 +59,29 @@ pub(crate) enum Command {
         UniqueFlag,
         oneshot::Sender<TransactionId>,
         mpsc::UnboundedSender<Option<Value>>,
+        LiveOnlyFlag,
     ),
-    SubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>),
+    SubscribeAsync(
+        Key,
+        UniqueFlag,
+        oneshot::Sender<TransactionId>,
+        LiveOnlyFlag,
+    ),
     PSubscribe(
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
         mpsc::UnboundedSender<PStateEvent>,
         Option<u64>,
+        LiveOnlyFlag,
     ),
-    PSubscribeAsync(Key, UniqueFlag, oneshot::Sender<TransactionId>, Option<u64>),
+    PSubscribeAsync(
+        Key,
+        UniqueFlag,
+        oneshot::Sender<TransactionId>,
+        Option<u64>,
+        LiveOnlyFlag,
+    ),
     Unsubscribe(TransactionId),
     SubscribeLs(
         Option<Key>,
@@ -295,10 +308,15 @@ impl Worterbuch {
         Ok(children)
     }
 
-    pub async fn subscribe_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn subscribe_async(
+        &self,
+        key: Key,
+        unique: bool,
+        live_only: bool,
+    ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::SubscribeAsync(key, false, tx))
+            .send(Command::SubscribeAsync(key, unique, tx, live_only))
             .await?;
         let tid = rx.await?;
         Ok(tid)
@@ -307,11 +325,13 @@ impl Worterbuch {
     pub async fn subscribe_generic(
         &self,
         key: Key,
+        unique: bool,
+        live_only: bool,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
-            .send(Command::Subscribe(key, false, tid_tx, val_tx))
+            .send(Command::Subscribe(key, unique, tid_tx, val_tx, live_only))
             .await?;
         let transaction_id = tid_rx.await?;
         Ok((val_rx, transaction_id))
@@ -320,40 +340,10 @@ impl Worterbuch {
     pub async fn subscribe<T: DeserializeOwned + Send + 'static>(
         &self,
         key: Key,
+        unique: bool,
+        live_only: bool,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
-        let (val_rx, transaction_id) = self.subscribe_generic(key).await?;
-        let (typed_val_tx, typed_val_rx) = mpsc::unbounded_channel();
-        spawn(deserialize_values(val_rx, typed_val_tx));
-        Ok((typed_val_rx, transaction_id))
-    }
-
-    pub async fn subscribe_unique_async(&self, key: Key) -> ConnectionResult<TransactionId> {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::SubscribeAsync(key, true, tx))
-            .await?;
-        let tid = rx.await?;
-        Ok(tid)
-    }
-
-    pub async fn subscribe_unique_generic(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
-        let (tid_tx, tid_rx) = oneshot::channel();
-        let (val_tx, val_rx) = mpsc::unbounded_channel();
-        self.commands
-            .send(Command::Subscribe(key, true, tid_tx, val_tx))
-            .await?;
-        let transaction_id = tid_rx.await?;
-        Ok((val_rx, transaction_id))
-    }
-
-    pub async fn subscribe_unique<T: DeserializeOwned + Send + 'static>(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
-        let (val_rx, transaction_id) = self.subscribe_unique_generic(key).await?;
+        let (val_rx, transaction_id) = self.subscribe_generic(key, unique, live_only).await?;
         let (typed_val_tx, typed_val_rx) = mpsc::unbounded_channel();
         spawn(deserialize_values(val_rx, typed_val_tx));
         Ok((typed_val_rx, transaction_id))
@@ -362,15 +352,18 @@ impl Worterbuch {
     pub async fn psubscribe_async(
         &self,
         request_pattern: RequestPattern,
+        unique: bool,
+        live_only: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
             .send(Command::PSubscribeAsync(
                 request_pattern,
-                false,
+                unique,
                 tx,
                 aggregation_duration.map(|d| d.as_millis() as u64),
+                live_only,
             ))
             .await?;
         let tid = rx.await?;
@@ -380,6 +373,8 @@ impl Worterbuch {
     pub async fn psubscribe_generic(
         &self,
         request_pattern: RequestPattern,
+        unique: bool,
+        live_only: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
@@ -387,10 +382,11 @@ impl Worterbuch {
         self.commands
             .send(Command::PSubscribe(
                 request_pattern,
-                false,
+                unique,
                 tid_tx,
                 event_tx,
                 aggregation_duration.map(|d| d.as_millis() as u64),
+                live_only,
             ))
             .await?;
         let transaction_id = tid_rx.await?;
@@ -400,61 +396,12 @@ impl Worterbuch {
     pub async fn psubscribe<T: DeserializeOwned + Send + 'static>(
         &self,
         request_pattern: RequestPattern,
+        unique: bool,
+        live_only: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
         let (event_rx, transaction_id) = self
-            .psubscribe_generic(request_pattern, aggregation_duration)
-            .await?;
-        let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
-        spawn(deserialize_events(event_rx, typed_event_tx));
-        Ok((typed_event_rx, transaction_id))
-    }
-
-    pub async fn psubscribe_unique_async(
-        &self,
-        request_pattern: RequestPattern,
-        aggregation_duration: Option<Duration>,
-    ) -> ConnectionResult<TransactionId> {
-        let (tx, rx) = oneshot::channel();
-        self.commands
-            .send(Command::PSubscribeAsync(
-                request_pattern,
-                true,
-                tx,
-                aggregation_duration.map(|d| d.as_millis() as u64),
-            ))
-            .await?;
-        let tid = rx.await?;
-        Ok(tid)
-    }
-
-    pub async fn psubscribe_unique_generic(
-        &self,
-        request_pattern: RequestPattern,
-        aggregation_duration: Option<Duration>,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
-        let (tid_tx, tid_rx) = oneshot::channel();
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        self.commands
-            .send(Command::PSubscribe(
-                request_pattern,
-                true,
-                tid_tx,
-                event_tx,
-                aggregation_duration.map(|d| d.as_millis() as u64),
-            ))
-            .await?;
-        let transaction_id = tid_rx.await?;
-        Ok((event_rx, transaction_id))
-    }
-
-    pub async fn psubscribe_unique<T: DeserializeOwned + Send + 'static>(
-        &self,
-        request_pattern: RequestPattern,
-        aggregation_duration: Option<Duration>,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
-        let (event_rx, transaction_id) = self
-            .psubscribe_unique_generic(request_pattern, aggregation_duration)
+            .psubscribe_generic(request_pattern, unique, live_only, aggregation_duration)
             .await?;
         let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
@@ -947,7 +894,7 @@ async fn process_incoming_command(
                     parent,
                 }))
             }
-            Command::Subscribe(key, unique, tid_callback, value_callback) => {
+            Command::Subscribe(key, unique, tid_callback, value_callback, live_only) => {
                 callbacks.sub.insert(transaction_id, value_callback);
                 tid_callback
                     .send(transaction_id)
@@ -956,14 +903,16 @@ async fn process_incoming_command(
                     transaction_id,
                     key,
                     unique,
+                    live_only: Some(live_only),
                 }))
             }
-            Command::SubscribeAsync(key, unique, callback) => {
+            Command::SubscribeAsync(key, unique, callback, live_only) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::Subscribe(Subscribe {
                     transaction_id,
                     key,
                     unique,
+                    live_only: Some(live_only),
                 }))
             }
             Command::PSubscribe(
@@ -972,6 +921,7 @@ async fn process_incoming_command(
                 tid_callback,
                 event_callback,
                 aggregate_events,
+                live_only,
             ) => {
                 callbacks.psub.insert(transaction_id, event_callback);
                 tid_callback
@@ -982,15 +932,23 @@ async fn process_incoming_command(
                     request_pattern,
                     unique,
                     aggregate_events,
+                    live_only: Some(live_only),
                 }))
             }
-            Command::PSubscribeAsync(request_pattern, unique, callback, aggregate_events) => {
+            Command::PSubscribeAsync(
+                request_pattern,
+                unique,
+                callback,
+                aggregate_events,
+                live_only,
+            ) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
                     unique,
                     aggregate_events,
+                    live_only: Some(live_only),
                 }))
             }
             Command::Unsubscribe(transaction_id) => {

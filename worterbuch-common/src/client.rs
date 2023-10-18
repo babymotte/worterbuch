@@ -1,5 +1,6 @@
 use crate::{
-    GraveGoods, Key, LastWill, ProtocolVersions, RequestPattern, TransactionId, UniqueFlag, Value,
+    GraveGoods, Key, LastWill, LiveOnlyFlag, ProtocolVersions, RequestPattern, TransactionId,
+    UniqueFlag, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +88,8 @@ pub struct Subscribe {
     pub transaction_id: TransactionId,
     pub key: RequestPattern,
     pub unique: UniqueFlag,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_only: Option<LiveOnlyFlag>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -97,6 +100,8 @@ pub struct PSubscribe {
     pub unique: UniqueFlag,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_only: Option<LiveOnlyFlag>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -199,6 +204,7 @@ mod test {
             request_pattern: "hello/world".to_owned(),
             unique: true,
             aggregate_events: None,
+            live_only: None,
         });
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -215,12 +221,13 @@ mod test {
             request_pattern: "hello/world".to_owned(),
             unique: true,
             aggregate_events: Some(10),
+            live_only: Some(true),
         });
 
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10,"liveOnly":true}}"#
         );
     }
 
@@ -237,13 +244,14 @@ mod test {
                 request_pattern: "hello/world".to_owned(),
                 unique: true,
                 aggregate_events: None,
+                live_only: None,
             })
         );
     }
 
     #[test]
     fn psubscribe_with_aggregation_is_deserialized_correctly() {
-        let json = r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#;
+        let json = r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10,"liveOnly":false}}"#;
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
 
         assert_eq!(
@@ -253,6 +261,7 @@ mod test {
                 request_pattern: "hello/world".to_owned(),
                 unique: true,
                 aggregate_events: Some(10),
+                live_only: Some(false),
             })
         );
     }

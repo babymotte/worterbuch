@@ -8,8 +8,9 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchResult, Handshake, Key, KeyValuePairs, PStateEvent, ProtocolVersion,
-    ProtocolVersions, RegularKeySegment, RequestPattern, ServerMessage, TransactionId, Value,
+    error::WorterbuchResult, Handshake, Key, KeyValuePairs, LiveOnlyFlag, PStateEvent,
+    ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, ServerMessage,
+    TransactionId, UniqueFlag, Value,
 };
 
 pub async fn process_incoming_message(
@@ -50,14 +51,16 @@ pub enum WbFunction {
         Uuid,
         TransactionId,
         Key,
-        bool,
+        UniqueFlag,
+        LiveOnlyFlag,
         oneshot::Sender<WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)>>,
     ),
     PSubscribe(
         Uuid,
         TransactionId,
         RequestPattern,
-        bool,
+        UniqueFlag,
+        LiveOnlyFlag,
         oneshot::Sender<WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)>>,
     ),
     SubscribeLs(
@@ -149,6 +152,7 @@ impl CloneableWbApi {
         transaction_id: TransactionId,
         key: Key,
         unique: bool,
+        live_only: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -157,6 +161,7 @@ impl CloneableWbApi {
                 transaction_id,
                 key,
                 unique,
+                live_only,
                 tx,
             ))
             .await?;
@@ -169,6 +174,7 @@ impl CloneableWbApi {
         transaction_id: TransactionId,
         pattern: RequestPattern,
         unique: bool,
+        live_only: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -177,6 +183,7 @@ impl CloneableWbApi {
                 transaction_id,
                 pattern,
                 unique,
+                live_only,
                 tx,
             ))
             .await?;
