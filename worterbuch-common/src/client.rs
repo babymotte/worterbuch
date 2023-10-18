@@ -227,7 +227,7 @@ mod test {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10,"liveOnly":true}}"#
         );
     }
 
@@ -251,7 +251,7 @@ mod test {
 
     #[test]
     fn psubscribe_with_aggregation_is_deserialized_correctly() {
-        let json = r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10}}"#;
+        let json = r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10,"liveOnly":false}}"#;
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
 
         assert_eq!(
