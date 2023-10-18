@@ -40,8 +40,7 @@ pub async fn process_incoming_message(
                 publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
-                let unique = msg.unique;
-                subscribe(msg, client_id, worterbuch, tx, unique).await?;
+                subscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::PSubscribe(msg) => {
                 psubscribe(msg, client_id, worterbuch, tx).await?;
@@ -229,10 +228,15 @@ async fn subscribe(
     client_id: Uuid,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    unique: bool,
 ) -> WorterbuchResult<bool> {
     let (mut rx, subscription) = match worterbuch
-        .subscribe(client_id, msg.transaction_id, msg.key.clone(), unique)
+        .subscribe(
+            client_id,
+            msg.transaction_id,
+            msg.key.clone(),
+            msg.unique,
+            msg.live_only.unwrap_or(false),
+        )
         .await
     {
         Ok(it) => it,
@@ -304,6 +308,7 @@ async fn psubscribe(
             msg.transaction_id,
             msg.request_pattern.clone(),
             msg.unique,
+            msg.live_only.unwrap_or(false),
         )
         .await
     {

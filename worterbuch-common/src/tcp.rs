@@ -21,6 +21,7 @@ pub async fn write_line_and_flush(
             format!("invalid JSON: '{json}' is empty"),
         )));
     }
+    log::debug!("Sending message: {json}");
     tx.write_all(json.as_bytes()).await?;
     tx.write_u8(b'\n').await?;
     tx.flush().await?;

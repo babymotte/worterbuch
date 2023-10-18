@@ -27,7 +27,10 @@ struct Args {
     keys: Option<Vec<String>>,
     /// Only receive unique values, i.e. skip notifications when a key is set to a value it already has.
     #[arg(short, long)]
-    unique: Option<bool>,
+    unique: bool,
+    /// Only receive live values, i.e. do not receive a callback for the state currently stored on the broker.
+    #[arg(short, long)]
+    live_only: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -56,7 +59,8 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     config.port = args.port.unwrap_or(config.port);
     let json = args.json;
     let keys = args.keys;
-    let unique = args.unique.unwrap_or(false);
+    let unique = args.unique;
+    let live_only = args.live_only;
 
     let (disco_tx, mut disco_rx) = mpsc::channel(1);
     let on_disconnect = async move {
@@ -80,11 +84,9 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 print_message(&msg, json);
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some(key ) => if unique {
-                        wb.subscribe_unique_async(key).await?;
-                    } else {
-                        wb.subscribe_async(key).await?;
-                    },
+                Some(key ) => {
+                    wb.subscribe_async(key, unique, live_only).await?;
+                },
                 None => done = true,
             },
         }
