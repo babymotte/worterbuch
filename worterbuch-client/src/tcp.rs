@@ -26,6 +26,7 @@ impl TcpClientSocket {
         match read {
             Ok(None) => Ok(None),
             Ok(Some(json)) => {
+                log::debug!("Received messaeg: {json}");
                 let sm = serde_json::from_str(&json);
                 if let Err(e) = &sm {
                     log::error!("Error deserializing message '{json}': {e}")

@@ -14,7 +14,7 @@ categories = ["database"]
 web = ["poem-openapi", "serde_yaml"]
 
 [dependencies]
-tokio = { version = "1.26.0", features = ["sync"] }
+tokio = { version = "1.26.0", features = ["sync", "io-util"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
 tungstenite = "0.20.0"

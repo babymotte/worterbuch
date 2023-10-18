@@ -23,6 +23,7 @@ impl WsClientSocket {
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
         match self.websocket.next().await {
             Some(Ok(Message::Text(json))) => {
+                log::debug!("Received messaeg: {json}");
                 let msg = serde_json::from_str(&json)?;
                 Ok(Some(msg))
             }

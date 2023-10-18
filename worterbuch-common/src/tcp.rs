@@ -1,7 +1,6 @@
-use std::io;
-
 use crate::error::{ConnectionError, ConnectionResult};
 use serde::Serialize;
+use std::io;
 use tokio::io::AsyncWriteExt;
 
 pub async fn write_line_and_flush(
