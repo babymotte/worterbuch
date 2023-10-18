@@ -99,10 +99,10 @@ enum ClientSocket {
 }
 
 impl ClientSocket {
-    pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {
+    pub async fn send_msg(&mut self, msg: ClientMessage) -> ConnectionResult<()> {
         match self {
             ClientSocket::Tcp(sock) => sock.send_msg(msg).await,
-            ClientSocket::Ws(sock) => sock.send_msg(msg).await,
+            ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
         }
     }
 
@@ -683,7 +683,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                 Ok(SM::Handshake(handshake)) => {
                     log::debug!("Handhsake complete: {handshake}");
                     connected(
-                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines())),
+                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await),
                         on_disconnect,
                         config,
                     )
@@ -772,7 +772,7 @@ async fn run(
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         last_keepalive_tx = Instant::now();
-                        if let Err(e) = send_with_timeout(&mut client_socket, &msg, config.send_timeout).await {
+                        if let Err(e) = send_with_timeout(&mut client_socket, msg, config.send_timeout).await {
                             log::error!("Error sending message to server: {e}");
                             break;
                         }
@@ -789,12 +789,12 @@ async fn run(
 }
 
 async fn send_with_timeout(
-    ws: &mut ClientSocket,
-    msg: &ClientMessage,
+    sock: &mut ClientSocket,
+    msg: ClientMessage,
     timeout: Duration,
 ) -> ConnectionResult<()> {
     select! {
-        r = ws.send_msg (msg) => Ok(r?),
+        r = sock.send_msg(msg) => Ok(r?),
         _ = sleep(timeout) => Err(ConnectionError::Timeout),
     }
 }
@@ -1094,7 +1094,7 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
 
 async fn send_keepalive(websocket: &mut ClientSocket, timeout: Duration) -> ConnectionResult<()> {
     log::trace!("Sending keepalive");
-    send_with_timeout(websocket, &ClientMessage::Keepalive, timeout).await?;
+    send_with_timeout(websocket, ClientMessage::Keepalive, timeout).await?;
     Ok(())
 }
 
