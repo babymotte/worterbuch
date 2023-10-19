@@ -31,6 +31,8 @@ poem-openapi = { version = "3.0.0", features = ["swagger-ui"] }
 tracing-subscriber = "0.3.16"
 serde_yaml = "0.9.22"
 hashlink = "0.8.4"
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
