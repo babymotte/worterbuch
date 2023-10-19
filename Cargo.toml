@@ -12,11 +12,12 @@ worterbuch-common = { path = "./worterbuch-common" }
 worterbuch-client = { path = "./worterbuch-client" }
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
 # strip = true
 debug = 1
+opt-level = 3
 
 [profile.release-web]
 inherits = "release"
