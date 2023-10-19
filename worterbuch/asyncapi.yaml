@@ -145,6 +145,9 @@ components:
               unique:
                 description: Indicate whether all or only unique values should be received
                 type: boolean
+              liveOnly:
+                description: Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
+                type: boolean
             additionalProperties: false
             required:
               - transactionId
@@ -163,6 +166,9 @@ components:
                 type: string
               unique:
                 description: Indicate whether all or only unique values should be received
+                type: boolean
+              liveOnly:
+                description: Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
                 type: boolean
               aggregateEvents:
                 description: Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic

@@ -128,12 +128,12 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::PGet(pattern, tx) => {
             tx.send(worterbuch.pget(&pattern)).ok();
         }
-        WbFunction::Subscribe(client_id, transaction_id, key, unique, tx) => {
-            tx.send(worterbuch.subscribe(client_id, transaction_id, key, unique))
+        WbFunction::Subscribe(client_id, transaction_id, key, unique, live_only, tx) => {
+            tx.send(worterbuch.subscribe(client_id, transaction_id, key, unique, live_only))
                 .ok();
         }
-        WbFunction::PSubscribe(client_id, transaction_id, pattern, unique, tx) => {
-            tx.send(worterbuch.psubscribe(client_id, transaction_id, pattern, unique))
+        WbFunction::PSubscribe(client_id, transaction_id, pattern, unique, live_only, tx) => {
+            tx.send(worterbuch.psubscribe(client_id, transaction_id, pattern, unique, live_only))
                 .ok();
         }
         WbFunction::SubscribeLs(client_id, transaction_id, parent, tx) => {

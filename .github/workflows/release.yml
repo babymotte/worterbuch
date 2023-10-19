@@ -29,11 +29,8 @@ jobs:
           default: true
           override: true
 
-      - name: Set up 'cargo make'
-        uses: davidB/rust-cargo-make@v1
-
       - name: Run tests
-        run: cargo make test
+        run: cargo test -p worterbuch-common && cargo test -p worterbuch && cargo test -p worterbuch-client && cargo test -p worterbuch-cli
 
   release:
     needs: test

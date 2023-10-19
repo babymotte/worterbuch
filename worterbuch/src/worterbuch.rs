@@ -320,20 +320,23 @@ impl Worterbuch {
         transaction_id: TransactionId,
         key: Key,
         unique: bool,
+        live_only: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
-        let matches = match self.get(&key) {
-            Ok((key, value)) => Some((key, value)),
-            Err(WorterbuchError::NoSuchValue(_)) => None,
-            Err(e) => return Err(e),
-        };
         let (tx, rx) = unbounded_channel();
         let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = Subscriber::new(subscription.clone(), path.clone(), tx.clone(), unique);
         self.subscribers.add_subscriber(&path, subscriber);
-        if let Some((key, value)) = matches {
-            tx.send(PStateEvent::KeyValuePairs(vec![(key, value).into()]))
-                .expect("rx is neither closed nor dropped");
+        if !live_only {
+            let matches = match self.get(&key) {
+                Ok((key, value)) => Some((key, value)),
+                Err(WorterbuchError::NoSuchValue(_)) => None,
+                Err(e) => return Err(e),
+            };
+            if let Some((key, value)) = matches {
+                tx.send(PStateEvent::KeyValuePairs(vec![(key, value).into()]))
+                    .expect("rx is neither closed nor dropped");
+            }
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
@@ -376,9 +379,9 @@ impl Worterbuch {
         transaction_id: TransactionId,
         pattern: RequestPattern,
         unique: bool,
+        live_only: bool,
     ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
-        let matches = self.pget(&pattern)?;
         let (tx, rx) = unbounded_channel();
         let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = Subscriber::new(
@@ -388,8 +391,11 @@ impl Worterbuch {
             unique,
         );
         self.subscribers.add_subscriber(&path, subscriber);
-        tx.send(PStateEvent::KeyValuePairs(matches))
-            .expect("rx is neither closed nor dropped");
+        if !live_only {
+            let matches = self.pget(&pattern)?;
+            tx.send(PStateEvent::KeyValuePairs(matches))
+                .expect("rx is neither closed nor dropped");
+        }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
