@@ -1,6 +1,7 @@
 mod v1_0;
 
 use crate::{subscribers::SubscriptionId, Config};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
@@ -12,6 +13,12 @@ use worterbuch_common::{
     ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, ServerMessage,
     TransactionId, UniqueFlag, Value,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Protocol {
+    TCP,
+    WS,
+}
 
 pub async fn process_incoming_message(
     client_id: Uuid,
@@ -78,7 +85,7 @@ pub enum WbFunction {
         RequestPattern,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
-    Connected(Uuid, SocketAddr),
+    Connected(Uuid, SocketAddr, Protocol),
     Disconnected(Uuid, SocketAddr),
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<WorterbuchResult<Value>>),
@@ -248,9 +255,10 @@ impl CloneableWbApi {
         &self,
         client_id: Uuid,
         remote_addr: SocketAddr,
+        protocol: Protocol,
     ) -> WorterbuchResult<()> {
         self.tx
-            .send(WbFunction::Connected(client_id, remote_addr))
+            .send(WbFunction::Connected(client_id, remote_addr, protocol))
             .await?;
         Ok(())
     }

@@ -1,4 +1,4 @@
-use crate::server::common::{process_incoming_message, CloneableWbApi};
+use crate::server::common::{process_incoming_message, CloneableWbApi, Protocol};
 use anyhow::anyhow;
 use std::{
     net::{IpAddr, SocketAddr},
@@ -63,7 +63,9 @@ async fn serve(
 
     log::info!("New client connected: {client_id} ({remote_addr})");
 
-    worterbuch.connected(client_id, remote_addr).await?;
+    worterbuch
+        .connected(client_id, remote_addr, Protocol::TCP)
+        .await?;
 
     log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 

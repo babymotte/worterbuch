@@ -154,8 +154,8 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::PDelete(pattern, tx) => {
             tx.send(worterbuch.pdelete(pattern)).ok();
         }
-        WbFunction::Connected(client_id, remote_addr) => {
-            worterbuch.connected(client_id, remote_addr);
+        WbFunction::Connected(client_id, remote_addr, protocol) => {
+            worterbuch.connected(client_id, remote_addr, protocol);
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
             worterbuch.disconnected(client_id, remote_addr).ok();

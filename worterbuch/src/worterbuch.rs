@@ -1,6 +1,10 @@
 use crate::{
     config::Config,
-    stats::{SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT},
+    server::common::Protocol,
+    stats::{
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
+        SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS,
+    },
     store::{Store, StoreStats},
     subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
@@ -730,11 +734,48 @@ impl Worterbuch {
         }
     }
 
-    pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr) {
+    pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr, protocol: Protocol) {
         self.clients.insert(client_id, remote_addr);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
             log::error!("Error updating client count: {e}");
+        }
+        if let Err(e) = serde_json::to_value(&protocol)
+            .map_err(|e| {
+                WorterbuchError::SerDeError(e, format!("could not convert protocol to value"))
+            })
+            .and_then(|protocol| {
+                self.set(
+                    topic!(
+                        SYSTEM_TOPIC_ROOT,
+                        SYSTEM_TOPIC_CLIENTS,
+                        client_id,
+                        SYSTEM_TOPIC_CLIENTS_PROTOCOL
+                    ),
+                    protocol,
+                )
+            })
+        {
+            log::error!("Error updating client protocol: {e}");
+        }
+
+        if let Err(e) = serde_json::to_value(&remote_addr)
+            .map_err(|e| {
+                WorterbuchError::SerDeError(e, format!("could not convert remote address to value"))
+            })
+            .and_then(|remote_addr| {
+                self.set(
+                    topic!(
+                        SYSTEM_TOPIC_ROOT,
+                        SYSTEM_TOPIC_CLIENTS,
+                        client_id,
+                        SYSTEM_TOPIC_CLIENTS_ADDRESS
+                    ),
+                    remote_addr,
+                )
+            })
+        {
+            log::error!("Error updating client address: {e}");
         }
     }
 
@@ -807,11 +848,29 @@ impl Worterbuch {
 
         if self.config.extended_monitoring {
             if let Err(e) = self.set(
-                topic!("$SYS", "subscriptions"),
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                 json!(self.subscriptions.len()),
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
+        }
+
+        if let Err(e) = self.delete(topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_CLIENTS_PROTOCOL
+        )) {
+            log::error!("Error updating client protocol: {e}");
+        }
+
+        if let Err(e) = self.delete(topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_CLIENTS_ADDRESS
+        )) {
+            log::error!("Error updating client address: {e}");
         }
 
         Ok(())
