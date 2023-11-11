@@ -42,9 +42,20 @@ spec:
           env:          
             - name: WORTERBUCH_PUBLIC_ADDRESS
               value: {{ (first .Values.ingress.hosts).host }}
+            - name: WORTERBUCH_WS_SERVER_PORT
+              value: "{{ .Values.service.port }}"
+            - name: WORTERBUCH_TCP_SERVER_PORT
+              value: "{{ .Values.service.tcpport }}"
+            - name: WORTERBUCH_WS_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: WORTERBUCH_TCP_BIND_ADDRESS
+              value: "0.0.0.0"
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: tcp
+              containerPort: {{ .Values.service.tcpport }}
               protocol: TCP
           livenessProbe:
             httpGet:
