@@ -58,7 +58,7 @@ pub(crate) enum Command {
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
-        mpsc::UnboundedSender<Option<Value>>,
+        mpsc::UnboundedSender<(Option<Value>, Key)>,
         LiveOnlyFlag,
     ),
     SubscribeAsync(
@@ -327,7 +327,7 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<(Option<Value>, Key)>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
@@ -464,22 +464,24 @@ impl Worterbuch {
 }
 
 async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
-    mut val_rx: mpsc::UnboundedReceiver<Option<Value>>,
+    mut val_rx: mpsc::UnboundedReceiver<(Option<Value>, Key)>,
     typed_val_tx: mpsc::UnboundedSender<Option<T>>,
 ) {
-    while let Some(val) = val_rx.recv().await {
+    while let Some((val, key)) = val_rx.recv().await {
         match val {
-            Some(val) => match json::from_value(val) {
-                Ok(typed_val) => {
-                    if typed_val_tx.send(typed_val).is_err() {
+            Some(val) => {
+                match json::from_value(val) {
+                    Ok(typed_val) => {
+                        if typed_val_tx.send(typed_val).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("could not deserialize json value of key '{key}' to requested type: {e}");
                         break;
                     }
                 }
-                Err(e) => {
-                    log::error!("could not deserialize json to requested type: {e}");
-                    break;
-                }
-            },
+            }
             None => {
                 if typed_val_tx.send(None).is_err() {
                     break;
@@ -516,7 +518,7 @@ struct Callbacks {
     del: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
     pdel: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
     ls: HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>,
-    sub: HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>,
+    sub: HashMap<TransactionId, mpsc::UnboundedSender<(Option<Value>, Key)>>,
     psub: HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>,
     subls: HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>,
 }
@@ -1042,8 +1044,8 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
     }
     if let Some(cb) = callbacks.sub.get(&state.transaction_id) {
         let value = match state.event {
-            StateEvent::KeyValue(kv) => Some(kv.value),
-            StateEvent::Deleted(_) => None,
+            StateEvent::KeyValue(kv) => (Some(kv.value), kv.key),
+            StateEvent::Deleted(kv) => (None, kv.key),
         };
         cb.send(value)?;
     }
