@@ -2,8 +2,8 @@
 /data/*
 .env
 .dockerignore
-/worterbuch-explorer/node_modules/*
-/worterbuch-explorer/build/*
-/worterbuch-wasm/examples/*
-.git/*
-.github/*
+/.git/*
+/.github/*
+/.vscode/*
+/chart/*
+/worterbuch/flamegraph/*
