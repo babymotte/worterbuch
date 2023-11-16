@@ -15,7 +15,7 @@ worterbuch-client = { path = "./worterbuch-client" }
 lto = "fat"
 codegen-units = 1
 panic = "abort"
-# strip = true
+strip = true
 debug = 1
 opt-level = 3
 
