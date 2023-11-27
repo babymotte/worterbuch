@@ -5,6 +5,7 @@ use futures::{
     stream::{SplitSink, StreamExt},
 };
 use poem::{
+    endpoint::StaticFilesEndpoint,
     get, handler,
     http::StatusCode,
     listener::TcpListener,
@@ -247,7 +248,7 @@ pub async fn start(
     port: u16,
     public_addr: String,
     subsys: SubsystemHandle,
-) -> Result<(), std::io::Error> {
+) -> anyhow::Result<()> {
     let proto = if tls { "wss" } else { "ws" };
 
     let proto_versions = worterbuch
@@ -292,6 +293,18 @@ pub async fn start(
             ))),
         );
 
+    let config = worterbuch.config().await?;
+    if let Some(web_root_path) = config.web_root_path {
+        log::info!("Serving custom web app from {web_root_path} at http://{public_addr}:{port}/");
+
+        app = app.nest(
+            "/",
+            StaticFilesEndpoint::new(web_root_path)
+                .show_files_listing()
+                .index_file("index.html"),
+        );
+    }
+
     for proto_ver in proto_versions {
         let spec_data = (
             format!("{proto}://{public_addr}:{port}/ws"),
@@ -325,7 +338,9 @@ pub async fn start(
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )
-        .await
+        .await?;
+
+    Ok(())
 }
 
 async fn serve(
