@@ -1,12 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
 use std::time::Duration;
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::Toplevel;
 use worterbuch::run_worterbuch;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 

@@ -10,6 +10,10 @@ license = "MIT"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
+[features]
+jemalloc = ["tikv-jemallocator"]
+default = ["jemalloc"]
+
 [dependencies]
 worterbuch-common = { version = "0.41.0", features = ["web"] }
 tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
@@ -32,7 +36,7 @@ tracing-subscriber = "0.3.16"
 serde_yaml = "0.9.22"
 hashlink = "0.8.4"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.5"
+tikv-jemallocator = { version = "0.5", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
