@@ -855,22 +855,28 @@ impl Worterbuch {
             }
         }
 
-        if let Err(e) = self.delete(topic!(
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS,
-            client_id,
-            SYSTEM_TOPIC_CLIENTS_PROTOCOL
-        )) {
-            log::error!("Error updating client protocol: {e}");
+        if let Err(e) = self.internal_delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_PROTOCOL
+            ),
+            true,
+        ) {
+            log::debug!("Error updating client protocol: {e}");
         }
 
-        if let Err(e) = self.delete(topic!(
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS,
-            client_id,
-            SYSTEM_TOPIC_CLIENTS_ADDRESS
-        )) {
-            log::error!("Error updating client address: {e}");
+        if let Err(e) = self.internal_delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_ADDRESS
+            ),
+            true,
+        ) {
+            log::debug!("Error updating client address: {e}");
         }
 
         Ok(())
