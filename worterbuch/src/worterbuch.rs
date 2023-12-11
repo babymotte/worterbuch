@@ -22,9 +22,9 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    parse_segments, topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern,
-    ServerMessage, TransactionId,
+    parse_segments, topic, AuthToken, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs,
+    LastWill, PState, PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment,
+    RequestPattern, ServerMessage, TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -254,7 +254,12 @@ impl Worterbuch {
         last_will: LastWill,
         grave_goods: GraveGoods,
         client_id: Uuid,
+        auth_token: Option<AuthToken>,
     ) -> WorterbuchResult<Handshake> {
+        if self.config.auth_token != auth_token {
+            return Err(WorterbuchError::AuthenticationFailed);
+        }
+
         let mut supported_protocol_versions = self.supported_protocol_versions();
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));

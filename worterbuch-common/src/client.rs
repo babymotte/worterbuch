@@ -1,6 +1,6 @@
 use crate::{
-    GraveGoods, Key, LastWill, LiveOnlyFlag, ProtocolVersions, RequestPattern, TransactionId,
-    UniqueFlag, Value,
+    AuthToken, GraveGoods, Key, LastWill, LiveOnlyFlag, ProtocolVersions, RequestPattern,
+    TransactionId, UniqueFlag, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,9 @@ pub struct HandshakeRequest {
     pub supported_protocol_versions: ProtocolVersions,
     pub last_will: LastWill,
     pub grave_goods: GraveGoods,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub auth_token: Option<AuthToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -157,6 +160,7 @@ mod test {
             grave_goods: vec!["delete/this/stuff/#".to_owned()],
             last_will: vec![("set/this", json!("to this value")).into()],
             supported_protocol_versions: vec![ProtocolVersion { major: 0, minor: 1 }],
+            auth_token: Some("123456".to_owned()),
         });
 
         let json = r#"{"handshakeRequest":{"supportedProtocolVersions":[{"major":0,"minor":1}],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"]}}"#;
@@ -170,6 +174,7 @@ mod test {
             grave_goods: vec!["delete/this/stuff/#".to_owned()],
             last_will: vec![("set/this", json!("to this value")).into()],
             supported_protocol_versions: vec![ProtocolVersion { major: 0, minor: 1 }],
+            auth_token: None,
         });
 
         let json = r#"{

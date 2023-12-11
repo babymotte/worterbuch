@@ -96,6 +96,8 @@ async fn serve_loop(
     proto_version: ProtocolVersion,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
+    let auth_token = config.auth_token;
+    let handshake_required = auth_token.is_some();
     let send_timeout = config.send_timeout;
     let keepalive_timeout = config.keepalive_timeout;
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
@@ -129,6 +131,7 @@ async fn serve_loop(
                         &worterbuch,
                         &tcp_send_tx,
                         &proto_version,
+                        handshake_required, handshake_complete
                     ).await;
                     let (msg_processed, handshake) = res?;
                     handshake_complete |= msg_processed && handshake;

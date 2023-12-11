@@ -1,7 +1,7 @@
 use std::{env, net::IpAddr, time::Duration};
 use worterbuch_common::{
     error::{ConfigIntContext, ConfigResult},
-    Path,
+    AuthToken, Path,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +30,7 @@ pub struct Config {
     pub send_timeout: Duration,
     pub channel_buffer_size: usize,
     pub extended_monitoring: bool,
+    pub auth_token: Option<AuthToken>,
 }
 
 impl Config {
@@ -116,6 +117,10 @@ impl Config {
             self.extended_monitoring = enabled == "true" || enabled == "1";
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_AUTH_TOKEN") {
+            self.auth_token = Some(val);
+        }
+
         Ok(())
     }
 
@@ -151,6 +156,7 @@ impl Default for Config {
             send_timeout: Duration::from_secs(5),
             channel_buffer_size: 1_000,
             extended_monitoring: true,
+            auth_token: None,
         }
     }
 }
