@@ -5,26 +5,24 @@ use futures::{
     stream::{SplitSink, StreamExt},
 };
 use poem::{
+    delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
     http::StatusCode,
     listener::TcpListener,
+    middleware::AddData,
+    post,
     web::websocket::WebSocket,
     web::{
         websocket::{Message, WebSocketStream},
-        Data, Query, Yaml,
+        Data, Json, Path, Query,
     },
     EndpointExt, IntoResponse, Request, Result, Route,
-};
-use poem_openapi::{
-    param::Path,
-    payload::{Json, PlainText},
-    OpenApi, OpenApiService,
 };
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    env,
+    // env,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -36,147 +34,8 @@ use tokio::{
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::{Context, WorterbuchError, WorterbuchResult},
-    quote, KeyValuePair, KeyValuePairs, ProtocolVersion, RegularKeySegment, ServerMessage,
+    error::WorterbuchError, Key, KeyValuePairs, ProtocolVersion, RegularKeySegment, ServerMessage,
 };
-
-const ASYNC_API_YAML: &'static str = include_str!("../../asyncapi.yaml");
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-struct Api {
-    worterbuch: CloneableWbApi,
-    _subsys: SubsystemHandle,
-}
-
-#[OpenApi]
-impl Api {
-    #[oai(path = "/get/:key", method = "get")]
-    async fn get(
-        &self,
-        Path(key): Path<String>,
-        Query(params): Query<HashMap<String, String>>,
-    ) -> Result<Json<KeyValuePair>> {
-        let pointer = params.get("extract");
-        match self.worterbuch.get(key).await {
-            Ok((key, value)) => {
-                if let Some(pointer) = pointer {
-                    let key = key + pointer;
-                    let extracted = value.pointer(pointer);
-                    if let Some(extracted) = extracted {
-                        Ok(Json(KeyValuePair {
-                            key,
-                            value: extracted.to_owned(),
-                        }))
-                    } else {
-                        to_error_response(WorterbuchError::NoSuchValue(key))
-                    }
-                } else {
-                    Ok(Json(KeyValuePair { key, value }))
-                }
-            }
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/get/raw/:key", method = "get")]
-    async fn get_raw(
-        &self,
-        Path(key): Path<String>,
-        Query(params): Query<HashMap<String, String>>,
-    ) -> Result<PlainText<String>> {
-        let pointer = params.get("extract");
-        match self.worterbuch.get(key.clone()).await {
-            Ok((_, value)) => {
-                if let Some(pointer) = pointer {
-                    let extracted = value.pointer(&pointer);
-                    if let Some(value) = extracted {
-                        match to_raw_string(value.to_owned()) {
-                            Ok(text) => Ok(PlainText(text)),
-                            Err(e) => to_error_response(e),
-                        }
-                    } else {
-                        to_error_response(WorterbuchError::NoSuchValue(key + pointer))
-                    }
-                } else {
-                    match to_raw_string(value) {
-                        Ok(text) => Ok(PlainText(text)),
-                        Err(e) => to_error_response(e),
-                    }
-                }
-            }
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/pget/:pattern", method = "get")]
-    async fn pget(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
-        match self.worterbuch.pget(pattern).await {
-            Ok(kvps) => Ok(Json(kvps)),
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/set/:key", method = "post")]
-    async fn set(
-        &self,
-        Path(key): Path<String>,
-        Json(value): Json<Value>,
-    ) -> Result<Json<&'static str>> {
-        match self.worterbuch.set(key, value).await {
-            Ok(()) => {}
-            Err(e) => return to_error_response(e),
-        }
-        Ok(Json("Ok"))
-    }
-
-    #[oai(path = "/publish/:key", method = "post")]
-    async fn publish(
-        &self,
-        Path(key): Path<String>,
-        Json(value): Json<Value>,
-    ) -> Result<Json<&'static str>> {
-        match self.worterbuch.publish(key, value).await {
-            Ok(()) => {}
-            Err(e) => return to_error_response(e),
-        }
-        Ok(Json("Ok"))
-    }
-
-    #[oai(path = "/delete/:key", method = "delete")]
-    async fn delete(&self, Path(key): Path<String>) -> Result<Json<KeyValuePair>> {
-        match self.worterbuch.delete(key).await {
-            Ok(kvp) => {
-                let kvp: KeyValuePair = kvp.into();
-                Ok(Json(kvp))
-            }
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/pdelete/:pattern", method = "delete")]
-    async fn pdelete(&self, Path(pattern): Path<String>) -> Result<Json<KeyValuePairs>> {
-        match self.worterbuch.pdelete(pattern).await {
-            Ok(kvps) => Ok(Json(kvps)),
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/ls/:key", method = "get")]
-    async fn ls(&self, Path(key): Path<String>) -> Result<Json<Vec<RegularKeySegment>>> {
-        match self.worterbuch.ls(Some(key)).await {
-            Ok(kvps) => Ok(Json(kvps)),
-            Err(e) => to_error_response(e),
-        }
-    }
-
-    #[oai(path = "/ls", method = "get")]
-    async fn ls_root(&self) -> Result<Json<Vec<RegularKeySegment>>> {
-        match self.worterbuch.ls(None).await {
-            Ok(kvps) => Ok(Json(kvps)),
-            Err(e) => to_error_response(e),
-        }
-    }
-}
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match e {
@@ -212,33 +71,106 @@ async fn ws(
 }
 
 #[handler]
-fn asyncapi_spec_yaml(Data((server_url, api_version)): Data<&(String, String)>) -> Yaml<Value> {
-    Yaml(async_api(server_url, api_version))
+async fn get_value(
+    Path(key): Path<Key>,
+    Query(params): Query<HashMap<String, String>>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<Value>> {
+    let pointer = params.get("extract");
+    match wb.get(key).await {
+        Ok((key, value)) => {
+            if let Some(pointer) = pointer {
+                let key = key + pointer;
+                let extracted = value.pointer(pointer);
+                if let Some(extracted) = extracted {
+                    Ok(Json(extracted.to_owned()))
+                } else {
+                    to_error_response(WorterbuchError::NoSuchValue(key))
+                }
+            } else {
+                Ok(Json(value))
+            }
+        }
+        Err(e) => to_error_response(e),
+    }
 }
 
 #[handler]
-fn asyncapi_spec_json(Data((server_url, api_version)): Data<&(String, String)>) -> Json<Value> {
-    Json(async_api(server_url, api_version))
+async fn pget(
+    Path(pattern): Path<Key>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<KeyValuePairs>> {
+    match wb.pget(pattern).await {
+        Ok(kvps) => Ok(Json(kvps)),
+        Err(e) => to_error_response(e),
+    }
 }
 
-fn async_api(server_url: &str, api_version: &str) -> Value {
-    let (admin_name, admin_url, admin_email) = admin_data();
-
-    let yaml_string = ASYNC_API_YAML
-        .replace("${WS_SERVER_URL}", &quote(&server_url))
-        .replace("${API_VERSION}", &quote(&api_version))
-        .replace("${WORTERBUCH_VERSION}", VERSION)
-        .replace("${WORTERBUCH_ADMIN_NAME}", &admin_name)
-        .replace("${WORTERBUCH_ADMIN_URL}", &admin_url)
-        .replace("${WORTERBUCH_ADMIN_EMAIL}", &admin_email);
-    serde_yaml::from_str(&yaml_string).expect("cannot fail")
+#[handler]
+async fn set(
+    Path(key): Path<Key>,
+    Json(value): Json<Value>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<&'static str>> {
+    match wb.set(key, value).await {
+        Ok(()) => {}
+        Err(e) => return to_error_response(e),
+    }
+    Ok(Json("Ok"))
 }
 
-fn admin_data() -> (String, String, String) {
-    let admin_name = env::var("WORTERBUCH_ADMIN_NAME").unwrap_or("<admin name>".to_owned());
-    let admin_url = env::var("WORTERBUCH_ADMIN_URL").unwrap_or("<admin url>".to_owned());
-    let admin_email = env::var("WORTERBUCH_ADMIN_EMAIL").unwrap_or("<admin email>".to_owned());
-    (admin_name, admin_url, admin_email)
+#[handler]
+async fn publish(
+    Path(key): Path<Key>,
+    Json(value): Json<Value>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<&'static str>> {
+    match wb.publish(key, value).await {
+        Ok(()) => {}
+        Err(e) => return to_error_response(e),
+    }
+    Ok(Json("Ok"))
+}
+
+#[handler]
+async fn delete_value(
+    Path(key): Path<Key>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<Value>> {
+    match wb.delete(key).await {
+        Ok(kvp) => Ok(Json(kvp.1)),
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn pdelete(
+    Path(pattern): Path<Key>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<KeyValuePairs>> {
+    match wb.pdelete(pattern).await {
+        Ok(kvps) => Ok(Json(kvps)),
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn ls(
+    Path(key): Path<Key>,
+    Data(wb): Data<&CloneableWbApi>,
+) -> Result<Json<Vec<RegularKeySegment>>> {
+    match wb.ls(Some(key)).await {
+        Ok(kvps) => Ok(Json(kvps)),
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn ls_root(Data(wb): Data<&CloneableWbApi>) -> Result<Json<Vec<RegularKeySegment>>> {
+    match wb.ls(None).await {
+        Ok(kvps) => Ok(Json(kvps)),
+        Err(e) => to_error_response(e),
+    }
 }
 
 pub async fn start(
@@ -258,40 +190,18 @@ pub async fn start(
 
     let addr = format!("{bind_addr}:{port}");
 
-    let api = Api {
-        worterbuch: worterbuch.clone(),
-        _subsys: subsys.clone(),
-    };
-
-    let api_path = "/api";
-    let public_url = &format!("http://{public_addr}:{port}{api_path}");
-
-    let api_service =
-        OpenApiService::new(api, "Worterbuch", env!("CARGO_PKG_VERSION")).server(public_url);
-
-    log::info!("Starting openapi service at {}", public_url);
-
-    let swagger_ui = api_service.swagger_ui();
-    let oapi_spec_json = api_service.spec_endpoint();
-    let oapi_spec_yaml = api_service.spec_endpoint_yaml();
-
-    let mut app = Route::new()
-        .nest(api_path, api_service)
-        .nest("/doc", swagger_ui)
-        .nest("/api/json", oapi_spec_json)
-        .nest("/api/yaml", oapi_spec_yaml)
-        .nest(
-            format!("/ws"),
-            get(ws.data((
-                worterbuch.clone(),
-                proto_versions
-                    .iter()
-                    .last()
-                    .expect("cannot be none")
-                    .to_owned(),
-                subsys.clone(),
-            ))),
-        );
+    let mut app = Route::new().nest(
+        format!("/ws"),
+        get(ws.data((
+            worterbuch.clone(),
+            proto_versions
+                .iter()
+                .last()
+                .expect("cannot be none")
+                .to_owned(),
+            subsys.clone(),
+        ))),
+    );
 
     let config = worterbuch.config().await?;
     if let Some(web_root_path) = config.web_root_path {
@@ -306,35 +216,25 @@ pub async fn start(
     }
 
     for proto_ver in proto_versions {
-        let spec_data = (
-            format!("{proto}://{public_addr}:{port}/ws"),
-            format!("{proto_ver}"),
-        );
         app = app
-            .nest(
-                format!("/asyncapi/{proto_ver}/yaml"),
-                get(asyncapi_spec_yaml.data(spec_data.clone())),
-            )
-            .nest(
-                format!("/asyncapi/{proto_ver}/json"),
-                get(asyncapi_spec_json.data(spec_data)),
-            )
+            .at("/api/v1/get/*", get(get_value))
+            .at("/api/v1/set/*", post(set))
+            .at("/api/v1/pget/*", get(pget))
+            .at("/api/v1/publish/*", post(publish))
+            .at("/api/v1/delete/*", delete(delete_value))
+            .at("/api/v1/pdelete/*", delete(pdelete))
+            .at("/api/v1/ls", get(ls_root))
+            .at("/api/v1/ls/*", get(ls))
             .nest(
                 format!("/ws/{proto_ver}"),
                 get(ws.data((worterbuch.clone(), proto_ver.to_owned()))),
             );
-        log::info!(
-            "Serving asyncapi json at http://{public_addr}:{port}/asyncapi/{proto_ver}/json"
-        );
-        log::info!(
-            "Serving asyncapi yaml at http://{public_addr}:{port}/asyncapi/{proto_ver}/yaml"
-        );
         log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}");
     }
 
     poem::Server::new(TcpListener::bind(addr))
         .run_with_graceful_shutdown(
-            app,
+            app.with(AddData::new(worterbuch)),
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )
@@ -536,14 +436,4 @@ async fn send_with_timeout(
 fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
     log::error!("Failed to encode a value to JSON: {e}");
     subsys.request_global_shutdown();
-}
-
-fn to_raw_string(value: Value) -> WorterbuchResult<String> {
-    match value {
-        Value::String(text) => Ok(text),
-        other => {
-            let text = serde_json::to_string(&other).context(|| "invalid json".to_owned())?;
-            Ok(text)
-        }
-    }
 }
