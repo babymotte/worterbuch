@@ -163,7 +163,7 @@ mod test {
             auth_token: Some("123456".to_owned()),
         });
 
-        let json = r#"{"handshakeRequest":{"supportedProtocolVersions":[{"major":0,"minor":1}],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"]}}"#;
+        let json = r#"{"handshakeRequest":{"supportedProtocolVersions":[{"major":0,"minor":1}],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"],"authToken":"123456"}}"#;
 
         assert_eq!(&serde_json::to_string(&msg).unwrap(), json);
     }
