@@ -41,11 +41,11 @@ use worterbuch_common::{
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match e {
+        WorterbuchError::AuthenticationFailed => Err(poem::Error::new(e, StatusCode::UNAUTHORIZED)),
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
         | WorterbuchError::MultiWildcardAtIllegalPosition(_)
         | WorterbuchError::NoSuchValue(_)
-        | WorterbuchError::AuthenticationFailed
         | WorterbuchError::HandshakeAlreadyDone
         | WorterbuchError::HandshakeRequired
         | WorterbuchError::MissingValue
@@ -69,21 +69,25 @@ async fn ws(
     ws: WebSocket,
     Data(data): Data<&(CloneableWbApi, ProtocolVersion, SubsystemHandle)>,
     req: &Request,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse> {
     log::info!("Client connected");
     let worterbuch = data.0.clone();
     let proto_version = data.1.to_owned();
     let subsys = data.2.to_owned();
+    if let Err(e) = worterbuch.authenticate(None).await {
+        return to_error_response(e);
+    }
     let remote = *req
         .remote_addr()
         .as_socket_addr()
         .expect("Client has no remote address.");
-    ws.protocols(vec!["worterbuch"])
+    Ok(ws
+        .protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
             if let Err(e) = serve(remote, worterbuch, socket, proto_version, subsys).await {
                 log::error!("Error in WS connection: {e}");
             }
-        })
+        }))
 }
 
 #[handler]
