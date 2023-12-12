@@ -55,6 +55,7 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RestApiBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
