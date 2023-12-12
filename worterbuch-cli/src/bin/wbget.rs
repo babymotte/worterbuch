@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
 use worterbuch_cli::{next_item, print_message, provide_keys};
 use worterbuch_client::config::Config;
-use worterbuch_client::connect;
+use worterbuch_client::{connect, AuthToken};
 
 #[derive(Parser)]
 #[command(author, version, about = "Get values for keys from a Wörterbuch.", long_about = None)]
@@ -25,6 +25,9 @@ struct Args {
     json: bool,
     /// Keys to be fetched from Wörterbuch in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
     keys: Option<Vec<String>>,
+    /// Auth token to be used to authenticate with the server
+    #[arg(long)]
+    auth: Option<AuthToken>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -43,6 +46,8 @@ async fn main() -> Result<()> {
 async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
+
+    config.auth_token = args.auth.or(config.auth_token);
 
     config.proto = if args.ssl {
         "wss".to_owned()

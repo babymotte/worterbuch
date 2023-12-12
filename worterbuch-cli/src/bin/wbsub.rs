@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
 use worterbuch_cli::{next_item, print_message, provide_keys};
 use worterbuch_client::config::Config;
-use worterbuch_client::connect;
+use worterbuch_client::{connect, AuthToken};
 
 #[derive(Parser)]
 #[command(author, version, about = "Subscribe to values of Wörterbuch keys.", long_about = None)]
@@ -31,6 +31,9 @@ struct Args {
     /// Only receive live values, i.e. do not receive a callback for the state currently stored on the broker.
     #[arg(short, long)]
     live_only: bool,
+    /// Auth token to be used to authenticate with the server
+    #[arg(long)]
+    auth: Option<AuthToken>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -49,6 +52,8 @@ async fn main() -> Result<()> {
 async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
+
+    config.auth_token = args.auth.or(config.auth_token);
 
     config.proto = if args.ssl {
         "wss".to_owned()
