@@ -26,6 +26,7 @@ use tokio::{
     time::{interval, sleep, MissedTickBehavior},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
@@ -621,6 +622,12 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                         config,
                     )
                 }
+                Ok(SM::Err(e)) => {
+                    log::error!("Handshake failed: {e}");
+                    Err(ConnectionError::WorterbuchError(
+                        WorterbuchError::ServerResponse(e),
+                    ))
+                }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid handshake message: {msg:?}"),
@@ -695,6 +702,12 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                         on_disconnect,
                         config,
                     )
+                }
+                Ok(SM::Err(e)) => {
+                    log::error!("Handshake failed: {e}");
+                    Err(ConnectionError::WorterbuchError(
+                        WorterbuchError::ServerResponse(e),
+                    ))
                 }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
