@@ -290,20 +290,27 @@ async fn subscribe(
         Ok((mut rx, _)) => {
             let (sse_tx, sse_rx) = mpsc::channel(100);
             spawn(async move {
-                'recv_loop: while let Some(pstate) = rx.recv().await {
-                    let events: Vec<StateEvent> = pstate.into();
-                    for e in events {
-                        match serde_json::to_string(&e) {
-                            Ok(json) => {
-                                if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                    log::error!("Error forwarding state event: {e}");
-                                    break 'recv_loop;
+                'recv_loop: loop {
+                    select! {
+                        _ = sse_tx.closed() => break 'recv_loop,
+                        recv = rx.recv() => if let Some(pstate) = recv {
+                            let events: Vec<StateEvent> = pstate.into();
+                            for e in events {
+                                match serde_json::to_string(&e) {
+                                    Ok(json) => {
+                                        if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                            log::error!("Error forwarding state event: {e}");
+                                            break 'recv_loop;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!("Error serializiing state event: {e}");
+                                        break 'recv_loop;
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                log::error!("Error serializiing state event: {e}");
-                                break 'recv_loop;
-                            }
+                        } else {
+                            break 'recv_loop;
                         }
                     }
                 }
@@ -366,16 +373,23 @@ async fn psubscribe(
         Ok((mut rx, _)) => {
             let (sse_tx, sse_rx) = mpsc::channel(100);
             spawn(async move {
-                'recv_loop: while let Some(pstate) = rx.recv().await {
-                    match serde_json::to_string(&pstate) {
-                        Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                log::error!("Error forwarding state event: {e}");
-                                break 'recv_loop;
+                'recv_loop: loop {
+                    select! {
+                        _ = sse_tx.closed() => break 'recv_loop,
+                        recv = rx.recv() => if let Some(pstate) = recv {
+                            match serde_json::to_string(&pstate) {
+                                Ok(json) => {
+                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                        log::error!("Error forwarding state event: {e}");
+                                        break 'recv_loop;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Error serializiing state event: {e}");
+                                    break 'recv_loop;
+                                }
                             }
-                        }
-                        Err(e) => {
-                            log::error!("Error serializiing state event: {e}");
+                        } else {
                             break 'recv_loop;
                         }
                     }
@@ -429,16 +443,23 @@ async fn subscribels_root(
         Ok((mut rx, _)) => {
             let (sse_tx, sse_rx) = mpsc::channel(100);
             spawn(async move {
-                'recv_loop: while let Some(pstate) = rx.recv().await {
-                    match serde_json::to_string(&pstate) {
-                        Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                log::error!("Error forwarding state event: {e}");
-                                break 'recv_loop;
+                'recv_loop: loop {
+                    select! {
+                        _ = sse_tx.closed() => break 'recv_loop,
+                        recv = rx.recv() => if let Some(children) = recv {
+                            match serde_json::to_string(&children) {
+                                Ok(json) => {
+                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                        log::error!("Error forwarding state event: {e}");
+                                        break 'recv_loop;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Error serializiing state event: {e}");
+                                    break 'recv_loop;
+                                }
                             }
-                        }
-                        Err(e) => {
-                            log::error!("Error serializiing state event: {e}");
+                        } else {
                             break 'recv_loop;
                         }
                     }
@@ -496,16 +517,23 @@ async fn subscribels(
         Ok((mut rx, _)) => {
             let (sse_tx, sse_rx) = mpsc::channel(100);
             spawn(async move {
-                'recv_loop: while let Some(pstate) = rx.recv().await {
-                    match serde_json::to_string(&pstate) {
-                        Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                log::error!("Error forwarding state event: {e}");
-                                break 'recv_loop;
+                'recv_loop: loop {
+                    select! {
+                        _ = sse_tx.closed() => break 'recv_loop,
+                        recv = rx.recv() => if let Some(children) = recv {
+                            match serde_json::to_string(&children) {
+                                Ok(json) => {
+                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                        log::error!("Error forwarding state event: {e}");
+                                        break 'recv_loop;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Error serializiing state event: {e}");
+                                    break 'recv_loop;
+                                }
                             }
-                        }
-                        Err(e) => {
-                            log::error!("Error serializiing state event: {e}");
+                        } else {
                             break 'recv_loop;
                         }
                     }
