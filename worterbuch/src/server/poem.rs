@@ -12,17 +12,22 @@ use poem::{
     listener::TcpListener,
     middleware::AddData,
     post,
-    web::websocket::WebSocket,
+    web::{
+        sse::{Event, SSE},
+        websocket::WebSocket,
+        RemoteAddr,
+    },
     web::{
         websocket::{Message, WebSocketStream},
         Data, Json, Path, Query,
     },
-    EndpointExt, IntoResponse, Request, Result, Route,
+    Addr, EndpointExt, IntoResponse, Request, Result, Route,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
+    io,
     // env,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
@@ -36,7 +41,7 @@ use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
     error::WorterbuchError, AuthToken, Key, KeyValuePairs, ProtocolVersion, RegularKeySegment,
-    ServerMessage,
+    ServerMessage, StateEvent,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
@@ -242,6 +247,285 @@ async fn ls_root(
     }
 }
 
+#[handler]
+async fn subscribe(
+    Path(key): Path<Key>,
+    Query(params): Query<HashMap<String, String>>,
+    Json(body): Json<RestApiBody>,
+    Data(wb): Data<&CloneableWbApi>,
+    RemoteAddr(addr): &RemoteAddr,
+) -> Result<SSE> {
+    let auth_token = body.auth_token;
+    if let Err(e) = wb.authenticate(auth_token).await {
+        return to_error_response(e);
+    }
+    let client_id = Uuid::new_v4();
+    let remote_addr = if let Addr::SocketAddr(it) = addr {
+        it
+    } else {
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "only network socket connections are supported",
+            ),
+            "only network socket connections are supported".to_owned(),
+        ));
+    }
+    .to_owned();
+    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+        log::error!("Error adding new client: {e}");
+        return to_error_response(e);
+    }
+    let transaction_id = 1;
+    let unique: bool = params.get("unique").map(|it| it == "true").unwrap_or(false);
+    let live_only: bool = params
+        .get("liveOnly")
+        .map(|it| it == "true")
+        .unwrap_or(false);
+    let wb_unsub = wb.clone();
+    match wb
+        .subscribe(client_id, transaction_id, key, unique, live_only)
+        .await
+    {
+        Ok((mut rx, _)) => {
+            let (sse_tx, sse_rx) = mpsc::channel(100);
+            spawn(async move {
+                'recv_loop: while let Some(pstate) = rx.recv().await {
+                    let events: Vec<StateEvent> = pstate.into();
+                    for e in events {
+                        match serde_json::to_string(&e) {
+                            Ok(json) => {
+                                if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                    log::error!("Error forwarding state event: {e}");
+                                    break 'recv_loop;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Error serializiing state event: {e}");
+                                break 'recv_loop;
+                            }
+                        }
+                    }
+                }
+                if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+                    log::error!("Error stopping subscription: {e}");
+                }
+                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                    log::error!("Error disconnecting client: {e}");
+                }
+            });
+            Ok(
+                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
+                    .keep_alive(Duration::from_secs(5)),
+            )
+        }
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn psubscribe(
+    Path(key): Path<Key>,
+    Query(params): Query<HashMap<String, String>>,
+    Json(body): Json<RestApiBody>,
+    Data(wb): Data<&CloneableWbApi>,
+    RemoteAddr(addr): &RemoteAddr,
+) -> Result<SSE> {
+    let auth_token = body.auth_token;
+    if let Err(e) = wb.authenticate(auth_token).await {
+        return to_error_response(e);
+    }
+    let client_id = Uuid::new_v4();
+    let remote_addr = if let Addr::SocketAddr(it) = addr {
+        it
+    } else {
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "only network socket connections are supported",
+            ),
+            "only network socket connections are supported".to_owned(),
+        ));
+    }
+    .to_owned();
+    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+        log::error!("Error adding new client: {e}");
+        return to_error_response(e);
+    }
+    let transaction_id = 1;
+    let unique: bool = params.get("unique").map(|it| it == "true").unwrap_or(false);
+    let live_only: bool = params
+        .get("liveOnly")
+        .map(|it| it == "true")
+        .unwrap_or(false);
+    let wb_unsub = wb.clone();
+    match wb
+        .psubscribe(client_id, transaction_id, key, unique, live_only)
+        .await
+    {
+        Ok((mut rx, _)) => {
+            let (sse_tx, sse_rx) = mpsc::channel(100);
+            spawn(async move {
+                'recv_loop: while let Some(pstate) = rx.recv().await {
+                    match serde_json::to_string(&pstate) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                log::error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Error serializiing state event: {e}");
+                            break 'recv_loop;
+                        }
+                    }
+                }
+                if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+                    log::error!("Error stopping subscription: {e}");
+                }
+                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                    log::error!("Error disconnecting client: {e}");
+                }
+            });
+            Ok(
+                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
+                    .keep_alive(Duration::from_secs(5)),
+            )
+        }
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn subscribels_root(
+    Json(body): Json<RestApiBody>,
+    Data(wb): Data<&CloneableWbApi>,
+    RemoteAddr(addr): &RemoteAddr,
+) -> Result<SSE> {
+    let auth_token = body.auth_token;
+    if let Err(e) = wb.authenticate(auth_token).await {
+        return to_error_response(e);
+    }
+    let client_id = Uuid::new_v4();
+    let remote_addr = if let Addr::SocketAddr(it) = addr {
+        it
+    } else {
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "only network socket connections are supported",
+            ),
+            "only network socket connections are supported".to_owned(),
+        ));
+    }
+    .to_owned();
+    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+        log::error!("Error adding new client: {e}");
+        return to_error_response(e);
+    }
+    let transaction_id = 1;
+    let wb_unsub = wb.clone();
+    match wb.subscribe_ls(client_id, transaction_id, None).await {
+        Ok((mut rx, _)) => {
+            let (sse_tx, sse_rx) = mpsc::channel(100);
+            spawn(async move {
+                'recv_loop: while let Some(pstate) = rx.recv().await {
+                    match serde_json::to_string(&pstate) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                log::error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Error serializiing state event: {e}");
+                            break 'recv_loop;
+                        }
+                    }
+                }
+                if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+                    log::error!("Error stopping subscription: {e}");
+                }
+                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                    log::error!("Error disconnecting client: {e}");
+                }
+            });
+            Ok(
+                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
+                    .keep_alive(Duration::from_secs(5)),
+            )
+        }
+        Err(e) => to_error_response(e),
+    }
+}
+
+#[handler]
+async fn subscribels(
+    Path(parent): Path<Key>,
+    Json(body): Json<RestApiBody>,
+    Data(wb): Data<&CloneableWbApi>,
+    RemoteAddr(addr): &RemoteAddr,
+) -> Result<SSE> {
+    let auth_token = body.auth_token;
+    if let Err(e) = wb.authenticate(auth_token).await {
+        return to_error_response(e);
+    }
+    let client_id = Uuid::new_v4();
+    let remote_addr = if let Addr::SocketAddr(it) = addr {
+        it
+    } else {
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "only network socket connections are supported",
+            ),
+            "only network socket connections are supported".to_owned(),
+        ));
+    }
+    .to_owned();
+    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+        log::error!("Error adding new client: {e}");
+        return to_error_response(e);
+    }
+    let transaction_id = 1;
+    let wb_unsub = wb.clone();
+    match wb
+        .subscribe_ls(client_id, transaction_id, Some(parent))
+        .await
+    {
+        Ok((mut rx, _)) => {
+            let (sse_tx, sse_rx) = mpsc::channel(100);
+            spawn(async move {
+                'recv_loop: while let Some(pstate) = rx.recv().await {
+                    match serde_json::to_string(&pstate) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                log::error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Error serializiing state event: {e}");
+                            break 'recv_loop;
+                        }
+                    }
+                }
+                if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+                    log::error!("Error stopping subscription: {e}");
+                }
+                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                    log::error!("Error disconnecting client: {e}");
+                }
+            });
+            Ok(
+                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
+                    .keep_alive(Duration::from_secs(5)),
+            )
+        }
+        Err(e) => to_error_response(e),
+    }
+}
+
 pub async fn start(
     worterbuch: CloneableWbApi,
     tls: bool,
@@ -294,6 +578,10 @@ pub async fn start(
             .at("/api/v1/pdelete/*", delete(pdelete))
             .at("/api/v1/ls", get(ls_root))
             .at("/api/v1/ls/*", get(ls))
+            .at("/api/v1/subscribe/*", get(subscribe))
+            .at("/api/v1/psubscribe/*", get(psubscribe))
+            .at("/api/v1/subscribels", get(subscribels_root))
+            .at("/api/v1/subscribels/*", get(subscribels))
             .nest(
                 format!("/ws/{proto_ver}"),
                 get(ws.data((worterbuch.clone(), proto_ver.to_owned()))),

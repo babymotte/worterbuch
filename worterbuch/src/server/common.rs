@@ -18,6 +18,7 @@ use worterbuch_common::{
 pub enum Protocol {
     TCP,
     WS,
+    HTTP,
 }
 
 pub async fn process_incoming_message(

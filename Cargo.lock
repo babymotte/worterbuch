@@ -2476,6 +2476,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tokio-graceful-shutdown",
+ "tokio-stream",
  "tracing-subscriber",
  "urlencoding",
  "uuid",
