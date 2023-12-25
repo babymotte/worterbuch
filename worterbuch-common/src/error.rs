@@ -85,7 +85,6 @@ pub enum WorterbuchError {
     AuthenticationFailed,
     HandshakeRequired,
     HandshakeAlreadyDone,
-    MissingValue,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -130,9 +129,6 @@ impl fmt::Display for WorterbuchError {
             }
             WorterbuchError::HandshakeAlreadyDone => {
                 write!(f, "Handshake already done")
-            }
-            WorterbuchError::MissingValue => {
-                write!(f, "No value specified in request body")
             }
         }
     }
@@ -277,7 +273,6 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
             WorterbuchError::HandshakeRequired => ErrorCode::HandshakeRequired,
             WorterbuchError::HandshakeAlreadyDone => ErrorCode::HandshakeAlreadyDone,
-            WorterbuchError::MissingValue => ErrorCode::MissingValue,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

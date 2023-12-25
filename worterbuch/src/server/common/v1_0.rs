@@ -793,12 +793,6 @@ async fn handle_store_error(
             ))
             .expect("failed to serialize error message"),
         },
-        WorterbuchError::MissingValue => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!("no value specified in request body"))
-                .expect("failed to serialize error message"),
-        },
     };
     client
         .send(ServerMessage::Err(err_msg))

@@ -44,7 +44,6 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
         if self.wb.authenticate(auth_token).await.is_ok() {
             self.ep.call(req).await
         } else {
-            dbg!("not authenticated");
             Err(Error::from_status(StatusCode::UNAUTHORIZED))
         }
     }

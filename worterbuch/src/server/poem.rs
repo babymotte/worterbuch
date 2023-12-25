@@ -21,13 +21,12 @@ use poem::{
     web::{Data, Json, Path, Query},
     Addr, EndpointExt, IntoResponse, Result, Route,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
     io,
     // env,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     time::Duration,
 };
 use tokio::{select, spawn, sync::mpsc};
@@ -46,18 +45,9 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
         | WorterbuchError::NoSuchValue(_)
         | WorterbuchError::HandshakeAlreadyDone
         | WorterbuchError::HandshakeRequired
-        | WorterbuchError::MissingValue
         | WorterbuchError::ReadOnlyKey(_) => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
         e => Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR)),
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RestApiBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default)]
-    value: Option<Value>,
 }
 
 #[handler]
@@ -70,18 +60,7 @@ async fn ws(
     let worterbuch = data.0.clone();
     let proto_version = data.1.to_owned();
     let subsys = data.2.to_owned();
-    let remote = if let Addr::SocketAddr(it) = addr {
-        it
-    } else {
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ));
-    }
-    .to_owned();
+    let remote = to_socket_addr(addr)?;
     Ok(ws
         .protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
@@ -132,34 +111,24 @@ async fn pget(
 #[handler]
 async fn set(
     Path(key): Path<Key>,
-    Json(body): Json<RestApiBody>,
+    Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<&'static str>> {
-    if let Some(value) = body.value {
-        match wb.set(key, value).await {
-            Ok(()) => {}
-            Err(e) => return to_error_response(e),
-        }
-        Ok(Json("Ok"))
-    } else {
-        to_error_response(WorterbuchError::MissingValue)
+    match wb.set(key, value).await {
+        Ok(()) => Ok(Json("Ok")),
+        Err(e) => to_error_response(e),
     }
 }
 
 #[handler]
 async fn publish(
     Path(key): Path<Key>,
-    Json(body): Json<RestApiBody>,
+    Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<&'static str>> {
-    if let Some(value) = body.value {
-        match wb.publish(key, value).await {
-            Ok(()) => {}
-            Err(e) => return to_error_response(e),
-        }
-        Ok(Json("Ok"))
-    } else {
-        to_error_response(WorterbuchError::MissingValue)
+    match wb.publish(key, value).await {
+        Ok(()) => Ok(Json("Ok")),
+        Err(e) => to_error_response(e),
     }
 }
 
@@ -212,27 +181,16 @@ async fn subscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
-    let remote_addr = if let Addr::SocketAddr(it) = addr {
-        it
-    } else {
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ));
-    }
-    .to_owned();
-    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
-        log::error!("Error adding new client: {e}");
-        return to_error_response(e);
-    }
+    let remote_addr = to_socket_addr(addr)?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
-    let unique: bool = params.get("unique").map(|it| it == "true").unwrap_or(false);
+    let unique: bool = params
+        .get("unique")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
     let live_only: bool = params
         .get("liveOnly")
-        .map(|it| it == "true")
+        .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
     let wb_unsub = wb.clone();
     match wb
@@ -290,27 +248,16 @@ async fn psubscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
-    let remote_addr = if let Addr::SocketAddr(it) = addr {
-        it
-    } else {
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ));
-    }
-    .to_owned();
-    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
-        log::error!("Error adding new client: {e}");
-        return to_error_response(e);
-    }
+    let remote_addr = to_socket_addr(addr)?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
-    let unique: bool = params.get("unique").map(|it| it == "true").unwrap_or(false);
+    let unique: bool = params
+        .get("unique")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
     let live_only: bool = params
         .get("liveOnly")
-        .map(|it| it == "true")
+        .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
     let wb_unsub = wb.clone();
     match wb
@@ -363,22 +310,8 @@ async fn subscribels_root(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
-    let remote_addr = if let Addr::SocketAddr(it) = addr {
-        it
-    } else {
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ));
-    }
-    .to_owned();
-    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
-        log::error!("Error adding new client: {e}");
-        return to_error_response(e);
-    }
+    let remote_addr = to_socket_addr(addr)?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
     match wb.subscribe_ls(client_id, transaction_id, None).await {
@@ -429,22 +362,8 @@ async fn subscribels(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
-    let remote_addr = if let Addr::SocketAddr(it) = addr {
-        it
-    } else {
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ));
-    }
-    .to_owned();
-    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
-        log::error!("Error adding new client: {e}");
-        return to_error_response(e);
-    }
+    let remote_addr = to_socket_addr(addr)?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
     match wb
@@ -547,7 +466,9 @@ pub async fn start(
 
     let config = worterbuch.config().await?;
     if let Some(web_root_path) = config.web_root_path {
-        log::info!("Serving custom web app from {web_root_path} at http://{public_addr}:{port}/");
+        log::info!(
+            "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"
+        );
 
         app = app.at(
             "/",
@@ -567,4 +488,27 @@ pub async fn start(
         .await?;
 
     Ok(())
+}
+
+fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
+    if let Addr::SocketAddr(it) = addr {
+        Ok(it.to_owned())
+    } else {
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "only network socket connections are supported",
+            ),
+            "only network socket connections are supported".to_owned(),
+        ));
+    }
+}
+
+async fn connected(wb: &CloneableWbApi, client_id: Uuid, remote_addr: SocketAddr) -> Result<()> {
+    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+        log::error!("Error adding client {client_id} ({remote_addr}): {e}");
+        to_error_response(e)
+    } else {
+        Ok(())
+    }
 }
