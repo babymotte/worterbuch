@@ -231,10 +231,9 @@ async fn subscribe(
                     log::error!("Error disconnecting client: {e}");
                 }
             });
-            Ok(
-                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
-                    .keep_alive(Duration::from_secs(5)),
-            )
+            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+                sse_rx,
+            )))
         }
         Err(e) => to_error_response(e),
     }
@@ -295,10 +294,9 @@ async fn psubscribe(
                     log::error!("Error disconnecting client: {e}");
                 }
             });
-            Ok(
-                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
-                    .keep_alive(Duration::from_secs(5)),
-            )
+            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+                sse_rx,
+            )))
         }
         Err(e) => to_error_response(e),
     }
@@ -346,10 +344,9 @@ async fn subscribels_root(
                     log::error!("Error disconnecting client: {e}");
                 }
             });
-            Ok(
-                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
-                    .keep_alive(Duration::from_secs(5)),
-            )
+            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+                sse_rx,
+            )))
         }
         Err(e) => to_error_response(e),
     }
@@ -401,10 +398,9 @@ async fn subscribels(
                     log::error!("Error disconnecting client: {e}");
                 }
             });
-            Ok(
-                SSE::new(tokio_stream::wrappers::ReceiverStream::new(sse_rx))
-                    .keep_alive(Duration::from_secs(5)),
-            )
+            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+                sse_rx,
+            )))
         }
         Err(e) => to_error_response(e),
     }
