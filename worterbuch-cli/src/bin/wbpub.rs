@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
 use worterbuch_cli::{next_item, print_message, provide_key_value_pairs};
 use worterbuch_client::config::Config;
-use worterbuch_client::connect;
+use worterbuch_client::{connect, AuthToken};
 
 #[derive(Parser)]
 #[command(author, version, about = "Publish values on a Wörterbuch.", long_about = None)]
@@ -25,6 +25,9 @@ struct Args {
     json: bool,
     /// Key/value pairs to be published on Wörterbuch in the form "KEY1=VALUE1 KEY2=VALUE2 KEY3=VALUE3 ...". When omitted, key/value pairs will be read from stdin. When reading key/value pairs from stdin, one key/value pair is expected per line.
     key_value_pairs: Option<Vec<String>>,
+    /// Auth token to be used to authenticate with the server
+    #[arg(long)]
+    auth: Option<AuthToken>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -43,6 +46,8 @@ async fn main() -> Result<()> {
 async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
+
+    config.auth_token = args.auth.or(config.auth_token);
 
     config.proto = if args.ssl {
         "wss".to_owned()

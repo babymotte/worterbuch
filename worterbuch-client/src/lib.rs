@@ -26,6 +26,7 @@ use tokio::{
     time::{interval, sleep, MissedTickBehavior},
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
@@ -598,10 +599,13 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     // TODO implement protocol versions properly
     let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
 
+    let auth_token = config.auth_token.clone();
+
     let handshake = HandshakeRequest {
         supported_protocol_versions,
         last_will,
         grave_goods,
+        auth_token,
     };
     let msg = json::to_string(&CM::HandshakeRequest(handshake))?;
     log::debug!("Sending handshake message: {msg}");
@@ -617,6 +621,12 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                         on_disconnect,
                         config,
                     )
+                }
+                Ok(SM::Err(e)) => {
+                    log::error!("Handshake failed: {e}");
+                    Err(ConnectionError::WorterbuchError(
+                        WorterbuchError::ServerResponse(e),
+                    ))
                 }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -659,10 +669,13 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     // TODO implement protocol versions properly
     let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
 
+    let auth_token = config.auth_token.clone();
+
     let handshake = HandshakeRequest {
         supported_protocol_versions,
         last_will,
         grave_goods,
+        auth_token,
     };
     let mut msg = json::to_string(&CM::HandshakeRequest(handshake))?;
     msg.push('\n');
@@ -689,6 +702,12 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                         on_disconnect,
                         config,
                     )
+                }
+                Ok(SM::Err(e)) => {
+                    log::error!("Handshake failed: {e}");
+                    Err(ConnectionError::WorterbuchError(
+                        WorterbuchError::ServerResponse(e),
+                    ))
                 }
                 Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,

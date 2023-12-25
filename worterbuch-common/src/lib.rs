@@ -28,6 +28,7 @@ pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = bool;
 pub type LiveOnlyFlag = bool;
+pub type AuthToken = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
@@ -42,6 +43,10 @@ pub enum ErrorCode {
     ProtocolNegotiationFailed = 0b00000111,
     InvalidServerResponse = 0b00001000,
     ReadOnlyKey = 0b00001001,
+    AuthenticationFailed = 0b00001010,
+    HandshakeRequired = 0b00001011,
+    HandshakeAlreadyDone = 0b00001100,
+    MissingValue = 0b00001101,
     Other = 0b11111111,
 }
 

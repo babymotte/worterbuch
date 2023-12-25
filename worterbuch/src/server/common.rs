@@ -9,7 +9,7 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchResult, Handshake, Key, KeyValuePairs, LiveOnlyFlag, PStateEvent,
+    error::WorterbuchResult, AuthToken, Handshake, Key, KeyValuePairs, LiveOnlyFlag, PStateEvent,
     ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern, ServerMessage,
     TransactionId, UniqueFlag, Value,
 };
@@ -26,21 +26,25 @@ pub async fn process_incoming_message(
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
     protocol_version: &ProtocolVersion,
+    handshake_required: bool,
+    handshae_complete: bool,
 ) -> WorterbuchResult<(bool, bool)> {
     match protocol_version {
         ProtocolVersion { major, minor } if *major < 1 || (*major == 1 && *minor == 0) => {
-            v1_0::process_incoming_message(client_id, msg, worterbuch, tx).await
+            v1_0::process_incoming_message(client_id, msg, worterbuch, tx, handshake_required, handshae_complete).await
         }
         _ => panic!("looks like the server accidentally accepted a connection to a client that speaks an unsupported protocol version"),
     }
 }
 
 pub enum WbFunction {
+    Authenticate(Option<AuthToken>, oneshot::Sender<WorterbuchResult<()>>),
     Handshake(
         ProtocolVersions,
         KeyValuePairs,
         Vec<String>,
         Uuid,
+        Option<AuthToken>,
         oneshot::Sender<WorterbuchResult<Handshake>>,
     ),
     Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
@@ -103,12 +107,21 @@ impl CloneableWbApi {
         CloneableWbApi { tx }
     }
 
+    pub async fn authenticate(&self, auth_token: Option<String>) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(WbFunction::Authenticate(auth_token, tx))
+            .await?;
+        rx.await?
+    }
+
     pub async fn handshake(
         &self,
         supported_protocol_versions: ProtocolVersions,
         last_will: KeyValuePairs,
         grave_goods: Vec<String>,
         client_id: Uuid,
+        auth_token: Option<AuthToken>,
     ) -> WorterbuchResult<Handshake> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -117,6 +130,7 @@ impl CloneableWbApi {
                 last_will,
                 grave_goods,
                 client_id,
+                auth_token,
                 tx,
             ))
             .await?;

@@ -22,9 +22,9 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    parse_segments, topic, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment, RequestPattern,
-    ServerMessage, TransactionId,
+    parse_segments, topic, AuthToken, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs,
+    LastWill, PState, PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment,
+    RequestPattern, ServerMessage, TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -254,7 +254,12 @@ impl Worterbuch {
         last_will: LastWill,
         grave_goods: GraveGoods,
         client_id: Uuid,
+        auth_token: Option<AuthToken>,
     ) -> WorterbuchResult<Handshake> {
+        if self.config.auth_token != auth_token {
+            return Err(WorterbuchError::AuthenticationFailed);
+        }
+
         let mut supported_protocol_versions = self.supported_protocol_versions();
 
         supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
@@ -855,22 +860,28 @@ impl Worterbuch {
             }
         }
 
-        if let Err(e) = self.delete(topic!(
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS,
-            client_id,
-            SYSTEM_TOPIC_CLIENTS_PROTOCOL
-        )) {
-            log::error!("Error updating client protocol: {e}");
+        if let Err(e) = self.internal_delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_PROTOCOL
+            ),
+            true,
+        ) {
+            log::debug!("Error updating client protocol: {e}");
         }
 
-        if let Err(e) = self.delete(topic!(
-            SYSTEM_TOPIC_ROOT,
-            SYSTEM_TOPIC_CLIENTS,
-            client_id,
-            SYSTEM_TOPIC_CLIENTS_ADDRESS
-        )) {
-            log::error!("Error updating client address: {e}");
+        if let Err(e) = self.internal_delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_ADDRESS
+            ),
+            true,
+        ) {
+            log::debug!("Error updating client address: {e}");
         }
 
         Ok(())

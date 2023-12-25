@@ -1,0 +1,89 @@
+
+POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234",
+    "value": {
+        "level1": {
+            "level2": {
+                "a": "hello",
+                "b": "world"
+            }
+        }
+    }
+}
+
+###
+
+POST http://localhost:8080/api/v1/set/hello/there  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234",
+    "value": "General Kenobi"
+}
+
+###
+
+GET http://localhost:8080/api/v1/get/hello?extract=/level1/level2  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}
+
+###
+
+GET http://localhost:8080/api/v1/pget/hello/%23  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}
+
+###
+
+POST http://localhost:8080/api/v1/publish/hello  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234",
+    "value": "you"
+}
+
+###
+
+GET http://localhost:8080/api/v1/ls  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}
+
+###
+
+GET http://localhost:8080/api/v1/ls/hello  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}
+
+###
+
+DELETE  http://localhost:8080/api/v1/delete/hello  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}
+
+###
+
+DELETE  http://localhost:8080/api/v1/pdelete/hello/%23  HTTP/1.1
+content-type: application/json
+
+{
+    "authToken": "1234"
+}

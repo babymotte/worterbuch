@@ -3,7 +3,7 @@ use std::{fs, io::Read};
 use anyhow::Result;
 use clap::Parser;
 use serde_json::Value;
-use worterbuch_client::KeyValuePair;
+use worterbuch_client::{config::Config, AuthToken, KeyValuePair};
 
 #[derive(Parser)]
 #[command(author, version, about = "Convert JSON into Wörterbuch key/value pairs.", long_about = None)]
@@ -16,13 +16,19 @@ struct Args {
     /// Prefix the keys with a string.
     #[arg(short, long)]
     prefix: Option<String>,
+    /// Auth token to be used to authenticate with the server
+    #[arg(long)]
+    auth: Option<AuthToken>,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
+    let mut config = Config::new();
     let args: Args = Args::parse();
+
+    config.auth_token = args.auth.or(config.auth_token);
 
     let json = if let Some(file) = args.file {
         fs::read_to_string(file)?
