@@ -597,7 +597,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     log::debug!("Connected to server.");
 
     // TODO implement protocol versions properly
-    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 7 }];
 
     let auth_token = config.auth_token.clone();
 
@@ -667,7 +667,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     log::debug!("Connected to server.");
 
     // TODO implement protocol versions properly
-    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 6 }];
+    let supported_protocol_versions = vec![ProtocolVersion { major: 0, minor: 7 }];
 
     let auth_token = config.auth_token.clone();
 
