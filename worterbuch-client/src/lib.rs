@@ -7,7 +7,7 @@ pub mod ws;
 use crate::config::Config;
 use buffer::SendBuffer;
 use error::SubscriptionError;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self as json};
 use std::{
@@ -25,7 +25,10 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::{interval, sleep, MissedTickBehavior},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async_with_config,
+    tungstenite::{handshake::client::generate_key, http::Request},
+};
 use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
 
@@ -33,8 +36,8 @@ pub use worterbuch_common::*;
 pub use worterbuch_common::{
     self,
     error::{ConnectionError, ConnectionResult},
-    Ack, ClientMessage as CM, Delete, Err, Get, GraveGoods, HandshakeRequest, Key, KeyValuePairs,
-    LastWill, LsState, PState, PStateEvent, ProtocolVersion, RegularKeySegment,
+    Ack, AuthenticationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
+    KeyValuePairs, LastWill, LsState, PState, PStateEvent, ProtocolVersion, RegularKeySegment,
     ServerMessage as SM, Set, State, StateEvent, TransactionId,
 };
 
@@ -119,11 +122,16 @@ impl ClientSocket {
 pub struct Worterbuch {
     commands: mpsc::Sender<Command>,
     stop: mpsc::Sender<()>,
+    client_id: String,
 }
 
 impl Worterbuch {
-    fn new(commands: mpsc::Sender<Command>, stop: mpsc::Sender<()>) -> Self {
-        Self { commands, stop }
+    fn new(commands: mpsc::Sender<Command>, stop: mpsc::Sender<()>, client_id: String) -> Self {
+        Self {
+            commands,
+            stop,
+            client_id,
+        }
     }
 
     pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
@@ -462,6 +470,10 @@ impl Worterbuch {
         self.commands.send(Command::AllMessages(tx)).await?;
         Ok(rx)
     }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
 }
 
 async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
@@ -545,19 +557,15 @@ impl TransactionIds {
 }
 
 pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
-    last_will: LastWill,
-    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<(Worterbuch, Config)> {
     let config = Config::new();
-    let conn = connect(config.clone(), last_will, grave_goods, on_disconnect).await?;
+    let conn = connect(config.clone(), on_disconnect).await?;
     Ok((conn, config))
 }
 
 pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     config: Config,
-    last_will: LastWill,
-    grave_goods: GraveGoods,
     on_disconnect: F,
 ) -> ConnectionResult<Worterbuch> {
     let proto = &config.proto;
@@ -570,91 +578,88 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     log::debug!("Got server url from config: {url}");
 
     if tcp {
-        connect_tcp(
-            host_addr.to_owned(),
-            port,
-            last_will,
-            grave_goods,
-            on_disconnect,
-            config,
-        )
-        .await
+        connect_tcp(host_addr.to_owned(), port, on_disconnect, config).await
     } else {
-        connect_ws(url, last_will, grave_goods, on_disconnect, config).await
+        connect_ws(url, on_disconnect, config).await
     }
 }
 
 async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     url: String,
-    last_will: Vec<KeyValuePair>,
-    grave_goods: Vec<String>,
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     log::debug!("Connecting to server {url} over websocket …");
 
-    let (mut websocket, _) = connect_async(url).await?;
+    let auth_token = config.auth_token.clone();
+    let mut request = Request::builder()
+        .uri(url)
+        .header("Sec-WebSocket-Protocol", "wortebruch".to_owned())
+        .header("Sec-WebSocket-Key", generate_key());
+
+    if let Some(auth_token) = auth_token {
+        request = request.header("Authorization", format!("Bearer {auth_token}"));
+    }
+    let request: Request<()> = request.body(())?;
+
+    let (mut websocket, _) = connect_async_with_config(request, None, true).await?;
     log::debug!("Connected to server.");
 
-    // TODO implement protocol versions properly
-    let supported_protocol_versions = vec!["0.7".to_owned()];
-
-    let auth_token = config.auth_token.clone();
-
-    let handshake = HandshakeRequest {
-        supported_protocol_versions,
-        last_will,
-        grave_goods,
-        auth_token,
-    };
-    let msg = json::to_string(&CM::HandshakeRequest(handshake))?;
-    log::debug!("Sending handshake message: {msg}");
-    websocket.send(Message::Text(msg)).await?;
-
-    match websocket.next().await {
+    let Welcome {
+        client_id,
+        info:
+            ServerInfo {
+                protocol_version,
+                authentication_required: _,
+            },
+    } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
             Ok(data) => match json::from_str::<SM>(data) {
-                Ok(SM::Handshake(handshake)) => {
-                    log::debug!("Handhsake complete: {handshake}");
-                    connected(
-                        ClientSocket::Ws(WsClientSocket::new(websocket)),
-                        on_disconnect,
-                        config,
-                    )
+                Ok(SM::Welcome(welcome)) => {
+                    log::debug!("Welcome message received: {welcome:?}");
+                    welcome
                 }
-                Ok(SM::Err(e)) => {
-                    log::error!("Handshake failed: {e}");
-                    Err(ConnectionError::WorterbuchError(
-                        WorterbuchError::ServerResponse(e),
-                    ))
+                Ok(msg) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("server sent invalid welcome message: {msg:?}"),
+                    )))
                 }
-                Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("server sent invalid handshake message: {msg:?}"),
-                ))),
-                Err(e) => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("server sent invalid handshake message: {e}"),
-                ))),
+                Err(e) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("error receiving welcome message: {e}"),
+                    )))
+                }
             },
-            Err(e) => Err(ConnectionError::IoError(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("server sent invalid handshake message: {e}"),
-            ))),
+            Err(e) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("error receiving welcome message: {e}"),
+                )))
+            }
         },
-        Some(Err(e)) => Err(e.into()),
-        None => Err(ConnectionError::IoError(io::Error::new(
-            io::ErrorKind::ConnectionAborted,
-            "connection closed before handshake",
-        ))),
-    }
+        Some(Err(e)) => return Err(e.into()),
+        None => {
+            return Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "connection closed before welcome message",
+            )))
+        }
+    };
+
+    connected(
+        ClientSocket::Ws(WsClientSocket::new(websocket)),
+        on_disconnect,
+        config,
+        client_id,
+        protocol_version,
+    )
 }
 
 async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     host_addr: String,
     port: u16,
-    last_will: Vec<KeyValuePair>,
-    grave_goods: Vec<String>,
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
@@ -666,60 +671,109 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
 
     log::debug!("Connected to server.");
 
-    // TODO implement protocol versions properly
-    let supported_protocol_versions = vec!["0.7".to_owned()];
-
-    let auth_token = config.auth_token.clone();
-
-    let handshake = HandshakeRequest {
-        supported_protocol_versions,
-        last_will,
-        grave_goods,
-        auth_token,
-    };
-    let mut msg = json::to_string(&CM::HandshakeRequest(handshake))?;
-    msg.push('\n');
-    log::debug!("Sending handshake message: {msg}");
-    tcp_tx.write(msg.as_bytes()).await?;
-
     let mut line_buf = String::new();
 
-    match tcp_rx.read_line(&mut line_buf).await {
+    let Welcome {
+        client_id,
+        info:
+            ServerInfo {
+                protocol_version,
+                authentication_required,
+            },
+    } = match tcp_rx.read_line(&mut line_buf).await {
         Ok(0) => {
             return Err(ConnectionError::IoError(io::Error::new(
                 io::ErrorKind::ConnectionReset,
-                "connection closed before handshake",
+                "connection closed before welcome message",
             )))
         }
         Ok(_) => {
             let msg = json::from_str::<SM>(&line_buf);
             line_buf.clear();
             match msg {
-                Ok(SM::Handshake(handshake)) => {
-                    log::debug!("Handhsake complete: {handshake}");
-                    connected(
-                        ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await),
-                        on_disconnect,
-                        config,
-                    )
+                Ok(SM::Welcome(welcome)) => {
+                    log::debug!("Welcome message received: {welcome:?}");
+                    welcome
                 }
-                Ok(SM::Err(e)) => {
-                    log::error!("Handshake failed: {e}");
-                    Err(ConnectionError::WorterbuchError(
-                        WorterbuchError::ServerResponse(e),
-                    ))
+                Ok(msg) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("server sent invalid welcome message: {msg:?}"),
+                    )))
                 }
-                Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("server sent invalid handshake message: {msg:?}"),
-                ))),
-                Err(e) => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("server sent invalid handshake message: {e}"),
-                ))),
+                Err(e) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("error receiving welcome message: {e}"),
+                    )))
+                }
             }
         }
-        Err(e) => Err(ConnectionError::IoError(e)),
+        Err(e) => return Err(ConnectionError::IoError(e)),
+    };
+
+    if authentication_required {
+        if let Some(auth_token) = config.auth_token.clone() {
+            let handshake = AuthenticationRequest { auth_token };
+            let mut msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
+            msg.push('\n');
+            log::debug!("Sending handshake message: {msg}");
+            tcp_tx.write(msg.as_bytes()).await?;
+
+            match tcp_rx.read_line(&mut line_buf).await {
+                Ok(0) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "connection closed before handshake",
+                    )))
+                }
+                Ok(_) => {
+                    let msg = json::from_str::<SM>(&line_buf);
+                    line_buf.clear();
+                    match msg {
+                        Ok(SM::Authenticated(_)) => {
+                            log::debug!("Authentication accepted.");
+                            connected(
+                                ClientSocket::Tcp(
+                                    TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await,
+                                ),
+                                on_disconnect,
+                                config,
+                                client_id,
+                                protocol_version,
+                            )
+                        }
+                        Ok(SM::Err(e)) => {
+                            log::error!("Authentication failed: {e}");
+                            Err(ConnectionError::WorterbuchError(
+                                WorterbuchError::ServerResponse(e),
+                            ))
+                        }
+                        Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid authetication response: {msg:?}"),
+                        ))),
+                        Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error receiving authentication response: {e}"),
+                        ))),
+                    }
+                }
+                Err(e) => Err(ConnectionError::IoError(e)),
+            }
+        } else {
+            return Err(ConnectionError::AuthenticationError(
+                "Server requires authentication but no auth token was provided.".to_owned(),
+            ));
+        }
+    } else {
+        connected(
+            ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await),
+            on_disconnect,
+            config,
+            client_id,
+            protocol_version,
+        )
     }
 }
 
@@ -727,7 +781,18 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     client_socket: ClientSocket,
     on_disconnect: F,
     config: Config,
+    client_id: String,
+    protocol_version: ProtocolVersion,
 ) -> Result<Worterbuch, ConnectionError> {
+    // TODO properly implement different protocol versions
+    let supported_protocol_versions = vec!["0.7".to_owned()];
+
+    if !supported_protocol_versions.contains(&protocol_version) {
+        return Err(ConnectionError::WorterbuchError(
+            WorterbuchError::ProtocolNegotiationFailed,
+        ));
+    }
+
     let (stop_tx, stop_rx) = mpsc::channel(1);
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 
@@ -737,7 +802,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
         on_disconnect.await;
     });
 
-    Ok(Worterbuch::new(cmd_tx, stop_tx))
+    Ok(Worterbuch::new(cmd_tx, stop_tx, client_id))
 }
 
 async fn run(
@@ -1018,12 +1083,11 @@ async fn process_incoming_server_message(
         Ok(Some(msg)) => {
             deliver_generic(&msg, callbacks);
             match msg {
-                SM::Ack(_) => (),
                 SM::State(state) => deliver_state(state, callbacks).await?,
                 SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
                 SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 SM::Err(err) => deliver_err(err, callbacks).await,
-                SM::Handshake(_) | SM::Keepalive => (),
+                SM::Ack(_) | SM::Welcome(_) | SM::Authenticated(_) | SM::Keepalive => (),
             }
             Ok(ControlFlow::Continue(()))
         }

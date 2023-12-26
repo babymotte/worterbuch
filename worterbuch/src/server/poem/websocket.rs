@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::ServerMessage;
+use worterbuch_common::{ServerInfo, ServerMessage, Welcome};
 
 pub(crate) async fn serve(
     remote_addr: SocketAddr,
@@ -61,14 +61,13 @@ async fn serve_loop(
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
-    let auth_token = config.auth_token;
-    let handshake_required = auth_token.is_some();
+    let authentication_required = false;
     let send_timeout = config.send_timeout;
     let keepalive_timeout = config.keepalive_timeout;
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
     let mut last_keepalive_tx = Instant::now();
     let mut last_keepalive_rx = Instant::now();
-    let mut handshake_complete = false;
+    let mut already_authenticated = false;
     keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (mut ws_tx, mut ws_rx) = websocket.split();
@@ -90,6 +89,18 @@ async fn serve_loop(
         }
     });
 
+    let protocol_version = worterbuch.supported_protocol_version().await?;
+
+    ws_send_tx
+        .send(ServerMessage::Welcome(Welcome {
+            client_id: client_id.to_string(),
+            info: ServerInfo {
+                authentication_required,
+                protocol_version,
+            },
+        }))
+        .await?;
+
     loop {
         select! {
             recv = ws_rx.next() => if let Some(msg) = recv {
@@ -97,16 +108,16 @@ async fn serve_loop(
                     Ok(incoming_msg) => {
                         last_keepalive_rx = Instant::now();
                         if let Message::Text(text) = incoming_msg {
-                            let (msg_processed, handshake) = process_incoming_message(
+                            let (msg_processed, authenticated) = process_incoming_message(
                                 client_id,
                                 &text,
                                 &worterbuch,
                                 &ws_send_tx,
-                                handshake_required,
-                                handshake_complete
+                                authentication_required,
+                                already_authenticated
                             )
                             .await?;
-                            handshake_complete |= msg_processed && handshake;
+                            already_authenticated |= msg_processed && authenticated;
                             if !msg_processed {
                                 break;
                             }
@@ -127,7 +138,7 @@ async fn serve_loop(
             },
             _ = keepalive_timer.tick() => {
                 // check how long ago the last websocket message was received
-                check_client_keepalive(last_keepalive_rx, last_keepalive_tx, handshake_complete, client_id, keepalive_timeout)?;
+                check_client_keepalive(last_keepalive_rx, last_keepalive_tx, client_id, keepalive_timeout)?;
                 // send out websocket message if the last has been more than a second ago
                 send_keepalive(last_keepalive_tx, &ws_send_tx, ).await?;
             }
@@ -151,13 +162,12 @@ async fn send_keepalive(
 fn check_client_keepalive(
     last_keepalive_rx: Instant,
     last_keepalive_tx: Instant,
-    handshake_complete: bool,
     client_id: Uuid,
     keepalive_timeout: Duration,
 ) -> anyhow::Result<()> {
     let lag = last_keepalive_tx - last_keepalive_rx;
 
-    if handshake_complete && lag >= Duration::from_secs(2) {
+    if lag >= Duration::from_secs(2) {
         log::warn!(
             "Client {} has been inactive for {} seconds …",
             client_id,
@@ -165,7 +175,7 @@ fn check_client_keepalive(
         );
     }
 
-    if handshake_complete && lag >= keepalive_timeout {
+    if lag >= keepalive_timeout {
         log::warn!(
             "Client {} has been inactive for too long. Disconnecting.",
             client_id

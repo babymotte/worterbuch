@@ -181,6 +181,8 @@ pub enum ConnectionError {
     SerdeError(serde_json::Error),
     AckError(broadcast::error::SendError<u64>),
     Timeout,
+    HttpError(tungstenite::http::Error),
+    AuthenticationError(String),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -199,6 +201,8 @@ impl fmt::Display for ConnectionError {
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
             Self::AckError(e) => fmt::Display::fmt(&e, f),
             Self::Timeout => fmt::Display::fmt("timeout", f),
+            Self::HttpError(e) => fmt::Display::fmt(&e, f),
+            Self::AuthenticationError(msg) => fmt::Display::fmt(&msg, f),
         }
     }
 }
@@ -250,6 +254,12 @@ impl From<serde_json::Error> for ConnectionError {
 impl From<broadcast::error::SendError<u64>> for ConnectionError {
     fn from(e: broadcast::error::SendError<u64>) -> Self {
         Self::AckError(e)
+    }
+}
+
+impl From<tungstenite::http::Error> for ConnectionError {
+    fn from(e: tungstenite::http::Error) -> Self {
+        Self::HttpError(e)
     }
 }
 

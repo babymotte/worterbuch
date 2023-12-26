@@ -11,11 +11,11 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthToken, ClientMessage as CM, Delete, Err, ErrorCode, Get, Handshake, HandshakeRequest,
-    Key, KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
-    PStateEvent, PSubscribe, ProtocolVersion, ProtocolVersions, Publish, RegularKeySegment,
-    RequestPattern, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
-    UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    Ack, AuthToken, AuthenticationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key,
+    KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
+    PStateEvent, PSubscribe, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
+    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
+    Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,88 +30,88 @@ pub async fn process_incoming_message(
     msg: &str,
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
-    handshake_required: bool,
-    handshake_complete: bool,
+    authentication_required: bool,
+    already_authenticated: bool,
 ) -> WorterbuchResult<(bool, bool)> {
     log::debug!("Received message: {msg}");
-    let mut hs = false;
+    let mut authenticated = false;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
-            CM::HandshakeRequest(msg) => {
-                if handshake_complete {
+            CM::AuthenticationRequest(msg) => {
+                if already_authenticated {
                     return Err(WorterbuchError::HandshakeAlreadyDone);
                 }
-                hs = true;
-                handshake(msg, worterbuch, tx, client_id.clone()).await?;
+                authenticate(msg, worterbuch, tx).await?;
+                authenticated = true;
             }
             CM::Get(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 get(msg, worterbuch, tx).await?;
             }
             CM::PGet(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 pget(msg, worterbuch, tx).await?;
             }
             CM::Set(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 set(msg, worterbuch, tx).await?;
             }
             CM::Publish(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 subscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::PSubscribe(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 psubscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::Unsubscribe(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 unsubscribe(msg, worterbuch, tx, client_id).await?
             }
             CM::Delete(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 delete(msg, worterbuch, tx).await?;
             }
             CM::PDelete(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 pdelete(msg, worterbuch, tx).await?;
             }
             CM::Ls(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 ls(msg, worterbuch, tx).await?;
             }
             CM::SubscribeLs(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 subscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::UnsubscribeLs(msg) => {
-                if handshake_required && !handshake_complete {
+                if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
@@ -120,27 +120,19 @@ pub async fn process_incoming_message(
         },
         Ok(None) => {
             // client disconnected
-            return Ok((false, hs));
+            return Ok((false, authenticated));
         }
         Err(e) => {
             log::error!("Error decoding message: {e}");
-            return Ok((false, hs));
+            return Ok((false, authenticated));
         }
     }
 
-    Ok((true, hs))
+    Ok((true, authenticated))
 }
 
 pub enum WbFunction {
     Authenticate(Option<AuthToken>, oneshot::Sender<WorterbuchResult<()>>),
-    Handshake(
-        ProtocolVersions,
-        KeyValuePairs,
-        Vec<String>,
-        Uuid,
-        Option<AuthToken>,
-        oneshot::Sender<WorterbuchResult<Handshake>>,
-    ),
     Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
     Set(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
@@ -205,28 +197,6 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::Authenticate(auth_token, tx))
-            .await?;
-        rx.await?
-    }
-
-    pub async fn handshake(
-        &self,
-        supported_protocol_versions: ProtocolVersions,
-        last_will: KeyValuePairs,
-        grave_goods: Vec<String>,
-        client_id: Uuid,
-        auth_token: Option<AuthToken>,
-    ) -> WorterbuchResult<Handshake> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(WbFunction::Handshake(
-                supported_protocol_versions,
-                last_will,
-                grave_goods,
-                client_id,
-                auth_token,
-                tx,
-            ))
             .await?;
         rx.await?
     }
@@ -409,23 +379,13 @@ impl CloneableWbApi {
     }
 }
 
-async fn handshake(
-    msg: HandshakeRequest,
+async fn authenticate(
+    msg: AuthenticationRequest,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: Uuid,
 ) -> WorterbuchResult<()> {
-    let response = match worterbuch
-        .handshake(
-            msg.supported_protocol_versions,
-            msg.last_will,
-            msg.grave_goods,
-            client_id,
-            msg.auth_token,
-        )
-        .await
-    {
-        Ok(handshake) => handshake,
+    let response = match worterbuch.authenticate(Some(msg.auth_token)).await {
+        Ok(()) => Ack { transaction_id: 0 },
         Err(e) => {
             handle_store_error(e, client, 0).await?;
             return Ok(());
@@ -433,7 +393,7 @@ async fn handshake(
     };
 
     client
-        .send(ServerMessage::Handshake(response))
+        .send(ServerMessage::Authenticated(response))
         .await
         .context(|| format!("Error sending HANDSHAKE message",))?;
 

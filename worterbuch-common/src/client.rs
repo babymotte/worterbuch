@@ -1,13 +1,10 @@
-use crate::{
-    AuthToken, GraveGoods, Key, LastWill, LiveOnlyFlag, ProtocolVersions, RequestPattern,
-    TransactionId, UniqueFlag, Value,
-};
+use crate::{AuthToken, Key, LiveOnlyFlag, RequestPattern, TransactionId, UniqueFlag, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientMessage {
-    HandshakeRequest(HandshakeRequest),
+    AuthenticationRequest(AuthenticationRequest),
     Get(Get),
     PGet(PGet),
     Set(Set),
@@ -27,7 +24,7 @@ pub enum ClientMessage {
 impl ClientMessage {
     pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
-            ClientMessage::HandshakeRequest(_) => Some(0),
+            ClientMessage::AuthenticationRequest(_) => Some(0),
             ClientMessage::Get(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
@@ -47,13 +44,8 @@ impl ClientMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HandshakeRequest {
-    pub supported_protocol_versions: ProtocolVersions,
-    pub last_will: LastWill,
-    pub grave_goods: GraveGoods,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default)]
-    pub auth_token: Option<AuthToken>,
+pub struct AuthenticationRequest {
+    pub auth_token: AuthToken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -154,33 +146,25 @@ mod test {
     use serde_json::json;
 
     #[test]
-    fn handshake_request_is_serialized_correctly() {
-        let msg = ClientMessage::HandshakeRequest(HandshakeRequest {
-            grave_goods: vec!["delete/this/stuff/#".to_owned()],
-            last_will: vec![("set/this", json!("to this value")).into()],
-            supported_protocol_versions: vec!["0.1".to_owned()],
-            auth_token: Some("123456".to_owned()),
+    fn auth_request_is_serialized_correctly() {
+        let msg = ClientMessage::AuthenticationRequest(AuthenticationRequest {
+            auth_token: "123456".to_owned(),
         });
 
-        let json = r#"{"handshakeRequest":{"supportedProtocolVersions":["0.1"],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"],"authToken":"123456"}}"#;
+        let json = r#"{"authenticationRequest":{"authToken":"123456"}}"#;
 
         assert_eq!(&serde_json::to_string(&msg).unwrap(), json);
     }
 
     #[test]
-    fn handshake_request_is_deserialized_correctly() {
-        let msg = ClientMessage::HandshakeRequest(HandshakeRequest {
-            grave_goods: vec!["delete/this/stuff/#".to_owned()],
-            last_will: vec![("set/this", json!("to this value")).into()],
-            supported_protocol_versions: vec!["0.1".to_owned()],
-            auth_token: None,
+    fn auth_request_is_deserialized_correctly() {
+        let msg = ClientMessage::AuthenticationRequest(AuthenticationRequest {
+            auth_token: "123456".to_owned(),
         });
 
         let json = r#"{
             "handshakeRequest": {
-              "supportedProtocolVersions": ["0.1"],
-              "lastWill": [{ "key": "set/this", "value": "to this value" }],
-              "graveGoods": ["delete/this/stuff/#"]
+              "authtoken": "123456"
             }
           }"#;
 

@@ -111,23 +111,6 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                 tx.send(Err(WorterbuchError::AuthenticationFailed)).ok();
             }
         }
-        WbFunction::Handshake(
-            client_protocol_versions,
-            last_will,
-            grave_goods,
-            client_id,
-            auth_token,
-            tx,
-        ) => {
-            tx.send(worterbuch.handshake(
-                &client_protocol_versions,
-                last_will,
-                grave_goods,
-                client_id,
-                auth_token,
-            ))
-            .ok();
-        }
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
         }

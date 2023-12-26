@@ -64,7 +64,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         disco_tx.send(()).await.ok();
     };
 
-    let wb = connect(config, vec![], vec![], on_disconnect).await?;
+    let wb = connect(config, on_disconnect).await?;
     let mut responses = wb.all_messages().await?;
 
     let trans_id = wb.ls_async(parent).await?;

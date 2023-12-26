@@ -8,11 +8,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ServerMessage {
+    Welcome(Welcome),
     PState(PState),
     Ack(Ack),
     State(State),
     Err(Err),
-    Handshake(Handshake),
+    Authenticated(Ack),
     LsState(LsState),
     #[serde(rename = "")]
     Keepalive,
@@ -21,15 +22,23 @@ pub enum ServerMessage {
 impl ServerMessage {
     pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
+            ServerMessage::Welcome(_) => None,
             ServerMessage::PState(msg) => Some(msg.transaction_id),
             ServerMessage::Ack(msg) => Some(msg.transaction_id),
             ServerMessage::State(msg) => Some(msg.transaction_id),
             ServerMessage::Err(msg) => Some(msg.transaction_id),
             ServerMessage::LsState(msg) => Some(msg.transaction_id),
-            ServerMessage::Handshake(_) => Some(0),
+            ServerMessage::Authenticated(_) => Some(0),
             ServerMessage::Keepalive => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Welcome {
+    pub info: ServerInfo,
+    pub client_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
