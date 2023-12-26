@@ -19,87 +19,87 @@ pub async fn process_incoming_message(
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
     handshake_required: bool,
-    handshae_complete: bool,
+    handshake_complete: bool,
 ) -> WorterbuchResult<(bool, bool)> {
     log::debug!("Received message: {msg}");
     let mut hs = false;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
             CM::HandshakeRequest(msg) => {
-                if handshae_complete {
+                if handshake_complete {
                     return Err(WorterbuchError::HandshakeAlreadyDone);
                 }
                 hs = true;
                 handshake(msg, worterbuch, tx, client_id.clone()).await?;
             }
             CM::Get(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 get(msg, worterbuch, tx).await?;
             }
             CM::PGet(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 pget(msg, worterbuch, tx).await?;
             }
             CM::Set(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 set(msg, worterbuch, tx).await?;
             }
             CM::Publish(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 subscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::PSubscribe(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 psubscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::Unsubscribe(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 unsubscribe(msg, worterbuch, tx, client_id).await?
             }
             CM::Delete(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 delete(msg, worterbuch, tx).await?;
             }
             CM::PDelete(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 pdelete(msg, worterbuch, tx).await?;
             }
             CM::Ls(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 ls(msg, worterbuch, tx).await?;
             }
             CM::SubscribeLs(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 subscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::UnsubscribeLs(msg) => {
-                if handshake_required && !handshae_complete {
+                if handshake_required && !handshake_complete {
                     return Err(WorterbuchError::HandshakeRequired);
                 }
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
