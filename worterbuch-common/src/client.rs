@@ -163,8 +163,8 @@ mod test {
         });
 
         let json = r#"{
-            "handshakeRequest": {
-              "authtoken": "123456"
+            "authenticationRequest": {
+              "authToken": "123456"
             }
           }"#;
 
