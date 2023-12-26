@@ -96,6 +96,12 @@ pub struct KeyValuePair {
     pub value: Value,
 }
 
+impl fmt::Display for KeyValuePair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}={}", self.key, self.value)
+    }
+}
+
 impl From<KeyValuePair> for Option<Value> {
     fn from(kvp: KeyValuePair) -> Self {
         Some(kvp.value)

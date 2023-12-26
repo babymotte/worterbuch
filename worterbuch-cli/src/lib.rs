@@ -8,7 +8,9 @@ use tokio::{
     time::sleep,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_client::{Err, Key, KeyValuePair, LsState, PState, ServerMessage as SM, State};
+use worterbuch_client::{
+    Err, Key, KeyValuePair, LsState, PState, PStateEvent, ServerMessage as SM, State, StateEvent,
+};
 
 pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
     if done {
@@ -153,29 +155,82 @@ async fn provide_key_value_pair(
     ControlFlow::Continue(())
 }
 
-pub fn print_message(msg: &SM, json: bool) {
+pub fn print_message(msg: &SM, json: bool, raw: bool) {
     match msg {
-        SM::PState(msg) => print_pstate(&msg, json),
-        SM::State(msg) => print_state(&msg, json),
+        SM::PState(msg) => print_pstate(&msg, json, raw),
+        SM::State(msg) => print_state(&msg, json, raw),
         SM::Err(msg) => print_err(&msg, json),
         SM::LsState(msg) => print_ls(&msg, json),
         _ => (),
     }
 }
 
-fn print_pstate(msg: &PState, json: bool) {
-    if json {
-        print_msg_as_json(&msg);
-    } else {
-        println!("{msg}");
+pub fn print_change_event(msg: &SM, json: bool) {
+    match msg {
+        SM::PState(msg) => print_pstate_change(&msg, json),
+        SM::State(msg) => print_state_change(&msg, json),
+        SM::Err(msg) => print_err(&msg, json),
+        _ => (),
     }
 }
 
-fn print_state(msg: &State, json: bool) {
+pub fn print_del_event(msg: &SM, json: bool) {
+    match msg {
+        SM::PState(msg) => print_pstate_del(&msg, json),
+        SM::State(msg) => print_state_del(&msg, json),
+        SM::Err(msg) => print_err(&msg, json),
+        _ => (),
+    }
+}
+
+fn print_pstate(msg: &PState, json: bool, raw: bool) {
     if json {
-        print_msg_as_json(&msg);
+        if raw {
+            print_msg_as_json(&msg.event);
+        } else {
+            print_msg_as_json(&msg);
+        }
     } else {
-        println!("{msg}");
+        if raw {
+            match &msg.event {
+                PStateEvent::KeyValuePairs(kvps) => {
+                    for kvp in kvps {
+                        println!("{kvp}");
+                    }
+                }
+                PStateEvent::Deleted(kvps) => {
+                    for kvp in kvps {
+                        println!("{}={}", kvp.key, Value::Null);
+                    }
+                }
+            }
+        } else {
+            println!("{msg}");
+        }
+    }
+}
+
+fn print_state(msg: &State, json: bool, raw: bool) {
+    if json {
+        if raw {
+            if let StateEvent::KeyValue(kvp) = &msg.event {
+                print_msg_as_json(&kvp.value);
+            } else {
+                print_msg_as_json(Value::Null);
+            }
+        } else {
+            print_msg_as_json(&msg);
+        }
+    } else {
+        if raw {
+            if let StateEvent::KeyValue(kvp) = &msg.event {
+                println!("{}", kvp.value);
+            } else {
+                println!("{}", Value::Null);
+            }
+        } else {
+            println!("{msg}");
+        }
     }
 }
 
@@ -200,6 +255,58 @@ fn print_msg_as_json(msg: impl Serialize) {
         Ok(json) => println!("{json}"),
         Err(e) => {
             eprintln!("Error converting message to json: {e}");
+        }
+    }
+}
+
+fn print_state_change(msg: &State, json: bool) {
+    if json {
+        if let StateEvent::KeyValue(kvp) = &msg.event {
+            print_msg_as_json(&kvp.value);
+        }
+    } else {
+        if let StateEvent::KeyValue(kvp) = &msg.event {
+            println!("{}", kvp.value);
+        }
+    }
+}
+
+fn print_state_del(msg: &State, json: bool) {
+    if json {
+        if let StateEvent::Deleted(kvp) = &msg.event {
+            print_msg_as_json(&kvp.value);
+        }
+    } else {
+        if let StateEvent::Deleted(kvp) = &msg.event {
+            println!("{}", kvp.value);
+        }
+    }
+}
+
+fn print_pstate_change(msg: &PState, json: bool) {
+    if json {
+        if let PStateEvent::KeyValuePairs(kvps) = &msg.event {
+            print_msg_as_json(&kvps);
+        }
+    } else {
+        if let PStateEvent::KeyValuePairs(kvps) = &msg.event {
+            for kvp in kvps {
+                println!("{kvp}");
+            }
+        }
+    }
+}
+
+fn print_pstate_del(msg: &PState, json: bool) {
+    if json {
+        if let PStateEvent::Deleted(kvps) = &msg.event {
+            print_msg_as_json(&kvps);
+        }
+    } else {
+        if let PStateEvent::Deleted(kvps) = &msg.event {
+            for kvp in kvps {
+                println!("{kvp}");
+            }
         }
     }
 }

@@ -34,6 +34,9 @@ struct Args {
     /// Auth token to be used to authenticate with the server
     #[arg(long)]
     auth: Option<AuthToken>,
+    /// Print only the received events
+    #[arg(short, long)]
+    raw: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -63,6 +66,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     config.host_addr = args.addr.unwrap_or(config.host_addr);
     config.port = args.port.unwrap_or(config.port);
     let json = args.json;
+    let raw = args.raw;
     let keys = args.keys;
     let unique = args.unique;
     let live_only = args.live_only;
@@ -86,7 +90,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 subsys.request_global_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
-                print_message(&msg, json);
+                print_message(&msg, json, raw);
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
-use worterbuch_cli::{next_item, print_message, provide_keys};
+use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
 use worterbuch_client::config::Config;
 use worterbuch_client::{connect, AuthToken};
 
@@ -28,6 +28,9 @@ struct Args {
     /// Auth token to be used to authenticate with the server
     #[arg(long)]
     auth: Option<AuthToken>,
+    /// Print only the deleted key/value pairs
+    #[arg(short, long)]
+    raw: bool,
 }
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -56,6 +59,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     config.host_addr = args.addr.unwrap_or(config.host_addr);
     config.port = args.port.unwrap_or(config.port);
     let json = args.json;
+    let raw = args.raw;
     let patterns = args.patterns;
 
     let (disco_tx, mut disco_rx) = mpsc::channel(1);
@@ -88,7 +92,11 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                         acked = tid;
                     }
                 }
-                print_message(&msg, json);
+                if raw {
+                    print_del_event(&msg, json);
+                } else {
+                    print_message(&msg, json, false);
+                }
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => trans_id = wb.pdelete_async(key).await?,

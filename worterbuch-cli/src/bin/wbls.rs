@@ -86,7 +86,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                         acked = tid;
                     }
                 }
-                print_message(&msg, json);
+                print_message(&msg, json, false);
             },
         }
     }

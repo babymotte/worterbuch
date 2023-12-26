@@ -89,7 +89,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                         acked = tid;
                     }
                 }
-                print_message(&msg, json);
+                print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(value) => trans_id = wb.publish(key.clone(), &value).await?,
