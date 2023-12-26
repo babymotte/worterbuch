@@ -23,7 +23,7 @@ pub async fn start(
 ) -> anyhow::Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
-    log::info!("Starting TCP endpoint at {addr}");
+    log::info!("Serving TCP endpoint at {addr}");
     let listener = TcpListener::bind(&addr).await?;
 
     loop {
