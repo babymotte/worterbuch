@@ -16,13 +16,12 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::{ProtocolVersion, ServerMessage};
+use worterbuch_common::ServerMessage;
 
 pub(crate) async fn serve(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-    proto_version: ProtocolVersion,
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
@@ -40,7 +39,6 @@ pub(crate) async fn serve(
         remote_addr,
         worterbuch.clone(),
         websocket,
-        proto_version,
         subsys,
     )
     .await
@@ -60,7 +58,6 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-    proto_version: ProtocolVersion,
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
@@ -105,7 +102,8 @@ async fn serve_loop(
                                 &text,
                                 &worterbuch,
                                 &ws_send_tx,
-                                &proto_version,handshake_required,handshake_complete
+                                handshake_required,
+                                handshake_complete
                             )
                             .await?;
                             handshake_complete |= msg_processed && handshake;

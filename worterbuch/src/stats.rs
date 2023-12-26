@@ -13,7 +13,7 @@ pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
 pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
-pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS: &str = "supportedProtocolVersions";
+pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "supportedProtocolVersion";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {

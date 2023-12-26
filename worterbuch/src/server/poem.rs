@@ -33,7 +33,7 @@ use tokio::{select, spawn, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, Key, KeyValuePairs, ProtocolVersion, RegularKeySegment, StateEvent,
+    error::WorterbuchError, Key, KeyValuePairs, RegularKeySegment, StateEvent,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
@@ -53,20 +53,18 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    Data(data): Data<&(CloneableWbApi, ProtocolVersion, SubsystemHandle)>,
+    Data(subsys): Data<&SubsystemHandle>,
+    Data(wb): Data<&CloneableWbApi>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<impl IntoResponse> {
     log::info!("Client connected");
-    let worterbuch = data.0.clone();
-    let proto_version = data.1.to_owned();
-    let subsys = data.2.to_owned();
+    let worterbuch = wb.to_owned();
+    let subsys = subsys.to_owned();
     let remote = to_socket_addr(addr)?;
     Ok(ws
         .protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            if let Err(e) =
-                websocket::serve(remote, worterbuch, socket, proto_version, subsys).await
-            {
+            if let Err(e) = websocket::serve(remote, worterbuch, socket, subsys).await {
                 log::error!("Error in WS connection: {e}");
             }
         }))
@@ -417,31 +415,10 @@ pub async fn start(
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
 
-    let proto_versions = worterbuch
-        .supported_protocol_versions()
-        .await
-        .unwrap_or(Vec::new());
-
     let addr = format!("{bind_addr}:{port}");
 
-    let main_proto_version = proto_versions
-        .iter()
-        .last()
-        .expect("cannot be none")
-        .to_owned();
-    log::info!("Serving ws endpoint for protocol version {main_proto_version} at {proto}://{public_addr}:{port}/ws");
-    let mut app = Route::new().at(
-        "/ws",
-        get(ws.data((worterbuch.clone(), main_proto_version, subsys.clone()))),
-    );
-
-    for proto_ver in proto_versions {
-        app = app.at(
-            format!("/ws/{proto_ver}"),
-            get(ws.data((worterbuch.clone(), proto_ver.to_owned()))),
-        );
-        log::info!("Serving ws endpoint at {proto}://{public_addr}:{port}/ws/{proto_ver}");
-    }
+    log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
+    let mut app = Route::new().at("/ws", get(ws.data((worterbuch.clone(), subsys.clone()))));
 
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");

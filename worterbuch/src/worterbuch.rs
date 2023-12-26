@@ -244,8 +244,8 @@ impl Worterbuch {
         self.store.len()
     }
 
-    pub fn supported_protocol_versions(&self) -> ProtocolVersions {
-        vec![ProtocolVersion { major: 0, minor: 6 }]
+    pub fn supported_protocol_version(&self) -> ProtocolVersion {
+        ProtocolVersion { major: 0, minor: 7 }
     }
 
     pub fn handshake(
@@ -260,13 +260,12 @@ impl Worterbuch {
             return Err(WorterbuchError::AuthenticationFailed);
         }
 
-        let mut supported_protocol_versions = self.supported_protocol_versions();
+        let supported_protocol_version = self.supported_protocol_version();
 
-        supported_protocol_versions.retain(|e| client_protocol_versions.contains(e));
-        supported_protocol_versions.sort();
-        let protocol_version = match supported_protocol_versions.into_iter().last() {
-            Some(version) => version,
-            None => return Err(WorterbuchError::ProtocolNegotiationFailed),
+        let protocol_version = if client_protocol_versions.contains(&supported_protocol_version) {
+            supported_protocol_version
+        } else {
+            return Err(WorterbuchError::ProtocolNegotiationFailed);
         };
 
         if !last_will.is_empty() {

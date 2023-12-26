@@ -9,7 +9,7 @@ mod worterbuch;
 pub use crate::worterbuch::*;
 pub use config::*;
 use server::common::{CloneableWbApi, WbFunction};
-use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS};
+use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_common::{error::WorterbuchError, topic};
 
@@ -32,8 +32,8 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     };
 
     worterbuch.set(
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSIONS),
-        serde_json::to_value(worterbuch.supported_protocol_versions()).expect("cannot fail"),
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
+        serde_json::to_value(worterbuch.supported_protocol_version()).expect("cannot fail"),
     )?;
 
     let (api_tx, mut api_rx) = mpsc::channel(channel_buffer_size);
@@ -183,9 +183,6 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
-        }
-        WbFunction::SupportedProtocolVersions(tx) => {
-            tx.send(worterbuch.supported_protocol_versions()).ok();
         }
     }
 }

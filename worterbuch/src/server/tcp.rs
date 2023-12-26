@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::{tcp::write_line_and_flush, ProtocolVersion, ServerMessage};
+use worterbuch_common::{tcp::write_line_and_flush, ServerMessage};
 
 pub async fn start(
     worterbuch: CloneableWbApi,
@@ -23,14 +23,6 @@ pub async fn start(
 ) -> anyhow::Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
-    let proto_version = worterbuch
-        .supported_protocol_versions()
-        .await
-        .unwrap_or(Vec::new())
-        .into_iter()
-        .last()
-        .ok_or_else(|| anyhow!("could not get protocol version"))?;
-
     log::info!("Starting TCP endpoint at {addr}");
     let listener = TcpListener::bind(&addr).await?;
 
@@ -39,9 +31,8 @@ pub async fn start(
             con = listener.accept() => {
                 let (socket, remote_addr) = con?;
                 let worterbuch = worterbuch.clone();
-                let proto_version = proto_version.clone();
                 spawn(async move {
-                    if let Err(e) = serve(remote_addr, worterbuch, socket, proto_version).await {
+                    if let Err(e) = serve(remote_addr, worterbuch, socket).await {
                         log::error!("Connection to client {remote_addr} closed with error: {e}");
                     }
                 });
@@ -57,7 +48,6 @@ async fn serve(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
-    proto_version: ProtocolVersion,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
@@ -69,15 +59,7 @@ async fn serve(
 
     log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-    if let Err(e) = serve_loop(
-        client_id,
-        remote_addr,
-        worterbuch.clone(),
-        socket,
-        proto_version,
-    )
-    .await
-    {
+    if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
         log::error!("Error in serve loop: {e}");
     }
 
@@ -93,7 +75,6 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
-    proto_version: ProtocolVersion,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
     let auth_token = config.auth_token;
@@ -130,7 +111,6 @@ async fn serve_loop(
                         &json,
                         &worterbuch,
                         &tcp_send_tx,
-                        &proto_version,
                         handshake_required, handshake_complete
                     ).await;
                     let (msg_processed, handshake) = res?;
