@@ -28,4 +28,4 @@ jobs:
           override: true
       - uses: davidB/rust-cargo-make@v1
       - name: Run tests
-        run: cargo test -p worterbuch-common && cargo test -p worterbuch && cargo test -p worterbuch-client && cargo test -p worterbuch-cli
+        run: cargo test

@@ -30,7 +30,7 @@ jobs:
           override: true
 
       - name: Run tests
-        run: cargo test -p worterbuch-common && cargo test -p worterbuch && cargo test -p worterbuch-client && cargo test -p worterbuch-cli
+        run: cargo test
 
   release:
     needs: test
