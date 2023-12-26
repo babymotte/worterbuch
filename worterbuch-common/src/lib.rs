@@ -69,24 +69,7 @@ macro_rules! topic {
     };
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
-#[serde(rename_all = "camelCase")]
-pub struct ProtocolVersion {
-    pub major: ProtocolVersionSegment,
-    pub minor: ProtocolVersionSegment,
-}
-
-impl ProtocolVersion {
-    pub fn new(major: ProtocolVersionSegment, minor: ProtocolVersionSegment) -> Self {
-        ProtocolVersion { major, minor }
-    }
-}
-
-impl fmt::Display for ProtocolVersion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.major, self.minor)
-    }
-}
+pub type ProtocolVersion = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "web", derive(Object))]
@@ -258,36 +241,36 @@ pub fn quote(str: impl AsRef<str>) -> String {
 mod test {
     use std::cmp::Ordering;
 
-    use crate::{ClientMessage, ErrorCode, ProtocolVersion as PV, ServerMessage};
+    use crate::{ClientMessage, ErrorCode, ServerMessage};
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {
-        assert_eq!(PV::new(0, 1).cmp(&PV::new(0, 2)), Ordering::Less);
-        assert_eq!(PV::new(0, 9).cmp(&PV::new(1, 0)), Ordering::Less);
-        assert_eq!(PV::new(1, 2).cmp(&PV::new(1, 3)), Ordering::Less);
+        assert_eq!("0.1".cmp("0.2"), Ordering::Less);
+        assert_eq!("0.9".cmp("1.0"), Ordering::Less);
+        assert_eq!("1.2".cmp("1.3"), Ordering::Less);
+        assert_eq!("1.234".cmp("1.3"), Ordering::Less);
 
-        assert_eq!(PV::new(0, 1).cmp(&PV::new(0, 1)), Ordering::Equal);
-        assert_eq!(PV::new(0, 9).cmp(&PV::new(0, 9)), Ordering::Equal);
-        assert_eq!(PV::new(1, 2).cmp(&PV::new(1, 2)), Ordering::Equal);
+        assert_eq!("0.1".cmp("0.1"), Ordering::Equal);
+        assert_eq!("0.9".cmp("0.9"), Ordering::Equal);
+        assert_eq!("1.2".cmp("1.2"), Ordering::Equal);
 
-        assert_eq!(PV::new(0, 2).cmp(&PV::new(0, 1)), Ordering::Greater);
-        assert_eq!(PV::new(1, 0).cmp(&PV::new(0, 9)), Ordering::Greater);
-        assert_eq!(PV::new(1, 3).cmp(&PV::new(1, 2)), Ordering::Greater);
+        assert_eq!("0.2".cmp("0.1"), Ordering::Greater);
+        assert_eq!("1.0".cmp("0.9"), Ordering::Greater);
+        assert_eq!("1.3".cmp("1.2"), Ordering::Greater);
+        assert_eq!("1.3".cmp("1.234"), Ordering::Greater);
+        assert_eq!("13.45".cmp("1.345"), Ordering::Greater);
 
-        assert_eq!(PV::new(0, 3), PV::new(0, 3).min(PV::new(0, 5)));
-        assert_eq!(PV::new(0, 8), PV::new(0, 8).min(PV::new(1, 2)));
-        assert_eq!(PV::new(2, 3), PV::new(2, 3).min(PV::new(3, 1)));
+        assert_eq!("0.3", "0.3".min("0.5"));
+        assert_eq!("0.8", "0.8".min("1.2"));
+        assert_eq!("2.3", "2.3".min("3.1"));
 
-        assert_eq!(PV::new(0, 3), PV::new(0, 5).min(PV::new(0, 3)));
-        assert_eq!(PV::new(0, 8), PV::new(1, 2).min(PV::new(0, 8)));
-        assert_eq!(PV::new(2, 3), PV::new(3, 1).min(PV::new(2, 3)));
+        assert_eq!("0.3", "0.5".min("0.3"));
+        assert_eq!("0.8", "1.2".min("0.8"));
+        assert_eq!("2.34", "3.1".min("2.34"));
 
-        let mut versions = vec![PV::new(1, 2), PV::new(0, 4), PV::new(9, 0), PV::new(3, 5)];
+        let mut versions = vec!["1.2", "0.456", "9.0", "3.15"];
         versions.sort();
-        assert_eq!(
-            vec![PV::new(0, 4), PV::new(1, 2), PV::new(3, 5), PV::new(9, 0)],
-            versions
-        );
+        assert_eq!(vec!["0.456", "1.2", "3.15", "9.0"], versions);
     }
 
     #[test]

@@ -3,6 +3,7 @@ use poem::{
     web::headers::{self, authorization::Bearer, HeaderMapExt},
     Endpoint, Error, Middleware, Request, Result,
 };
+use worterbuch_common::ErrorCode;
 
 use crate::server::common::CloneableWbApi;
 
@@ -44,7 +45,10 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
         if self.wb.authenticate(auth_token).await.is_ok() {
             self.ep.call(req).await
         } else {
-            Err(Error::from_status(StatusCode::UNAUTHORIZED))
+            let mut err = Error::from_status(StatusCode::UNAUTHORIZED);
+            err.set_error_message("client failed to authenticate");
+            err.set_data(ErrorCode::AuthenticationFailed);
+            Err(err)
         }
     }
 }

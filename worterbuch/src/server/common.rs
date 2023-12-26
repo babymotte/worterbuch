@@ -13,9 +13,9 @@ use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthToken, ClientMessage as CM, Delete, Err, ErrorCode, Get, Handshake, HandshakeRequest,
     Key, KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
-    PStateEvent, PSubscribe, ProtocolVersions, Publish, RegularKeySegment, RequestPattern,
-    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
-    Unsubscribe, UnsubscribeLs, Value,
+    PStateEvent, PSubscribe, ProtocolVersion, ProtocolVersions, Publish, RegularKeySegment,
+    RequestPattern, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
+    UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +188,7 @@ pub enum WbFunction {
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<WorterbuchResult<Value>>),
     Len(oneshot::Sender<usize>),
+    SupportedProtocolVersion(oneshot::Sender<ProtocolVersion>),
 }
 
 #[derive(Clone)]
@@ -396,6 +397,14 @@ impl CloneableWbApi {
     pub async fn len(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Len(tx)).await?;
+        Ok(rx.await?)
+    }
+
+    pub async fn supported_protocol_version(&self) -> WorterbuchResult<ProtocolVersion> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(WbFunction::SupportedProtocolVersion(tx))
+            .await?;
         Ok(rx.await?)
     }
 }

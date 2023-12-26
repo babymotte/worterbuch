@@ -151,7 +151,6 @@ pub struct UnsubscribeLs {
 mod test {
 
     use super::*;
-    use crate::ProtocolVersion;
     use serde_json::json;
 
     #[test]
@@ -159,11 +158,11 @@ mod test {
         let msg = ClientMessage::HandshakeRequest(HandshakeRequest {
             grave_goods: vec!["delete/this/stuff/#".to_owned()],
             last_will: vec![("set/this", json!("to this value")).into()],
-            supported_protocol_versions: vec![ProtocolVersion { major: 0, minor: 1 }],
+            supported_protocol_versions: vec!["0.1".to_owned()],
             auth_token: Some("123456".to_owned()),
         });
 
-        let json = r#"{"handshakeRequest":{"supportedProtocolVersions":[{"major":0,"minor":1}],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"],"authToken":"123456"}}"#;
+        let json = r#"{"handshakeRequest":{"supportedProtocolVersions":["0.1"],"lastWill":[{"key":"set/this","value":"to this value"}],"graveGoods":["delete/this/stuff/#"],"authToken":"123456"}}"#;
 
         assert_eq!(&serde_json::to_string(&msg).unwrap(), json);
     }
@@ -173,13 +172,13 @@ mod test {
         let msg = ClientMessage::HandshakeRequest(HandshakeRequest {
             grave_goods: vec!["delete/this/stuff/#".to_owned()],
             last_will: vec![("set/this", json!("to this value")).into()],
-            supported_protocol_versions: vec![ProtocolVersion { major: 0, minor: 1 }],
+            supported_protocol_versions: vec!["0.1".to_owned()],
             auth_token: None,
         });
 
         let json = r#"{
             "handshakeRequest": {
-              "supportedProtocolVersions": [{ "major": 0, "minor": 1 }],
+              "supportedProtocolVersions": ["0.1"],
               "lastWill": [{ "key": "set/this", "value": "to this value" }],
               "graveGoods": ["delete/this/stuff/#"]
             }

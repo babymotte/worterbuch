@@ -236,10 +236,7 @@ impl fmt::Display for Handshake {
         write!(
             f,
             "handshake: supported protocol versions: {}",
-            format!(
-                "{}.{}",
-                self.protocol_version.major, self.protocol_version.minor
-            )
+            self.protocol_version
         )
     }
 }
@@ -255,6 +252,13 @@ impl fmt::Display for LsState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.children.join(", "))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerInfo {
+    pub protocol_version: ProtocolVersion,
+    pub authentication_required: bool,
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ use tokio::{select, spawn, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, Key, KeyValuePairs, RegularKeySegment, StateEvent,
+    error::WorterbuchError, Key, KeyValuePairs, RegularKeySegment, ServerInfo, StateEvent,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
@@ -53,8 +53,8 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 async fn ws(
     ws: WebSocket,
-    Data(subsys): Data<&SubsystemHandle>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(subsys): Data<&SubsystemHandle>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<impl IntoResponse> {
     log::info!("Client connected");
@@ -68,6 +68,24 @@ async fn ws(
                 log::error!("Error in WS connection: {e}");
             }
         }))
+}
+
+#[handler]
+async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
+    let proto = match wb.supported_protocol_version().await {
+        Ok(it) => it,
+        Err(e) => return to_error_response(e),
+    };
+    let config = match wb.config().await {
+        Ok(it) => it,
+        Err(e) => return to_error_response(e),
+    };
+    let info = ServerInfo {
+        authentication_required: config.auth_token.is_some(),
+        protocol_version: proto,
+    };
+
+    Ok(Json(info))
 }
 
 #[handler]
@@ -418,24 +436,99 @@ pub async fn start(
     let addr = format!("{bind_addr}:{port}");
 
     log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
-    let mut app = Route::new().at("/ws", get(ws.data((worterbuch.clone(), subsys.clone()))));
+    let mut app = Route::new();
+
+    app = app.at(
+        "/ws",
+        get(ws
+            .with(BearerAuth::new(worterbuch.clone()))
+            .with(AddData::new(worterbuch.clone()))
+            .with(AddData::new(subsys.clone()))),
+    );
 
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
     log::info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
     app = app
-        .at(format!("{rest_root}/get/*"), get(get_value))
-        .at(format!("{rest_root}/set/*"), post(set))
-        .at(format!("{rest_root}/pget/*"), get(pget))
-        .at(format!("{rest_root}/publish/*"), post(publish))
-        .at(format!("{rest_root}/delete/*"), delete(delete_value))
-        .at(format!("{rest_root}/pdelete/*"), delete(pdelete))
-        .at(format!("{rest_root}/ls"), get(ls_root))
-        .at(format!("{rest_root}/ls/*"), get(ls))
-        .at(format!("{rest_root}/subscribe/*"), get(subscribe))
-        .at(format!("{rest_root}/psubscribe/*"), get(psubscribe))
-        .at(format!("{rest_root}/subscribels"), get(subscribels_root))
-        .at(format!("{rest_root}/subscribels/*"), get(subscribels));
+        .at(
+            format!("{rest_root}/get/*"),
+            get(get_value
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/set/*"),
+            post(
+                set.with(BearerAuth::new(worterbuch.clone()))
+                    .with(AddData::new(worterbuch.clone())),
+            ),
+        )
+        .at(
+            format!("{rest_root}/pget/*"),
+            get(pget
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/publish/*"),
+            post(
+                publish
+                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(AddData::new(worterbuch.clone())),
+            ),
+        )
+        .at(
+            format!("{rest_root}/delete/*"),
+            delete(
+                delete_value
+                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(AddData::new(worterbuch.clone())),
+            ),
+        )
+        .at(
+            format!("{rest_root}/pdelete/*"),
+            delete(
+                pdelete
+                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(AddData::new(worterbuch.clone())),
+            ),
+        )
+        .at(
+            format!("{rest_root}/ls"),
+            get(ls_root
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/ls/*"),
+            get(ls
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/subscribe/*"),
+            get(subscribe
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/psubscribe/*"),
+            get(psubscribe
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/subscribels"),
+            get(subscribels_root
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/subscribels/*"),
+            get(subscribels
+                .with(BearerAuth::new(worterbuch.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        );
 
     let config = worterbuch.config().await?;
     if let Some(web_root_path) = config.web_root_path {
@@ -446,15 +539,18 @@ pub async fn start(
         app = app.at(
             "/",
             StaticFilesEndpoint::new(web_root_path)
-                .show_files_listing()
-                .index_file("index.html"),
+                .index_file("index.html")
+                .fallback_to_index()
+                .redirect_to_slash_directory(),
         );
     }
 
+    log::info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
+    app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
+
     poem::Server::new(TcpListener::bind(addr))
         .run_with_graceful_shutdown(
-            app.with(AddData::new(worterbuch.clone()))
-                .with(BearerAuth::new(worterbuch)),
+            app,
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )

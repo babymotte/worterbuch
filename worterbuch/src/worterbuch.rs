@@ -245,7 +245,7 @@ impl Worterbuch {
     }
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
-        ProtocolVersion { major: 0, minor: 7 }
+        "0.7".to_owned()
     }
 
     pub fn handshake(

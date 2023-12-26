@@ -184,5 +184,8 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
         }
+        WbFunction::SupportedProtocolVersion(tx) => {
+            tx.send(worterbuch.supported_protocol_version()).ok();
+        }
     }
 }
