@@ -81,8 +81,8 @@ pub enum WorterbuchError {
     ProtocolNegotiationFailed,
     ReadOnlyKey(Key),
     AuthenticationFailed,
-    HandshakeRequired,
-    HandshakeAlreadyDone,
+    AuthenticationRequired(&'static str),
+    AlreadyAuthenticated,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -120,10 +120,10 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::AuthenticationFailed => {
                 write!(f, "Client failed to authenticate")
             }
-            WorterbuchError::HandshakeRequired => {
-                write!(f, "Handshake required")
+            WorterbuchError::AuthenticationRequired(op) => {
+                write!(f, "Operation {op} requires authentication")
             }
-            WorterbuchError::HandshakeAlreadyDone => {
+            WorterbuchError::AlreadyAuthenticated => {
                 write!(f, "Handshake already done")
             }
         }
@@ -275,8 +275,8 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::InvalidServerResponse(_) => ErrorCode::InvalidServerResponse,
             WorterbuchError::ReadOnlyKey(_) => ErrorCode::ReadOnlyKey,
             WorterbuchError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
-            WorterbuchError::HandshakeRequired => ErrorCode::HandshakeRequired,
-            WorterbuchError::HandshakeAlreadyDone => ErrorCode::HandshakeAlreadyDone,
+            WorterbuchError::AuthenticationRequired(_) => ErrorCode::AuthenticationRequired,
+            WorterbuchError::AlreadyAuthenticated => ErrorCode::AlreadyAuthenticated,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

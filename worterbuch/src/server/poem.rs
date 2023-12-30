@@ -40,8 +40,8 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
         | WorterbuchError::IllegalWildcard(_)
         | WorterbuchError::MultiWildcardAtIllegalPosition(_)
         | WorterbuchError::NoSuchValue(_)
-        | WorterbuchError::HandshakeAlreadyDone
-        | WorterbuchError::HandshakeRequired
+        | WorterbuchError::AlreadyAuthenticated
+        | WorterbuchError::AuthenticationRequired(_)
         | WorterbuchError::ReadOnlyKey(_) => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
         e => Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR)),
     }

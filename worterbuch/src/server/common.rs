@@ -32,80 +32,80 @@ pub async fn process_incoming_message(
         Ok(Some(msg)) => match msg {
             CM::AuthenticationRequest(msg) => {
                 if already_authenticated {
-                    return Err(WorterbuchError::HandshakeAlreadyDone);
+                    return Err(WorterbuchError::AlreadyAuthenticated);
                 }
                 authenticate(msg, worterbuch, tx, client_id).await?;
                 authenticated = true;
             }
             CM::Get(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Get"));
                 }
                 get(msg, worterbuch, tx).await?;
             }
             CM::PGet(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("PGet"));
                 }
                 pget(msg, worterbuch, tx).await?;
             }
             CM::Set(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Set"));
                 }
                 set(msg, worterbuch, tx).await?;
             }
             CM::Publish(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Publish"));
                 }
                 publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Subscribe"));
                 }
                 subscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::PSubscribe(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("PSubscribe"));
                 }
                 psubscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::Unsubscribe(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Unsubscribe"));
                 }
                 unsubscribe(msg, worterbuch, tx, client_id).await?
             }
             CM::Delete(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Delete"));
                 }
                 delete(msg, worterbuch, tx).await?;
             }
             CM::PDelete(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("PDelete"));
                 }
                 pdelete(msg, worterbuch, tx).await?;
             }
             CM::Ls(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("Ls"));
                 }
                 ls(msg, worterbuch, tx).await?;
             }
             CM::SubscribeLs(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("SubscribeLs"));
                 }
                 subscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::UnsubscribeLs(msg) => {
                 if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::HandshakeRequired);
+                    return Err(WorterbuchError::AuthenticationRequired("UnsubscribeLs"));
                 }
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
@@ -1026,15 +1026,13 @@ async fn handle_store_error(
             metadata: serde_json::to_string(&format!("client failed to authenticate"))
                 .expect("failed to serialize error message"),
         },
-        WorterbuchError::HandshakeRequired => Err {
+        WorterbuchError::AuthenticationRequired(op) => Err {
             error_code,
             transaction_id,
-            metadata: serde_json::to_string(&format!(
-                "handshake must be completed before this operation can be used"
-            ))
-            .expect("failed to serialize error message"),
+            metadata: serde_json::to_string(&format!("operation {op} requires authentication"))
+                .expect("failed to serialize error message"),
         },
-        WorterbuchError::HandshakeAlreadyDone => Err {
+        WorterbuchError::AlreadyAuthenticated => Err {
             error_code,
             transaction_id,
             metadata: serde_json::to_string(&format!(
