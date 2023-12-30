@@ -91,7 +91,7 @@ async fn get_value(
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<Value>> {
-    let pointer = params.get("extract");
+    let pointer = params.get("pointer");
     match wb.get(key).await {
         Ok((key, value)) => {
             if let Some(pointer) = pointer {

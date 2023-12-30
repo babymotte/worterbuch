@@ -23,7 +23,7 @@ Authorization: Bearer 1234
 
 ###
 
-GET http://localhost:8080/api/v1/get/hello?extract=/level1/level2  HTTP/1.1
+GET http://localhost:8080/api/v1/get/hello?pointer=/level1/level2  HTTP/1.1
 Authorization: Bearer 1234
 
 ###

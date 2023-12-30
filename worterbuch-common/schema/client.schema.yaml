@@ -1,36 +1,22 @@
+title: ClientMessage
 type: object
 properties:
-  handshakeRequest:
-    description: A message sent by a client to initiate a handshake with the server
+  authenticationRequest:
+    description: A message sent by a client to authenticate itself to the server
     type: object
     properties:
-      supportedProtocolVersions:
-        type: array
-        minItems: 1
-        items:
-          $ref: "#/components/schemas/ProtocolVersion"
-      lastWill:
-        description: A list of key/value pairs that will be set when a client disconnects from the server
-        type: array
-        items:
-          $ref: "#/components/schemas/KeyValuePair"
-      graveGoods:
-        description: A list of keys that will be deleted when a client disconnects from the server
-        type: array
-        items:
-          type: string
+      authToken:
+        type: string
     additionalProperties: false
     required:
-      - supportedProtocolVersions
-      - lastWill
-      - graveGoods
+      - authToken
   get:
     description: A message sent by a client to request the value of the provided key from the server
     type: object
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       key:
         type: string
@@ -44,7 +30,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       requestPattern:
         type: string
@@ -58,7 +44,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       key:
         description: The key for which to set the value
@@ -76,7 +62,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       key:
         description: The key for which to publish the value
@@ -94,7 +80,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       key:
         description: The key to subscribe to
@@ -116,7 +102,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       requestPattern:
         description: The pattern to subscribe to
@@ -129,7 +115,7 @@ properties:
         type: boolean
       aggregateEvents:
         description: Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
-        type: number
+        type: integer
         format: u64
     additionalProperties: false
     required:
@@ -142,7 +128,7 @@ properties:
     properties:
       transactionId:
         description: The transaction ID of the subscription to be cancelled
-        type: number
+        type: integer
         format: u64
     additionalProperties: false
     required:
@@ -153,7 +139,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       key:
         description: The key to subscribe to
@@ -168,7 +154,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       requestPattern:
         description: The deletion pattern
@@ -183,7 +169,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       parent:
         description: The parent partial key for which to list sub-key segments
@@ -200,7 +186,7 @@ properties:
     properties:
       transactionId:
         description: A unique transaction ID
-        type: number
+        type: integer
         format: u64
       parent:
         description: The parent partial key for which to list sub-key segments
@@ -217,7 +203,7 @@ properties:
     properties:
       transactionId:
         description: The transaction ID of the ls subscription to be cancelled
-        type: number
+        type: integer
         format: u64
     additionalProperties: false
     required:
@@ -225,7 +211,7 @@ properties:
 additionalProperties: false
 oneOf:
   - required:
-      - handshakeRequest
+      - authenticationRequest
   - required:
       - get
   - required:
@@ -258,11 +244,11 @@ components:
       properties:
         major:
           description: The protocol's major version tag
-          type: number
+          type: integer
           format: u16
         minor:
           description: The protocol's minor version tag
-          type: number
+          type: integer
           format: u16
       additionalProperties: false
       required:
