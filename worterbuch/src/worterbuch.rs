@@ -1,6 +1,5 @@
 use crate::{
     config::Config,
-    server::common::Protocol,
     stats::{
         SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
         SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS,
@@ -22,9 +21,9 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    parse_segments, topic, AuthToken, GraveGoods, Handshake, Key, KeySegment, KeyValuePairs,
-    LastWill, PState, PStateEvent, Path, ProtocolVersion, ProtocolVersions, RegularKeySegment,
-    RequestPattern, ServerMessage, TransactionId,
+    parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
+    PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
+    TransactionId,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -246,39 +245,6 @@ impl Worterbuch {
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
         "0.7".to_owned()
-    }
-
-    pub fn handshake(
-        &mut self,
-        client_protocol_versions: &ProtocolVersions,
-        last_will: LastWill,
-        grave_goods: GraveGoods,
-        client_id: Uuid,
-        auth_token: Option<AuthToken>,
-    ) -> WorterbuchResult<Handshake> {
-        if self.config.auth_token != auth_token {
-            return Err(WorterbuchError::AuthenticationFailed);
-        }
-
-        let supported_protocol_version = self.supported_protocol_version();
-
-        let protocol_version = if client_protocol_versions.contains(&supported_protocol_version) {
-            supported_protocol_version
-        } else {
-            return Err(WorterbuchError::ProtocolNegotiationFailed);
-        };
-
-        if !last_will.is_empty() {
-            self.last_wills.insert(client_id, last_will);
-        }
-
-        if !grave_goods.is_empty() {
-            self.grave_goods.insert(client_id, grave_goods);
-        }
-
-        let handshake = Handshake { protocol_version };
-
-        Ok(handshake)
     }
 
     pub fn get(&self, key: &Key) -> WorterbuchResult<(String, Value)> {

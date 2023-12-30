@@ -2554,11 +2554,10 @@ name = "worterbuch-common"
 version = "0.41.3"
 dependencies = [
  "log",
- "poem-openapi",
  "serde",
  "serde_json",
  "serde_repr",
- "serde_yaml",
+ "sha2",
  "tokio",
  "tungstenite",
 ]

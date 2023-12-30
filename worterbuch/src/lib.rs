@@ -11,7 +11,7 @@ pub use config::*;
 use server::common::{CloneableWbApi, WbFunction};
 use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_common::{error::WorterbuchError, topic};
+use worterbuch_common::{digest_token, error::WorterbuchError, topic};
 
 use crate::stats::track_stats;
 use anyhow::Result;
@@ -104,8 +104,15 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
 
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     match function {
-        WbFunction::Authenticate(auth_token, tx) => {
-            if worterbuch.config().auth_token == auth_token {
+        WbFunction::Authenticate(auth_token, client_id, tx) => {
+            let authenticated = match client_id {
+                Some(client_id) => {
+                    let digest = digest_token(&worterbuch.config().auth_token, client_id);
+                    digest == auth_token
+                }
+                None => worterbuch.config().auth_token == auth_token,
+            };
+            if authenticated {
                 tx.send(Ok(())).ok();
             } else {
                 tx.send(Err(WorterbuchError::AuthenticationFailed)).ok();

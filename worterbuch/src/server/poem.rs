@@ -1,10 +1,7 @@
 mod auth;
 mod websocket;
 
-use crate::server::{
-    common::{CloneableWbApi, Protocol},
-    poem::auth::BearerAuth,
-};
+use crate::server::{common::CloneableWbApi, poem::auth::BearerAuth};
 use poem::{
     delete,
     endpoint::StaticFilesEndpoint,
@@ -33,7 +30,7 @@ use tokio::{select, spawn, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, Key, KeyValuePairs, RegularKeySegment, ServerInfo, StateEvent,
+    error::WorterbuchError, Key, KeyValuePairs, Protocol, RegularKeySegment, ServerInfo, StateEvent,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {

@@ -42,7 +42,7 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
             .headers()
             .typed_get::<headers::Authorization<Bearer>>()
             .map(|it| it.0.token().to_owned());
-        if self.wb.authenticate(auth_token).await.is_ok() {
+        if self.wb.authenticate(auth_token, None).await.is_ok() {
             self.ep.call(req).await
         } else {
             let mut err = Error::from_status(StatusCode::UNAUTHORIZED);

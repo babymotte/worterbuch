@@ -1,5 +1,5 @@
 use crate::{subscribers::SubscriptionId, Config, PStateAggregator};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
     spawn,
@@ -13,17 +13,10 @@ use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthToken, AuthenticationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key,
     KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
-    PStateEvent, PSubscribe, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
+    PStateEvent, PSubscribe, Protocol, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
     ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
     Unsubscribe, UnsubscribeLs, Value,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Protocol {
-    TCP,
-    WS,
-    HTTP,
-}
 
 pub async fn process_incoming_message(
     client_id: Uuid,
@@ -41,7 +34,7 @@ pub async fn process_incoming_message(
                 if already_authenticated {
                     return Err(WorterbuchError::HandshakeAlreadyDone);
                 }
-                authenticate(msg, worterbuch, tx).await?;
+                authenticate(msg, worterbuch, tx, client_id).await?;
                 authenticated = true;
             }
             CM::Get(msg) => {
@@ -132,7 +125,11 @@ pub async fn process_incoming_message(
 }
 
 pub enum WbFunction {
-    Authenticate(Option<AuthToken>, oneshot::Sender<WorterbuchResult<()>>),
+    Authenticate(
+        Option<AuthToken>,
+        Option<String>,
+        oneshot::Sender<WorterbuchResult<()>>,
+    ),
     Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
     Set(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
@@ -193,10 +190,14 @@ impl CloneableWbApi {
         CloneableWbApi { tx }
     }
 
-    pub async fn authenticate(&self, auth_token: Option<String>) -> WorterbuchResult<()> {
+    pub async fn authenticate(
+        &self,
+        auth_token: Option<String>,
+        client_id: Option<String>,
+    ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(WbFunction::Authenticate(auth_token, tx))
+            .send(WbFunction::Authenticate(auth_token, client_id, tx))
             .await?;
         rx.await?
     }
@@ -383,8 +384,12 @@ async fn authenticate(
     msg: AuthenticationRequest,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
-    let response = match worterbuch.authenticate(Some(msg.auth_token)).await {
+    let response = match worterbuch
+        .authenticate(Some(msg.auth_token), Some(client_id.to_string()))
+        .await
+    {
         Ok(()) => Ack { transaction_id: 0 },
         Err(e) => {
             handle_store_error(e, client, 0).await?;
@@ -987,12 +992,6 @@ async fn handle_store_error(
                 .expect("failed to serialize metadata"),
         },
         WorterbuchError::SerDeError(e, meta) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
-                .expect("failed to serialize metadata"),
-        },
-        WorterbuchError::SerDeYamlError(e, meta) => Err {
             error_code,
             transaction_id,
             metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())

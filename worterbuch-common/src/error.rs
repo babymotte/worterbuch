@@ -75,8 +75,6 @@ pub enum WorterbuchError {
     NotSubscribed,
     IoError(io::Error, MetaData),
     SerDeError(serde_json::Error, MetaData),
-    #[cfg(feature = "web")]
-    SerDeYamlError(serde_yaml::Error, MetaData),
     InvalidServerResponse(MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
     ServerResponse(Err),
@@ -105,8 +103,6 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::NotSubscribed => write!(f, "no such subscription"),
             WorterbuchError::IoError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::SerDeError(e, meta) => write!(f, "{meta}: {e}"),
-            #[cfg(feature = "web")]
-            WorterbuchError::SerDeYamlError(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::Other(e, meta) => write!(f, "{meta}: {e}"),
             WorterbuchError::ServerResponse(e) => {
                 write!(f, "error {}: {}", e.error_code, e.metadata)
@@ -275,8 +271,6 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotSubscribed => ErrorCode::NotSubscribed,
             WorterbuchError::IoError(_, _) => ErrorCode::IoError,
             WorterbuchError::SerDeError(_, _) => ErrorCode::SerdeError,
-            #[cfg(feature = "web")]
-            WorterbuchError::SerDeYamlError(_, _) => ErrorCode::SerdeError,
             WorterbuchError::ProtocolNegotiationFailed => ErrorCode::ProtocolNegotiationFailed,
             WorterbuchError::InvalidServerResponse(_) => ErrorCode::InvalidServerResponse,
             WorterbuchError::ReadOnlyKey(_) => ErrorCode::ReadOnlyKey,

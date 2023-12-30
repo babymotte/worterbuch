@@ -15,7 +15,7 @@ jemalloc = ["tikv-jemallocator"]
 default = ["jemalloc"]
 
 [dependencies]
-worterbuch-common = { version = "0.41.0", features = ["web"] }
+worterbuch-common = { version = "0.41.0" }
 tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
 tokio-graceful-shutdown = "0.13.0"
 log = "0.4.17"

@@ -1,4 +1,4 @@
-use crate::server::common::{process_incoming_message, CloneableWbApi, Protocol};
+use crate::server::common::{process_incoming_message, CloneableWbApi};
 use anyhow::anyhow;
 use futures::{
     sink::SinkExt,
@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::{ServerInfo, ServerMessage, Welcome};
+use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
 
 pub(crate) async fn serve(
     remote_addr: SocketAddr,

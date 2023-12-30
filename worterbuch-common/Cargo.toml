@@ -10,16 +10,11 @@ license = "MIT"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
-[features]
-web = ["poem-openapi", "serde_yaml"]
-
 [dependencies]
 tokio = { version = "1.26.0", features = ["sync", "io-util"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
 tungstenite = "0.20.0"
-
-serde_yaml = { version = "0.9.22", optional = true }
-poem-openapi = { version = "3.0.0", optional = true }
 serde_repr = "0.1.16"
 log = "0.4.20"
+sha2 = "0.10.8"

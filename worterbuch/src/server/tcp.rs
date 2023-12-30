@@ -1,4 +1,4 @@
-use crate::server::common::{process_incoming_message, CloneableWbApi, Protocol};
+use crate::server::common::{process_incoming_message, CloneableWbApi};
 use anyhow::anyhow;
 use std::{
     net::{IpAddr, SocketAddr},
@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
-use worterbuch_common::{tcp::write_line_and_flush, ServerInfo, ServerMessage, Welcome};
+use worterbuch_common::{tcp::write_line_and_flush, Protocol, ServerInfo, ServerMessage, Welcome};
 
 pub async fn start(
     worterbuch: CloneableWbApi,

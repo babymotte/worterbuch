@@ -7,10 +7,9 @@ pub use client::*;
 pub use server::*;
 
 use error::WorterbuchResult;
-#[cfg(feature = "web")]
-use poem_openapi::Object;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::*;
+use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
 pub type TransactionId = u64;
@@ -71,8 +70,14 @@ macro_rules! topic {
 
 pub type ProtocolVersion = String;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
+pub enum Protocol {
+    TCP,
+    WS,
+    HTTP,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "web", derive(Object))]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValuePair {
     pub key: Key,
@@ -235,6 +240,15 @@ pub fn quote(str: impl AsRef<str>) -> String {
     } else {
         format!("\"{str_ref}\"")
     }
+}
+
+pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<String> {
+    auth_token.as_deref().map(|token| {
+        let salted = client_id + token;
+        let mut hasher = Sha256::new();
+        hasher.update(salted.as_bytes());
+        format!("{:x}", hasher.finalize())
+    })
 }
 
 #[cfg(test)]
