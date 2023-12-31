@@ -2,7 +2,8 @@ use crate::{
     config::Config,
     stats::{
         SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
-        SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_SUBSCRIPTIONS,
     },
     store::{Store, StoreStats},
     subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
@@ -212,8 +213,6 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
-    last_wills: HashMap<Uuid, LastWill>,
-    grave_goods: HashMap<Uuid, GraveGoods>,
     clients: HashMap<Uuid, SocketAddr>,
 }
 
@@ -749,11 +748,36 @@ impl Worterbuch {
         }
     }
 
+    fn grave_goods(&self, client_id: &Uuid) -> Option<GraveGoods> {
+        let key = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_GRAVE_GOODS
+        );
+        let value = self.get(&key).ok();
+        value.and_then(|it| serde_json::from_value(it.1).ok())
+    }
+
+    fn last_wills(&self, client_id: &Uuid) -> Option<LastWill> {
+        let key = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_LAST_WILL
+        );
+        let value = self.get(&key).ok();
+        value.and_then(|it| serde_json::from_value(it.1).ok())
+    }
+
     pub fn disconnected(
         &mut self,
         client_id: Uuid,
         remote_addr: SocketAddr,
     ) -> WorterbuchResult<()> {
+        let grave_goods = self.grave_goods(&client_id);
+        let last_wills = self.last_wills(&client_id);
+
         let pattern = topic!("$SYS", "clients", client_id, "#");
         if self.config.extended_monitoring {
             log::debug!("Deleting {pattern}");
@@ -783,7 +807,7 @@ impl Worterbuch {
             }
         }
 
-        if let Some(grave_goods) = self.grave_goods.remove(&client_id) {
+        if let Some(grave_goods) = grave_goods {
             log::info!("Burying grave goods of client {client_id} ({remote_addr}).");
 
             for grave_good in grave_goods {
@@ -799,7 +823,7 @@ impl Worterbuch {
             log::info!("Client {client_id} ({remote_addr}) has no grave goods.");
         }
 
-        if let Some(last_wills) = self.last_wills.remove(&client_id) {
+        if let Some(last_wills) = last_wills {
             log::info!("Publishing last will of client {client_id} ({remote_addr}).");
 
             for last_will in last_wills {

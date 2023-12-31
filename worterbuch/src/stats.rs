@@ -13,6 +13,8 @@ pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
 pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
+pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
+pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
 pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "supportedProtocolVersion";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
