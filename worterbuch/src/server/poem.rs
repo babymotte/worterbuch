@@ -467,7 +467,6 @@ pub async fn start(
     app = app.at(
         "/ws",
         get(ws
-            .with(BearerAuth::new(worterbuch.clone()))
             .with(AddData::new(worterbuch.clone()))
             .with(AddData::new(subsys.clone()))),
     );

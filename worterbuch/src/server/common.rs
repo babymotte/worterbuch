@@ -393,7 +393,7 @@ async fn authenticate(
         Ok(()) => Ack { transaction_id: 0 },
         Err(e) => {
             handle_store_error(e, client, 0).await?;
-            return Ok(());
+            return Err(WorterbuchError::AuthenticationFailed);
         }
     };
 

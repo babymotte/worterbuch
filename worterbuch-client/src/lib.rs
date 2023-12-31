@@ -7,7 +7,7 @@ pub mod ws;
 use crate::config::Config;
 use buffer::SendBuffer;
 use error::SubscriptionError;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self as json};
 use std::{
@@ -27,7 +27,7 @@ use tokio::{
 };
 use tokio_tungstenite::{
     connect_async_with_config,
-    tungstenite::{handshake::client::generate_key, http::Request},
+    tungstenite::{handshake::client::generate_key, http::Request, Message},
 };
 use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
@@ -610,7 +610,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
         info:
             ServerInfo {
                 protocol_version,
-                authentication_required: _,
+                authentication_required,
             },
     } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
@@ -648,13 +648,65 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
         }
     };
 
-    connected(
-        ClientSocket::Ws(WsClientSocket::new(websocket)),
-        on_disconnect,
-        config,
-        client_id,
-        protocol_version,
-    )
+    if authentication_required {
+        let digest = digest_token(&config.auth_token, client_id.clone());
+        if let Some(auth_token) = digest {
+            let handshake = AuthenticationRequest { auth_token };
+            let msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
+            log::debug!("Sending authentication message: {msg}");
+            websocket.send(Message::Text(msg)).await?;
+
+            match websocket.next().await {
+                Some(Err(e)) => Err(e.into()),
+                Some(Ok(Message::Text(msg))) => match serde_json::from_str(&msg) {
+                    Ok(SM::Authenticated(_)) => {
+                        log::debug!("Authentication accepted.");
+                        connected(
+                            ClientSocket::Ws(WsClientSocket::new(websocket)),
+                            on_disconnect,
+                            config,
+                            client_id,
+                            protocol_version,
+                        )
+                    }
+                    Ok(SM::Err(e)) => {
+                        log::error!("Authentication failed: {e}");
+                        Err(ConnectionError::WorterbuchError(
+                            WorterbuchError::ServerResponse(e),
+                        ))
+                    }
+                    Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("server sent invalid authetication response: {msg:?}"),
+                    ))),
+                    Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("error receiving authentication response: {e}"),
+                    ))),
+                },
+                Some(Ok(msg)) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    format!("received unexpected message from server: {msg:?}"),
+                ))),
+                None => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before welcome message",
+                ))),
+            }
+        } else {
+            return Err(ConnectionError::AuthenticationError(
+                "Server requires authentication but no auth token was provided.".to_owned(),
+            ));
+        }
+    } else {
+        connected(
+            ClientSocket::Ws(WsClientSocket::new(websocket)),
+            on_disconnect,
+            config,
+            client_id,
+            protocol_version,
+        )
+    }
 }
 
 async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
@@ -718,7 +770,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             let handshake = AuthenticationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
             msg.push('\n');
-            log::debug!("Sending handshake message: {msg}");
+            log::debug!("Sending authentication message: {msg}");
             tcp_tx.write(msg.as_bytes()).await?;
 
             match tcp_rx.read_line(&mut line_buf).await {

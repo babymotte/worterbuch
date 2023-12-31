@@ -61,7 +61,7 @@ async fn serve_loop(
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
-    let authentication_required = false;
+    let authentication_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
     let keepalive_timeout = config.keepalive_timeout;
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
