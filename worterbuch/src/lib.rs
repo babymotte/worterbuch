@@ -17,6 +17,8 @@ use crate::stats::track_stats;
 use anyhow::Result;
 use tokio::{select, sync::mpsc};
 
+pub const INTERNAL_CLIENT_ID: &str = "internal_client_id";
+
 pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new()?;
     let config_pers = config.clone();
@@ -34,6 +36,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     worterbuch.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
         serde_json::to_value(worterbuch.supported_protocol_version()).expect("cannot fail"),
+        INTERNAL_CLIENT_ID,
     )?;
 
     let (api_tx, mut api_rx) = mpsc::channel(channel_buffer_size);
@@ -121,8 +124,8 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
         }
-        WbFunction::Set(key, value, tx) => {
-            tx.send(worterbuch.set(key, value)).ok();
+        WbFunction::Set(key, value, client_id, tx) => {
+            tx.send(worterbuch.set(key, value, &client_id)).ok();
         }
         WbFunction::Publish(key, value, tx) => {
             tx.send(worterbuch.publish(key, value)).ok();
@@ -153,11 +156,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id))
                 .ok();
         }
-        WbFunction::Delete(key, tx) => {
-            tx.send(worterbuch.delete(key)).ok();
+        WbFunction::Delete(key, client_id, tx) => {
+            tx.send(worterbuch.delete(key, &client_id)).ok();
         }
-        WbFunction::PDelete(pattern, tx) => {
-            tx.send(worterbuch.pdelete(pattern)).ok();
+        WbFunction::PDelete(pattern, client_id, tx) => {
+            tx.send(worterbuch.pdelete(pattern, &client_id)).ok();
         }
         WbFunction::Connected(client_id, remote_addr, protocol) => {
             worterbuch.connected(client_id, remote_addr, protocol);

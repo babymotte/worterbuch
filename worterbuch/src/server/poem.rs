@@ -127,7 +127,8 @@ async fn set(
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<&'static str>> {
-    match wb.set(key, value).await {
+    let client_id = Uuid::new_v4();
+    match wb.set(key, value, client_id.to_string()).await {
         Ok(()) => Ok(Json("Ok")),
         Err(e) => to_error_response(e),
     }
@@ -150,7 +151,8 @@ async fn delete_value(
     Path(key): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<Value>> {
-    match wb.delete(key).await {
+    let client_id = Uuid::new_v4();
+    match wb.delete(key, client_id.to_string()).await {
         Ok(kvp) => Ok(Json(kvp.1)),
         Err(e) => to_error_response(e),
     }
@@ -161,7 +163,8 @@ async fn pdelete(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
 ) -> Result<Json<KeyValuePairs>> {
-    match wb.pdelete(pattern).await {
+    let client_id = Uuid::new_v4();
+    match wb.pdelete(pattern, client_id.to_string()).await {
         Ok(kvps) => Ok(Json(kvps)),
         Err(e) => to_error_response(e),
     }

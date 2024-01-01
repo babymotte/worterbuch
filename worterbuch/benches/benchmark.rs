@@ -1,13 +1,16 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use std::time::Duration;
+use uuid::Uuid;
 use worterbuch::Worterbuch;
 use worterbuch_common::{KeyValuePairs, PState, PStateEvent};
 
 const DUMP: &str = include_str!("dump.json");
 
 fn set_without_subscribres((mut wb, kvps): (Worterbuch, KeyValuePairs)) {
+    let client_id = Uuid::new_v4();
     for kvp in kvps {
-        wb.set(kvp.key, kvp.value).expect("set failed");
+        wb.set(kvp.key, kvp.value, &client_id.to_string())
+            .expect("set failed");
     }
 }
 

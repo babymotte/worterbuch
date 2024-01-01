@@ -53,7 +53,7 @@ pub async fn process_incoming_message(
                 if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::AuthenticationRequired("Set"));
                 }
-                set(msg, worterbuch, tx).await?;
+                set(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::Publish(msg) => {
                 if authentication_required && !already_authenticated {
@@ -83,13 +83,13 @@ pub async fn process_incoming_message(
                 if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::AuthenticationRequired("Delete"));
                 }
-                delete(msg, worterbuch, tx).await?;
+                delete(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::PDelete(msg) => {
                 if authentication_required && !already_authenticated {
                     return Err(WorterbuchError::AuthenticationRequired("PDelete"));
                 }
-                pdelete(msg, worterbuch, tx).await?;
+                pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::Ls(msg) => {
                 if authentication_required && !already_authenticated {
@@ -131,7 +131,7 @@ pub enum WbFunction {
         oneshot::Sender<WorterbuchResult<()>>,
     ),
     Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
-    Set(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
+    Set(Key, Value, String, oneshot::Sender<WorterbuchResult<()>>),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
     Ls(
         Option<Key>,
@@ -167,9 +167,10 @@ pub enum WbFunction {
     ),
     Unsubscribe(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
     UnsubscribeLs(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
-    Delete(Key, oneshot::Sender<WorterbuchResult<(Key, Value)>>),
+    Delete(Key, String, oneshot::Sender<WorterbuchResult<(Key, Value)>>),
     PDelete(
         RequestPattern,
+        String,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
     Connected(Uuid, SocketAddr, Protocol),
@@ -214,9 +215,11 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn set(&self, key: Key, value: Value) -> WorterbuchResult<()> {
+    pub async fn set(&self, key: Key, value: Value, client_id: String) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Set(key, value, tx)).await?;
+        self.tx
+            .send(WbFunction::Set(key, value, client_id, tx))
+            .await?;
         rx.await?
     }
 
@@ -318,15 +321,21 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn delete(&self, key: Key) -> WorterbuchResult<(Key, Value)> {
+    pub async fn delete(&self, key: Key, client_id: String) -> WorterbuchResult<(Key, Value)> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Delete(key, tx)).await?;
+        self.tx.send(WbFunction::Delete(key, client_id, tx)).await?;
         rx.await?
     }
 
-    pub async fn pdelete(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
+    pub async fn pdelete(
+        &self,
+        pattern: RequestPattern,
+        client_id: String,
+    ) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::PDelete(pattern, tx)).await?;
+        self.tx
+            .send(WbFunction::PDelete(pattern, client_id, tx))
+            .await?;
         rx.await?
     }
 
@@ -472,8 +481,9 @@ async fn set(
     msg: Set,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
+    client_id: String,
 ) -> WorterbuchResult<()> {
-    if let Err(e) = worterbuch.set(msg.key, msg.value).await {
+    if let Err(e) = worterbuch.set(msg.key, msg.value, client_id).await {
         handle_store_error(e, client, msg.transaction_id).await?;
         return Ok(());
     }
@@ -766,8 +776,9 @@ async fn delete(
     msg: Delete,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
+    client_id: String,
 ) -> WorterbuchResult<()> {
-    let key_value = match worterbuch.delete(msg.key).await {
+    let key_value = match worterbuch.delete(msg.key, client_id).await {
         Ok(key_value) => key_value.into(),
         Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;
@@ -797,8 +808,12 @@ async fn pdelete(
     msg: PDelete,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
+    client_id: String,
 ) -> WorterbuchResult<()> {
-    let deleted = match worterbuch.pdelete(msg.request_pattern.clone()).await {
+    let deleted = match worterbuch
+        .pdelete(msg.request_pattern.clone(), client_id)
+        .await
+    {
         Ok(it) => it,
         Result::Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;

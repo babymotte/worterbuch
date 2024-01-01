@@ -7,6 +7,7 @@ use crate::{
     },
     store::{Store, StoreStats},
     subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
+    INTERNAL_CLIENT_ID,
 };
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
@@ -258,7 +259,9 @@ impl Worterbuch {
         }
     }
 
-    pub fn set(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
+    pub fn set(&mut self, key: Key, value: Value, client_id: &str) -> WorterbuchResult<()> {
+        self.check_for_read_only_key(&key, client_id)?;
+
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         let (changed, ls_subscribers) = self
@@ -319,19 +322,16 @@ impl Worterbuch {
             if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
+                INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
 
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
             if let Err(e) = self.set(
-                topic!(
-                    subs_key,
-                    key.replace("/", "%2F")
-                        .replace("?", "%3F")
-                        .replace("#", "%23")
-                ),
+                topic!(subs_key, key),
                 json!(transaction_id),
+                INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
@@ -340,6 +340,7 @@ impl Worterbuch {
             self.set(
                 topic!("$SYS", "clients", client_id, "subscriptions"),
                 json!(subs),
+                INTERNAL_CLIENT_ID,
             )?;
         }
 
@@ -381,19 +382,15 @@ impl Worterbuch {
             if let Err(e) = self.set(
                 topic!("$SYS", "subscriptions"),
                 json!(self.subscriptions.len()),
+                INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
             if let Err(e) = self.set(
-                topic!(
-                    subs_key,
-                    pattern
-                        .replace("/", "%2F")
-                        .replace("?", "%3F")
-                        .replace("#", "%23")
-                ),
+                topic!(subs_key, pattern),
                 json!(transaction_id),
+                INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
@@ -405,6 +402,7 @@ impl Worterbuch {
                     self.set(
                         topic!("$SYS", "clients", client_id, "subscriptions"),
                         json!(subs),
+                        INTERNAL_CLIENT_ID,
                     )
                 })
             {
@@ -510,7 +508,7 @@ impl Worterbuch {
                 && path[0] != KeySegment::MultiWildcard
                 && path[0].deref() != "$SYS"
             {
-                if let Err(e) = self.internal_delete(
+                if let Err(e) = self.delete(
                     topic!(
                         "$SYS",
                         "clients",
@@ -520,11 +518,8 @@ impl Worterbuch {
                             .map(ToString::to_string)
                             .collect::<Vec<String>>()
                             .join("/")
-                            .replace("/", "%2F")
-                            .replace("?", "%3F")
-                            .replace("#", "%23")
                     ),
-                    true,
+                    INTERNAL_CLIENT_ID,
                 ) {
                     match e {
                         WorterbuchError::NoSuchValue(_) => (/* will happen on disconnect */),
@@ -538,6 +533,7 @@ impl Worterbuch {
                 if let Err(e) = self.set(
                     topic!("$SYS", "subscriptions"),
                     json!(self.subscriptions.len()),
+                    INTERNAL_CLIENT_ID,
                 ) {
                     log::warn!("Error in subscription monitoring: {e}");
                 }
@@ -622,20 +618,39 @@ impl Worterbuch {
         }
     }
 
-    pub fn delete(&mut self, key: Key) -> WorterbuchResult<(String, Value)> {
-        self.internal_delete(key, false)
+    fn check_for_read_only_key(&self, key: &str, client_id: &str) -> WorterbuchResult<()> {
+        if client_id == INTERNAL_CLIENT_ID {
+            // modification is made internally by the server, so everything is allowed
+            return Ok(());
+        }
+
+        let path: Vec<&str> = key.split('/').collect();
+
+        if path.is_empty() || path[0] != SYSTEM_TOPIC_ROOT {
+            // path is outside the protected $SYS prefix
+            return Ok(());
+        }
+
+        if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id {
+            // the only writable values are under $SYS/clients/[client_id]]/#
+            return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
+        }
+
+        if path[3] == SYSTEM_TOPIC_GRAVE_GOODS || path[3] == SYSTEM_TOPIC_LAST_WILL {
+            // clients may modify their last will or grave goods at any time
+            return Ok(());
+        }
+
+        // TODO potentially whitelist more fields clients may change
+
+        return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
     }
 
-    fn internal_delete(
-        &mut self,
-        key: Key,
-        allow_delete_sys: bool,
-    ) -> WorterbuchResult<(String, Value)> {
+    pub fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<(String, Value)> {
+        self.check_for_read_only_key(&key, client_id)?;
+
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        if path.is_empty() || (path[0] == SYSTEM_TOPIC_ROOT && !allow_delete_sys) {
-            return Err(WorterbuchError::ReadOnlyKey(key));
-        }
         match self.store.delete(&path) {
             Some((value, ls_subscribers)) => {
                 let key_value = (key.to_owned(), value.to_owned());
@@ -647,23 +662,25 @@ impl Worterbuch {
         }
     }
 
-    pub fn pdelete(&mut self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
-        self.internal_pdelete(pattern, false)
+    pub fn pdelete(
+        &mut self,
+        pattern: RequestPattern,
+        client_id: &str,
+    ) -> WorterbuchResult<KeyValuePairs> {
+        self.internal_pdelete(pattern, false, client_id)
     }
 
     fn internal_pdelete(
         &mut self,
         pattern: RequestPattern,
-        allow_delete_sys: bool,
+        skip_read_only_check: bool,
+        client_id: &str,
     ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
-        let path: Vec<KeySegment> = KeySegment::parse(&pattern);
-
-        if path.is_empty()
-            || (&*(path[0]) == SYSTEM_TOPIC_ROOT && !allow_delete_sys)
-            || path[0] == KeySegment::MultiWildcard
-        {
-            return Err(WorterbuchError::ReadOnlyKey(pattern));
+        if !skip_read_only_check {
+            self.check_for_read_only_key(&pattern, client_id)?;
         }
+
+        let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
         match self
             .store
@@ -706,7 +723,11 @@ impl Worterbuch {
     pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr, protocol: Protocol) {
         self.clients.insert(client_id, remote_addr);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
-        if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
+        if let Err(e) = self.set(
+            client_count_key,
+            json!(self.clients.len()),
+            INTERNAL_CLIENT_ID,
+        ) {
             log::error!("Error updating client count: {e}");
         }
         if let Err(e) = serde_json::to_value(&protocol)
@@ -722,6 +743,7 @@ impl Worterbuch {
                         SYSTEM_TOPIC_CLIENTS_PROTOCOL
                     ),
                     protocol,
+                    INTERNAL_CLIENT_ID,
                 )
             })
         {
@@ -741,6 +763,7 @@ impl Worterbuch {
                         SYSTEM_TOPIC_CLIENTS_ADDRESS
                     ),
                     remote_addr,
+                    INTERNAL_CLIENT_ID,
                 )
             })
         {
@@ -781,13 +804,17 @@ impl Worterbuch {
         let pattern = topic!("$SYS", "clients", client_id, "#");
         if self.config.extended_monitoring {
             log::debug!("Deleting {pattern}");
-            if let Err(e) = self.internal_pdelete(pattern, true) {
+            if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
         }
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
-        if let Err(e) = self.set(client_count_key, json!(self.clients.len())) {
+        if let Err(e) = self.set(
+            client_count_key,
+            json!(self.clients.len()),
+            INTERNAL_CLIENT_ID,
+        ) {
             log::error!("Error updating client count: {e}");
         }
 
@@ -815,7 +842,7 @@ impl Worterbuch {
                     "Deleting grave good key of client {client_id} ({remote_addr}): {} ",
                     grave_good
                 );
-                if let Err(e) = self.pdelete(grave_good) {
+                if let Err(e) = self.pdelete(grave_good, &client_id.to_string()) {
                     log::error!("Error burying grave goods for client {client_id}: {e}")
                 }
             }
@@ -832,7 +859,7 @@ impl Worterbuch {
                     last_will.key,
                     last_will.value
                 );
-                if let Err(e) = self.set(last_will.key, last_will.value) {
+                if let Err(e) = self.set(last_will.key, last_will.value, &client_id.to_string()) {
                     log::error!("Error setting last will of client {client_id}: {e}")
                 }
             }
@@ -844,31 +871,32 @@ impl Worterbuch {
             if let Err(e) = self.set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                 json!(self.subscriptions.len()),
+                INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
         }
 
-        if let Err(e) = self.internal_delete(
+        if let Err(e) = self.delete(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
                 client_id,
                 SYSTEM_TOPIC_CLIENTS_PROTOCOL
             ),
-            true,
+            INTERNAL_CLIENT_ID,
         ) {
             log::debug!("Error updating client protocol: {e}");
         }
 
-        if let Err(e) = self.internal_delete(
+        if let Err(e) = self.delete(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
                 client_id,
                 SYSTEM_TOPIC_CLIENTS_ADDRESS
             ),
-            true,
+            INTERNAL_CLIENT_ID,
         ) {
             log::debug!("Error updating client address: {e}");
         }

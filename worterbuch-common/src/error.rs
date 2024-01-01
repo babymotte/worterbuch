@@ -115,7 +115,7 @@ impl fmt::Display for WorterbuchError {
                 "The server sent a response that is not valid for the issued request: {meta}"
             ),
             WorterbuchError::ReadOnlyKey(key) => {
-                write!(f, "Tried to delete a read only key: {key}")
+                write!(f, "Tried to modify a read only key: {key}")
             }
             WorterbuchError::AuthenticationFailed => {
                 write!(f, "Client failed to authenticate")
