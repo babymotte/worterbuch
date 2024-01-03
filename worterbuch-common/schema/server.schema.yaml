@@ -14,6 +14,12 @@ properties:
     required:
       - info
       - clientId
+  authenticated:
+    description: A message sent by the server to indicate that client authentication was successful
+    type: object
+    properties:
+      authenticated:
+        $ref: "#/properties/ack"
   state:
     description: A message sent by the server in response to a Get or Delete message
     properties:
