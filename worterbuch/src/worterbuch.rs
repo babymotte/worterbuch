@@ -388,7 +388,7 @@ impl Worterbuch {
             }
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
             if let Err(e) = self.set(
-                topic!(subs_key, pattern),
+                topic!(subs_key, pattern.replace("#", "%23").replace("?", "%3F")),
                 json!(transaction_id),
                 INTERNAL_CLIENT_ID,
             ) {
