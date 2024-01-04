@@ -435,8 +435,13 @@ impl Worterbuch {
     }
 
     pub fn export(&self) -> WorterbuchResult<Value> {
-        let value = to_value(&self.store)
+        let mut value = to_value(&self.store)
             .context(|| format!("Error generating JSON from worterbuch store during export"))?;
+        if let Some(val) = value.pointer_mut("/data/t") {
+            if let Value::Object(obj) = val {
+                obj.remove("$SYS");
+            }
+        }
         Ok(value)
     }
 
@@ -902,5 +907,28 @@ impl Worterbuch {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn export_removes_system_keys() {
+        let mut wb = Worterbuch::default();
+        wb.set("hello/world".to_owned(), json!("test"), INTERNAL_CLIENT_ID)
+            .unwrap();
+        wb.set(
+            "$SYS/something".to_owned(),
+            json!("this should not be exported"),
+            INTERNAL_CLIENT_ID,
+        )
+        .unwrap();
+        let export = wb.export().unwrap();
+        assert_eq!(
+            r#"{"data":{"t":{"hello":{"t":{"world":{"v":"test"}}}}}}"#,
+            &serde_json::to_string(&export).unwrap()
+        );
     }
 }

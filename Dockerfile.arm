@@ -1,4 +1,4 @@
-FROM messense/rust-musl-cross:armv7-musleabihf AS worterbuch-builder-arm
+FROM --platform=linux/amd64 messense/rust-musl-cross:armv7-musleabihf AS worterbuch-builder-arm
 WORKDIR /src/worterbuch
 COPY . .
 RUN cargo build -p worterbuch --release --no-default-features
