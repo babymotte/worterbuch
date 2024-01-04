@@ -558,13 +558,16 @@ pub async fn start(
                 .with(AddData::new(worterbuch.clone()))),
         );
 
+    log::info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
+    app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
+
     let config = worterbuch.config().await?;
     if let Some(web_root_path) = config.web_root_path {
         log::info!(
             "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"
         );
 
-        app = app.at(
+        app = app.nest(
             "/",
             StaticFilesEndpoint::new(web_root_path)
                 .index_file("index.html")
@@ -572,9 +575,6 @@ pub async fn start(
                 .redirect_to_slash_directory(),
         );
     }
-
-    log::info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
-    app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
 
     poem::Server::new(TcpListener::bind(addr))
         .run_with_graceful_shutdown(
