@@ -523,6 +523,8 @@ impl Worterbuch {
                             .map(ToString::to_string)
                             .collect::<Vec<String>>()
                             .join("/")
+                            .replace("#", "%23")
+                            .replace("?", "%3F")
                     ),
                     INTERNAL_CLIENT_ID,
                 ) {
