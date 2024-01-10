@@ -611,13 +611,15 @@ async fn psubscribe(
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<bool> {
+    let live_only = msg.live_only.unwrap_or(false);
+
     let (rx, subscription) = match worterbuch
         .psubscribe(
             client_id,
             msg.transaction_id,
             msg.request_pattern.clone(),
             msg.unique,
-            msg.live_only.unwrap_or(false),
+            live_only,
         )
         .await
     {
@@ -659,6 +661,7 @@ async fn psubscribe(
             client_id,
             subscription,
             aggregate_duration,
+            live_only,
         ));
     } else {
         spawn(forward_psub_events(
@@ -676,12 +679,39 @@ async fn psubscribe(
 }
 
 async fn forward_psub_events(
-    mut rx: mpsc::UnboundedReceiver<PStateEvent>,
+    rx: mpsc::UnboundedReceiver<PStateEvent>,
     transaction_id: TransactionId,
     request_pattern: RequestPattern,
     client_sub: mpsc::Sender<ServerMessage>,
     wb_unsub: CloneableWbApi,
     client_id: Uuid,
+    subscription: SubscriptionId,
+) {
+    forward_loop(
+        rx,
+        transaction_id,
+        request_pattern,
+        client_sub,
+        subscription,
+    )
+    .await;
+
+    match wb_unsub.unsubscribe(client_id, transaction_id).await {
+        Ok(()) => {
+            log::warn!("Subscription was not cleaned up properly!");
+        }
+        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+        Err(e) => {
+            log::warn!("Error while unsubscribing: {e}");
+        }
+    }
+}
+
+async fn forward_loop(
+    mut rx: UnboundedReceiver<PStateEvent>,
+    transaction_id: u64,
+    request_pattern: String,
+    client_sub: mpsc::Sender<ServerMessage>,
     subscription: SubscriptionId,
 ) {
     log::debug!("Receiving events for subscription {subscription:?} …");
@@ -696,6 +726,29 @@ async fn forward_psub_events(
             break;
         }
     }
+}
+
+async fn aggregate_psub_events(
+    rx: mpsc::UnboundedReceiver<PStateEvent>,
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    client_sub: mpsc::Sender<ServerMessage>,
+    wb_unsub: CloneableWbApi,
+    client_id: Uuid,
+    subscription: SubscriptionId,
+    aggregate_duration: Duration,
+    live_only: bool,
+) {
+    aggregate_loop(
+        rx,
+        transaction_id,
+        request_pattern,
+        client_sub,
+        subscription,
+        aggregate_duration,
+        live_only,
+    )
+    .await;
 
     match wb_unsub.unsubscribe(client_id, transaction_id).await {
         Ok(()) => {
@@ -708,16 +761,34 @@ async fn forward_psub_events(
     }
 }
 
-async fn aggregate_psub_events(
-    mut rx: mpsc::UnboundedReceiver<PStateEvent>,
-    transaction_id: TransactionId,
-    request_pattern: RequestPattern,
+async fn aggregate_loop(
+    mut rx: UnboundedReceiver<PStateEvent>,
+    transaction_id: u64,
+    request_pattern: String,
     client_sub: mpsc::Sender<ServerMessage>,
-    wb_unsub: CloneableWbApi,
-    client_id: Uuid,
     subscription: SubscriptionId,
     aggregate_duration: Duration,
+    live_only: bool,
 ) {
+    if !live_only {
+        log::debug!("Immediately forwarding current state to new subscription {subscription:?} …");
+
+        if let Some(event) = rx.recv().await {
+            let event = PState {
+                transaction_id: transaction_id.clone(),
+                request_pattern: request_pattern.clone(),
+                event,
+            };
+
+            if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
+                log::error!("Error sending STATE message to client: {e}");
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
     log::debug!("Aggregating events for subscription {subscription:?} …");
 
     let aggregator = PStateAggregator::new(
@@ -731,16 +802,6 @@ async fn aggregate_psub_events(
         if let Err(e) = aggregator.aggregate(event).await {
             log::error!("Error sending STATE message to client: {e}");
             break;
-        }
-    }
-
-    match wb_unsub.unsubscribe(client_id, transaction_id).await {
-        Ok(()) => {
-            log::warn!("Subscription was not cleaned up properly!");
-        }
-        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-        Err(e) => {
-            log::warn!("Error while unsubscribing: {e}");
         }
     }
 }
