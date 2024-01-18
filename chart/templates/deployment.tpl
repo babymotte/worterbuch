@@ -57,13 +57,17 @@ spec:
             - name: tcp
               containerPort: {{ .Values.service.tcpport }}
               protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /api/v1/get/%24SYS/uptime
+              port: http
           livenessProbe:
             httpGet:
-              path: /api/get/%24SYS%2Fuptime
+              path: /api/v1/get/%24SYS/uptime
               port: http
           readinessProbe:
             httpGet:
-              path: /api/get/%24SYS%2Fuptime
+              path: /api/v1/get/%24SYS/uptime
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
