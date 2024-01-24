@@ -45,3 +45,12 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 [[bench]]
 name = "benchmark"
 harness = false
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+enum_glob_use = "deny"
+# pedantic = "deny"
+# nursery = "deny"
+unwrap_used = "deny"

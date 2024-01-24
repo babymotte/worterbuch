@@ -48,7 +48,7 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 }
 
 #[handler]
-async fn ws(
+fn ws(
     ws: WebSocket,
     Data(wb): Data<&CloneableWbApi>,
     Data(subsys): Data<&SubsystemHandle>,
@@ -198,7 +198,7 @@ async fn subscribe(
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
-    connected(&wb, client_id, remote_addr).await?;
+    connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
         .get("unique")
@@ -293,7 +293,7 @@ async fn psubscribe(
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
-    connected(&wb, client_id, remote_addr).await?;
+    connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
         .get("unique")
@@ -354,7 +354,7 @@ async fn subscribels_root(
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
-    connected(&wb, client_id, remote_addr).await?;
+    connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
     match wb.subscribe_ls(client_id, transaction_id, None).await {
@@ -405,7 +405,7 @@ async fn subscribels(
 ) -> Result<SSE> {
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
-    connected(&wb, client_id, remote_addr).await?;
+    connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
     match wb
@@ -591,13 +591,13 @@ fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
     if let Addr::SocketAddr(it) = addr {
         Ok(it.to_owned())
     } else {
-        return to_error_response(WorterbuchError::IoError(
+        to_error_response(WorterbuchError::IoError(
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "only network socket connections are supported",
             ),
             "only network socket connections are supported".to_owned(),
-        ));
+        ))
     }
 }
 

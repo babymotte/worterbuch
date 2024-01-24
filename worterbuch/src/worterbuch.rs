@@ -69,7 +69,7 @@ impl PStateAggregatorState {
                 } else {
                     break;
                 },
-                tick = send_trigger_rx.recv() => if let Some(_) = tick {
+                tick = send_trigger_rx.recv() => if tick.is_some() {
                     if let Err(e) = self.send_current_state().await {
                         log::error!("Error sending PState event: {e}");
                         break;
@@ -201,7 +201,7 @@ impl PStateAggregator {
         }
     }
 
-    pub async fn aggregate(&self, event: PStateEvent) -> WorterbuchResult<()> {
+    pub fn aggregate(&self, event: PStateEvent) -> WorterbuchResult<()> {
         self.aggregate.send(event)?;
         Ok(())
     }
@@ -230,7 +230,7 @@ impl Worterbuch {
     }
 
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
-        let mut store: Store = from_str(json).context(|| format!("Error parsing JSON"))?;
+        let mut store: Store = from_str(json).context(|| "Error parsing JSON".to_owned())?;
         store.count_entries();
         Ok(Worterbuch {
             config,
@@ -241,6 +241,10 @@ impl Worterbuch {
 
     pub fn len(&self) -> usize {
         self.store.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.store.is_empty()
     }
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
@@ -260,7 +264,7 @@ impl Worterbuch {
     }
 
     pub fn set(&mut self, key: Key, value: Value, client_id: &str) -> WorterbuchResult<()> {
-        self.check_for_read_only_key(&key, client_id)?;
+        check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
@@ -270,7 +274,7 @@ impl Worterbuch {
             .map_err(|e| e.for_pattern(key.clone()))?;
 
         self.notify_ls_subscribers(ls_subscribers);
-        self.notify_subscribers(path, key, value, changed, false);
+        self.notify_subscribers(&path, &key, &value, changed, false);
 
         Ok(())
     }
@@ -278,12 +282,12 @@ impl Worterbuch {
     pub fn publish(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        self.notify_subscribers(path, key, value, true, false);
+        self.notify_subscribers(&path, &key, &value, true, false);
 
         Ok(())
     }
 
-    pub fn pget<'a>(&self, pattern: &str) -> WorterbuchResult<KeyValuePairs> {
+    pub fn pget(&self, pattern: &str) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<KeySegment> = KeySegment::parse(pattern);
         self.store
             .get_matches(&path)
@@ -388,7 +392,7 @@ impl Worterbuch {
             }
             let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
             if let Err(e) = self.set(
-                topic!(subs_key, pattern.replace("#", "%23").replace("?", "%3F")),
+                topic!(subs_key, escape_wildcards(&pattern)),
                 json!(transaction_id),
                 INTERNAL_CLIENT_ID,
             ) {
@@ -421,8 +425,8 @@ impl Worterbuch {
     ) -> WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)> {
         let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
         let path: Vec<RegularKeySegment> = parent
-            .map(|p| p.split("/").map(ToOwned::to_owned).collect())
-            .unwrap_or_else(|| Vec::new());
+            .map(|p| p.split('/').map(ToOwned::to_owned).collect())
+            .unwrap_or_default();
         let (tx, rx) = unbounded_channel();
         let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = LsSubscriber::new(subscription.clone(), path.clone(), tx.clone());
@@ -436,11 +440,9 @@ impl Worterbuch {
 
     pub fn export(&self) -> WorterbuchResult<Value> {
         let mut value = to_value(&self.store)
-            .context(|| format!("Error generating JSON from worterbuch store during export"))?;
-        if let Some(val) = value.pointer_mut("/data/t") {
-            if let Value::Object(obj) = val {
-                obj.remove("$SYS");
-            }
+            .context(|| "Error generating JSON from worterbuch store during export".to_owned())?;
+        if let Some(Value::Object(obj)) = value.pointer_mut("/data/t") {
+            obj.remove("$SYS");
         }
         Ok(value)
     }
@@ -448,19 +450,15 @@ impl Worterbuch {
     pub fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
         log::debug!("Parsing store data …");
         let store: Store =
-            from_str(json).context(|| format!("Error parsing JSON during import"))?;
+            from_str(json).context(|| "Error parsing JSON during import".to_owned())?;
         log::debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store);
 
         for (key, val) in &imported_values {
-            let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+            let path: Vec<RegularKeySegment> = parse_segments(key)?;
             self.notify_subscribers(
-                path,
-                key.to_owned(),
-                val.to_owned(),
-                // TODO only pass true if the value actually changed
-                true,
-                false,
+                &path, key, val, // TODO only pass true if the value actually changed
+                true, false,
             );
         }
 
@@ -508,7 +506,7 @@ impl Worterbuch {
         subscription: &SubscriptionId,
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
-        if let Some(path) = self.subscriptions.remove(&subscription) {
+        if let Some(path) = self.subscriptions.remove(subscription) {
             if self.config.extended_monitoring
                 && path[0] != KeySegment::MultiWildcard
                 && path[0].deref() != "$SYS"
@@ -519,12 +517,13 @@ impl Worterbuch {
                         "clients",
                         client_id,
                         "subscriptions",
-                        path.iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<String>>()
-                            .join("/")
-                            .replace("#", "%23")
-                            .replace("?", "%3F")
+                        escape_wildcards(
+                            &path
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<String>>()
+                                .join("/")
+                        )
                     ),
                     INTERNAL_CLIENT_ID,
                 ) {
@@ -545,7 +544,7 @@ impl Worterbuch {
                     log::warn!("Error in subscription monitoring: {e}");
                 }
             }
-            if self.subscribers.unsubscribe(&path, &subscription) {
+            if self.subscribers.unsubscribe(&path, subscription) {
                 Ok(())
             } else {
                 Err(WorterbuchError::NotSubscribed)
@@ -565,12 +564,12 @@ impl Worterbuch {
     }
 
     fn do_unsubscribe_ls(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
-        if let Some(path) = self.ls_subscriptions.remove(&subscription) {
+        if let Some(path) = self.ls_subscriptions.remove(subscription) {
             log::debug!(
                 "Remaining ls subscriptions: {}",
                 self.ls_subscriptions.len()
             );
-            if self.store.unsubscribe_ls(&path, &subscription) {
+            if self.store.unsubscribe_ls(&path, subscription) {
                 Ok(())
             } else {
                 Err(WorterbuchError::NotSubscribed)
@@ -582,13 +581,13 @@ impl Worterbuch {
 
     fn notify_subscribers(
         &mut self,
-        path: Vec<RegularKeySegment>,
-        key: Key,
-        value: Value,
+        path: &[RegularKeySegment],
+        key: &Key,
+        value: &Value,
         value_changed: bool,
         deleted: bool,
     ) {
-        let subscribers = self.subscribers.get_subscribers(&path);
+        let subscribers = self.subscribers.get_subscribers(path);
 
         let filtered_subscribers: Vec<Subscriber> = subscribers
             .into_iter()
@@ -609,7 +608,7 @@ impl Worterbuch {
                 subscriber.send(PStateEvent::KeyValuePairs(kvps))
             } {
                 log::debug!("Error calling subscriber: {e}");
-                self.subscribers.remove_subscriber(subscriber)
+                self.subscribers.remove_subscriber(subscriber);
             }
         }
     }
@@ -619,51 +618,22 @@ impl Worterbuch {
             for subscriber in subscribers {
                 if let Err(e) = subscriber.send(new_children.clone()) {
                     log::debug!("Error calling subscriber: {e}");
-                    self.store.remove_ls_subscriber(subscriber)
+                    self.store.remove_ls_subscriber(subscriber);
                 }
             }
         }
     }
 
-    fn check_for_read_only_key(&self, key: &str, client_id: &str) -> WorterbuchResult<()> {
-        if client_id == INTERNAL_CLIENT_ID {
-            // modification is made internally by the server, so everything is allowed
-            return Ok(());
-        }
-
-        let path: Vec<&str> = key.split('/').collect();
-
-        if path.is_empty() || path[0] != SYSTEM_TOPIC_ROOT {
-            // path is outside the protected $SYS prefix
-            return Ok(());
-        }
-
-        if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id {
-            // the only writable values are under $SYS/clients/[client_id]]/#
-            return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
-        }
-
-        if path[3] == SYSTEM_TOPIC_GRAVE_GOODS || path[3] == SYSTEM_TOPIC_LAST_WILL {
-            // clients may modify their last will or grave goods at any time
-            return Ok(());
-        }
-
-        // TODO potentially whitelist more fields clients may change
-
-        return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
-    }
-
     pub fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<(String, Value)> {
-        self.check_for_read_only_key(&key, client_id)?;
+        check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         match self.store.delete(&path) {
             Some((value, ls_subscribers)) => {
-                let key_value = (key.to_owned(), value.to_owned());
                 self.notify_ls_subscribers(ls_subscribers);
-                self.notify_subscribers(path, key.clone(), value.clone(), true, true);
-                Ok(key_value)
+                self.notify_subscribers(&path, &key, &value, true, true);
+                Ok((key, value))
             }
             None => Err(WorterbuchError::NoSuchValue(key)),
         }
@@ -684,7 +654,7 @@ impl Worterbuch {
         client_id: &str,
     ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
         if !skip_read_only_check {
-            self.check_for_read_only_key(&pattern, client_id)?;
+            check_for_read_only_key(&pattern, client_id)?;
         }
 
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
@@ -692,13 +662,13 @@ impl Worterbuch {
         match self
             .store
             .delete_matches(&path)
-            .map_err(|e| e.for_pattern(pattern.to_owned()))
+            .map_err(|e| e.for_pattern(pattern))
         {
             Ok((deleted, ls_subscribers)) => {
                 self.notify_ls_subscribers(ls_subscribers);
                 for kvp in &deleted {
                     let path = parse_segments(&kvp.key)?;
-                    self.notify_subscribers(path, kvp.key.clone(), kvp.value.clone(), true, true);
+                    self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true);
                 }
                 Ok(deleted)
             }
@@ -709,25 +679,24 @@ impl Worterbuch {
     pub fn ls(&self, parent: &Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let path = parent
             .as_deref()
-            .map(|p| p.split("/").collect())
-            .unwrap_or_else(|| Vec::new());
+            .map_or_else(Vec::new, |p| p.split('/').collect());
         self.ls_path(&path)
     }
 
-    fn ls_path<'s>(&self, path: &[&'s str]) -> WorterbuchResult<Vec<RegularKeySegment>> {
-        let children = if !path.is_empty() {
-            self.store.ls(path)
-        } else {
+    fn ls_path(&self, path: &[&str]) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let children = if path.is_empty() {
             Some(self.store.ls_root())
+        } else {
+            self.store.ls(path)
         };
 
-        match children {
-            Some(children) => Ok(children),
-            None => Err(WorterbuchError::NoSuchValue(path.join("/"))),
-        }
+        children.map_or_else(
+            || Err(WorterbuchError::NoSuchValue(path.join("/"))),
+            Result::Ok,
+        )
     }
 
-    pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr, protocol: Protocol) {
+    pub fn connected(&mut self, client_id: Uuid, remote_addr: SocketAddr, protocol: &Protocol) {
         self.clients.insert(client_id, remote_addr);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self.set(
@@ -737,9 +706,9 @@ impl Worterbuch {
         ) {
             log::error!("Error updating client count: {e}");
         }
-        if let Err(e) = serde_json::to_value(&protocol)
+        if let Err(e) = serde_json::to_value(protocol)
             .map_err(|e| {
-                WorterbuchError::SerDeError(e, format!("could not convert protocol to value"))
+                WorterbuchError::SerDeError(e, "could not convert protocol to value".to_owned())
             })
             .and_then(|protocol| {
                 self.set(
@@ -757,9 +726,12 @@ impl Worterbuch {
             log::error!("Error updating client protocol: {e}");
         }
 
-        if let Err(e) = serde_json::to_value(&remote_addr)
+        if let Err(e) = serde_json::to_value(remote_addr)
             .map_err(|e| {
-                WorterbuchError::SerDeError(e, format!("could not convert remote address to value"))
+                WorterbuchError::SerDeError(
+                    e,
+                    "could not convert remote address to value".to_owned(),
+                )
             })
             .and_then(|remote_addr| {
                 self.set(
@@ -841,38 +813,41 @@ impl Worterbuch {
             }
         }
 
-        if let Some(grave_goods) = grave_goods {
-            log::info!("Burying grave goods of client {client_id} ({remote_addr}).");
+        grave_goods.map_or_else(
+            || log::info!("Client {client_id} ({remote_addr}) has no grave goods."),
+            |grave_goods| {
+                log::info!("Burying grave goods of client {client_id} ({remote_addr}).");
 
-            for grave_good in grave_goods {
-                log::debug!(
-                    "Deleting grave good key of client {client_id} ({remote_addr}): {} ",
-                    grave_good
-                );
-                if let Err(e) = self.pdelete(grave_good, &client_id.to_string()) {
-                    log::error!("Error burying grave goods for client {client_id}: {e}")
+                for grave_good in grave_goods {
+                    log::debug!(
+                        "Deleting grave good key of client {client_id} ({remote_addr}): {} ",
+                        grave_good
+                    );
+                    if let Err(e) = self.pdelete(grave_good, &client_id.to_string()) {
+                        log::error!("Error burying grave goods for client {client_id}: {e}");
+                    }
                 }
-            }
-        } else {
-            log::info!("Client {client_id} ({remote_addr}) has no grave goods.");
-        }
+            },
+        );
 
-        if let Some(last_wills) = last_wills {
-            log::info!("Publishing last will of client {client_id} ({remote_addr}).");
+        last_wills.map_or_else(
+            || log::info!("Client {client_id} ({remote_addr}) has no last will."),
+            |last_wills| {
+                log::info!("Publishing last will of client {client_id} ({remote_addr}).");
 
-            for last_will in last_wills {
-                log::debug!(
-                    "Setting last will of client {client_id} ({remote_addr}): {} = {}",
-                    last_will.key,
-                    last_will.value
-                );
-                if let Err(e) = self.set(last_will.key, last_will.value, &client_id.to_string()) {
-                    log::error!("Error setting last will of client {client_id}: {e}")
+                for last_will in last_wills {
+                    log::debug!(
+                        "Setting last will of client {client_id} ({remote_addr}): {} = {}",
+                        last_will.key,
+                        last_will.value
+                    );
+                    if let Err(e) = self.set(last_will.key, last_will.value, &client_id.to_string())
+                    {
+                        log::error!("Error setting last will of client {client_id}: {e}");
+                    }
                 }
-            }
-        } else {
-            log::info!("Client {client_id} ({remote_addr}) has no last will.");
-        }
+            },
+        );
 
         if self.config.extended_monitoring {
             if let Err(e) = self.set(
@@ -910,6 +885,38 @@ impl Worterbuch {
 
         Ok(())
     }
+}
+
+fn check_for_read_only_key(key: &str, client_id: &str) -> WorterbuchResult<()> {
+    if client_id == INTERNAL_CLIENT_ID {
+        // modification is made internally by the server, so everything is allowed
+        return Ok(());
+    }
+
+    let path: Vec<&str> = key.split('/').collect();
+
+    if path.is_empty() || path[0] != SYSTEM_TOPIC_ROOT {
+        // path is outside the protected $SYS prefix
+        return Ok(());
+    }
+
+    if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id {
+        // the only writable values are under $SYS/clients/[client_id]]/#
+        return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
+    }
+
+    if path[3] == SYSTEM_TOPIC_GRAVE_GOODS || path[3] == SYSTEM_TOPIC_LAST_WILL {
+        // clients may modify their last will or grave goods at any time
+        return Ok(());
+    }
+
+    // TODO potentially whitelist more fields clients may change
+
+    Err(WorterbuchError::ReadOnlyKey(key.to_owned()))
+}
+
+fn escape_wildcards(pattern: &str) -> String {
+    pattern.replace('#', "%23").replace('?', "%3F")
 }
 
 #[cfg(test)]

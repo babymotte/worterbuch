@@ -11,6 +11,8 @@ type Tree = HashMap<RegularKeySegment, Node>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 type CanDelete = bool;
 
+pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
+
 #[derive(Debug)]
 pub enum StoreError {
     IllegalMultiWildcard,
@@ -64,6 +66,10 @@ impl Store {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// retrieve a value for a non-wildcard key
     pub fn get(&self, path: &[RegularKeySegment]) -> Option<&Value> {
         let mut current = &self.data;
@@ -82,7 +88,7 @@ impl Store {
     pub fn delete(
         &mut self,
         path: &[RegularKeySegment],
-    ) -> Option<(Value, Vec<(Vec<LsSubscriber>, Vec<String>)>)> {
+    ) -> Option<(Value, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
         let removed = Store::ndelete(
             &mut self.data,
@@ -115,7 +121,7 @@ impl Store {
     pub fn delete_matches(
         &mut self,
         path: &[KeySegment],
-    ) -> StoreResult<(Vec<KeyValuePair>, Vec<(Vec<LsSubscriber>, Vec<String>)>)> {
+    ) -> StoreResult<(Vec<KeyValuePair>, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
         let mut matches = Vec::new();
         let traversed_path = vec![];
@@ -251,7 +257,7 @@ impl Store {
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) -> StoreResult<()> {
-        traversed_path.push(&id);
+        traversed_path.push(id);
         if let Entry::Occupied(mut e) = node.t.entry(id.to_owned()) {
             let child = e.get_mut();
             let can_delete = Store::ndelete_matches(
@@ -371,7 +377,7 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
-    ) -> StoreResult<(bool, Vec<(Vec<LsSubscriber>, Vec<RegularKeySegment>)>)> {
+    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
         let mut current_node = &mut self.data;
         let mut current_subscribers = Some(&self.subscribers);
@@ -412,7 +418,7 @@ impl Store {
         Ok((changed, ls_subscribers))
     }
 
-    pub fn ls<'s>(&self, path: &[&'s str]) -> Option<Vec<RegularKeySegment>> {
+    pub fn ls(&self, path: &[&str]) -> Option<Vec<RegularKeySegment>> {
         if path.is_empty() {
             panic!("path must not be empty!");
         }
@@ -454,7 +460,7 @@ impl Store {
     ) {
         if let Some(v) = other.v {
             node.v = Some(v.clone());
-            let key = concat_key(&path, key);
+            let key = concat_key(path, key);
             log::debug!("Imported {} = {}", key, v);
             insertions.push((key, v));
         }

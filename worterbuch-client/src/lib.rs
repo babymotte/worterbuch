@@ -694,9 +694,9 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                 ))),
             }
         } else {
-            return Err(ConnectionError::AuthenticationError(
+            Err(ConnectionError::AuthenticationError(
                 "Server requires authentication but no auth token was provided.".to_owned(),
-            ));
+            ))
         }
     } else {
         connected(
@@ -771,15 +771,13 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             let mut msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
             msg.push('\n');
             log::debug!("Sending authentication message: {msg}");
-            tcp_tx.write(msg.as_bytes()).await?;
+            tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.read_line(&mut line_buf).await {
-                Ok(0) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
-                        io::ErrorKind::ConnectionReset,
-                        "connection closed before handshake",
-                    )))
-                }
+                Ok(0) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before handshake",
+                ))),
                 Ok(_) => {
                     let msg = json::from_str::<SM>(&line_buf);
                     line_buf.clear();
@@ -815,9 +813,9 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                 Err(e) => Err(ConnectionError::IoError(e)),
             }
         } else {
-            return Err(ConnectionError::AuthenticationError(
+            Err(ConnectionError::AuthenticationError(
                 "Server requires authentication but no auth token was provided.".to_owned(),
-            ));
+            ))
         }
     } else {
         connected(
@@ -1146,11 +1144,11 @@ async fn process_incoming_server_message(
         }
         Ok(None) => {
             log::warn!("Connection closed.");
-            return Ok(ControlFlow::Break(()));
+            Ok(ControlFlow::Break(()))
         }
         Err(e) => {
             log::error!("Error receiving message: {e}");
-            return Ok(ControlFlow::Break(()));
+            Ok(ControlFlow::Break(()))
         }
     }
 }

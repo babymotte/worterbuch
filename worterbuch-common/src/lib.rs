@@ -155,7 +155,7 @@ pub type RegularKeySegment = String;
 
 pub fn parse_segments(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
     let mut segments = Vec::new();
-    for segment in pattern.split("/") {
+    for segment in pattern.split('/') {
         let ks: KeySegment = segment.into();
         match ks {
             KeySegment::Regular(reg) => segments.push(reg),
@@ -180,7 +180,7 @@ pub enum KeySegment {
     // RegexWildcard(String),
 }
 
-pub fn format_path(path: &Vec<KeySegment>) -> String {
+pub fn format_path(path: &[KeySegment]) -> String {
     path.iter()
         .map(|seg| format!("{seg}"))
         .collect::<Vec<String>>()
@@ -198,7 +198,7 @@ impl Deref for KeySegment {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            KeySegment::Regular(reg) => &reg,
+            KeySegment::Regular(reg) => reg,
             KeySegment::Wildcard => "?",
             KeySegment::MultiWildcard => "#",
         }
@@ -221,21 +221,21 @@ impl From<&str> for KeySegment {
         match str {
             "?" => KeySegment::Wildcard,
             "#" => KeySegment::MultiWildcard,
-            other => KeySegment::Regular(other.to_owned().into()),
+            other => KeySegment::Regular(other.to_owned()),
         }
     }
 }
 
 impl KeySegment {
     pub fn parse(pattern: impl AsRef<str>) -> Vec<KeySegment> {
-        let segments = pattern.as_ref().split("/");
+        let segments = pattern.as_ref().split('/');
         segments.map(KeySegment::from).collect()
     }
 }
 
 pub fn quote(str: impl AsRef<str>) -> String {
     let str_ref = str.as_ref();
-    if str_ref.starts_with("\"") && str_ref.ends_with("\"") {
+    if str_ref.starts_with('\"') && str_ref.ends_with('\"') {
         str_ref.to_owned()
     } else {
         format!("\"{str_ref}\"")

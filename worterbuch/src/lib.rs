@@ -8,6 +8,7 @@ mod worterbuch;
 
 pub use crate::worterbuch::*;
 pub use config::*;
+use serde_json::Value;
 use server::common::{CloneableWbApi, WbFunction};
 use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -35,7 +36,8 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
 
     worterbuch.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
-        serde_json::to_value(worterbuch.supported_protocol_version()).expect("cannot fail"),
+        serde_json::to_value(worterbuch.supported_protocol_version())
+            .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
         INTERNAL_CLIENT_ID,
     )?;
 
@@ -89,10 +91,10 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     loop {
         select! {
             recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call(&mut worterbuch, function).await,
+                Some(function) => process_api_call(&mut worterbuch, function),
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => break,
+            () = subsys.on_shutdown_requested() => break,
         }
     }
 
@@ -105,16 +107,16 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     Ok(())
 }
 
-async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
+fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     match function {
         WbFunction::Authenticate(auth_token, client_id, tx) => {
-            let authenticated = match client_id {
-                Some(client_id) => {
+            let authenticated = client_id.map_or_else(
+                || worterbuch.config().auth_token == auth_token,
+                |client_id| {
                     let digest = digest_token(&worterbuch.config().auth_token, client_id);
                     digest == auth_token
-                }
-                None => worterbuch.config().auth_token == auth_token,
-            };
+                },
+            );
             if authenticated {
                 tx.send(Ok(())).ok();
             } else {
@@ -163,7 +165,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.pdelete(pattern, &client_id)).ok();
         }
         WbFunction::Connected(client_id, remote_addr, protocol) => {
-            worterbuch.connected(client_id, remote_addr, protocol);
+            worterbuch.connected(client_id, remote_addr, &protocol);
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
             worterbuch.disconnected(client_id, remote_addr).ok();

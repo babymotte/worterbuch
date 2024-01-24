@@ -41,15 +41,15 @@ impl fmt::Display for ConfigError {
 }
 
 pub trait ConfigIntContext<I> {
-    fn as_port(self) -> Result<I, ConfigError>;
-    fn as_interval(self) -> Result<I, ConfigError>;
+    fn to_port(self) -> Result<I, ConfigError>;
+    fn to_interval(self) -> Result<I, ConfigError>;
 }
 
 impl<I> ConfigIntContext<I> for Result<I, ParseIntError> {
-    fn as_port(self) -> Result<I, ConfigError> {
+    fn to_port(self) -> Result<I, ConfigError> {
         self.map_err(ConfigError::InvalidPort)
     }
-    fn as_interval(self) -> Result<I, ConfigError> {
+    fn to_interval(self) -> Result<I, ConfigError> {
         self.map_err(ConfigError::InvalidInterval)
     }
 }

@@ -35,7 +35,7 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: Config) -> Result<
     let mut hasher = Sha256::new();
     hasher.update(&json);
     let result = hasher.finalize();
-    let sha = hex::encode(&result);
+    let sha = hex::encode(result);
 
     let mut file = File::create(&json_temp_path).await?;
     file.write_all(json.as_bytes()).await?;
@@ -81,7 +81,7 @@ async fn try_load(json_path: &PathBuf, sha_path: &PathBuf, config: &Config) -> R
     let mut hasher = Sha256::new();
     hasher.update(&json);
     let result = hasher.finalize();
-    let loaded_sha = hex::encode(&result);
+    let loaded_sha = hex::encode(result);
 
     if sha != loaded_sha {
         Err(anyhow::Error::msg("checksums did not match"))

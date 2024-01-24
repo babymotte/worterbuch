@@ -92,37 +92,9 @@ impl Subscribers {
     pub fn get_subscribers(&self, key: &[RegularKeySegment]) -> Vec<Subscriber> {
         let mut all_subscribers = Vec::new();
 
-        self.add_matches(&self.data, key, &mut all_subscribers);
+        add_matches(&self.data, key, &mut all_subscribers);
 
         all_subscribers
-    }
-
-    fn add_matches(
-        &self,
-        mut current: &Node,
-        remaining_path: &[RegularKeySegment],
-        all_subscribers: &mut Vec<Subscriber>,
-    ) {
-        let mut remaining_path = remaining_path;
-
-        for elem in remaining_path {
-            remaining_path = &remaining_path[1..];
-
-            if let Some(node) = current.tree.get(&KeySegment::Wildcard) {
-                self.add_matches(&node, remaining_path, all_subscribers);
-            }
-
-            if let Some(node) = current.tree.get(&KeySegment::MultiWildcard) {
-                self.add_all_children(node, all_subscribers);
-            }
-
-            if let Some(node) = current.tree.get(&elem.to_owned().into()) {
-                current = node;
-            } else {
-                return;
-            }
-        }
-        all_subscribers.extend(current.subscribers.clone());
     }
 
     pub fn add_subscriber(&mut self, pattern: &[KeySegment], subscriber: Subscriber) {
@@ -130,7 +102,7 @@ impl Subscribers {
         let mut current = &mut self.data;
 
         for elem in pattern {
-            current = match current.tree.entry(elem.to_owned().into()) {
+            current = match current.tree.entry(elem.to_owned()) {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => e.insert(Node::default()),
             };
@@ -179,12 +151,39 @@ impl Subscribers {
 
         current.subscribers.retain(|s| s.id != subscriber.id);
     }
+}
 
-    fn add_all_children(&self, node: &Node, all_subscribers: &mut Vec<Subscriber>) {
-        all_subscribers.extend(node.subscribers.clone());
-        for node in node.tree.values() {
-            self.add_all_children(&node, all_subscribers);
+fn add_matches(
+    mut current: &Node,
+    remaining_path: &[RegularKeySegment],
+    all_subscribers: &mut Vec<Subscriber>,
+) {
+    let mut remaining_path = remaining_path;
+
+    for elem in remaining_path {
+        remaining_path = &remaining_path[1..];
+
+        if let Some(node) = current.tree.get(&KeySegment::Wildcard) {
+            add_matches(node, remaining_path, all_subscribers);
         }
+
+        if let Some(node) = current.tree.get(&KeySegment::MultiWildcard) {
+            add_all_children(node, all_subscribers);
+        }
+
+        if let Some(node) = current.tree.get(&elem.to_owned().into()) {
+            current = node;
+        } else {
+            return;
+        }
+    }
+    all_subscribers.extend(current.subscribers.clone());
+}
+
+fn add_all_children(node: &Node, all_subscribers: &mut Vec<Subscriber>) {
+    all_subscribers.extend(node.subscribers.clone());
+    for node in node.tree.values() {
+        add_all_children(node, all_subscribers);
     }
 }
 

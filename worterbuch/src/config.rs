@@ -47,7 +47,7 @@ impl Config {
 
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_SERVER_PORT") {
             if let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.port = val.parse().as_port()?;
+                ep.endpoint.port = val.parse().to_port()?;
             }
         }
 
@@ -65,7 +65,7 @@ impl Config {
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_SERVER_PORT") {
             if let Some(ep) = &mut self.tcp_endpoint {
-                ep.port = val.parse().as_port()?;
+                ep.port = val.parse().to_port()?;
             }
         }
 
@@ -80,7 +80,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_PERSISTENCE_INTERVAL") {
-            let secs = val.parse().as_interval()?;
+            let secs = val.parse().to_interval()?;
             self.persistence_interval = Duration::from_secs(secs);
         }
 
@@ -97,17 +97,17 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_TIMEOUT") {
-            let secs = val.parse().as_interval()?;
+            let secs = val.parse().to_interval()?;
             self.keepalive_timeout = Duration::from_secs(secs);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_SEND_TIMEOUT") {
-            let secs = val.parse().as_interval()?;
+            let secs = val.parse().to_interval()?;
             self.send_timeout = Duration::from_secs(secs);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_SIZE") {
-            let size = val.parse().as_interval()?;
+            let size = val.parse().to_interval()?;
             self.channel_buffer_size = size;
         }
 

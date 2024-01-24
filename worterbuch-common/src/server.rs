@@ -205,7 +205,7 @@ impl<T: DeserializeOwned> TryFrom<PState> for TypedStateEvents<T> {
     type Error = serde_json::Error;
 
     fn try_from(pstate: PState) -> Result<Self, Self::Error> {
-        Ok(pstate.event.try_into()?)
+        pstate.event.try_into()
     }
 }
 
