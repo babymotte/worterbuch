@@ -27,5 +27,7 @@ jobs:
           toolchain: stable
           override: true
       - uses: davidB/rust-cargo-make@v1
+      - name: Run linter
+        run: cargo clippy
       - name: Run tests
         run: cargo test

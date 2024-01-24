@@ -29,6 +29,8 @@ jobs:
           default: true
           override: true
 
+      - name: Run linter
+        run: cargo clippy
       - name: Run tests
         run: cargo test
 
