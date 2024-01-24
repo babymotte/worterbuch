@@ -22,4 +22,10 @@ futures-util = { version = "0.3.27", default-features = false, features = [
     "sink",
     "std",
 ] }
-tokio-tungstenite = "0.20.0"
+tokio-tungstenite = "0.21.0"
+
+[lints.clippy]
+enum_glob_use = "deny"
+# pedantic = "deny"
+# nursery = "deny"
+unwrap_used = "deny"

@@ -21,3 +21,9 @@ serde_json = "1.0.94"
 clap = { version = "4.1.11", features = ["derive"] }
 log = "0.4.17"
 env_logger = "0.10.0"
+
+[lints.clippy]
+enum_glob_use = "deny"
+# pedantic = "deny"
+# nursery = "deny"
+unwrap_used = "deny"
