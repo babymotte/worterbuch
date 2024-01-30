@@ -134,6 +134,38 @@ impl Worterbuch {
         }
     }
 
+    pub async fn set_last_will(
+        &self,
+        last_will: &KeyValuePairs,
+    ) -> ConnectionResult<TransactionId> {
+        self.set(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                &self.client_id,
+                SYSTEM_TOPIC_LAST_WILL
+            ),
+            last_will,
+        )
+        .await
+    }
+
+    pub async fn set_grave_goods(
+        &self,
+        grave_goods: &RequestPatterns,
+    ) -> ConnectionResult<TransactionId> {
+        self.set(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                &self.client_id,
+                SYSTEM_TOPIC_GRAVE_GOODS
+            ),
+            grave_goods,
+        )
+        .await
+    }
+
     pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
