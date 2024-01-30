@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
+pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_VERSION: &str = "version";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";

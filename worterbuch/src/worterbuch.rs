@@ -22,7 +22,7 @@ use worterbuch_common::{
     PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
     TransactionId, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
     SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS,
+    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -319,16 +319,24 @@ impl Worterbuch {
         self.subscriptions.insert(subscription_id, path);
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
-        if self.config.extended_monitoring && &key != "$SYS" && !key.starts_with("$SYS/") {
+        if self.config.extended_monitoring
+            && &key != SYSTEM_TOPIC_ROOT
+            && !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
+        {
             if let Err(e) = self.set(
-                topic!("$SYS", "subscriptions"),
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                 json!(self.subscriptions.len()),
                 INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
 
-            let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+            let subs_key = topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_SUBSCRIPTIONS
+            );
             if let Err(e) = self.set(
                 topic!(subs_key, key),
                 json!(transaction_id),
@@ -339,7 +347,12 @@ impl Worterbuch {
 
             let subs = self.ls(&Some(subs_key))?.len();
             self.set(
-                topic!("$SYS", "clients", client_id, "subscriptions"),
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_SUBSCRIPTIONS
+                ),
                 json!(subs),
                 INTERNAL_CLIENT_ID,
             )?;
@@ -377,17 +390,22 @@ impl Worterbuch {
 
         if self.config.extended_monitoring
             && &pattern != "#"
-            && &pattern != "$SYS"
-            && !pattern.starts_with("$SYS/")
+            && &pattern != SYSTEM_TOPIC_ROOT
+            && !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
         {
             if let Err(e) = self.set(
-                topic!("$SYS", "subscriptions"),
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                 json!(self.subscriptions.len()),
                 INTERNAL_CLIENT_ID,
             ) {
                 log::warn!("Error in subscription monitoring: {e}");
             }
-            let subs_key = topic!("$SYS", "clients", client_id, "subscriptions");
+            let subs_key = topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_SUBSCRIPTIONS
+            );
             if let Err(e) = self.set(
                 topic!(subs_key, escape_wildcards(&pattern)),
                 json!(transaction_id),
@@ -401,7 +419,12 @@ impl Worterbuch {
                 .map(|ls| ls.len())
                 .and_then(|subs| {
                     self.set(
-                        topic!("$SYS", "clients", client_id, "subscriptions"),
+                        topic!(
+                            SYSTEM_TOPIC_ROOT,
+                            SYSTEM_TOPIC_CLIENTS,
+                            client_id,
+                            SYSTEM_TOPIC_SUBSCRIPTIONS
+                        ),
                         json!(subs),
                         INTERNAL_CLIENT_ID,
                     )
@@ -439,7 +462,7 @@ impl Worterbuch {
         let mut value = to_value(&self.store)
             .context(|| "Error generating JSON from worterbuch store during export".to_owned())?;
         if let Some(Value::Object(obj)) = value.pointer_mut("/data/t") {
-            obj.remove("$SYS");
+            obj.remove(SYSTEM_TOPIC_ROOT);
         }
         Ok(value)
     }
@@ -506,14 +529,14 @@ impl Worterbuch {
         if let Some(path) = self.subscriptions.remove(subscription) {
             if self.config.extended_monitoring
                 && path[0] != KeySegment::MultiWildcard
-                && path[0].deref() != "$SYS"
+                && path[0].deref() != SYSTEM_TOPIC_ROOT
             {
                 if let Err(e) = self.delete(
                     topic!(
-                        "$SYS",
-                        "clients",
+                        SYSTEM_TOPIC_ROOT,
+                        SYSTEM_TOPIC_CLIENTS,
                         client_id,
-                        "subscriptions",
+                        SYSTEM_TOPIC_SUBSCRIPTIONS,
                         escape_wildcards(
                             &path
                                 .iter()
@@ -534,7 +557,7 @@ impl Worterbuch {
 
             if self.config.extended_monitoring {
                 if let Err(e) = self.set(
-                    topic!("$SYS", "subscriptions"),
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
                 ) {
@@ -777,7 +800,7 @@ impl Worterbuch {
         let grave_goods = self.grave_goods(&client_id);
         let last_wills = self.last_wills(&client_id);
 
-        let pattern = topic!("$SYS", "clients", client_id, "#");
+        let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         if self.config.extended_monitoring {
             log::debug!("Deleting {pattern}");
             if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID) {
