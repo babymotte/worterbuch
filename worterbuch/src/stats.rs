@@ -6,17 +6,8 @@ use tokio::{
     time::{interval, Instant},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_common::{error::WorterbuchResult, topic};
+use worterbuch_common::{error::WorterbuchResult, topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION};
 
-pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
-pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
-pub const SYSTEM_TOPIC_VERSION: &str = "version";
-pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
-pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
-pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
-pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
-pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
-pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "protocolVersion";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {

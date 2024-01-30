@@ -12,6 +12,16 @@ use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
+pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
+pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
+pub const SYSTEM_TOPIC_VERSION: &str = "version";
+pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
+pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
+pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
+pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
+pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
+pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "protocolVersion";
+
 pub type TransactionId = u64;
 pub type RequestPattern = String;
 pub type RequestPatterns = Vec<RequestPattern>;

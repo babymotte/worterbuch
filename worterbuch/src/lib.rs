@@ -10,9 +10,11 @@ pub use crate::worterbuch::*;
 pub use config::*;
 use serde_json::Value;
 use server::common::{CloneableWbApi, WbFunction};
-use stats::{SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_common::{digest_token, error::WorterbuchError, topic};
+use worterbuch_common::{
+    digest_token, error::WorterbuchError, topic, SYSTEM_TOPIC_ROOT,
+    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
+};
 
 use crate::stats::track_stats;
 use anyhow::Result;
