@@ -320,7 +320,7 @@ impl Worterbuch {
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
-            && &key != SYSTEM_TOPIC_ROOT
+            && key != SYSTEM_TOPIC_ROOT
             && !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
         {
             if let Err(e) = self.set(
@@ -389,8 +389,8 @@ impl Worterbuch {
         log::debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
-            && &pattern != "#"
-            && &pattern != SYSTEM_TOPIC_ROOT
+            && pattern != "#"
+            && pattern != SYSTEM_TOPIC_ROOT
             && !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
         {
             if let Err(e) = self.set(
