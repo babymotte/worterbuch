@@ -97,19 +97,19 @@ impl Stats {
         let total_delta_sent_offsets = self
             .delta_sent_offsets
             .values()
-            .map(|i| *i)
+            .copied()
             .reduce(|a, b| a + b)
             .unwrap_or(0);
         let total_delta_received_offsets = self
             .delta_received_offsets
             .values()
-            .map(|i| *i)
+            .copied()
             .reduce(|a, b| a + b)
             .unwrap_or(0);
         let total_delta_t = self
             .delta_ts
             .values()
-            .map(|i| *i)
+            .copied()
             .reduce(|a, b| a + b)
             .map(|it| it.as_millis())
             .unwrap_or(0);
@@ -119,7 +119,7 @@ impl Stats {
         let total_lag = self
             .lags
             .values()
-            .map(|i: &u64| *i)
+            .copied()
             .reduce(|a, b| a + b)
             .unwrap_or(0);
 
@@ -127,7 +127,7 @@ impl Stats {
             "Send rate: {} msg/s, receive rate: {} msg/s, lag: {} msgs",
             total_send_rate as u64,
             total_receive_rate as u64,
-            total_lag as u64
+            total_lag
         )
     }
 }

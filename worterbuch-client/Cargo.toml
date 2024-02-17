@@ -24,7 +24,11 @@ futures-util = { version = "0.3.27", default-features = false, features = [
 ] }
 tokio-tungstenite = "0.21.0"
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [lints.clippy]
+all = "deny"
 enum_glob_use = "deny"
 # pedantic = "deny"
 # nursery = "deny"

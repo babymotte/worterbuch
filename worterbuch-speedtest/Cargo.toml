@@ -14,3 +14,13 @@ tokio = { version = "1.36.0", features = ["full"] }
 tokio-graceful-shutdown = "0.13.0"
 tracing-subscriber = "0.3.18"
 worterbuch-client = { path = "../worterbuch-client" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+enum_glob_use = "deny"
+# pedantic = "deny"
+# nursery = "deny"
+unwrap_used = "deny"
