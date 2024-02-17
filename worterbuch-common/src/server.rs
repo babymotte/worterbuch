@@ -1,6 +1,6 @@
 use crate::{
     ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
-    TransactionId, TypedKeyValuePair, Value,
+    TransactionId, TypedKeyValuePair, Value, Version,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
@@ -266,6 +266,7 @@ impl fmt::Display for LsState {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
+    pub version: Version,
     pub protocol_version: ProtocolVersion,
     pub authentication_required: bool,
 }

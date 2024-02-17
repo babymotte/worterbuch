@@ -6,13 +6,14 @@ authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "A message broker / database hybrid."
 repository = "https://github.com/babymotte/worterbuch"
 readme = "../README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [features]
 jemalloc = ["tikv-jemallocator"]
-default = ["jemalloc"]
+foss = []
+default = ["jemalloc", "foss"]
 
 [dependencies]
 worterbuch-common = { version = "0.42.0" }

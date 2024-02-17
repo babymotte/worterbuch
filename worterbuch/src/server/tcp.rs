@@ -1,4 +1,7 @@
-use crate::server::common::{process_incoming_message, CloneableWbApi};
+use crate::{
+    server::common::{process_incoming_message, CloneableWbApi},
+    stats::VERSION,
+};
 use anyhow::anyhow;
 use std::{
     net::{IpAddr, SocketAddr},
@@ -107,6 +110,7 @@ async fn serve_loop(
         .send(ServerMessage::Welcome(Welcome {
             client_id: client_id.to_string(),
             info: ServerInfo {
+                version: VERSION.to_owned(),
                 authentication_required,
                 protocol_version,
             },

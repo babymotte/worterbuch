@@ -6,7 +6,7 @@ authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Command line clients for Wörterbuch."
 repository = "https://github.com/babymotte/worterbuch"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 

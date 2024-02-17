@@ -6,15 +6,41 @@ use tokio::{
     time::{interval, Instant},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_common::{error::WorterbuchResult, topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION};
+#[cfg(feature = "foss")]
+use worterbuch_common::SYSTEM_TOPIC_SOURCES;
+use worterbuch_common::{
+    error::WorterbuchResult, topic, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION,
+};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(feature = "foss")]
+pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
+#[cfg(not(feature = "foss"))]
+pub const LICENSE: &str = "PROPRIETARY";
+#[cfg(feature = "foss")]
+pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
 pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
     let start = Instant::now();
+
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION),
         json!(VERSION),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE),
+        json!(LICENSE),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    #[cfg(feature = "foss")]
+    wb.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES),
+        json!(format!("{REPO}/releases/tag/v{VERSION}")),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;

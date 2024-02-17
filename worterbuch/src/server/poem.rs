@@ -1,7 +1,10 @@
 mod auth;
 mod websocket;
 
-use crate::server::{common::CloneableWbApi, poem::auth::BearerAuth};
+use crate::{
+    server::{common::CloneableWbApi, poem::auth::BearerAuth},
+    stats::VERSION,
+};
 use poem::{
     delete,
     endpoint::StaticFilesEndpoint,
@@ -13,9 +16,8 @@ use poem::{
     web::{
         sse::{Event, SSE},
         websocket::WebSocket,
-        RemoteAddr,
+        Data, Json, Path, Query, RemoteAddr,
     },
-    web::{Data, Json, Path, Query},
     Addr, EndpointExt, IntoResponse, Result, Route,
 };
 use serde_json::Value;
@@ -78,6 +80,7 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
         Err(e) => return to_error_response(e),
     };
     let info = ServerInfo {
+        version: VERSION.to_owned(),
         authentication_required: config.auth_token.is_some(),
         protocol_version: proto,
     };

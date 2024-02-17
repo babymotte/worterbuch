@@ -641,6 +641,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
         client_id,
         info:
             ServerInfo {
+                version: _,
                 protocol_version,
                 authentication_required,
             },
@@ -761,6 +762,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
         client_id,
         info:
             ServerInfo {
+                version: _,
                 protocol_version,
                 authentication_required,
             },

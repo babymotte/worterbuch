@@ -16,6 +16,8 @@ pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_VERSION: &str = "version";
+pub const SYSTEM_TOPIC_LICENSE: &str = "license";
+pub const SYSTEM_TOPIC_SOURCES: &str = "source-code";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
 pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
@@ -79,6 +81,7 @@ macro_rules! topic {
     };
 }
 
+pub type Version = String;
 pub type ProtocolVersion = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
