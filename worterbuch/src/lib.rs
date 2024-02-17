@@ -1,3 +1,30 @@
+/*
+ *  The worterbuch application library
+ *
+ *  Copyright (C) 2024 Michael Bachmann
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU Affero General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Affero General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Affero General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+//! This library allows you to embed worterbuch into your application.
+//!
+//! Note that while it makes embedding very easy, it does leak several
+//! dependencies into your application that a proper library normally
+//! shouldn't. Worterbuch takes this liberty because it is essentailly
+//! still an application. Just one that you can start from within your
+//! own application.
+
 mod config;
 mod persistence;
 mod server;

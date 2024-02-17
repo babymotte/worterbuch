@@ -1,3 +1,22 @@
+/*
+ *  Worterbuch client library
+ *
+ *  Copyright (C) 2024 Michael Bachmann
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU Affero General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Affero General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Affero General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pub mod buffer;
 pub mod config;
 pub mod error;
@@ -626,7 +645,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     let auth_token = config.auth_token.clone();
     let mut request = Request::builder()
         .uri(url)
-        .header("Sec-WebSocket-Protocol", "wortebruch".to_owned())
+        .header("Sec-WebSocket-Protocol", "worterbuch".to_owned())
         .header("Sec-WebSocket-Key", generate_key());
 
     if let Some(auth_token) = auth_token {
