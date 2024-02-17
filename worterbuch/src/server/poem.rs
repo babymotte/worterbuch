@@ -37,13 +37,12 @@ use poem::{
         websocket::WebSocket,
         Data, Json, Path, Query, RemoteAddr,
     },
-    Addr, EndpointExt, IntoResponse, Result, Route,
+    Addr, EndpointExt, IntoResponse, Request, Response, Result, Route,
 };
 use serde_json::Value;
 use std::{
     collections::HashMap,
     io,
-    // env,
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
@@ -109,23 +108,36 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
 
 #[handler]
 async fn get_value(
+    req: &Request,
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let pointer = params.get("pointer");
+    let raw = params.get("raw");
+    let content_type = req.content_type().map(str::to_lowercase);
     match wb.get(key).await {
         Ok((key, value)) => {
             if let Some(pointer) = pointer {
                 let key = key + pointer;
                 let extracted = value.pointer(pointer);
                 if let Some(extracted) = extracted {
-                    Ok(Json(extracted.to_owned()))
+                    if raw.is_some() || content_type.as_deref() == Some("text/plain") {
+                        if let Value::String(str) = extracted {
+                            return Ok(str.to_owned().into_response());
+                        }
+                    }
+                    Ok(Json(extracted.to_owned()).into_response())
                 } else {
                     to_error_response(WorterbuchError::NoSuchValue(key))
                 }
             } else {
-                Ok(Json(value))
+                if raw.is_some() || content_type.as_deref() == Some("text/plain") {
+                    if let Value::String(str) = value {
+                        return Ok(str.into_response());
+                    }
+                }
+                Ok(Json(value).into_response())
             }
         }
         Err(e) => to_error_response(e),
