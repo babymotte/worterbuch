@@ -17,7 +17,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
-debug = 1
+debug = 0
 opt-level = 3
 
 [profile.release-web]

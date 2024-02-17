@@ -902,7 +902,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
 
     spawn(async move {
         run(cmd_rx, client_socket, stop_rx, config).await;
-        log::info!("WebSocket closed.");
+        log::info!("Connection closed.");
         on_disconnect.await;
     });
 

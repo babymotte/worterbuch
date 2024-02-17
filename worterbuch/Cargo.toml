@@ -20,7 +20,6 @@ worterbuch-common = { version = "0.42.0" }
 tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
 tokio-graceful-shutdown = "0.13.0"
 log = "0.4.17"
-env_logger = "0.11.0"
 dotenv = "0.15.0"
 anyhow = "1.0.70"
 serde = { version = "1.0.157", features = ["derive"] }

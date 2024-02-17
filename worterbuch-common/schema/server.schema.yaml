@@ -141,6 +141,9 @@ components:
       description: Information about the server and how to communicate with it
       type: object
       properties:
+        version:
+          description: The server's software version
+          type: string
         protocolVersion:
           description: The protocol version implemented by the server
           type: string
@@ -149,6 +152,7 @@ components:
           type: boolean
       additionalProperties: false
       required:
+        - version
         - protocolVersion
         - authenticationRequired
     KeyValuePair:

@@ -36,7 +36,10 @@ struct Args {}
 #[tokio::main()]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    env_logger::init();
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", "info");
+    }
+    tracing_subscriber::fmt::init();
     let _args: Args = Args::parse();
 
     Toplevel::new()
