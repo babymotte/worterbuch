@@ -34,7 +34,7 @@ struct Args {
     /// Prefix the keys with a string.
     #[arg(short, long)]
     prefix: Option<String>,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
 }

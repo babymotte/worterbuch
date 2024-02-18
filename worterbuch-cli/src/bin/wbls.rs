@@ -44,7 +44,7 @@ struct Args {
     json: bool,
     /// The key for which to list sub keys. If omitted, root keys will be listed.
     parent: Option<String>,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
 }

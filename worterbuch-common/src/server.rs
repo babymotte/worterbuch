@@ -32,7 +32,7 @@ pub enum ServerMessage {
     Ack(Ack),
     State(State),
     Err(Err),
-    Authenticated(Ack),
+    Authorized(Ack),
     LsState(LsState),
     #[serde(rename = "")]
     Keepalive,
@@ -47,7 +47,7 @@ impl ServerMessage {
             ServerMessage::State(msg) => Some(msg.transaction_id),
             ServerMessage::Err(msg) => Some(msg.transaction_id),
             ServerMessage::LsState(msg) => Some(msg.transaction_id),
-            ServerMessage::Authenticated(_) => Some(0),
+            ServerMessage::Authorized(_) => Some(0),
             ServerMessage::Keepalive => None,
         }
     }
@@ -287,7 +287,7 @@ impl fmt::Display for LsState {
 pub struct ServerInfo {
     pub version: Version,
     pub protocol_version: ProtocolVersion,
-    pub authentication_required: bool,
+    pub authorization_required: bool,
 }
 
 #[cfg(test)]

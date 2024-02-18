@@ -18,8 +18,8 @@
 title: ClientMessage
 type: object
 properties:
-  authenticationRequest:
-    description: A message sent by a client to authenticate itself to the server
+  authorizationRequest:
+    description: A message sent by a client to acquire authorization from the server
     type: object
     properties:
       authToken:
@@ -228,7 +228,7 @@ properties:
 additionalProperties: false
 oneOf:
   - required:
-      - authenticationRequest
+      - authorizationRequest
   - required:
       - get
   - required:

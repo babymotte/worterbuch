@@ -34,11 +34,11 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthenticationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key,
-    KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
-    PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment,
-    RequestPattern, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
-    UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key, KeyValuePair,
+    KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState, PStateEvent,
+    PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
+    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
+    Unsubscribe, UnsubscribeLs, Value,
 };
 
 async fn check_auth(
@@ -62,7 +62,7 @@ async fn check_auth(
                     return Err(WorterbuchError::Unauthorized(e));
                 }
             }
-            None => return Err(WorterbuchError::AuthenticationRequired(privilege)),
+            None => return Err(WorterbuchError::AuthorizationRequired(privilege)),
         }
     }
     Ok(())
@@ -78,14 +78,14 @@ pub async fn process_incoming_message(
     config: &Config,
 ) -> WorterbuchResult<(bool, Option<JwtClaims>)> {
     log::debug!("Received message: {msg}");
-    let mut authenticated = None;
+    let mut authorized = None;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
-            CM::AuthenticationRequest(msg) => {
+            CM::AuthorizationRequest(msg) => {
                 if auth.is_some() {
-                    return Err(WorterbuchError::AlreadyAuthenticated);
+                    return Err(WorterbuchError::AlreadyAuthorized);
                 }
-                authenticated = Some(authenticate(msg, tx, &config).await?);
+                authorized = Some(authorize(msg, tx, config).await?);
             }
             CM::Get(msg) => {
                 check_auth(
@@ -225,15 +225,15 @@ pub async fn process_incoming_message(
         },
         Ok(None) => {
             // client disconnected
-            return Ok((false, authenticated));
+            return Ok((false, authorized));
         }
         Err(e) => {
             log::error!("Error decoding message: {e}");
-            return Ok((false, authenticated));
+            return Ok((false, authorized));
         }
     }
 
-    Ok((true, authenticated))
+    Ok((true, authorized))
 }
 
 pub enum WbFunction {
@@ -484,22 +484,22 @@ impl CloneableWbApi {
     }
 }
 
-async fn authenticate(
-    msg: AuthenticationRequest,
+async fn authorize(
+    msg: AuthorizationRequest,
     client: &mpsc::Sender<ServerMessage>,
     config: &Config,
 ) -> WorterbuchResult<JwtClaims> {
     match get_claims(Some(&msg.auth_token), config) {
         Ok(claims) => {
             client
-                .send(ServerMessage::Authenticated(Ack { transaction_id: 0 }))
+                .send(ServerMessage::Authorized(Ack { transaction_id: 0 }))
                 .await
                 .context(|| "Error sending HANDSHAKE message".to_owned())?;
             Ok(claims)
         }
         Err(e) => {
             handle_store_error(WorterbuchError::Unauthorized(e.clone()), client, 0).await?;
-            return Err(WorterbuchError::Unauthorized(e));
+            Err(WorterbuchError::Unauthorized(e))
         }
     }
 }
@@ -1146,19 +1146,13 @@ async fn handle_store_error(
             metadata: serde_json::to_string(&format!("tried to delete read only key '{key}'"))
                 .expect("failed to serialize error message"),
         },
-        WorterbuchError::AuthenticationFailed => Err {
+        WorterbuchError::AuthorizationRequired(privilege) => Err {
             error_code,
             transaction_id,
-            metadata: serde_json::to_string("client failed to authenticate")
+            metadata: serde_json::to_string(&format!("{privilege} requires authorization"))
                 .expect("failed to serialize error message"),
         },
-        WorterbuchError::AuthenticationRequired(op) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!("operation {op} requires authentication"))
-                .expect("failed to serialize error message"),
-        },
-        WorterbuchError::AlreadyAuthenticated => Err {
+        WorterbuchError::AlreadyAuthorized => Err {
             error_code,
             transaction_id,
             metadata: serde_json::to_string(

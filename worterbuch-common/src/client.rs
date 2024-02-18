@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientMessage {
-    AuthenticationRequest(AuthenticationRequest),
+    AuthorizationRequest(AuthorizationRequest),
     Get(Get),
     PGet(PGet),
     Set(Set),
@@ -43,7 +43,7 @@ pub enum ClientMessage {
 impl ClientMessage {
     pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
-            ClientMessage::AuthenticationRequest(_) => Some(0),
+            ClientMessage::AuthorizationRequest(_) => Some(0),
             ClientMessage::Get(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
@@ -63,7 +63,7 @@ impl ClientMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthenticationRequest {
+pub struct AuthorizationRequest {
     pub auth_token: AuthToken,
 }
 
@@ -166,23 +166,23 @@ mod test {
 
     #[test]
     fn auth_request_is_serialized_correctly() {
-        let msg = ClientMessage::AuthenticationRequest(AuthenticationRequest {
+        let msg = ClientMessage::AuthorizationRequest(AuthorizationRequest {
             auth_token: "123456".to_owned(),
         });
 
-        let json = r#"{"authenticationRequest":{"authToken":"123456"}}"#;
+        let json = r#"{"authorizationRequest":{"authToken":"123456"}}"#;
 
         assert_eq!(&serde_json::to_string(&msg).unwrap(), json);
     }
 
     #[test]
     fn auth_request_is_deserialized_correctly() {
-        let msg = ClientMessage::AuthenticationRequest(AuthenticationRequest {
+        let msg = ClientMessage::AuthorizationRequest(AuthorizationRequest {
             auth_token: "123456".to_owned(),
         });
 
         let json = r#"{
-            "authenticationRequest": {
+            "authorizationRequest": {
               "authToken": "123456"
             }
           }"#;

@@ -44,7 +44,7 @@ struct Args {
     json: bool,
     /// Wörterbuch key to send values to.
     key: String,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
 }

@@ -83,13 +83,13 @@ async fn serve_loop(
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
-    let authentication_required = config.auth_token.is_some();
+    let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
     let keepalive_timeout = config.keepalive_timeout;
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
     let mut last_keepalive_tx = Instant::now();
     let mut last_keepalive_rx = Instant::now();
-    let mut already_authenticated = None;
+    let mut authorized = None;
     keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (mut ws_tx, mut ws_rx) = websocket.split();
@@ -118,7 +118,7 @@ async fn serve_loop(
             client_id: client_id.to_string(),
             info: ServerInfo {
                 version: VERSION.to_owned(),
-                authentication_required,
+                authorization_required,
                 protocol_version,
             },
         }))
@@ -131,17 +131,17 @@ async fn serve_loop(
                     Ok(incoming_msg) => {
                         last_keepalive_rx = Instant::now();
                         if let Message::Text(text) = incoming_msg {
-                            let (msg_processed, authenticated) = process_incoming_message(
+                            let (msg_processed, auth) = process_incoming_message(
                                 client_id,
                                 &text,
                                 &worterbuch,
                                 &ws_send_tx,
-                                authentication_required,
-                                already_authenticated,
+                                authorization_required,
+                                authorized,
                                 &config
                             )
                             .await?;
-                            already_authenticated = authenticated;
+                            authorized = auth;
                             if !msg_processed {
                                 break;
                             }

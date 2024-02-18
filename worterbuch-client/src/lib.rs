@@ -55,7 +55,7 @@ pub use worterbuch_common::*;
 pub use worterbuch_common::{
     self,
     error::{ConnectionError, ConnectionResult},
-    Ack, AuthenticationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
+    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
     KeyValuePairs, LastWill, LsState, PState, PStateEvent, ProtocolVersion, RegularKeySegment,
     ServerMessage as SM, Set, State, StateEvent, TransactionId,
 };
@@ -662,7 +662,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
             ServerInfo {
                 version: _,
                 protocol_version,
-                authentication_required,
+                authorization_required,
             },
     } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
@@ -700,18 +700,18 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
         }
     };
 
-    if authentication_required {
+    if authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
-            let handshake = AuthenticationRequest { auth_token };
-            let msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
-            log::debug!("Sending authentication message: {msg}");
+            let handshake = AuthorizationRequest { auth_token };
+            let msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
+            log::debug!("Sending authorization message: {msg}");
             websocket.send(Message::Text(msg)).await?;
 
             match websocket.next().await {
                 Some(Err(e)) => Err(e.into()),
                 Some(Ok(Message::Text(msg))) => match serde_json::from_str(&msg) {
-                    Ok(SM::Authenticated(_)) => {
-                        log::debug!("Authentication accepted.");
+                    Ok(SM::Authorized(_)) => {
+                        log::debug!("Authorization accepted.");
                         connected(
                             ClientSocket::Ws(WsClientSocket::new(websocket)),
                             on_disconnect,
@@ -721,7 +721,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                         )
                     }
                     Ok(SM::Err(e)) => {
-                        log::error!("Authentication failed: {e}");
+                        log::error!("Authorization failed: {e}");
                         Err(ConnectionError::WorterbuchError(
                             WorterbuchError::ServerResponse(e),
                         ))
@@ -732,7 +732,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                     ))),
                     Err(e) => Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("error receiving authentication response: {e}"),
+                        format!("error receiving authorization response: {e}"),
                     ))),
                 },
                 Some(Ok(msg)) => Err(ConnectionError::IoError(io::Error::new(
@@ -745,8 +745,8 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                 ))),
             }
         } else {
-            Err(ConnectionError::AuthenticationError(
-                "Server requires authentication but no auth token was provided.".to_owned(),
+            Err(ConnectionError::AuthorizationError(
+                "Server requires authorization but no auth token was provided.".to_owned(),
             ))
         }
     } else {
@@ -782,7 +782,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             ServerInfo {
                 version: _,
                 protocol_version,
-                authentication_required,
+                authorization_required,
             },
     } = match tcp_rx.read_line(&mut line_buf).await {
         Ok(0) => {
@@ -816,12 +816,12 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
         Err(e) => return Err(ConnectionError::IoError(e)),
     };
 
-    if authentication_required {
+    if authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
-            let handshake = AuthenticationRequest { auth_token };
-            let mut msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
+            let handshake = AuthorizationRequest { auth_token };
+            let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
             msg.push('\n');
-            log::debug!("Sending authentication message: {msg}");
+            log::debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.read_line(&mut line_buf).await {
@@ -833,8 +833,8 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                     let msg = json::from_str::<SM>(&line_buf);
                     line_buf.clear();
                     match msg {
-                        Ok(SM::Authenticated(_)) => {
-                            log::debug!("Authentication accepted.");
+                        Ok(SM::Authorized(_)) => {
+                            log::debug!("Authorization accepted.");
                             connected(
                                 ClientSocket::Tcp(
                                     TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await,
@@ -846,7 +846,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                             )
                         }
                         Ok(SM::Err(e)) => {
-                            log::error!("Authentication failed: {e}");
+                            log::error!("Authorization failed: {e}");
                             Err(ConnectionError::WorterbuchError(
                                 WorterbuchError::ServerResponse(e),
                             ))
@@ -857,15 +857,15 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                         ))),
                         Err(e) => Err(ConnectionError::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("error receiving authentication response: {e}"),
+                            format!("error receiving authorization response: {e}"),
                         ))),
                     }
                 }
                 Err(e) => Err(ConnectionError::IoError(e)),
             }
         } else {
-            Err(ConnectionError::AuthenticationError(
-                "Server requires authentication but no auth token was provided.".to_owned(),
+            Err(ConnectionError::AuthorizationError(
+                "Server requires authorization but no auth token was provided.".to_owned(),
             ))
         }
     } else {
@@ -1189,7 +1189,7 @@ async fn process_incoming_server_message(
                 SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
                 SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 SM::Err(err) => deliver_err(err, callbacks).await,
-                SM::Ack(_) | SM::Welcome(_) | SM::Authenticated(_) | SM::Keepalive => (),
+                SM::Ack(_) | SM::Welcome(_) | SM::Authorized(_) | SM::Keepalive => (),
             }
             Ok(ControlFlow::Continue(()))
         }

@@ -57,13 +57,12 @@ use worterbuch_common::{
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match e {
-        WorterbuchError::AuthenticationFailed => Err(poem::Error::new(e, StatusCode::UNAUTHORIZED)),
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
         | WorterbuchError::MultiWildcardAtIllegalPosition(_)
         | WorterbuchError::NoSuchValue(_)
-        | WorterbuchError::AlreadyAuthenticated
-        | WorterbuchError::AuthenticationRequired(_)
+        | WorterbuchError::AlreadyAuthorized
+        | WorterbuchError::AuthorizationRequired(_)
         | WorterbuchError::ReadOnlyKey(_) => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
         e => Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR)),
     }
@@ -101,7 +100,7 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
     };
     let info = ServerInfo {
         version: VERSION.to_owned(),
-        authentication_required: config.auth_token.is_some(),
+        authorization_required: config.auth_token.is_some(),
         protocol_version: proto,
     };
 

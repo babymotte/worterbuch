@@ -44,7 +44,7 @@ struct Args {
     json: bool,
     /// Patterns to be deleted from Wörterbuch in the form "PATTERN1 PATTERN2 PATTERN3 ...". When omitted, patterns will be read from stdin. When reading patterns from stdin, one pattern is expected per line.
     patterns: Option<Vec<String>>,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
     /// Print only the deleted key/value pairs

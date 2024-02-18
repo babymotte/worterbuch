@@ -31,11 +31,11 @@ properties:
     required:
       - info
       - clientId
-  authenticated:
-    description: A message sent by the server to indicate that client authentication was successful
+  authorized:
+    description: A message sent by the server to indicate that client authorization was successful
     type: object
     properties:
-      authenticated:
+      authorized:
         $ref: "#/properties/ack"
   state:
     description: A message sent by the server in response to a Get or Delete message
@@ -147,14 +147,14 @@ components:
         protocolVersion:
           description: The protocol version implemented by the server
           type: string
-        authenticationRequired:
-          description: Whether or not the client need to authenticate itself before sending requests to the server
+        authorizationRequired:
+          description: Whether or not the client need to be authorized before sending requests to the server
           type: boolean
       additionalProperties: false
       required:
         - version
         - protocolVersion
-        - authenticationRequired
+        - authorizationRequired
     KeyValuePair:
       description: A key/value pair where the key is always a string and the value can be anything
       type: object

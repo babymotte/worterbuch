@@ -37,7 +37,7 @@ pub struct JwtClaims {
 
 impl JwtClaims {
     pub fn authorize(&self, privilege: &Privilege, pattern: &str) -> AuthorizationResult<()> {
-        self.worterbuch_privileges.get(&privilege).map_or_else(
+        self.worterbuch_privileges.get(privilege).map_or_else(
             || {
                 Err(AuthorizationError::InsufficientPrivileges(
                     privilege.to_owned(),
@@ -45,11 +45,7 @@ impl JwtClaims {
                 ))
             },
             |allowed_patters| {
-                if allowed_patters
-                    .iter()
-                    .find(|p| pattern_matches(p, pattern))
-                    .is_some()
-                {
+                if allowed_patters.iter().any(|p| pattern_matches(p, pattern)) {
                     Ok(())
                 } else {
                     Err(AuthorizationError::InsufficientPrivileges(
@@ -66,7 +62,7 @@ pub fn get_claims(jwt: Option<&str>, config: &Config) -> AuthorizationResult<Jwt
     if let Some(secret) = &config.auth_token {
         if let Some(token) = jwt {
             let token = decode::<JwtClaims>(
-                &token,
+                token,
                 &DecodingKey::from_secret(secret.as_ref()),
                 &Validation::default(),
             )

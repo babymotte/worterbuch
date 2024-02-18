@@ -123,9 +123,8 @@ pub enum WorterbuchError {
     ServerResponse(Err),
     ProtocolNegotiationFailed,
     ReadOnlyKey(Key),
-    AuthenticationFailed,
-    AuthenticationRequired(Privilege),
-    AlreadyAuthenticated,
+    AuthorizationRequired(Privilege),
+    AlreadyAuthorized,
     Unauthorized(AuthorizationError),
 }
 
@@ -161,13 +160,10 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::ReadOnlyKey(key) => {
                 write!(f, "Tried to modify a read only key: {key}")
             }
-            WorterbuchError::AuthenticationFailed => {
-                write!(f, "Client failed to authenticate")
+            WorterbuchError::AuthorizationRequired(op) => {
+                write!(f, "Operation {op} requires authorization")
             }
-            WorterbuchError::AuthenticationRequired(op) => {
-                write!(f, "Operation {op} requires authentication")
-            }
-            WorterbuchError::AlreadyAuthenticated => {
+            WorterbuchError::AlreadyAuthorized => {
                 write!(f, "Handshake already done")
             }
             WorterbuchError::Unauthorized(err) => err.fmt(f),
@@ -223,7 +219,7 @@ pub enum ConnectionError {
     AckError(broadcast::error::SendError<u64>),
     Timeout,
     HttpError(tungstenite::http::Error),
-    AuthenticationError(String),
+    AuthorizationError(String),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -243,7 +239,7 @@ impl fmt::Display for ConnectionError {
             Self::AckError(e) => fmt::Display::fmt(&e, f),
             Self::Timeout => fmt::Display::fmt("timeout", f),
             Self::HttpError(e) => fmt::Display::fmt(&e, f),
-            Self::AuthenticationError(msg) => fmt::Display::fmt(&msg, f),
+            Self::AuthorizationError(msg) => fmt::Display::fmt(&msg, f),
         }
     }
 }
@@ -319,9 +315,8 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::ProtocolNegotiationFailed => ErrorCode::ProtocolNegotiationFailed,
             WorterbuchError::InvalidServerResponse(_) => ErrorCode::InvalidServerResponse,
             WorterbuchError::ReadOnlyKey(_) => ErrorCode::ReadOnlyKey,
-            WorterbuchError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
-            WorterbuchError::AuthenticationRequired(_) => ErrorCode::AuthenticationRequired,
-            WorterbuchError::AlreadyAuthenticated => ErrorCode::AlreadyAuthenticated,
+            WorterbuchError::AuthorizationRequired(_) => ErrorCode::AuthorizationRequired,
+            WorterbuchError::AlreadyAuthorized => ErrorCode::AlreadyAuthorized,
             WorterbuchError::Unauthorized(_) => ErrorCode::Unauthorized,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }

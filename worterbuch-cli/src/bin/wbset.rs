@@ -44,7 +44,7 @@ struct Args {
     json: bool,
     /// Key/value pairs to be set on Wörterbuch in the form "KEY1=VALUE1 KEY2=VALUE2 KEY3=VALUE3 ...". When omitted, key/value pairs will be read from stdin. When reading key/value pairs from stdin, one key/value pair is expected per line.
     key_value_pairs: Option<Vec<String>>,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
 }

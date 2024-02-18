@@ -50,7 +50,7 @@ struct Args {
     /// Only receive live values, i.e. do not receive a callback for the state currently stored on the broker.
     #[arg(short, long)]
     live_only: bool,
-    /// Auth token to be used to authenticate with the server
+    /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
     /// Print only the received events
