@@ -99,14 +99,13 @@ async fn serve_loop(
     socket: TcpStream,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
-    let auth_token = config.auth_token;
-    let authentication_required = auth_token.is_some();
+    let authentication_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
     let keepalive_timeout = config.keepalive_timeout;
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
     let mut last_keepalive_tx = Instant::now();
     let mut last_keepalive_rx = Instant::now();
-    let mut already_authenticated = false;
+    let mut already_authenticated = None;
     keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (tcp_rx, mut tcp_tx) = socket.into_split();
@@ -147,10 +146,11 @@ async fn serve_loop(
                         &worterbuch,
                         &tcp_send_tx,
                         authentication_required,
-                        already_authenticated
+                        already_authenticated,
+                        &config
                     ).await;
                     let (msg_processed, authenticated) = res?;
-                    already_authenticated |= msg_processed && authenticated;
+                    already_authenticated = authenticated;
                     if !msg_processed {
                         break;
                     }

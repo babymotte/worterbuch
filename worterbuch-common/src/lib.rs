@@ -61,6 +61,24 @@ pub type UniqueFlag = bool;
 pub type LiveOnlyFlag = bool;
 pub type AuthToken = String;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Privilege {
+    Read,
+    Write,
+    Delete,
+}
+
+impl fmt::Display for Privilege {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Privilege::Read => "read".fmt(f),
+            Privilege::Write => "write".fmt(f),
+            Privilege::Delete => "delete".fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum ErrorCode {

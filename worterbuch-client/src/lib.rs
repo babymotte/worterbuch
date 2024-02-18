@@ -701,8 +701,7 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     };
 
     if authentication_required {
-        let digest = digest_token(&config.auth_token, client_id.clone());
-        if let Some(auth_token) = digest {
+        if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthenticationRequest { auth_token };
             let msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
             log::debug!("Sending authentication message: {msg}");
@@ -818,8 +817,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     };
 
     if authentication_required {
-        let digest = digest_token(&config.auth_token, client_id.clone());
-        if let Some(auth_token) = digest {
+        if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthenticationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthenticationRequest(handshake))?;
             msg.push('\n');

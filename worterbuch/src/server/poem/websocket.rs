@@ -89,7 +89,7 @@ async fn serve_loop(
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
     let mut last_keepalive_tx = Instant::now();
     let mut last_keepalive_rx = Instant::now();
-    let mut already_authenticated = false;
+    let mut already_authenticated = None;
     keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (mut ws_tx, mut ws_rx) = websocket.split();
@@ -137,10 +137,11 @@ async fn serve_loop(
                                 &worterbuch,
                                 &ws_send_tx,
                                 authentication_required,
-                                already_authenticated
+                                already_authenticated,
+                                &config
                             )
                             .await?;
-                            already_authenticated |= msg_processed && authenticated;
+                            already_authenticated = authenticated;
                             if !msg_processed {
                                 break;
                             }

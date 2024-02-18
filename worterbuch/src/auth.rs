@@ -17,31 +17,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{collections::HashMap, fmt};
-
+use crate::Config;
+use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use worterbuch_common::{
-    error::{WorterbuchError, WorterbuchResult},
-    KeySegment, RequestPattern,
+    error::{AuthorizationError, AuthorizationResult},
+    KeySegment, Privilege, RequestPattern,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Privilege {
-    Read,
-    Write,
-    Delete,
-}
-
-impl fmt::Display for Privilege {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Privilege::Read => "read".fmt(f),
-            Privilege::Write => "write".fmt(f),
-            Privilege::Delete => "delete".fmt(f),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,9 +36,14 @@ pub struct JwtClaims {
 }
 
 impl JwtClaims {
-    pub fn authorize(&self, privilege: &Privilege, pattern: &str) -> WorterbuchResult<()> {
+    pub fn authorize(&self, privilege: &Privilege, pattern: &str) -> AuthorizationResult<()> {
         self.worterbuch_privileges.get(&privilege).map_or_else(
-            || not_authorized(privilege, pattern),
+            || {
+                Err(AuthorizationError::InsufficientPrivileges(
+                    privilege.to_owned(),
+                    pattern.to_owned(),
+                ))
+            },
             |allowed_patters| {
                 if allowed_patters
                     .iter()
@@ -64,10 +52,31 @@ impl JwtClaims {
                 {
                     Ok(())
                 } else {
-                    not_authorized(privilege, pattern)
+                    Err(AuthorizationError::InsufficientPrivileges(
+                        privilege.to_owned(),
+                        pattern.to_owned(),
+                    ))
                 }
             },
         )
+    }
+}
+
+pub fn get_claims(jwt: Option<&str>, config: &Config) -> AuthorizationResult<JwtClaims> {
+    if let Some(secret) = &config.auth_token {
+        if let Some(token) = jwt {
+            let token = decode::<JwtClaims>(
+                &token,
+                &DecodingKey::from_secret(secret.as_ref()),
+                &Validation::default(),
+            )
+            .map_err(|e| AuthorizationError::TokenDecodeError(e.to_string()))?;
+            Ok(token.claims)
+        } else {
+            Err(AuthorizationError::MissingToken)
+        }
+    } else {
+        Err(AuthorizationError::MissingSecret)
     }
 }
 
@@ -94,12 +103,6 @@ pub fn pattern_matches(pattern: &str, key: &str) -> bool {
             }
         }
     }
-}
-
-fn not_authorized(privilege: &Privilege, pattern: &str) -> WorterbuchResult<()> {
-    Err(WorterbuchError::Unauthorized(format!(
-        "client does not have {privilege} access to '{pattern}'"
-    )))
 }
 
 #[cfg(test)]

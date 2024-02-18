@@ -17,7 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{subscribers::SubscriptionId, Config, PStateAggregator};
+use crate::{
+    auth::{get_claims, JwtClaims},
+    subscribers::SubscriptionId,
+    Config, PStateAggregator,
+};
 use serde::Serialize;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
@@ -30,102 +34,191 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthToken, AuthenticationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key,
+    Ack, AuthenticationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key,
     KeyValuePair, KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState,
-    PStateEvent, PSubscribe, Protocol, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
-    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
-    Unsubscribe, UnsubscribeLs, Value,
+    PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment,
+    RequestPattern, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
+    UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
+
+async fn check_auth(
+    auth_required: bool,
+    privilege: Privilege,
+    pattern: &str,
+    auth: &Option<JwtClaims>,
+    client: &mpsc::Sender<ServerMessage>,
+    transaction_id: u64,
+) -> WorterbuchResult<()> {
+    if auth_required {
+        match auth {
+            Some(claims) => {
+                if let Err(e) = claims.authorize(&privilege, pattern) {
+                    handle_store_error(
+                        WorterbuchError::Unauthorized(e.clone()),
+                        client,
+                        transaction_id,
+                    )
+                    .await?;
+                    return Err(WorterbuchError::Unauthorized(e));
+                }
+            }
+            None => return Err(WorterbuchError::AuthenticationRequired(privilege)),
+        }
+    }
+    Ok(())
+}
 
 pub async fn process_incoming_message(
     client_id: Uuid,
     msg: &str,
     worterbuch: &CloneableWbApi,
     tx: &mpsc::Sender<ServerMessage>,
-    authentication_required: bool,
-    already_authenticated: bool,
-) -> WorterbuchResult<(bool, bool)> {
+    auth_required: bool,
+    auth: Option<JwtClaims>,
+    config: &Config,
+) -> WorterbuchResult<(bool, Option<JwtClaims>)> {
     log::debug!("Received message: {msg}");
-    let mut authenticated = false;
+    let mut authenticated = None;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
             CM::AuthenticationRequest(msg) => {
-                if already_authenticated {
+                if auth.is_some() {
                     return Err(WorterbuchError::AlreadyAuthenticated);
                 }
-                authenticate(msg, worterbuch, tx, client_id).await?;
-                authenticated = true;
+                authenticated = Some(authenticate(msg, tx, &config).await?);
             }
             CM::Get(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Get"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    &msg.key,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 get(msg, worterbuch, tx).await?;
             }
             CM::PGet(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("PGet"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    &msg.request_pattern,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 pget(msg, worterbuch, tx).await?;
             }
             CM::Set(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Set"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Write,
+                    &msg.key,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 set(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::Publish(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Publish"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Write,
+                    &msg.key,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 publish(msg, worterbuch, tx).await?;
             }
             CM::Subscribe(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Subscribe"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    &msg.key,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 subscribe(msg, client_id, worterbuch, tx).await?;
             }
             CM::PSubscribe(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("PSubscribe"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    &msg.request_pattern,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 psubscribe(msg, client_id, worterbuch, tx).await?;
             }
-            CM::Unsubscribe(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Unsubscribe"));
-                }
-                unsubscribe(msg, worterbuch, tx, client_id).await?
-            }
+            CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, tx, client_id).await?,
             CM::Delete(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Delete"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Delete,
+                    &msg.key,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 delete(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::PDelete(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("PDelete"));
-                }
+                check_auth(
+                    auth_required,
+                    Privilege::Delete,
+                    &msg.request_pattern,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
             }
             CM::Ls(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("Ls"));
-                }
+                let pattern = &msg
+                    .parent
+                    .as_ref()
+                    .map(|it| format!("{it}/?"))
+                    .unwrap_or("?".to_owned());
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    pattern,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 ls(msg, worterbuch, tx).await?;
             }
             CM::SubscribeLs(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("SubscribeLs"));
-                }
+                let pattern = &msg
+                    .parent
+                    .as_ref()
+                    .map(|it| format!("{it}/?"))
+                    .unwrap_or("?".to_owned());
+                check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    pattern,
+                    &auth,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?;
                 subscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::UnsubscribeLs(msg) => {
-                if authentication_required && !already_authenticated {
-                    return Err(WorterbuchError::AuthenticationRequired("UnsubscribeLs"));
-                }
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
             }
             CM::Keepalive => (),
@@ -144,11 +237,6 @@ pub async fn process_incoming_message(
 }
 
 pub enum WbFunction {
-    Authenticate(
-        Option<AuthToken>,
-        Option<String>,
-        oneshot::Sender<WorterbuchResult<()>>,
-    ),
     Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
     Set(Key, Value, String, oneshot::Sender<WorterbuchResult<()>>),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
@@ -208,18 +296,6 @@ pub struct CloneableWbApi {
 impl CloneableWbApi {
     pub fn new(tx: mpsc::Sender<WbFunction>) -> Self {
         CloneableWbApi { tx }
-    }
-
-    pub async fn authenticate(
-        &self,
-        auth_token: Option<String>,
-        client_id: Option<String>,
-    ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(WbFunction::Authenticate(auth_token, client_id, tx))
-            .await?;
-        rx.await?
     }
 
     pub async fn get(&self, key: Key) -> WorterbuchResult<(String, Value)> {
@@ -410,27 +486,22 @@ impl CloneableWbApi {
 
 async fn authenticate(
     msg: AuthenticationRequest,
-    worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: Uuid,
-) -> WorterbuchResult<()> {
-    let response = match worterbuch
-        .authenticate(Some(msg.auth_token), Some(client_id.to_string()))
-        .await
-    {
-        Ok(()) => Ack { transaction_id: 0 },
-        Err(e) => {
-            handle_store_error(e, client, 0).await?;
-            return Err(WorterbuchError::AuthenticationFailed);
+    config: &Config,
+) -> WorterbuchResult<JwtClaims> {
+    match get_claims(Some(&msg.auth_token), config) {
+        Ok(claims) => {
+            client
+                .send(ServerMessage::Authenticated(Ack { transaction_id: 0 }))
+                .await
+                .context(|| "Error sending HANDSHAKE message".to_owned())?;
+            Ok(claims)
         }
-    };
-
-    client
-        .send(ServerMessage::Authenticated(response))
-        .await
-        .context(|| "Error sending HANDSHAKE message".to_owned())?;
-
-    Ok(())
+        Err(e) => {
+            handle_store_error(WorterbuchError::Unauthorized(e.clone()), client, 0).await?;
+            return Err(WorterbuchError::Unauthorized(e));
+        }
+    }
 }
 
 async fn get(
@@ -1095,10 +1166,10 @@ async fn handle_store_error(
             )
             .expect("failed to serialize error message"),
         },
-        WorterbuchError::Unauthorized(metadata) => Err {
+        WorterbuchError::Unauthorized(auth_err) => Err {
             error_code,
             transaction_id,
-            metadata,
+            metadata: auth_err.to_string(),
         },
     };
     client

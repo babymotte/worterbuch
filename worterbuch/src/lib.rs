@@ -39,10 +39,7 @@ pub use config::*;
 use serde_json::Value;
 use server::common::{CloneableWbApi, WbFunction};
 use tokio_graceful_shutdown::SubsystemHandle;
-use worterbuch_common::{
-    digest_token, error::WorterbuchError, topic, SYSTEM_TOPIC_ROOT,
-    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
-};
+use worterbuch_common::{topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 
 use crate::stats::track_stats;
 use anyhow::Result;
@@ -139,20 +136,6 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
 
 fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     match function {
-        WbFunction::Authenticate(auth_token, client_id, tx) => {
-            let authenticated = client_id.map_or_else(
-                || worterbuch.config().auth_token == auth_token,
-                |client_id| {
-                    let digest = digest_token(&worterbuch.config().auth_token, client_id);
-                    digest == auth_token
-                },
-            );
-            if authenticated {
-                tx.send(Ok(())).ok();
-            } else {
-                tx.send(Err(WorterbuchError::AuthenticationFailed)).ok();
-            }
-        }
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
         }

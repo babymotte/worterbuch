@@ -17,8 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{auth::JwtClaims, Config};
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use crate::{auth::get_claims, Config};
 use poem::{
     http::StatusCode,
     middleware::AddData,
@@ -62,28 +61,9 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
             .typed_get::<headers::Authorization<Bearer>>()
             .map(|it| it.0.token().to_owned());
 
-        if let Some(secret) = &self.config.auth_token {
-            if let Some(token) = jwt {
-                let token = decode::<JwtClaims>(
-                    &token,
-                    &DecodingKey::from_secret(secret.as_ref()),
-                    &Validation::default(),
-                )
-                .map_err(|e| poem::Error::new(e, StatusCode::UNAUTHORIZED))?;
-
-                (&self.ep).with(AddData::new(token.claims)).call(req).await
-            } else {
-                Err(poem::Error::from_string(
-                    "No JWT in Auth header",
-                    StatusCode::UNAUTHORIZED,
-                ))
-            }
-        } else {
-            Err(poem::Error::from_string(
-                "Cannot decode JWT, no JWT secret configured",
-                StatusCode::UNAUTHORIZED,
-            ))
-        }
+        let claims = get_claims(jwt.as_deref(), &self.config)
+            .map_err(|e| poem::Error::new(e, StatusCode::UNAUTHORIZED))?;
+        (&self.ep).with(AddData::new(claims)).call(req).await
     }
 }
 

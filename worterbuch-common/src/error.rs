@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{server::Err, ErrorCode, Key, MetaData, RequestPattern};
+use crate::{server::Err, ErrorCode, Key, MetaData, Privilege, RequestPattern};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{
     broadcast,
@@ -85,6 +85,30 @@ pub trait Context<T, E: std::error::Error> {
     fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError>;
 }
 
+#[derive(Debug, Clone)]
+pub enum AuthorizationError {
+    InsufficientPrivileges(Privilege, RequestPattern),
+    TokenDecodeError(String),
+    MissingToken,
+    MissingSecret,
+}
+
+impl fmt::Display for AuthorizationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuthorizationError::InsufficientPrivileges(privilege, pattern) => {
+                write!(f, "Client does not have {privilege} access to '{pattern}'")
+            }
+            AuthorizationError::TokenDecodeError(msg) => msg.fmt(f),
+            AuthorizationError::MissingToken => "No JWT was included in the request".fmt(f),
+            AuthorizationError::MissingSecret => "No JWT was configured".fmt(f),
+        }
+    }
+}
+impl std::error::Error for AuthorizationError {}
+
+pub type AuthorizationResult<T> = Result<T, AuthorizationError>;
+
 #[derive(Debug)]
 pub enum WorterbuchError {
     IllegalWildcard(RequestPattern),
@@ -100,9 +124,9 @@ pub enum WorterbuchError {
     ProtocolNegotiationFailed,
     ReadOnlyKey(Key),
     AuthenticationFailed,
-    AuthenticationRequired(&'static str),
+    AuthenticationRequired(Privilege),
     AlreadyAuthenticated,
-    Unauthorized(MetaData),
+    Unauthorized(AuthorizationError),
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -146,7 +170,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::AlreadyAuthenticated => {
                 write!(f, "Handshake already done")
             }
-            WorterbuchError::Unauthorized(meta) => meta.fmt(f),
+            WorterbuchError::Unauthorized(err) => err.fmt(f),
         }
     }
 }

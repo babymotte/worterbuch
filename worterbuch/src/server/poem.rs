@@ -21,7 +21,7 @@ mod auth;
 mod websocket;
 
 use crate::{
-    auth::{JwtClaims, Privilege},
+    auth::JwtClaims,
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
 };
@@ -51,7 +51,8 @@ use tokio::{select, spawn, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, Key, KeyValuePairs, Protocol, RegularKeySegment, ServerInfo, StateEvent,
+    error::WorterbuchError, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo,
+    StateEvent,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
@@ -116,7 +117,7 @@ async fn get_value(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Response> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let pointer = params.get("pointer");
     let raw = params.get("raw");
@@ -156,7 +157,7 @@ async fn pget(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &pattern) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     match wb.pget(pattern).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -172,7 +173,7 @@ async fn set(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<&'static str>> {
     if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     match wb.set(key, value, client_id.to_string()).await {
@@ -189,7 +190,7 @@ async fn publish(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<&'static str>> {
     if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     match wb.publish(key, value).await {
         Ok(()) => Ok(Json("Ok")),
@@ -204,7 +205,7 @@ async fn delete_value(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<Value>> {
     if let Err(e) = privileges.authorize(&Privilege::Delete, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     match wb.delete(key, client_id.to_string()).await {
@@ -220,7 +221,7 @@ async fn pdelete(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Err(e) = privileges.authorize(&Privilege::Delete, &pattern) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     match wb.pdelete(pattern, client_id.to_string()).await {
@@ -236,7 +237,7 @@ async fn ls(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     match wb.ls(Some(parent)).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -250,7 +251,7 @@ async fn ls_root(
     Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     match wb.ls(None).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -267,7 +268,7 @@ async fn subscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -366,7 +367,7 @@ async fn psubscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -431,7 +432,7 @@ async fn subscribels_root(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -486,7 +487,7 @@ async fn subscribels(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
-        return to_error_response(e);
+        return to_error_response(WorterbuchError::Unauthorized(e));
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
