@@ -21,6 +21,7 @@ mod auth;
 mod websocket;
 
 use crate::{
+    auth::{JwtClaims, Privilege},
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
 };
@@ -112,7 +113,11 @@ async fn get_value(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Response> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        return to_error_response(e);
+    }
     let pointer = params.get("pointer");
     let raw = params.get("raw");
     let content_type = req.content_type().map(str::to_lowercase);
@@ -148,7 +153,11 @@ async fn get_value(
 async fn pget(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<KeyValuePairs>> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &pattern) {
+        return to_error_response(e);
+    }
     match wb.pget(pattern).await {
         Ok(kvps) => Ok(Json(kvps)),
         Err(e) => to_error_response(e),
@@ -160,7 +169,11 @@ async fn set(
     Path(key): Path<Key>,
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<&'static str>> {
+    if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     match wb.set(key, value, client_id.to_string()).await {
         Ok(()) => Ok(Json("Ok")),
@@ -173,7 +186,11 @@ async fn publish(
     Path(key): Path<Key>,
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<&'static str>> {
+    if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+        return to_error_response(e);
+    }
     match wb.publish(key, value).await {
         Ok(()) => Ok(Json("Ok")),
         Err(e) => to_error_response(e),
@@ -184,7 +201,11 @@ async fn publish(
 async fn delete_value(
     Path(key): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<Value>> {
+    if let Err(e) = privileges.authorize(&Privilege::Delete, &key) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     match wb.delete(key, client_id.to_string()).await {
         Ok(kvp) => Ok(Json(kvp.1)),
@@ -196,7 +217,11 @@ async fn delete_value(
 async fn pdelete(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<KeyValuePairs>> {
+    if let Err(e) = privileges.authorize(&Privilege::Delete, &pattern) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     match wb.pdelete(pattern, client_id.to_string()).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -206,17 +231,27 @@ async fn pdelete(
 
 #[handler]
 async fn ls(
-    Path(key): Path<Key>,
+    Path(parent): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
-    match wb.ls(Some(key)).await {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+        return to_error_response(e);
+    }
+    match wb.ls(Some(parent)).await {
         Ok(kvps) => Ok(Json(kvps)),
         Err(e) => to_error_response(e),
     }
 }
 
 #[handler]
-async fn ls_root(Data(wb): Data<&CloneableWbApi>) -> Result<Json<Vec<RegularKeySegment>>> {
+async fn ls_root(
+    Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
+) -> Result<Json<Vec<RegularKeySegment>>> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+        return to_error_response(e);
+    }
     match wb.ls(None).await {
         Ok(kvps) => Ok(Json(kvps)),
         Err(e) => to_error_response(e),
@@ -228,8 +263,12 @@ async fn subscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
@@ -323,8 +362,12 @@ async fn psubscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
@@ -384,8 +427,12 @@ async fn psubscribe(
 #[handler]
 async fn subscribels_root(
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
@@ -435,8 +482,12 @@ async fn subscribels_root(
 async fn subscribels(
     Path(parent): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&JwtClaims>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
+    if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+        return to_error_response(e);
+    }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
@@ -508,6 +559,7 @@ pub async fn start(
             .with(AddData::new(subsys.clone()))),
     );
 
+    let config = worterbuch.config().await?;
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
     log::info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
@@ -515,27 +567,27 @@ pub async fn start(
         .at(
             format!("{rest_root}/get/*"),
             get(get_value
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/set/*"),
             post(
-                set.with(BearerAuth::new(worterbuch.clone()))
+                set.with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
             ),
         )
         .at(
             format!("{rest_root}/pget/*"),
             get(pget
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/publish/*"),
             post(
                 publish
-                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
             ),
         )
@@ -543,7 +595,7 @@ pub async fn start(
             format!("{rest_root}/delete/*"),
             delete(
                 delete_value
-                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
             ),
         )
@@ -551,51 +603,50 @@ pub async fn start(
             format!("{rest_root}/pdelete/*"),
             delete(
                 pdelete
-                    .with(BearerAuth::new(worterbuch.clone()))
+                    .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
             ),
         )
         .at(
             format!("{rest_root}/ls"),
             get(ls_root
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/ls/*"),
             get(ls
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/subscribe/*"),
             get(subscribe
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/psubscribe/*"),
             get(psubscribe
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/subscribels"),
             get(subscribels_root
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         )
         .at(
             format!("{rest_root}/subscribels/*"),
             get(subscribels
-                .with(BearerAuth::new(worterbuch.clone()))
+                .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
         );
 
     log::info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
     app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
 
-    let config = worterbuch.config().await?;
     if let Some(web_root_path) = config.web_root_path {
         log::info!(
             "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"

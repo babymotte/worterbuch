@@ -102,6 +102,7 @@ pub enum WorterbuchError {
     AuthenticationFailed,
     AuthenticationRequired(&'static str),
     AlreadyAuthenticated,
+    Unauthorized(MetaData),
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -145,6 +146,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::AlreadyAuthenticated => {
                 write!(f, "Handshake already done")
             }
+            WorterbuchError::Unauthorized(meta) => meta.fmt(f),
         }
     }
 }
@@ -296,6 +298,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
             WorterbuchError::AuthenticationRequired(_) => ErrorCode::AuthenticationRequired,
             WorterbuchError::AlreadyAuthenticated => ErrorCode::AlreadyAuthenticated,
+            WorterbuchError::Unauthorized(_) => ErrorCode::Unauthorized,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

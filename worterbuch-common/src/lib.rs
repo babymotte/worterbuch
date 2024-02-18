@@ -78,6 +78,7 @@ pub enum ErrorCode {
     AuthenticationRequired = 0b00001011,
     AlreadyAuthenticated = 0b00001100,
     MissingValue = 0b00001101,
+    Unauthorized = 0b00001110,
     Other = 0b11111111,
 }
 

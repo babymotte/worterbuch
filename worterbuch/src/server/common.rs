@@ -1095,6 +1095,11 @@ async fn handle_store_error(
             )
             .expect("failed to serialize error message"),
         },
+        WorterbuchError::Unauthorized(metadata) => Err {
+            error_code,
+            transaction_id,
+            metadata,
+        },
     };
     client
         .send(ServerMessage::Err(err_msg))

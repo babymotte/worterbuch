@@ -25,6 +25,7 @@
 //! still an application. Just one that you can start from within your
 //! own application.
 
+mod auth;
 mod config;
 mod persistence;
 mod server;

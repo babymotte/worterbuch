@@ -1,8 +1,11 @@
 # curl -sN 'http://localhost:8080/api/v1/subscribe/hello' -H "Authorization: Bearer 1234" | grep --line-buffered -Po '(?<=data: ).*' | jq
 
+# JWT secret Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw
+
+### Successful
 POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
 {
     "level1": {
@@ -13,48 +16,108 @@ Authorization: Bearer 1234
     }
 }
 
-###
+### Unauthorized, JWT has expired
+
+POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjoxMDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvLyMiLCIkU1lTLyMiXSwid3JpdGUiOlsiaGVsbG8vIyJdfX0.j74e5bpKo5g81dKLfVhwVK5lsYmGZZ2gthYXHt_28QE
+
+{
+    "level1": {
+        "level2": {
+            "a": "hello",
+            "b": "world"
+        }
+    }
+}
+
+### Unauthorized, no write privileges for hello
+
+POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvLyMiLCIkU1lTLyMiXSwid3JpdGUiOltdfX0.KO_WKBt68YbDXed9Hv6ftr1UMxT9ux6l4odMaI0YU48
+
+{
+    "level1": {
+        "level2": {
+            "a": "hello",
+            "b": "world"
+        }
+    }
+}
+
+### Successful
 
 POST http://localhost:8080/api/v1/set/hello/there  HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
 "General Kenobi"
 
-###
+### Successful
 
 GET http://localhost:8080/api/v1/get/hello?pointer=/level1/level2  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
-###
+### Successful
 
 GET http://localhost:8080/api/v1/pget/hello/%23  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
-###
+### Unauthorized, no read access to /hello/#
+
+GET http://localhost:8080/api/v1/pget/hello/%23  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdfX0.cfjhy8QgjY2ToBfpFwltWzCRKJcBkf5XAvJBFm2hNOs
+
+### Unauthorized, no read access to /hello/there
+
+GET http://localhost:8080/api/v1/pget/hello/there  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdfX0.cfjhy8QgjY2ToBfpFwltWzCRKJcBkf5XAvJBFm2hNOs
+
+### Successful
 
 POST http://localhost:8080/api/v1/publish/hello  HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
 "you"
 
-###
+### Unauthorized, no read privileges for ?
 
 GET http://localhost:8080/api/v1/ls  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
-###
+### Successful
+
+GET http://localhost:8080/api/v1/ls  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbIj8iLCJoZWxsby8jIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdfX0.wHyRAdUffzsDFkv9OSbYIO_lUcNygRPe0HtGIo7tbp0
+
+### Successful
 
 GET http://localhost:8080/api/v1/ls/hello  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXX19.kNkkdO5pSGC3dCX1_TOlpf7XH4fMjAJ3x4V1Cn7qnyE
 
-###
+### Unauthorized, no read access to hello/?
+
+GET http://localhost:8080/api/v1/ls/hello  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdfX0.cfjhy8QgjY2ToBfpFwltWzCRKJcBkf5XAvJBFm2hNOs
+
+### Successful
 
 DELETE  http://localhost:8080/api/v1/delete/hello  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdLCJkZWxldGUiOlsiaGVsbG8iXX19.ebA9ujB4rUTFojxz0Hr4gt_dtZwWfBc9fXvN4jzQkaw
 
-###
+### Unauthorized, no delete access to hello
+
+DELETE  http://localhost:8080/api/v1/delete/hello  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdfX0.cfjhy8QgjY2ToBfpFwltWzCRKJcBkf5XAvJBFm2hNOs
+
+### Successful
 
 DELETE  http://localhost:8080/api/v1/pdelete/hello/%23  HTTP/1.1
-Authorization: Bearer 1234
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdLCJkZWxldGUiOlsiaGVsbG8vIyJdfX0.taLQS7wtuvNWYEEr7ytd_eCHjwen6q_ahQze-Ic5HWM
+
+### Unauthorized, no delete access to hello/#
+
+DELETE  http://localhost:8080/api/v1/pdelete/hello/%23  HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiJFNZUy8jIl0sIndyaXRlIjpbImhlbGxvIiwiaGVsbG8vIyJdLCJkZWxldGUiOlsiaGVsbG8vPyJdfX0.lLejRUK4_PPiTHEKwm64Xiz_PllX2MfzjEnM076qXIE
