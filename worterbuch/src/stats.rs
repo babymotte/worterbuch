@@ -17,8 +17,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#[cfg(feature = "commercial")]
-use crate::license::commercial::PUBLIC_KEY_FINGERPRINT;
 use crate::{server::common::CloneableWbApi, INTERNAL_CLIENT_ID};
 use serde_json::json;
 use std::time::Duration;
@@ -62,13 +60,6 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "data"),
         json!(wb.config().await?.license),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
-    #[cfg(feature = "commercial")]
-    wb.set(
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "fingerprint"),
-        json!(PUBLIC_KEY_FINGERPRINT),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;

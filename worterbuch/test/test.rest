@@ -1,6 +1,8 @@
 # curl -sN 'http://localhost:8080/api/v1/subscribe/hello' -H "Authorization: Bearer 1234" | grep --line-buffered -Po '(?<=data: ).*' | jq
 
-# JWT secret Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw
+# JWT secret: Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw
+
+# Full access JWT: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsIm5hbWUiOiJKb2huIERvZSIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjo0NTE2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbIiMiXSwid3JpdGUiOlsiIyJdLCJkZWxldGUiOlsiIyJdfX0.bzV4019DIltKPQ-lDQQALenJqLZc2xD23CPhibFxIVc
 
 ### Successful
 POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
