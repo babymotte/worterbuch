@@ -48,7 +48,7 @@ async fn check_auth(
     auth: &Option<JwtClaims>,
     client: &mpsc::Sender<ServerMessage>,
     transaction_id: u64,
-) -> WorterbuchResult<()> {
+) -> WorterbuchResult<bool> {
     if auth_required {
         match auth {
             Some(claims) => {
@@ -59,13 +59,13 @@ async fn check_auth(
                         transaction_id,
                     )
                     .await?;
-                    return Err(WorterbuchError::Unauthorized(e));
+                    return Ok(false);
                 }
             }
             None => return Err(WorterbuchError::AuthorizationRequired(privilege)),
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 pub async fn process_incoming_message(
@@ -78,111 +78,127 @@ pub async fn process_incoming_message(
     config: &Config,
 ) -> WorterbuchResult<(bool, Option<JwtClaims>)> {
     log::debug!("Received message: {msg}");
-    let mut authorized = None;
+    let mut authorized = auth;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
             CM::AuthorizationRequest(msg) => {
-                if auth.is_some() {
+                if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);
                 }
                 authorized = Some(authorize(msg, tx, config).await?);
             }
             CM::Get(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     &msg.key,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                get(msg, worterbuch, tx).await?;
+                .await?
+                {
+                    get(msg, worterbuch, tx).await?;
+                }
             }
             CM::PGet(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     &msg.request_pattern,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                pget(msg, worterbuch, tx).await?;
+                .await?
+                {
+                    pget(msg, worterbuch, tx).await?;
+                }
             }
             CM::Set(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Write,
                     &msg.key,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                set(msg, worterbuch, tx, client_id.to_string()).await?;
+                .await?
+                {
+                    set(msg, worterbuch, tx, client_id.to_string()).await?;
+                }
             }
             CM::Publish(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Write,
                     &msg.key,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                publish(msg, worterbuch, tx).await?;
+                .await?
+                {
+                    publish(msg, worterbuch, tx).await?;
+                }
             }
             CM::Subscribe(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     &msg.key,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                subscribe(msg, client_id, worterbuch, tx).await?;
+                .await?
+                {
+                    subscribe(msg, client_id, worterbuch, tx).await?;
+                }
             }
             CM::PSubscribe(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     &msg.request_pattern,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                psubscribe(msg, client_id, worterbuch, tx).await?;
+                .await?
+                {
+                    psubscribe(msg, client_id, worterbuch, tx).await?;
+                }
             }
             CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, tx, client_id).await?,
             CM::Delete(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Delete,
                     &msg.key,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                delete(msg, worterbuch, tx, client_id.to_string()).await?;
+                .await?
+                {
+                    delete(msg, worterbuch, tx, client_id.to_string()).await?;
+                }
             }
             CM::PDelete(msg) => {
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Delete,
                     &msg.request_pattern,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
+                .await?
+                {
+                    pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
+                }
             }
             CM::Ls(msg) => {
                 let pattern = &msg
@@ -190,16 +206,18 @@ pub async fn process_incoming_message(
                     .as_ref()
                     .map(|it| format!("{it}/?"))
                     .unwrap_or("?".to_owned());
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     pattern,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                ls(msg, worterbuch, tx).await?;
+                .await?
+                {
+                    ls(msg, worterbuch, tx).await?;
+                }
             }
             CM::SubscribeLs(msg) => {
                 let pattern = &msg
@@ -207,16 +225,18 @@ pub async fn process_incoming_message(
                     .as_ref()
                     .map(|it| format!("{it}/?"))
                     .unwrap_or("?".to_owned());
-                check_auth(
+                if check_auth(
                     auth_required,
                     Privilege::Read,
                     pattern,
-                    &auth,
+                    &authorized,
                     tx,
                     msg.transaction_id,
                 )
-                .await?;
-                subscribe_ls(msg, client_id, worterbuch, tx).await?;
+                .await?
+                {
+                    subscribe_ls(msg, client_id, worterbuch, tx).await?;
+                }
             }
             CM::UnsubscribeLs(msg) => {
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
