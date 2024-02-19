@@ -37,7 +37,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(not(feature = "commercial"))]
 pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
 #[cfg(feature = "commercial")]
-pub const LICENSE: &str = "PROPRIETARY";
+pub const LICENSE: &str = "COMMERCIAL";
 #[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 

@@ -23,8 +23,11 @@ use std::str;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Features {
+    #[serde(default = "Default::default")]
     pub jwt_authorization: bool,
+    #[serde(default = "Default::default")]
     pub clustering: bool,
+    #[serde(default = "Default::default")]
     pub extended_monitoring: bool,
 }
 
@@ -39,12 +42,21 @@ impl Default for Features {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Plan {
+    Foss,
+    Single,
+    Business,
+    Premium,
+    Partner,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct License {
-    pub sub: String,
-    pub name: String,
-    pub iat: u64,
-    pub exp: u64,
+    pub licensee: String,
+    pub issued: u64,
+    pub expires: u64,
+    pub plan: Plan,
     pub versions: (usize, usize),
     pub features: Features,
 }
@@ -53,10 +65,10 @@ pub struct License {
 impl License {
     fn foss() -> Self {
         Self {
-            sub: "42".into(),
-            name: "Everyone".into(),
-            iat: 1708291670,
-            exp: 999999999999,
+            licensee: "Everyone".into(),
+            issued: 1708291670,
+            expires: 999999999999,
+            plan: Plan::Foss,
             versions: (1, 99999),
             features: Features {
                 clustering: true,
@@ -181,5 +193,38 @@ pub mod commercial {
             .context("Invalid license file")?;
 
         Ok(license)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn deserialize_incomplete_features() {
+        let license = r#"{"clustering":true}"#;
+        let features = serde_json::from_str::<Features>(license).unwrap();
+        assert_eq!(
+            features,
+            Features {
+                clustering: true,
+                extended_monitoring: false,
+                jwt_authorization: false
+            }
+        )
+    }
+
+    #[test]
+    fn deserialize_unknown_features() {
+        let license = r#"{"clustering":true,"unknownFeature":false}"#;
+        let features = serde_json::from_str::<Features>(license).unwrap();
+        assert_eq!(
+            features,
+            Features {
+                clustering: true,
+                extended_monitoring: false,
+                jwt_authorization: false
+            }
+        )
     }
 }
