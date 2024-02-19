@@ -223,7 +223,6 @@ impl PStateAggregator {
     }
 }
 
-#[derive(Default)]
 pub struct Worterbuch {
     config: Config,
     store: Store,
@@ -241,7 +240,11 @@ impl Worterbuch {
     pub fn with_config(config: Config) -> Worterbuch {
         Worterbuch {
             config,
-            ..Default::default()
+            clients: Default::default(),
+            ls_subscriptions: Default::default(),
+            store: Default::default(),
+            subscribers: Default::default(),
+            subscriptions: Default::default(),
         }
     }
 
@@ -251,7 +254,10 @@ impl Worterbuch {
         Ok(Worterbuch {
             config,
             store,
-            ..Default::default()
+            clients: Default::default(),
+            ls_subscriptions: Default::default(),
+            subscribers: Default::default(),
+            subscriptions: Default::default(),
         })
     }
 
@@ -962,9 +968,10 @@ fn escape_wildcards(pattern: &str) -> String {
 mod test {
     use super::*;
 
-    #[test]
-    fn export_removes_system_keys() {
-        let mut wb = Worterbuch::default();
+    #[tokio::test]
+    async fn export_removes_system_keys() {
+        dotenv::dotenv().ok();
+        let mut wb = Worterbuch::with_config(Config::new().await.unwrap());
         wb.set("hello/world".to_owned(), json!("test"), INTERNAL_CLIENT_ID)
             .unwrap();
         wb.set(

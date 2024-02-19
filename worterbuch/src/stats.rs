@@ -17,6 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "commercial")]
+use crate::license::commercial::PUBLIC_KEY_FINGERPRINT;
 use crate::{server::common::CloneableWbApi, INTERNAL_CLIENT_ID};
 use serde_json::json;
 use std::time::Duration;
@@ -25,18 +27,18 @@ use tokio::{
     time::{interval, Instant},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-#[cfg(feature = "foss")]
+#[cfg(not(feature = "commercial"))]
 use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
     error::WorterbuchResult, topic, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-#[cfg(feature = "foss")]
+#[cfg(not(feature = "commercial"))]
 pub const LICENSE: &str = env!("CARGO_PKG_LICENSE");
-#[cfg(not(feature = "foss"))]
+#[cfg(feature = "commercial")]
 pub const LICENSE: &str = "PROPRIETARY";
-#[cfg(feature = "foss")]
+#[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
 pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
@@ -56,7 +58,22 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
     )
     .await?;
 
-    #[cfg(feature = "foss")]
+    #[cfg(feature = "commercial")]
+    wb.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "data"),
+        json!(wb.config().await?.license),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+    #[cfg(feature = "commercial")]
+    wb.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "fingerprint"),
+        json!(PUBLIC_KEY_FINGERPRINT),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    #[cfg(not(feature = "commercial"))]
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES),
         json!(format!("{REPO}/releases/tag/v{VERSION}")),

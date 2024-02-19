@@ -17,9 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::license::{load_license, License};
 use std::{env, net::IpAddr, time::Duration};
 use worterbuch_common::{
-    error::{ConfigIntContext, ConfigResult},
+    error::{ConfigError, ConfigIntContext, ConfigResult},
     AuthToken, Path,
 };
 
@@ -50,6 +51,7 @@ pub struct Config {
     pub channel_buffer_size: usize,
     pub extended_monitoring: bool,
     pub auth_token: Option<AuthToken>,
+    pub license: License,
 }
 
 impl Config {
@@ -143,39 +145,39 @@ impl Config {
         Ok(())
     }
 
-    pub fn new() -> ConfigResult<Self> {
-        let mut config = Config::default();
-        config.load_env()?;
-        Ok(config)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            ws_endpoint: Some(WsEndpoint {
-                endpoint: Endpoint {
-                    tls: false,
-                    bind_addr: [127, 0, 0, 1].into(),
-                    port: 8080,
-                },
-                public_addr: "localhost".to_owned(),
-            }),
-            tcp_endpoint: Some(Endpoint {
-                tls: false,
-                bind_addr: [127, 0, 0, 1].into(),
-                port: 8081,
-            }),
-            use_persistence: false,
-            persistence_interval: Duration::from_secs(30),
-            data_dir: "./data".into(),
-            single_threaded: false,
-            web_root_path: None,
-            keepalive_timeout: Duration::from_secs(5),
-            send_timeout: Duration::from_secs(5),
-            channel_buffer_size: 1_000,
-            extended_monitoring: true,
-            auth_token: None,
+    pub async fn new() -> ConfigResult<Self> {
+        match load_license().await {
+            Ok(license) => {
+                let mut config = Config {
+                    ws_endpoint: Some(WsEndpoint {
+                        endpoint: Endpoint {
+                            tls: false,
+                            bind_addr: [127, 0, 0, 1].into(),
+                            port: 8080,
+                        },
+                        public_addr: "localhost".to_owned(),
+                    }),
+                    tcp_endpoint: Some(Endpoint {
+                        tls: false,
+                        bind_addr: [127, 0, 0, 1].into(),
+                        port: 8081,
+                    }),
+                    use_persistence: false,
+                    persistence_interval: Duration::from_secs(30),
+                    data_dir: "./data".into(),
+                    single_threaded: false,
+                    web_root_path: None,
+                    keepalive_timeout: Duration::from_secs(5),
+                    send_timeout: Duration::from_secs(5),
+                    channel_buffer_size: 1_000,
+                    extended_monitoring: true,
+                    auth_token: None,
+                    license,
+                };
+                config.load_env()?;
+                Ok(config)
+            }
+            Err(e) => Err(ConfigError::InvalidLicense(e.to_string())),
         }
     }
 }

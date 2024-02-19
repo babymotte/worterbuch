@@ -33,6 +33,7 @@ pub enum ConfigError {
     InvalidPort(ParseIntError),
     InvalidAddr(AddrParseError),
     InvalidInterval(ParseIntError),
+    InvalidLicense(String),
 }
 
 impl std::error::Error for ConfigError {}
@@ -55,6 +56,7 @@ impl fmt::Display for ConfigError {
             ConfigError::InvalidPort(e) => write!(f, "invalid port: {e}"),
             ConfigError::InvalidAddr(e) => write!(f, "invalid address: {e}"),
             ConfigError::InvalidInterval(e) => write!(f, "invalid interval: {e}"),
+            ConfigError::InvalidLicense(e) => write!(f, "license file could not be loaded: {e}"),
         }
     }
 }

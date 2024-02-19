@@ -31,7 +31,7 @@ use worterbuch_common::{
 pub struct JwtClaims {
     pub sub: String,
     pub name: String,
-    pub exp: usize,
+    pub exp: u64,
     pub worterbuch_privileges: HashMap<Privilege, Vec<RequestPattern>>,
 }
 

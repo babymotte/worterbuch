@@ -27,6 +27,7 @@
 
 mod auth;
 mod config;
+pub mod license;
 mod persistence;
 mod server;
 mod stats;
@@ -48,7 +49,7 @@ use tokio::{select, sync::mpsc};
 pub const INTERNAL_CLIENT_ID: &str = "internal_client_id";
 
 pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
-    let config = Config::new()?;
+    let config = Config::new().await?;
     let config_pers = config.clone();
 
     let channel_buffer_size = config.channel_buffer_size;
