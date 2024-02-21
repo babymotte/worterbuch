@@ -479,7 +479,7 @@ impl Store {
     pub fn count_sub_entries(&self, subkey: &str) -> WorterbuchResult<Option<usize>> {
         let path = parse_segments(subkey)?;
         let node = self.get_node(&path);
-        Ok(node.map(|n| Store::ncount_values(n)))
+        Ok(node.map(Store::ncount_values))
     }
 
     fn nmerge(

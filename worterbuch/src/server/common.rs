@@ -20,10 +20,14 @@
 use crate::{
     auth::{get_claims, JwtClaims},
     subscribers::SubscriptionId,
-    Config, PStateAggregator,
+    Config, PStateAggregator, INTERNAL_CLIENT_ID,
 };
+use anyhow::anyhow;
 use serde::Serialize;
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use tokio::{
     spawn,
     sync::{
@@ -41,6 +45,15 @@ use worterbuch_common::{
     Unsubscribe, UnsubscribeLs, Value,
 };
 
+#[derive(Debug, Clone, PartialEq)]
+struct SubscriptionInfo {
+    transaction_id: TransactionId,
+    request_pattern: RequestPattern,
+    live_only: bool,
+    aggregate_duration: Duration,
+    channel_buffer_size: usize,
+}
+
 async fn check_auth(
     auth_required: bool,
     privilege: Privilege,
@@ -53,12 +66,14 @@ async fn check_auth(
         match auth {
             Some(claims) => {
                 if let Err(e) = claims.authorize(&privilege, pattern) {
+                    log::trace!("Client is not authorized, sending error …");
                     handle_store_error(
                         WorterbuchError::Unauthorized(e.clone()),
                         client,
                         transaction_id,
                     )
                     .await?;
+                    log::trace!("Client is not authorized, sending error done.");
                     return Ok(false);
                 }
             }
@@ -85,7 +100,9 @@ pub async fn process_incoming_message(
                 if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);
                 }
+                log::trace!("Authorizing client {client_id} …");
                 authorized = Some(authorize(msg, tx, config).await?);
+                log::trace!("Authorizing client {client_id} done.");
             }
             CM::Get(msg) => {
                 if check_auth(
@@ -98,7 +115,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Getting value for client {} …", client_id);
                     get(msg, worterbuch, tx).await?;
+                    log::trace!("Getting value for client {} done.", client_id);
                 }
             }
             CM::PGet(msg) => {
@@ -112,7 +131,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("PGetting values for client {} …", client_id);
                     pget(msg, worterbuch, tx).await?;
+                    log::trace!("PGetting values for client {} done.", client_id);
                 }
             }
             CM::Set(msg) => {
@@ -126,7 +147,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Setting value for client {} …", client_id);
                     set(msg, worterbuch, tx, client_id.to_string()).await?;
+                    log::trace!("Setting values for client {} done.", client_id);
                 }
             }
             CM::Publish(msg) => {
@@ -140,7 +163,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Publishing value for client {} …", client_id);
                     publish(msg, worterbuch, tx).await?;
+                    log::trace!("Publishing value for client {} done.", client_id);
                 }
             }
             CM::Subscribe(msg) => {
@@ -154,7 +179,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Making subscription for client {} …", client_id);
                     subscribe(msg, client_id, worterbuch, tx).await?;
+                    log::trace!("Making subscription for client {} done.", client_id);
                 }
             }
             CM::PSubscribe(msg) => {
@@ -168,7 +195,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Making psubscription for client {} …", client_id);
                     psubscribe(msg, client_id, worterbuch, tx).await?;
+                    log::trace!("Making psubscription for client {} done.", client_id);
                 }
             }
             CM::Unsubscribe(msg) => unsubscribe(msg, worterbuch, tx, client_id).await?,
@@ -183,7 +212,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Deleting value for client {} …", client_id);
                     delete(msg, worterbuch, tx, client_id.to_string()).await?;
+                    log::trace!("Deleting value for client {} done.", client_id);
                 }
             }
             CM::PDelete(msg) => {
@@ -197,7 +228,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("DPeleting value for client {} …", client_id);
                     pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
+                    log::trace!("DPeleting value for client {} done.", client_id);
                 }
             }
             CM::Ls(msg) => {
@@ -216,7 +249,9 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Listing subkeys for client {} …", client_id);
                     ls(msg, worterbuch, tx).await?;
+                    log::trace!("Listing subkeys for client {} done.", client_id);
                 }
             }
             CM::SubscribeLs(msg) => {
@@ -235,11 +270,15 @@ pub async fn process_incoming_message(
                 )
                 .await?
                 {
+                    log::trace!("Subscribing to subkeys for client {} …", client_id);
                     subscribe_ls(msg, client_id, worterbuch, tx).await?;
+                    log::trace!("Subscribing to subkeys for client {} done.", client_id);
                 }
             }
             CM::UnsubscribeLs(msg) => {
+                log::trace!("Unsubscribing to subkeys for client {} …", client_id);
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
+                log::trace!("Unsubscribing to subkeys for client {} done.", client_id);
             }
             CM::Keepalive => (),
         },
@@ -330,10 +369,26 @@ impl CloneableWbApi {
 
     pub async fn set(&self, key: Key, value: Value, client_id: String) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let trace = client_id != INTERNAL_CLIENT_ID;
+        if trace {
+            log::trace!("Sending set request to core system …");
+        }
+        let res = self
+            .tx
             .send(WbFunction::Set(key, value, client_id, tx))
-            .await?;
-        rx.await?
+            .await;
+        if trace {
+            log::trace!("Sending set request to core system done.");
+        }
+        res?;
+        if trace {
+            log::trace!("Waiting for response to set request …");
+        }
+        let res = rx.await;
+        if trace {
+            log::trace!("Waiting for response to set request done.");
+        }
+        res?
     }
 
     pub async fn publish(&self, key: Key, value: Value) -> WorterbuchResult<()> {
@@ -600,15 +655,15 @@ async fn set(
         transaction_id: msg.transaction_id,
     };
 
-    client
-        .send(ServerMessage::Ack(response))
-        .await
-        .context(|| {
-            format!(
-                "Error sending ACK message for transaction ID {}",
-                msg.transaction_id
-            )
-        })?;
+    log::trace!("Value set, queuing Ack …");
+    let res = client.send(ServerMessage::Ack(response)).await;
+    log::trace!("Value set, queuing Ack done.");
+    res.context(|| {
+        format!(
+            "Error sending ACK message for transaction ID {}",
+            msg.transaction_id
+        )
+    })?;
 
     Ok(())
 }
@@ -762,18 +817,15 @@ async fn psubscribe(
 
     let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
     if let Some(aggregate_duration) = aggregate_events {
+        let subscription = SubscriptionInfo {
+            aggregate_duration,
+            channel_buffer_size,
+            live_only,
+            request_pattern,
+            transaction_id,
+        };
         spawn(async move {
-            aggregate_loop(
-                rx,
-                transaction_id,
-                request_pattern,
-                client_sub,
-                subscription,
-                aggregate_duration,
-                live_only,
-                channel_buffer_size,
-            )
-            .await;
+            aggregate_loop(rx, subscription, client_sub).await;
 
             match wb_unsub.unsubscribe(client_id, transaction_id).await {
                 Ok(()) => {
@@ -834,21 +886,16 @@ async fn forward_loop(
 
 async fn aggregate_loop(
     mut rx: Receiver<PStateEvent>,
-    transaction_id: u64,
-    request_pattern: String,
+    subscription: SubscriptionInfo,
     client_sub: mpsc::Sender<ServerMessage>,
-    subscription: SubscriptionId,
-    aggregate_duration: Duration,
-    live_only: bool,
-    channel_buffer_size: usize,
 ) {
-    if !live_only {
+    if !subscription.live_only {
         log::debug!("Immediately forwarding current state to new subscription {subscription:?} …");
 
         if let Some(event) = rx.recv().await {
             let event = PState {
-                transaction_id,
-                request_pattern: request_pattern.clone(),
+                transaction_id: subscription.transaction_id,
+                request_pattern: subscription.request_pattern.clone(),
                 event,
             };
 
@@ -865,10 +912,10 @@ async fn aggregate_loop(
 
     let aggregator = PStateAggregator::new(
         client_sub,
-        request_pattern,
-        aggregate_duration,
-        transaction_id,
-        channel_buffer_size,
+        subscription.request_pattern,
+        subscription.aggregate_duration,
+        subscription.transaction_id,
+        subscription.channel_buffer_size,
     );
 
     while let Some(event) = rx.recv().await {
@@ -1189,10 +1236,13 @@ async fn handle_store_error(
             metadata: auth_err.to_string(),
         },
     };
-    client
+    log::trace!("Error in store, queuing error message for client …");
+    let res = client
         .send(ServerMessage::Err(err_msg))
         .await
-        .context(|| "Error sending ERR message to client".to_owned())
+        .context(|| "Error sending ERR message to client".to_owned());
+    log::trace!("Error in store, queuing error message for client done");
+    res
 }
 
 #[derive(Serialize)]
@@ -1207,5 +1257,43 @@ impl From<(&Box<dyn std::error::Error + Send + Sync>, MetaData)> for Meta {
             cause: e.0.to_string(),
             meta: e.1,
         }
+    }
+}
+
+pub async fn send_keepalive(
+    last_keepalive_tx: Instant,
+    send_tx: &mpsc::Sender<ServerMessage>,
+) -> anyhow::Result<()> {
+    if last_keepalive_tx.elapsed().as_secs() >= 1 {
+        log::trace!("Sending keepalive");
+        send_tx.send(ServerMessage::Keepalive).await?;
+    }
+    Ok(())
+}
+
+pub fn check_client_keepalive(
+    last_keepalive_rx: Instant,
+    last_keepalive_tx: Instant,
+    client_id: Uuid,
+    keepalive_timeout: Duration,
+) -> anyhow::Result<()> {
+    let lag = last_keepalive_tx - last_keepalive_rx;
+
+    if lag >= Duration::from_secs(2) {
+        log::warn!(
+            "Client {} has been inactive for {} seconds …",
+            client_id,
+            lag.as_secs()
+        );
+    }
+
+    if lag >= keepalive_timeout {
+        log::warn!(
+            "Client {} has been inactive for too long. Disconnecting.",
+            client_id
+        );
+        Err(anyhow!("Client has been inactive for too long"))
+    } else {
+        Ok(())
     }
 }

@@ -40,9 +40,15 @@ pub async fn write_line_and_flush(
         )));
     }
     log::debug!("Sending message: {json}");
+    log::trace!("Writing line …");
     tx.write_all(json.as_bytes()).await?;
+    log::trace!("Writing line done.");
+    log::trace!("Writing newline …");
     tx.write_u8(b'\n').await?;
+    log::trace!("Writing newline done.");
+    log::trace!("Flushing channel …");
     tx.flush().await?;
+    log::trace!("Flushing channel done.");
 
     Ok(())
 }
