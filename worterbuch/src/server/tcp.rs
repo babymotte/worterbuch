@@ -110,7 +110,7 @@ async fn serve_loop(
 
     let (tcp_rx, mut tcp_tx) = socket.into_split();
     let (tcp_send_tx, mut tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
-    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::unbounded_channel();
+    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
     spawn(async move {
@@ -140,6 +140,12 @@ async fn serve_loop(
             recv = tcp_rx.next_line() => match recv {
                 Ok(Some(json)) => {
                     last_keepalive_rx = Instant::now();
+
+                    // drain the send buffer to make room for the response
+                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
+                        last_keepalive_tx = keepalive?;
+                    }
+
                     let (msg_processed, auth) = process_incoming_message(
                         client_id,
                         &json,
@@ -218,19 +224,19 @@ async fn send_with_timeout<'a>(
     msg: ServerMessage,
     tcp: &mut TcpSender,
     send_timeout: Duration,
-    result_handler: &mpsc::UnboundedSender<anyhow::Result<Instant>>,
+    result_handler: &mpsc::Sender<anyhow::Result<Instant>>,
 ) {
     select! {
         r = write_line_and_flush(&msg, tcp)  => {
             if let Err(e) = r {
-                result_handler.send(Err(e.into())).ok();
+                result_handler.send(Err(e.into())).await.ok();
             } else {
-                result_handler.send(Ok(Instant::now())).ok();
+                result_handler.send(Ok(Instant::now())).await.ok();
             }
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout");
-            result_handler.send(Err(anyhow!("Send timeout"))).ok();
+            result_handler.send(Err(anyhow!("Send timeout"))).await.ok();
         },
     }
 }

@@ -27,7 +27,7 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::{
     spawn,
     sync::{
-        mpsc::{self, UnboundedReceiver},
+        mpsc::{self, Receiver},
         oneshot,
     },
 };
@@ -274,7 +274,7 @@ pub enum WbFunction {
         Key,
         UniqueFlag,
         LiveOnlyFlag,
-        oneshot::Sender<WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)>>,
     ),
     PSubscribe(
         Uuid,
@@ -282,15 +282,13 @@ pub enum WbFunction {
         RequestPattern,
         UniqueFlag,
         LiveOnlyFlag,
-        oneshot::Sender<WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)>>,
     ),
     SubscribeLs(
         Uuid,
         TransactionId,
         Option<Key>,
-        oneshot::Sender<
-            WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)>,
-        >,
+        oneshot::Sender<WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)>>,
     ),
     Unsubscribe(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
     UnsubscribeLs(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
@@ -357,7 +355,7 @@ impl CloneableWbApi {
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::Subscribe(
@@ -379,7 +377,7 @@ impl CloneableWbApi {
         pattern: RequestPattern,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(UnboundedReceiver<PStateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::PSubscribe(
@@ -399,7 +397,7 @@ impl CloneableWbApi {
         client_id: Uuid,
         transaction_id: TransactionId,
         parent: Option<Key>,
-    ) -> WorterbuchResult<(UnboundedReceiver<Vec<RegularKeySegment>>, SubscriptionId)> {
+    ) -> WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::SubscribeLs(
@@ -760,6 +758,8 @@ async fn psubscribe(
     let wb_unsub = worterbuch.clone();
     let client_sub = client.clone();
 
+    let channel_buffer_size = worterbuch.config().await?.channel_buffer_size;
+
     let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
     if let Some(aggregate_duration) = aggregate_events {
         spawn(async move {
@@ -771,6 +771,7 @@ async fn psubscribe(
                 subscription,
                 aggregate_duration,
                 live_only,
+                channel_buffer_size,
             )
             .await;
 
@@ -811,7 +812,7 @@ async fn psubscribe(
 }
 
 async fn forward_loop(
-    mut rx: UnboundedReceiver<PStateEvent>,
+    mut rx: Receiver<PStateEvent>,
     transaction_id: u64,
     request_pattern: String,
     client_sub: mpsc::Sender<ServerMessage>,
@@ -832,13 +833,14 @@ async fn forward_loop(
 }
 
 async fn aggregate_loop(
-    mut rx: UnboundedReceiver<PStateEvent>,
+    mut rx: Receiver<PStateEvent>,
     transaction_id: u64,
     request_pattern: String,
     client_sub: mpsc::Sender<ServerMessage>,
     subscription: SubscriptionId,
     aggregate_duration: Duration,
     live_only: bool,
+    channel_buffer_size: usize,
 ) {
     if !live_only {
         log::debug!("Immediately forwarding current state to new subscription {subscription:?} …");
@@ -866,10 +868,11 @@ async fn aggregate_loop(
         request_pattern,
         aggregate_duration,
         transaction_id,
+        channel_buffer_size,
     );
 
     while let Some(event) = rx.recv().await {
-        if let Err(e) = aggregator.aggregate(event) {
+        if let Err(e) = aggregator.aggregate(event).await {
             log::error!("Error sending STATE message to client: {e}");
             break;
         }

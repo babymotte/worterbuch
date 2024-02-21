@@ -128,7 +128,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_SIZE") {
-            let size = val.parse().to_interval()?;
+            let size = val.parse::<usize>().to_interval()?.max(3);
             self.channel_buffer_size = size;
         }
 

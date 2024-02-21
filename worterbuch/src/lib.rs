@@ -62,12 +62,14 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         Worterbuch::with_config(config.clone())
     };
 
-    worterbuch.set(
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
-        serde_json::to_value(worterbuch.supported_protocol_version())
-            .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
-        INTERNAL_CLIENT_ID,
-    )?;
+    worterbuch
+        .set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
+            serde_json::to_value(worterbuch.supported_protocol_version())
+                .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
+            INTERNAL_CLIENT_ID,
+        )
+        .await?;
 
     let (api_tx, mut api_rx) = mpsc::channel(channel_buffer_size);
     let api = CloneableWbApi::new(api_tx);
@@ -119,7 +121,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     loop {
         select! {
             recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call(&mut worterbuch, function),
+                Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
             () = subsys.on_shutdown_requested() => break,
@@ -135,16 +137,16 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     Ok(())
 }
 
-fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
+async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     match function {
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
         }
         WbFunction::Set(key, value, client_id, tx) => {
-            tx.send(worterbuch.set(key, value, &client_id)).ok();
+            tx.send(worterbuch.set(key, value, &client_id).await).ok();
         }
         WbFunction::Publish(key, value, tx) => {
-            tx.send(worterbuch.publish(key, value)).ok();
+            tx.send(worterbuch.publish(key, value).await).ok();
         }
         WbFunction::Ls(parent, tx) => {
             tx.send(worterbuch.ls(&parent)).ok();
@@ -153,19 +155,31 @@ fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.pget(&pattern)).ok();
         }
         WbFunction::Subscribe(client_id, transaction_id, key, unique, live_only, tx) => {
-            tx.send(worterbuch.subscribe(client_id, transaction_id, key, unique, live_only))
-                .ok();
+            tx.send(
+                worterbuch
+                    .subscribe(client_id, transaction_id, key, unique, live_only)
+                    .await,
+            )
+            .ok();
         }
         WbFunction::PSubscribe(client_id, transaction_id, pattern, unique, live_only, tx) => {
-            tx.send(worterbuch.psubscribe(client_id, transaction_id, pattern, unique, live_only))
-                .ok();
+            tx.send(
+                worterbuch
+                    .psubscribe(client_id, transaction_id, pattern, unique, live_only)
+                    .await,
+            )
+            .ok();
         }
         WbFunction::SubscribeLs(client_id, transaction_id, parent, tx) => {
-            tx.send(worterbuch.subscribe_ls(client_id, transaction_id, parent))
-                .ok();
+            tx.send(
+                worterbuch
+                    .subscribe_ls(client_id, transaction_id, parent)
+                    .await,
+            )
+            .ok();
         }
         WbFunction::Unsubscribe(client_id, transaction_id, tx) => {
-            tx.send(worterbuch.unsubscribe(client_id, transaction_id))
+            tx.send(worterbuch.unsubscribe(client_id, transaction_id).await)
                 .ok();
         }
         WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
@@ -173,16 +187,18 @@ fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                 .ok();
         }
         WbFunction::Delete(key, client_id, tx) => {
-            tx.send(worterbuch.delete(key, &client_id)).ok();
+            tx.send(worterbuch.delete(key, &client_id).await).ok();
         }
         WbFunction::PDelete(pattern, client_id, tx) => {
-            tx.send(worterbuch.pdelete(pattern, &client_id)).ok();
+            tx.send(worterbuch.pdelete(pattern, &client_id).await).ok();
         }
         WbFunction::Connected(client_id, remote_addr, protocol) => {
-            worterbuch.connected(client_id, remote_addr, &protocol);
+            worterbuch
+                .connected(client_id, remote_addr, &protocol)
+                .await;
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
-            worterbuch.disconnected(client_id, remote_addr).ok();
+            worterbuch.disconnected(client_id, remote_addr).await.ok();
         }
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();

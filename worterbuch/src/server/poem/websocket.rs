@@ -94,7 +94,7 @@ async fn serve_loop(
 
     let (mut ws_tx, mut ws_rx) = websocket.split();
     let (ws_send_tx, mut ws_send_rx) = mpsc::channel(config.channel_buffer_size);
-    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::unbounded_channel();
+    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
     let subsys_send = subsys.clone();
@@ -130,6 +130,12 @@ async fn serve_loop(
                 match msg {
                     Ok(incoming_msg) => {
                         last_keepalive_rx = Instant::now();
+
+                        // drain the send buffer to make room for the response
+                        while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
+                            last_keepalive_tx = keepalive?;
+                        }
+
                         if let Message::Text(text) = incoming_msg {
                             let (msg_processed, auth) = process_incoming_message(
                                 client_id,
@@ -214,7 +220,7 @@ async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
     send_timeout: Duration,
-    result_handler: &mpsc::UnboundedSender<anyhow::Result<Instant>>,
+    result_handler: &mpsc::Sender<anyhow::Result<Instant>>,
     subsys: &SubsystemHandle,
 ) {
     let json = match serde_json::to_string(&msg) {
@@ -230,14 +236,14 @@ async fn send_with_timeout(
     select! {
         r = websocket.send(msg) => {
             if let Err(e) = r {
-                result_handler.send(Err(e.into())).ok();
+                result_handler.send(Err(e.into())).await.ok();
             } else {
-                result_handler.send(Ok(Instant::now())).ok();
+                result_handler.send(Ok(Instant::now())).await.ok();
             }
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout");
-            result_handler.send(Err(anyhow!("Send timeout"))).ok();
+            result_handler.send(Err(anyhow!("Send timeout"))).await.ok();
         },
     }
 }

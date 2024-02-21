@@ -19,7 +19,7 @@
 
 use anyhow::Result;
 use std::collections::{hash_map::Entry, HashMap};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, TransactionId};
 
@@ -44,7 +44,7 @@ impl SubscriptionId {
 #[derive(Clone, Debug)]
 pub struct Subscriber {
     pattern: Vec<KeySegment>,
-    tx: UnboundedSender<PStateEvent>,
+    tx: Sender<PStateEvent>,
     id: SubscriptionId,
     unique: bool,
 }
@@ -53,7 +53,7 @@ impl Subscriber {
     pub fn new(
         id: SubscriptionId,
         pattern: Vec<KeySegment>,
-        tx: UnboundedSender<PStateEvent>,
+        tx: Sender<PStateEvent>,
         unique: bool,
     ) -> Subscriber {
         Subscriber {
@@ -64,8 +64,8 @@ impl Subscriber {
         }
     }
 
-    pub fn send(&self, event: PStateEvent) -> Result<()> {
-        self.tx.send(event)?;
+    pub async fn send(&self, event: PStateEvent) -> Result<()> {
+        self.tx.send(event).await?;
         Ok(())
     }
 
@@ -77,7 +77,7 @@ impl Subscriber {
 #[derive(Clone, Debug)]
 pub struct LsSubscriber {
     pub parent: Vec<RegularKeySegment>,
-    tx: UnboundedSender<Vec<RegularKeySegment>>,
+    tx: Sender<Vec<RegularKeySegment>>,
     pub id: SubscriptionId,
 }
 
@@ -85,13 +85,13 @@ impl LsSubscriber {
     pub fn new(
         id: SubscriptionId,
         parent: Vec<RegularKeySegment>,
-        tx: UnboundedSender<Vec<RegularKeySegment>>,
+        tx: Sender<Vec<RegularKeySegment>>,
     ) -> LsSubscriber {
         LsSubscriber { parent, tx, id }
     }
 
-    pub fn send(&self, children: Vec<RegularKeySegment>) -> Result<()> {
-        self.tx.send(children)?;
+    pub async fn send(&self, children: Vec<RegularKeySegment>) -> Result<()> {
+        self.tx.send(children).await?;
         Ok(())
     }
 }
@@ -209,7 +209,7 @@ fn add_all_children(node: &Node, all_subscribers: &mut Vec<Subscriber>) {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::mpsc::channel;
     use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
@@ -224,7 +224,7 @@ mod test {
     fn get_subscribers() {
         let mut subscribers = Subscribers::default();
 
-        let (tx, _rx) = unbounded_channel();
+        let (tx, _rx) = channel(1);
         let pattern = KeySegment::parse("test/?/b/#");
         let id = SubscriptionId {
             client_id: Uuid::new_v4(),
@@ -250,7 +250,7 @@ mod test {
     fn subscribers_are_cleaned_up() {
         let mut subscribers = Subscribers::default();
 
-        let (tx, _rx) = unbounded_channel();
+        let (tx, _rx) = channel(1);
         let pattern = key_segs("test/?/b/#");
         let id = SubscriptionId {
             client_id: Uuid::new_v4(),

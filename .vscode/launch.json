@@ -17,7 +17,7 @@
       },
       "args": [],
       "env": {
-        "WORTERBUCH_AUTH_TOKEN": "Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw"
+        // "WORTERBUCH_AUTH_TOKEN": "Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw"
       },
       "cwd": "${workspaceFolder}/worterbuch"
     },

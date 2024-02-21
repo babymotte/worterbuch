@@ -20,7 +20,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap};
 use worterbuch_common::{
-    error::WorterbuchError, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
+    error::{WorterbuchError, WorterbuchResult},
+    parse_segments, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
 };
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
@@ -91,6 +92,11 @@ impl Store {
 
     /// retrieve a value for a non-wildcard key
     pub fn get(&self, path: &[RegularKeySegment]) -> Option<&Value> {
+        let node = self.get_node(path);
+        node.and_then(|n| n.v.as_ref())
+    }
+
+    fn get_node(&self, path: &[RegularKeySegment]) -> Option<&Node> {
         let mut current = &self.data;
 
         for elem in path {
@@ -101,7 +107,7 @@ impl Store {
             }
         }
 
-        current.v.as_ref()
+        Some(current)
     }
 
     pub fn delete(
@@ -468,6 +474,12 @@ impl Store {
 
     pub fn count_entries(&mut self) {
         self.len = Store::ncount_values(&self.data);
+    }
+
+    pub fn count_sub_entries(&self, subkey: &str) -> WorterbuchResult<Option<usize>> {
+        let path = parse_segments(subkey)?;
+        let node = self.get_node(&path);
+        Ok(node.map(|n| Store::ncount_values(n)))
     }
 
     fn nmerge(
