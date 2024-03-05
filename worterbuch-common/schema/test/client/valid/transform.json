@@ -1,0 +1,15 @@
+{
+  "transform": {
+    "transactionId": 123,
+    "key": "test/transformed/key",
+    "template": {
+      "name": "@some/person/name",
+      "email": "@some/person/email",
+      "phone": "@some/person/phone",
+      "meta": {
+        "nested": "@some/completely/unrelated/key",
+        "info": "this is not a key reference and will remain in the transformed state"
+      }
+    }
+  }
+}
