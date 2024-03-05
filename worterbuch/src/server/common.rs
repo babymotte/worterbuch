@@ -280,6 +280,11 @@ pub async fn process_incoming_message(
                 unsubscribe_ls(msg, client_id, worterbuch, tx).await?;
                 log::trace!("Unsubscribing to subkeys for client {} done.", client_id);
             }
+            CM::Transform(_) => {
+                log::error!("State transformers not implemented yet.");
+                // TODO
+                return Ok((false, authorized));
+            }
             CM::Keepalive => (),
         },
         Ok(None) => {

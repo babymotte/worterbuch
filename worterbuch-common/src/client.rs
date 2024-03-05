@@ -36,6 +36,7 @@ pub enum ClientMessage {
     Ls(Ls),
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
+    Transform(Transform),
     #[serde(rename = "")]
     Keepalive,
 }
@@ -56,6 +57,7 @@ impl ClientMessage {
             ClientMessage::Ls(m) => Some(m.transaction_id),
             ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
+            ClientMessage::Transform(m) => Some(m.transaction_id),
             ClientMessage::Keepalive => None,
         }
     }
@@ -67,14 +69,14 @@ pub struct AuthorizationRequest {
     pub auth_token: AuthToken,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Get {
     pub transaction_id: TransactionId,
     pub key: Key,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PGet {
     pub transaction_id: TransactionId,
@@ -96,7 +98,7 @@ pub struct Publish {
     pub key: Key,
     pub value: Value,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscribe {
     pub transaction_id: TransactionId,
@@ -106,7 +108,7 @@ pub struct Subscribe {
     pub live_only: Option<LiveOnlyFlag>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PSubscribe {
     pub transaction_id: TransactionId,
@@ -118,44 +120,52 @@ pub struct PSubscribe {
     pub live_only: Option<LiveOnlyFlag>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unsubscribe {
     pub transaction_id: TransactionId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Delete {
     pub transaction_id: TransactionId,
     pub key: Key,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PDelete {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Ls {
     pub transaction_id: TransactionId,
     pub parent: Option<Key>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeLs {
     pub transaction_id: TransactionId,
     pub parent: Option<Key>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnsubscribeLs {
     pub transaction_id: TransactionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Transform {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+    pub template: Value,
 }
 
 #[cfg(test)]
@@ -269,6 +279,67 @@ mod test {
                 unique: true,
                 aggregate_events: Some(10),
                 live_only: Some(false),
+            })
+        );
+    }
+
+    #[test]
+    fn transform_is_serialized_correctly() {
+        let msg = ClientMessage::Transform(Transform {
+            transaction_id: 123,
+            key: "test/transformed/key".to_owned(),
+            template: json!({
+              "name": "@some/person/name",
+              "email": "@some/person/email",
+              "phone": "@some/person/phone",
+              "meta": {
+                "nested": "@some/completely/unrelated/key",
+                "info": "this is not a key reference and will remain in the transformed state"
+              }
+            }),
+        });
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"transform":{"transactionId":123,"key":"test/transformed/key","template":{"email":"@some/person/email","meta":{"info":"this is not a key reference and will remain in the transformed state","nested":"@some/completely/unrelated/key"},"name":"@some/person/name","phone":"@some/person/phone"}}}"#
+        );
+    }
+
+    #[test]
+    fn transform_is_deserialized_correctly() {
+        let json = r#"{
+                "transform": {
+                  "transactionId": 123,
+                  "key": "test/transformed/key",
+                  "template": {
+                    "name": "@some/person/name",
+                    "email": "@some/person/email",
+                    "phone": "@some/person/phone",
+                    "meta": {
+                      "nested": "@some/completely/unrelated/key",
+                      "info": "this is not a key reference and will remain in the transformed state"
+                    }
+                  }
+                }
+              }
+              "#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::Transform(Transform {
+                transaction_id: 123,
+                key: "test/transformed/key".to_owned(),
+                template: json!({
+                  "name": "@some/person/name",
+                  "email": "@some/person/email",
+                  "phone": "@some/person/phone",
+                  "meta": {
+                    "nested": "@some/completely/unrelated/key",
+                    "info": "this is not a key reference and will remain in the transformed state"
+                  }
+                }),
             })
         );
     }
