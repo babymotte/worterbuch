@@ -50,16 +50,44 @@ pub async fn start(
     log::info!("Serving TCP endpoint at {addr}");
     let listener = TcpListener::bind(&addr).await?;
 
+    let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
+    let mut open_connections = 0;
+    let mut waiting_for_free_connections = false;
+
     loop {
         select! {
-            con = listener.accept() => {
-                let (socket, remote_addr) = con?;
-                let worterbuch = worterbuch.clone();
-                spawn(async move {
-                    if let Err(e) = serve(remote_addr, worterbuch, socket).await {
-                        log::error!("Connection to client {remote_addr} closed with error: {e}");
+            recv = conn_closed_rx.recv() => if let Some(_) = recv {
+                open_connections -= 1;
+                while let Ok(_) = conn_closed_rx.try_recv() {
+                    open_connections -= 1;
+                }
+                log::debug!("{open_connections} TCP connection(s) open.");
+                waiting_for_free_connections = false;
+            } else {
+                break;
+            },
+            con = listener.accept(), if !waiting_for_free_connections => {
+                log::debug!("Trying to accept new client connection.");
+                match con {
+                    Ok((socket, remote_addr)) => {
+                        open_connections += 1;
+                        log::debug!("{open_connections} TCP connection(s) open.");
+                        let worterbuch = worterbuch.clone();
+                        let conn_closed_tx = conn_closed_tx.clone();
+                        spawn(async move {
+                            if let Err(e) = serve(remote_addr, worterbuch, socket).await {
+                                log::error!("Connection to client {remote_addr} closed with error: {e}");
+                            }
+                            conn_closed_tx.send(()).await.ok();
+                        });
+                    },
+                    Err(e) => {
+                        log::error!("Error while trying to accept client connection: {e}");
+                        log::warn!("{open_connections} TCP connections open, waiting for connections to close.");
+                        waiting_for_free_connections = true;
                     }
-                });
+                }
+                log::debug!("Ready to accept new connections.");
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -77,14 +105,17 @@ async fn serve(
 
     log::info!("New client connected: {client_id} ({remote_addr})");
 
-    worterbuch
+    if let Err(e) = worterbuch
         .connected(client_id, remote_addr, Protocol::TCP)
-        .await?;
+        .await
+    {
+        log::error!("Error while adding new client: {e}");
+    } else {
+        log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-    log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
-
-    if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
-        log::error!("Error in serve loop: {e}");
+        if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
+            log::error!("Error in serve loop: {e}");
+        }
     }
 
     worterbuch.disconnected(client_id, remote_addr).await?;
@@ -165,7 +196,7 @@ async fn serve_loop(
                 },
                 Ok(None) =>  break,
                 Err(e) => {
-                    log::info!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
+                    log::warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
                     break;
                 }
             } ,
