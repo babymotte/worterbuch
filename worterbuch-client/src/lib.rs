@@ -766,9 +766,20 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
-    log::debug!("Connecting to server {host_addr}:{port} over tcp …");
+    let timeout = config.connection_timeout.clone();
+    log::debug!(
+        "Connecting to server tcp://{host_addr}:{port} (timeout: {} ms) …",
+        timeout.as_millis()
+    );
 
-    let stream = TcpStream::connect(format!("{host_addr}:{port}")).await?;
+    let stream = select! {
+        conn = TcpStream::connect(format!("{host_addr}:{port}")) => conn,
+        _ = sleep(timeout) => {
+            log::error!("Timeout while waiting for TCP connection.");
+            return Err(ConnectionError::Timeout);
+        },
+    }?;
+    log::debug!("Connected to tcp://{host_addr}:{port}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
     let mut tcp_rx = BufReader::new(tcp_rx);
 
@@ -784,36 +795,42 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                 protocol_version,
                 authorization_required,
             },
-    } = match tcp_rx.read_line(&mut line_buf).await {
-        Ok(0) => {
-            return Err(ConnectionError::IoError(io::Error::new(
-                io::ErrorKind::ConnectionReset,
-                "connection closed before welcome message",
-            )))
-        }
-        Ok(_) => {
-            let msg = json::from_str::<SM>(&line_buf);
-            line_buf.clear();
-            match msg {
-                Ok(SM::Welcome(welcome)) => {
-                    log::debug!("Welcome message received: {welcome:?}");
-                    welcome
-                }
-                Ok(msg) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("server sent invalid welcome message: {msg:?}"),
-                    )))
-                }
-                Err(e) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("error receiving welcome message: {e}"),
-                    )))
+    } = select! {
+        line = tcp_rx.read_line(&mut line_buf) => match line {
+            Ok(0) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before welcome message",
+                )))
+            }
+            Ok(_) => {
+                let msg = json::from_str::<SM>(&line_buf);
+                line_buf.clear();
+                match msg {
+                    Ok(SM::Welcome(welcome)) => {
+                        log::debug!("Welcome message received: {welcome:?}");
+                        welcome
+                    }
+                    Ok(msg) => {
+                        return Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid welcome message: {msg:?}"),
+                        )))
+                    }
+                    Err(e) => {
+                        return Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error receiving welcome message: {e}"),
+                        )))
+                    }
                 }
             }
-        }
-        Err(e) => return Err(ConnectionError::IoError(e)),
+            Err(e) => return Err(ConnectionError::IoError(e)),
+        },
+        _ = sleep(timeout) => {
+            log::error!("Timeout while waiting for welcome message.");
+            return Err(ConnectionError::Timeout);
+        },
     };
 
     if authorization_required {
@@ -900,7 +917,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
 
     spawn(async move {
         run(cmd_rx, client_socket, stop_rx, config).await;
-        log::info!("Connection closed.");
+        log::debug!("Connection closed.");
         on_disconnect.await;
     });
 
@@ -924,7 +941,7 @@ async fn run(
         log::trace!("loop: wait for command / ws message / shutdown request");
         select! {
             _ = stop_rx.recv() => {
-                log::info!("Shutdown request received.");
+                log::debug!("Shutdown request received.");
                 break;
             },
             _ = keepalive_timer.tick() => {

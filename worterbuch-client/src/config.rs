@@ -26,6 +26,7 @@ pub struct Config {
     pub port: u16,
     pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
+    pub connection_timeout: Duration,
     pub auth_token: Option<String>,
 }
 
@@ -57,6 +58,12 @@ impl Config {
             }
         }
 
+        if let Ok(val) = env::var("WORTERBUCH_CONNECTION_TIMEOUT") {
+            if let Ok(secs) = val.parse() {
+                self.connection_timeout = Duration::from_secs(secs);
+            }
+        }
+
         if let Ok(val) = env::var("WORTERBUCH_AUTH_TOKEN") {
             self.auth_token = Some(val);
         }
@@ -70,6 +77,7 @@ impl Default for Config {
         let port = 8080;
         let keepalive_timeout = Duration::from_secs(5);
         let send_timeout = Duration::from_secs(5);
+        let connection_timeout = Duration::from_secs(5);
 
         Config {
             proto,
@@ -77,6 +85,7 @@ impl Default for Config {
             port,
             keepalive_timeout,
             send_timeout,
+            connection_timeout,
             auth_token: None,
         }
     }
