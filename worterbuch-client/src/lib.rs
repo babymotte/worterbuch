@@ -766,7 +766,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     on_disconnect: F,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
-    let timeout = config.connection_timeout.clone();
+    let timeout = config.connection_timeout;
     log::debug!(
         "Connecting to server tcp://{host_addr}:{port} (timeout: {} ms) …",
         timeout.as_millis()

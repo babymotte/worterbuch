@@ -33,7 +33,7 @@ async fn main() -> miette::Result<()> {
     tracing_subscriber::fmt::init();
 
     Toplevel::new()
-        .start("worterbuch-speedtest", move |s| run_speedtests_with_ui(s))
+        .start("worterbuch-speedtest", run_speedtests_with_ui)
         .catch_signals()
         .handle_shutdown_requests(Duration::from_millis(1000))
         .await

@@ -148,7 +148,7 @@ impl Stats {
         StatSummary {
             send_rate: total_send_rate as u64,
             receive_rate: total_receive_rate as u64,
-            lag: total_lag as u64,
+            lag: total_lag,
             severity: Severity::Green,
         }
     }
@@ -214,7 +214,7 @@ pub async fn start_throughput_test(
                         current_agents = agents;
                         current_target_rate = target_rate;
 
-                        'outer: while &agent_apis.len() < &agents {
+                        'outer: while agent_apis.len() < agents {
                             let i = agent_apis.len();
                             let (agent_tx, agent_rx) = mpsc::channel(1);
                             let result_tx = status_tx.clone();
@@ -240,7 +240,7 @@ pub async fn start_throughput_test(
                             ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
                         }
 
-                        while  &agent_apis.len() > &agents {
+                        while  agent_apis.len() > agents {
                             if let Some(api) = agent_apis.pop() {
                                 api.send(AgentApi::Close).await.into_diagnostic()?;
                             }
@@ -263,7 +263,7 @@ pub async fn start_throughput_test(
                     Api::SetAgents(agents) => {
                         current_agents = agents;
 
-                        'outer: while &agent_apis.len() < &agents {
+                        'outer: while agent_apis.len() < agents {
                             let i = agent_apis.len();
                             let (agent_tx, agent_rx) = mpsc::channel(1);
                             let result_tx = status_tx.clone();
@@ -289,7 +289,7 @@ pub async fn start_throughput_test(
                             ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
                         }
 
-                        while  &agent_apis.len() > &agents {
+                        while  agent_apis.len() > agents {
                             if let Some(api) = agent_apis.pop() {
                                 api.send(AgentApi::Close).await.into_diagnostic()?;
                             }

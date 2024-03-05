@@ -56,9 +56,9 @@ pub async fn start(
 
     loop {
         select! {
-            recv = conn_closed_rx.recv() => if let Some(_) = recv {
+            recv = conn_closed_rx.recv() => if recv.is_some() {
                 open_connections -= 1;
-                while let Ok(_) = conn_closed_rx.try_recv() {
+                while conn_closed_rx.try_recv().is_ok() {
                     open_connections -= 1;
                 }
                 log::debug!("{open_connections} TCP connection(s) open.");
