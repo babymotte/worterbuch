@@ -28,10 +28,16 @@ jobs:
           override: true
       - uses: davidB/rust-cargo-make@v1
       - name: Run linter FOSS
+        env:
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
         run: cargo clippy
       - name: Run linter commercial
+        env:
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
         run: cargo clippy --features=commercial
       - name: Run tests FOSS
         run: cargo test
       - name: Run tests commercial
+        env:
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
         run: cargo test --features=commercial
