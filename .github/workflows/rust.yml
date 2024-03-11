@@ -39,6 +39,6 @@ jobs:
         run: cargo test
       - name: Run tests commercial
         env:
-          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_TEST_LICENSE_SECRET }}
           WORTERBUCH_LICENSE_FILE: ./test/license
-        run: echo "${{ secrets.WORTERBUCH_LICENSE_FILE }}" > ./worterbuch/test/license && cargo test --features=commercial
+        run: cargo test --features=commercial
