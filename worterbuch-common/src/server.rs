@@ -278,7 +278,30 @@ pub struct LsState {
 
 impl fmt::Display for LsState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.children.join(", "))
+        write!(
+            f,
+            "{}",
+            self.children
+                .iter()
+                .map(escape_path_segment)
+                .reduce(|a, b| format!("{a}\t{b}"))
+                .unwrap_or("".to_owned())
+        )
+    }
+}
+
+fn escape_path_segment(str: impl AsRef<str>) -> String {
+    let str = str.as_ref();
+    let white = str.contains(char::is_whitespace);
+    let single_quote = str.contains('\'');
+    let quote = str.contains('"');
+
+    if (quote || white) && !single_quote {
+        format!("'{str}'")
+    } else if single_quote {
+        str.replace('\'', r#"\'"#)
+    } else {
+        str.to_owned()
     }
 }
 
