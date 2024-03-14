@@ -1,297 +1,639 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'worterbuch'",
-      "cargo": {
-        "args": ["build"],
-        "filter": {
-          "name": "worterbuch",
-          "kind": "bin"
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'worterbuch-common'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=worterbuch-common"
+                ],
+                "filter": {
+                    "name": "worterbuch-common",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'worterbuch-client'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=worterbuch-client"
+                ],
+                "filter": {
+                    "name": "worterbuch-client",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'worterbuch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=worterbuch"
+                ],
+                "filter": {
+                    "name": "worterbuch",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'worterbuch'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=worterbuch",
+                    "--package=worterbuch"
+                ],
+                "filter": {
+                    "name": "worterbuch",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'worterbuch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=worterbuch",
+                    "--package=worterbuch"
+                ],
+                "filter": {
+                    "name": "worterbuch",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'store-test'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=store-test",
+                    "--package=worterbuch"
+                ],
+                "filter": {
+                    "name": "store-test",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'store-test'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=store-test",
+                    "--package=worterbuch"
+                ],
+                "filter": {
+                    "name": "store-test",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'worterbuch-cli'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "worterbuch-cli",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbsub'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbsub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbsub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbsub'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbsub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbsub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbset'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbset",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbset",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbset'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbset",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbset",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbpub'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbpub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbpub'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbpub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbls'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbls",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbls",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbls'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbls",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbls",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbpsub'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbpsub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpsub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbpsub'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbpsub",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpsub",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbget'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbget",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbget",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbget'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbget",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbget",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbdel'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbdel",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbdel",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbdel'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbdel",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbdel",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbpget'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbpget",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpget",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbpget'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbpget",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpget",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbpdel'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbpdel",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpdel",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbpdel'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbpdel",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpdel",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbpubs'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbpubs",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpubs",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbpubs'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbpubs",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbpubs",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbsets'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbsets",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbsets",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbsets'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbsets",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbsets",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'wbjson'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=wbjson",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbjson",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'wbjson'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=wbjson",
+                    "--package=worterbuch-cli"
+                ],
+                "filter": {
+                    "name": "wbjson",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'worterbuch-speedtest'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=worterbuch-speedtest",
+                    "--package=worterbuch-speedtest"
+                ],
+                "filter": {
+                    "name": "worterbuch-speedtest",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'worterbuch-speedtest'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=worterbuch-speedtest",
+                    "--package=worterbuch-speedtest"
+                ],
+                "filter": {
+                    "name": "worterbuch-speedtest",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
         }
-      },
-      "args": [],
-      "env": {
-        // "WORTERBUCH_AUTH_TOKEN": "Iknw8OFYpEf0JfnjMHc9q8KKfGx7htZ2PDJcVJebFuwo5TbTZO1HA6Z0lFSaKaadtEfe2I6ZE91YBg54kHQOW6gORuj5PI9oqiQbWw0NpumozQlJ1JjDMauwEvRR0b0Jg2dP35aO64HAkjLGI5eqxe1dsp8qJyqBybyegDRGYHeSN4EGCEfUy6I7ckCR7TGI3QS3VnZ0VI6wdHGyvKnbmYjwHFvK79jKexJMhKcJ2JgUxnNFQqQ3CnrRukS2Zhcw"
-      },
-      "cwd": "${workspaceFolder}/worterbuch"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'worterbuch'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=worterbuch",
-          "--package=worterbuch"
-        ],
-        "filter": {
-          "name": "worterbuch",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'worterbuch-cli'",
-      "cargo": {
-        "args": ["test", "--no-run", "--lib", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "worterbuch-cli",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbsub'",
-      "cargo": {
-        "args": ["build", "--bin=wbsub", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbsub",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbsub'",
-      "cargo": {
-        "args": ["test", "--no-run", "--bin=wbsub", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbsub",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbset'",
-      "cargo": {
-        "args": ["build", "--bin=wbset", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbset",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbset'",
-      "cargo": {
-        "args": ["test", "--no-run", "--bin=wbset", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbset",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbpsub'",
-      "cargo": {
-        "args": ["build", "--bin=wbpsub", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbpsub",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbpsub'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=wbpsub",
-          "--package=worterbuch-cli"
-        ],
-        "filter": {
-          "name": "wbpsub",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbget'",
-      "cargo": {
-        "args": ["build", "--bin=wbget", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbget",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbget'",
-      "cargo": {
-        "args": ["test", "--no-run", "--bin=wbget", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbget",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbpget'",
-      "cargo": {
-        "args": ["build", "--bin=wbpget", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbpget",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbpget'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=wbpget",
-          "--package=worterbuch-cli"
-        ],
-        "filter": {
-          "name": "wbpget",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbimp'",
-      "cargo": {
-        "args": ["build", "--bin=wbimp", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbimp",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbimp'",
-      "cargo": {
-        "args": ["test", "--no-run", "--bin=wbimp", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbimp",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbsend'",
-      "cargo": {
-        "args": ["build", "--bin=wbsend", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbsend",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbsend'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=wbsend",
-          "--package=worterbuch-cli"
-        ],
-        "filter": {
-          "name": "wbsend",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'wbexp'",
-      "cargo": {
-        "args": ["build", "--bin=wbexp", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbexp",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'wbexp'",
-      "cargo": {
-        "args": ["test", "--no-run", "--bin=wbexp", "--package=worterbuch-cli"],
-        "filter": {
-          "name": "wbexp",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    }
-  ]
+    ]
 }
