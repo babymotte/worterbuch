@@ -680,14 +680,14 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
                 Err(e) => {
                     return Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("error receiving welcome message: {e}"),
+                        format!("error parsing welcome message '{data}': {e}"),
                     )))
                 }
             },
             Err(e) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("error receiving welcome message: {e}"),
+                    format!("invalid welcome message '{msg:?}': {e}"),
                 )))
             }
         },
@@ -805,8 +805,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             }
             Ok(_) => {
                 let msg = json::from_str::<SM>(&line_buf);
-                line_buf.clear();
-                match msg {
+                let msg = match msg {
                     Ok(SM::Welcome(welcome)) => {
                         log::debug!("Welcome message received: {welcome:?}");
                         welcome
@@ -820,10 +819,12 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                     Err(e) => {
                         return Err(ConnectionError::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("error receiving welcome message: {e}"),
+                            format!("error parsing welcome message '{line_buf}': {e}"),
                         )))
                     }
-                }
+                };
+                line_buf.clear();
+                msg
             }
             Err(e) => return Err(ConnectionError::IoError(e)),
         },
