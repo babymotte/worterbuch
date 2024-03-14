@@ -31,7 +31,7 @@ pub mod license;
 mod persistence;
 mod server;
 mod stats;
-mod store;
+pub mod store;
 mod subscribers;
 mod worterbuch;
 

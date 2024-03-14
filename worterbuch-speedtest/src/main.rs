@@ -17,9 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod latency;
 mod throughput;
 mod web_ui;
 
+use latency::start_latency_test;
 use miette::IntoDiagnostic;
 use std::time::Duration;
 use throughput::start_throughput_test;
@@ -43,11 +45,26 @@ async fn main() -> miette::Result<()> {
 }
 
 async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
-    let (api_tx, api_rx) = mpsc::channel(1);
-    let (ui_tx, ui_rx) = mpsc::channel(1);
+    let (throughput_api_tx, throughput_api_rx) = mpsc::channel(1);
+    let (latency_api_tx, latency_api_rx) = mpsc::channel(1);
+    let (throughput_ui_tx, throughput_ui_rx) = mpsc::channel(1);
+    let (latency_ui_tx, latency_ui_rx) = mpsc::channel(1);
 
-    subsys.start("speedtest-web-ui", |s| run_web_ui(s, ui_rx, api_tx));
-    subsys.start("throughput", |s| start_throughput_test(s, ui_tx, api_rx));
+    subsys.start("speedtest-web-ui", |s| {
+        run_web_ui(
+            s,
+            throughput_ui_rx,
+            latency_ui_rx,
+            throughput_api_tx,
+            latency_api_tx,
+        )
+    });
+    subsys.start("throughput", move |s| {
+        start_throughput_test(s, throughput_ui_tx, throughput_api_rx)
+    });
+    subsys.start("latency", move |s| {
+        start_latency_test(s, latency_ui_tx, latency_api_rx)
+    });
 
     Ok(())
 }
