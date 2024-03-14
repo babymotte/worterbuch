@@ -404,53 +404,67 @@ impl Store {
         value: Value,
     ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
-        let mut current_node = &mut self.data;
-        let mut current_subscribers = Some(&self.subscribers);
+        let changed = {
+            let mut current_node = &mut self.data;
+            let mut current_subscribers = Some(&self.subscribers);
 
-        for elem in path {
-            // TODO don't copy unless necessary
-            let mut new_children: Vec<String> =
-                current_node.t.keys().map(ToOwned::to_owned).collect();
-            current_node = match current_node.t.entry(elem.to_owned()) {
-                Entry::Occupied(e) => e.into_mut(),
-                Entry::Vacant(e) => {
-                    if let Some(subscribers) = current_subscribers {
-                        if !subscribers.ls_subscribers.is_empty() {
-                            let subscribers = subscribers.ls_subscribers.clone();
-                            new_children.push(elem.to_owned());
-                            ls_subscribers.push((subscribers, new_children));
+            for (i, elem) in path.iter().enumerate() {
+                current_node = match current_node.t.entry(elem.to_owned()) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => {
+                        if let Some(subscribers) = current_subscribers {
+                            if !subscribers.ls_subscribers.is_empty() {
+                                let subscribers = subscribers.ls_subscribers.clone();
+                                ls_subscribers.push((subscribers, &path[0..i]));
+                            }
                         }
+                        e.insert(Node::default())
                     }
-                    e.insert(Node::default())
-                }
+                };
+
+                current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
+            }
+
+            let (inserted, changed) = if let Some(val) = &current_node.v {
+                (false, val != &value)
+            } else {
+                (true, true)
             };
 
-            current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
-        }
+            current_node.v = Some(value);
 
-        let (inserted, changed) = if let Some(val) = &current_node.v {
-            (false, val != &value)
-        } else {
-            (true, true)
+            if inserted {
+                self.len += 1;
+            }
+
+            changed
         };
 
-        current_node.v = Some(value);
-
-        if inserted {
-            self.len += 1;
-        }
+        let ls_subscribers = ls_subscribers
+            .into_iter()
+            .filter_map(|(subscribers, path)| {
+                {
+                    if path.is_empty() {
+                        Some(self.ls_root())
+                    } else {
+                        self.ls(path)
+                    }
+                }
+                .map(|it| (subscribers, it))
+            })
+            .collect();
 
         Ok((changed, ls_subscribers))
     }
 
-    pub fn ls(&self, path: &[&str]) -> Option<Vec<RegularKeySegment>> {
+    pub fn ls(&self, path: &[impl AsRef<str>]) -> Option<Vec<RegularKeySegment>> {
         if path.is_empty() {
             panic!("path must not be empty!");
         }
         let mut current = &self.data;
 
         for elem in path {
-            current = match current.t.get(*elem) {
+            current = match current.t.get(elem.as_ref()) {
                 Some(e) => e,
                 None => return None,
             }
@@ -594,6 +608,8 @@ fn concat_key(path: &[&str], key: Option<&str>) -> String {
 mod test {
     use super::*;
     use serde_json::json;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
     use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
@@ -772,5 +788,43 @@ mod test {
             .iter()
             .find(|e| e == &&("trolo/c/b/d".to_owned(), json!("5")).into())
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn insert_detects_ls_subscribers_empty() {
+        let mut store = Store::default();
+        let parent = ["hello".to_owned(), "there".to_owned()];
+        let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
+
+        let (_, subscribers) = store.insert(&path, json!("Hello!")).unwrap();
+        assert!(subscribers.is_empty());
+
+        let (tx, _) = mpsc::channel(1);
+        let subscriber = LsSubscriber::new(
+            SubscriptionId::new(Uuid::new_v4(), 123),
+            parent.clone().into(),
+            tx,
+        );
+        store.add_ls_subscriber(&parent, subscriber);
+        let (_, subscribers) = store.insert(&path, json!("Hello There!")).unwrap();
+        assert!(subscribers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn insert_detects_ls_subscribers_not_empty() {
+        let mut store = Store::default();
+        let parent = ["hello".to_owned(), "there".to_owned()];
+        let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
+
+        let (tx, _) = mpsc::channel(1);
+        let subscriber = LsSubscriber::new(
+            SubscriptionId::new(Uuid::new_v4(), 123),
+            parent.clone().into(),
+            tx,
+        );
+        store.add_ls_subscriber(&parent, subscriber);
+        let (_, subscribers) = store.insert(&path, json!("Hello There!")).unwrap();
+        assert_eq!(subscribers.len(), 1);
+        assert_eq!(subscribers[0].1, vec!["world".to_owned()]);
     }
 }
