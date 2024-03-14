@@ -21,10 +21,7 @@ pub fn generate_dummy_data<E>(
     values_per_key: usize,
     mut consumer: impl KeyValueConsumer<Error = E>,
 ) -> Result<(), E> {
-    let mut n = Vec::with_capacity(key_length as usize);
-    for _ in 0..key_length {
-        n.push(0);
-    }
+    let mut n: Vec<usize> = vec![0; key_length as usize];
     let mut prefix = Vec::new();
     'outer: while n[prefix.len()] < n_ary_keys {
         while prefix.len() < key_length as usize {
