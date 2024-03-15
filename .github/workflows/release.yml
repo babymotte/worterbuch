@@ -32,10 +32,15 @@ jobs:
       - name: Run linter FOSS
         run: cargo clippy
       - name: Run linter commercial
+        env:
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
         run: cargo clippy --features=commercial
       - name: Run tests FOSS
         run: cargo test
       - name: Run tests commercial
+        env:
+          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_TEST_LICENSE_SECRET }}
+          WORTERBUCH_LICENSE_FILE: ./test/license
         run: cargo test --features=commercial
 
   release:
