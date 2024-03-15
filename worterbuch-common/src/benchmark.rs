@@ -15,6 +15,13 @@ impl KeyValueConsumer for mpsc::SyncSender<(Vec<String>, Value)> {
     }
 }
 
+impl KeyValueConsumer for tokio::sync::mpsc::Sender<(Vec<String>, Value)> {
+    type Error = tokio::sync::mpsc::error::SendError<(Vec<String>, Value)>;
+    fn accept(&mut self, key: Vec<String>, values: Value) -> Result<(), Self::Error> {
+        self.blocking_send((key, values))
+    }
+}
+
 pub fn generate_dummy_data<E>(
     n_ary_keys: usize,
     key_length: u32,

@@ -353,7 +353,7 @@ async fn client(
     let mut sent_offset = 0u64;
     let mut received_offset = 0u64;
 
-    let key = topic!("speedtest/client", id, "offset");
+    let key = topic!("speedtest/throughput/client", id, "offset");
 
     let (mut rx, _) = wb
         .subscribe::<u64>(key.clone(), false, true)

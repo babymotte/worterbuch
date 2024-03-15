@@ -17,19 +17,24 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::time::Duration;
-
 use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
-use tokio::{select, spawn, sync::mpsc, time::sleep};
+use std::{thread, time::Instant};
+use tokio::{
+    select, spawn,
+    sync::{mpsc, oneshot},
+};
 use tokio_graceful_shutdown::SubsystemHandle;
+use worterbuch_client::{
+    benchmark::generate_dummy_data, connect_with_default_config, ServerMessage,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatencySettings {
     pub publishers: usize,
     pub n_ary_keys: usize,
-    pub key_length: usize,
+    pub key_length: u32,
     pub messages_per_key: usize,
     pub subscribers: usize,
     pub total_messages: usize,
@@ -52,23 +57,176 @@ pub async fn start_latency_test(
     ui_tx: mpsc::Sender<UiApi>,
     mut api_rx: mpsc::Receiver<Api>,
 ) -> miette::Result<()> {
+    let mut stop_tx = None;
+
     loop {
         select! {
-            recv = api_rx.recv() => {
-                log::warn!("{recv:?}");
-                ui_tx.send(UiApi::Running).await.into_diagnostic()?;
-                let ui_tx = ui_tx.clone();
-                // TODO
-                spawn(async move {
-                    sleep(Duration::from_secs(2)).await;
-                    if let Err(e) = ui_tx.send(UiApi::Stopped).await {
-                        log::error!("Error sending test results: {e}");
-                    }
-                });
+            recv = api_rx.recv() => if let Some(msg) = recv {
+                stop_tx = process_msg(msg, &ui_tx, stop_tx).await?;
+            } else {
+                break;
             },
             _ = subsys.on_shutdown_requested() => break,
         }
     }
 
     Ok(())
+}
+
+async fn process_msg(
+    msg: Api,
+    ui_tx: &mpsc::Sender<UiApi>,
+    current_stop_tx: Option<oneshot::Sender<()>>,
+) -> miette::Result<Option<oneshot::Sender<()>>> {
+    match msg {
+        Api::Start(settings) => {
+            let start = match &current_stop_tx {
+                Some(tx) => tx.is_closed(),
+                None => true,
+            };
+
+            if start {
+                let (stop_tx, stop_rx) = oneshot::channel();
+                spawn(run_latency_test(settings, ui_tx.clone(), stop_rx));
+                Ok(Some(stop_tx))
+            } else {
+                Ok(current_stop_tx)
+            }
+        }
+        Api::Stop => {
+            if let Some(tx) = current_stop_tx {
+                tx.send(()).ok();
+            }
+            Ok(None)
+        }
+    }
+}
+
+async fn run_latency_test(
+    settings: LatencySettings,
+    ui_tx: mpsc::Sender<UiApi>,
+    mut stop_rx: oneshot::Receiver<()>,
+) -> miette::Result<()> {
+    log::info!("Starting latency test.");
+
+    let mut stop_txs = vec![];
+    let mut handles = vec![];
+
+    let start = Instant::now();
+
+    for _ in 0..settings.publishers {
+        let (stop_tx, stop_rx) = oneshot::channel();
+        stop_txs.push(stop_tx);
+        let settings = settings.clone();
+        handles.push(spawn(start_sender(settings, stop_rx)));
+    }
+
+    let mut counter = 0;
+
+    for handle in handles {
+        select! {
+            set = handle => if let Ok(set) = set { counter += set },
+            _ = &mut stop_rx => break,
+        }
+    }
+
+    for tx in stop_txs {
+        tx.send(()).ok();
+    }
+
+    let duration = start.elapsed();
+
+    log::info!(
+        "Test stopped after {} s ({} msg/s)",
+        duration.as_secs_f32(),
+        counter as f32 / duration.as_secs_f32()
+    );
+
+    ui_tx.send(UiApi::Stopped).await.into_diagnostic()?;
+
+    Ok(())
+}
+
+async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<()>) -> usize {
+    let (dummy_tx, mut dummy_rx) = mpsc::channel(1000);
+
+    let n_ary_keys = settings.n_ary_keys;
+    let key_length = settings.key_length;
+    let values_per_key = settings.messages_per_key;
+    thread::spawn(move || {
+        if let Err(e) = generate_dummy_data(n_ary_keys, key_length, values_per_key, dummy_tx) {
+            log::error!("Error sending dummy data: {e}");
+        }
+    });
+
+    let (disco_tx, mut disco_rx) = oneshot::channel();
+
+    let wb = match connect_with_default_config(async {
+        disco_tx.send(()).ok();
+    })
+    .await
+    {
+        Ok((wb, _)) => wb,
+        Err(e) => {
+            log::error!("Could not start worterbuch client: {e}");
+            return 0;
+        }
+    };
+
+    let mut counter = 0;
+    let mut tid_sent = 0;
+    let mut tid_recieved = 0;
+
+    let mut wb_rx = match wb.all_messages().await.into_diagnostic() {
+        Ok(it) => it,
+        Err(e) => {
+            log::error!("Could not subscribe to all wb messages: {e}");
+            return counter;
+        }
+    };
+
+    loop {
+        select! {
+            recv = dummy_rx.recv() => if let Some(data) = recv {
+                let key = format!("speedtest/latency/{}",data.0.join("/"));
+                let value = data.1;
+                match wb.set(key, &value).await.into_diagnostic()  {
+                    Ok(t) => tid_sent = t,
+                    Err(e) => {
+                        log::error!("Error setting value: {e}");
+                        return counter;
+                    }
+                }
+                counter += 1;
+            } else {
+                log::info!("All values set.");
+                break;
+            },
+            msg = wb_rx.recv() => if let Some(msg) = msg {
+                if let ServerMessage::Ack(ack) = msg {
+                    tid_recieved = ack.transaction_id;
+                }
+            } else {
+                return counter;
+            },
+            _ = &mut disco_rx => return counter,
+            _ = &mut stop_rx => return counter,
+        }
+    }
+
+    log::info!("Waiting for acks.");
+
+    while tid_recieved < tid_sent {
+        if let Some(msg) = wb_rx.recv().await {
+            if let ServerMessage::Ack(ack) = msg {
+                tid_recieved = ack.transaction_id;
+            }
+        } else {
+            break;
+        }
+    }
+
+    wb.close().await.ok();
+
+    counter
 }

@@ -153,6 +153,15 @@ async fn latency_start(
 }
 
 #[handler]
+async fn latency_stop(Data(api): Data<&mpsc::Sender<latency::Api>>) -> Result<Json<Value>> {
+    if let Err(e) = api.send(latency::Api::Stop).await {
+        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    Ok(Json(json!("Ok")))
+}
+
+#[handler]
 fn latency_events(
     Data(tx): Data<&broadcast::Sender<latency::UiApi>>,
     Data(running): Data<&Arc<AtomicBool>>,
@@ -217,6 +226,10 @@ pub async fn run_web_ui(
         .at(
             "/latency/start",
             post(latency_start.with(AddData::new(latency_api.clone()))),
+        )
+        .at(
+            "/latency/stop",
+            post(latency_stop.with(AddData::new(latency_api.clone()))),
         )
         .at(
             "/latency/events",
