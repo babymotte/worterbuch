@@ -17,7 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{auth::get_claims, Config};
+use crate::{
+    auth::{get_claims, JwtClaims},
+    Config,
+};
 use poem::{
     http::StatusCode,
     middleware::AddData,
@@ -51,18 +54,34 @@ pub struct BearerAuthEndpoint<E> {
     config: Config,
 }
 
+impl<E> BearerAuthEndpoint<E> {
+    fn auth_required(&self) -> bool {
+        self.config.auth_token.is_some()
+    }
+}
+
 #[poem::async_trait]
 impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
     type Output = E::Output;
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
-        let jwt = req
-            .headers()
-            .typed_get::<headers::Authorization<Bearer>>()
-            .map(|it| it.0.token().to_owned());
+        if self.auth_required() {
+            let jwt = req
+                .headers()
+                .typed_get::<headers::Authorization<Bearer>>()
+                .map(|it| it.0.token().to_owned());
 
-        let claims = get_claims(jwt.as_deref(), &self.config)
-            .map_err(|e| poem::Error::new(e, StatusCode::UNAUTHORIZED))?;
-        (&self.ep).with(AddData::new(claims)).call(req).await
+            let claims = get_claims(jwt.as_deref(), &self.config)
+                .map_err(|e| poem::Error::new(e, StatusCode::UNAUTHORIZED))?;
+            (&self.ep)
+                .with(AddData::<Option<JwtClaims>>::new(Some(claims)))
+                .call(req)
+                .await
+        } else {
+            (&self.ep)
+                .with(AddData::<Option<JwtClaims>>::new(None))
+                .call(req)
+                .await
+        }
     }
 }

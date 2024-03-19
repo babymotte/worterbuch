@@ -113,10 +113,12 @@ async fn get_value(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Response> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let pointer = params.get("pointer");
     let raw = params.get("raw");
@@ -153,10 +155,12 @@ async fn get_value(
 async fn pget(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &pattern) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &pattern) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     match wb.pget(pattern).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -169,10 +173,12 @@ async fn set(
     Path(key): Path<Key>,
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
-    if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     match wb.set(key, value, client_id.to_string()).await {
@@ -186,10 +192,12 @@ async fn publish(
     Path(key): Path<Key>,
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
-    if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     match wb.publish(key, value).await {
         Ok(()) => Ok(Json("Ok")),
@@ -201,10 +209,12 @@ async fn publish(
 async fn delete_value(
     Path(key): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Value>> {
-    if let Err(e) = privileges.authorize(&Privilege::Delete, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Delete, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     match wb.delete(key, client_id.to_string()).await {
@@ -217,10 +227,12 @@ async fn delete_value(
 async fn pdelete(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
-    if let Err(e) = privileges.authorize(&Privilege::Delete, &pattern) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Delete, &pattern) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     match wb.pdelete(pattern, client_id.to_string()).await {
@@ -233,10 +245,12 @@ async fn pdelete(
 async fn ls(
     Path(parent): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     match wb.ls(Some(parent)).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -247,10 +261,12 @@ async fn ls(
 #[handler]
 async fn ls_root(
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     match wb.ls(None).await {
         Ok(kvps) => Ok(Json(kvps)),
@@ -263,11 +279,13 @@ async fn subscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -362,11 +380,13 @@ async fn psubscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -427,11 +447,13 @@ async fn psubscribe(
 #[handler]
 async fn subscribels_root(
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -482,11 +504,13 @@ async fn subscribels_root(
 async fn subscribels(
     Path(parent): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&JwtClaims>,
+    Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
-    if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
-        return to_error_response(WorterbuchError::Unauthorized(e));
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
