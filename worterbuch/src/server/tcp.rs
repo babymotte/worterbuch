@@ -148,7 +148,12 @@ async fn serve_loop(
     // tcp socket send loop
     spawn(async move {
         while let Some(msg) = tcp_send_rx.recv().await {
-            send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx).await;
+            if let Err(e) =
+                send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx).await
+            {
+                log::error!("Erros sending WS message: {e}");
+                break;
+            }
         }
     });
 
@@ -175,9 +180,9 @@ async fn serve_loop(
                     last_keepalive_rx = Instant::now();
 
                     // drain the send buffer to make room for the response
-                        while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                            last_keepalive_tx = keepalive?;
-                        }
+                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
+                        last_keepalive_tx = keepalive;
+                    }
                     log::trace!("Processing incoming message …");
                     let (msg_processed, auth) = process_incoming_message(
                         client_id,
@@ -202,9 +207,9 @@ async fn serve_loop(
             } ,
             recv = keepalive_tx_rx.recv() => match recv {
                 Some(keepalive) => {
-                    last_keepalive_tx = keepalive?;
+                    last_keepalive_tx = keepalive;
                     while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                        last_keepalive_tx = keepalive?;
+                        last_keepalive_tx = keepalive;
                     }
                 },
                 None => break,
@@ -225,25 +230,20 @@ async fn send_with_timeout<'a>(
     msg: ServerMessage,
     tcp: &mut TcpSender,
     send_timeout: Duration,
-    keepalive_tx_tx: &mpsc::Sender<anyhow::Result<Instant>>,
-) {
+    keepalive_tx_tx: &mpsc::Sender<Instant>,
+) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
     select! {
         r = write_line_and_flush(&msg, tcp)  => {
-            if let Err(e) = r {
-                log::trace!("Writing line produced an error, queuing keepalive error …");
-                keepalive_tx_tx.send(Err(e.into())).await.ok();
-                log::trace!("Writing line produced an error, queuing keepalive error done.");
-            } else {
-                keepalive_tx_tx.try_send(Ok(Instant::now())).ok();
-            }
+            r?;
+            keepalive_tx_tx.try_send(Instant::now()).ok();
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout");
-            log::trace!("Writing line timed out, queuing keepalive error …");
-            keepalive_tx_tx.send(Err(anyhow!("Send timeout"))).await.ok();
-            log::trace!("Writing line timed out, queuing keepalive error done.");
+            return Err(anyhow!("Send timeout"));
         },
     }
     log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
+
+    Ok(())
 }

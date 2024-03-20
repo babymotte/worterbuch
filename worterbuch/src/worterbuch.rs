@@ -296,9 +296,13 @@ impl Worterbuch {
             .insert(&path, value.clone())
             .map_err(|e| e.for_pattern(key.clone()))?;
 
+        log::trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
+        log::trace!("Notifying ls subscribers done.");
+        log::trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false)
             .await;
+        log::trace!("Notifying subscribers done.");
 
         Ok(())
     }
@@ -669,12 +673,8 @@ impl Worterbuch {
             .filter(|s| value_changed || !s.is_unique())
             .collect();
 
-        log::trace!(
-            "Calling {} subscribers: {} = {:?}",
-            filtered_subscribers.len(),
-            key,
-            value
-        );
+        let len = filtered_subscribers.len();
+        log::trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
         for subscriber in filtered_subscribers {
             let kvps = vec![(key.clone(), value.clone()).into()];
             if let Err(e) = if deleted {
@@ -686,12 +686,15 @@ impl Worterbuch {
                 self.subscribers.remove_subscriber(subscriber);
             }
         }
+        log::trace!("Calling {} subscribers: {} = {:?} done.", len, key, value);
     }
 
     async fn notify_ls_subscribers(
         &mut self,
         ls_subscribers: Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) {
+        let len = ls_subscribers.len();
+        log::trace!("Calling {} ls subscribers …", len);
         for (subscribers, new_children) in ls_subscribers {
             for subscriber in subscribers {
                 if let Err(e) = subscriber.send(new_children.clone()).await {
@@ -700,6 +703,7 @@ impl Worterbuch {
                 }
             }
         }
+        log::trace!("Calling {} ls subscribers done.", len);
     }
 
     pub async fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<(String, Value)> {

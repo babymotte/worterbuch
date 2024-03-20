@@ -38,7 +38,6 @@ use tokio::{
     sync::mpsc,
     time::{sleep, MissedTickBehavior},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
 use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
 
@@ -46,28 +45,22 @@ pub(crate) async fn serve(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-    subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
     log::info!("New client connected: {client_id} ({remote_addr})");
 
-    worterbuch
+    if let Err(e) = worterbuch
         .connected(client_id, remote_addr, Protocol::WS)
-        .await?;
-
-    log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
-
-    if let Err(e) = serve_loop(
-        client_id,
-        remote_addr,
-        worterbuch.clone(),
-        websocket,
-        subsys,
-    )
-    .await
+        .await
     {
-        log::error!("Error in serve loop: {e}");
+        log::error!("Error while adding new client: {e}");
+    } else {
+        log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+
+        if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), websocket).await {
+            log::error!("Error in serve loop: {e}");
+        }
     }
 
     worterbuch.disconnected(client_id, remote_addr).await?;
@@ -82,7 +75,6 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-    subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
@@ -99,17 +91,13 @@ async fn serve_loop(
     let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
-    let subsys_send = subsys.clone();
     spawn(async move {
         while let Some(msg) = ws_send_rx.recv().await {
-            send_with_timeout(
-                msg,
-                &mut ws_tx,
-                send_timeout,
-                &keepalive_tx_tx,
-                &subsys_send,
-            )
-            .await;
+            if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, &keepalive_tx_tx).await
+            {
+                log::error!("Erros sending WS message: {e}");
+                break;
+            }
         }
     });
 
@@ -135,9 +123,9 @@ async fn serve_loop(
 
                         // drain the send buffer to make room for the response
                         while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                            last_keepalive_tx = keepalive?;
+                            last_keepalive_tx = keepalive;
                         }
-
+                        log::trace!("Processing incoming message …");
                         if let Message::Text(text) = incoming_msg {
                             let (msg_processed, auth) = process_incoming_message(
                                 client_id,
@@ -165,7 +153,12 @@ async fn serve_loop(
                 break;
             },
             recv = keepalive_tx_rx.recv() => match recv {
-                Some(keepalive) => last_keepalive_tx = keepalive?,
+                Some(keepalive) => {
+                    last_keepalive_tx = keepalive;
+                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
+                        last_keepalive_tx = keepalive;
+                    }
+                },
                 None => break,
             },
             _ = keepalive_timer.tick() => {
@@ -184,35 +177,22 @@ async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
     send_timeout: Duration,
-    result_handler: &mpsc::Sender<anyhow::Result<Instant>>,
-    subsys: &SubsystemHandle,
-) {
-    let json = match serde_json::to_string(&msg) {
-        Ok(it) => it,
-        Err(e) => {
-            handle_encode_error(e, subsys);
-            return;
-        }
-    };
-
+    keepalive_tx_tx: &mpsc::Sender<Instant>,
+) -> anyhow::Result<()> {
+    log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
+    let json = serde_json::to_string(&msg)?;
     let msg = Message::Text(json);
-
     select! {
         r = websocket.send(msg) => {
-            if let Err(e) = r {
-                result_handler.send(Err(e.into())).await.ok();
-            } else {
-                result_handler.send(Ok(Instant::now())).await.ok();
-            }
+            r?;
+            keepalive_tx_tx.try_send(Instant::now()).ok();
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout");
-            result_handler.send(Err(anyhow!("Send timeout"))).await.ok();
+            return Err(anyhow!("Send timeout"));
         },
     }
-}
+    log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
 
-fn handle_encode_error(e: serde_json::Error, subsys: &SubsystemHandle) {
-    log::error!("Failed to encode a value to JSON: {e}");
-    subsys.request_global_shutdown();
+    Ok(())
 }

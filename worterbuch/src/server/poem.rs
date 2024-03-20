@@ -72,17 +72,15 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 fn ws(
     ws: WebSocket,
     Data(wb): Data<&CloneableWbApi>,
-    Data(subsys): Data<&SubsystemHandle>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<impl IntoResponse> {
     log::info!("Client connected");
     let worterbuch = wb.to_owned();
-    let subsys = subsys.to_owned();
     let remote = to_socket_addr(addr)?;
     Ok(ws
         .protocols(vec!["worterbuch"])
         .on_upgrade(move |socket| async move {
-            if let Err(e) = websocket::serve(remote, worterbuch, socket, subsys).await {
+            if let Err(e) = websocket::serve(remote, worterbuch, socket).await {
                 log::error!("Error in WS connection: {e}");
             }
         }))
@@ -576,12 +574,7 @@ pub async fn start(
     log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
     let mut app = Route::new();
 
-    app = app.at(
-        "/ws",
-        get(ws
-            .with(AddData::new(worterbuch.clone()))
-            .with(AddData::new(subsys.clone()))),
-    );
+    app = app.at("/ws", get(ws.with(AddData::new(worterbuch.clone()))));
 
     let config = worterbuch.config().await?;
     let rest_api_version = 1;
