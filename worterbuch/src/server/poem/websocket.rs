@@ -95,7 +95,7 @@ async fn serve_loop(
         while let Some(msg) = ws_send_rx.recv().await {
             if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, &keepalive_tx_tx).await
             {
-                log::error!("Erros sending WS message: {e}");
+                log::error!("Error sending WS message: {e}");
                 break;
             }
         }

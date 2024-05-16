@@ -686,6 +686,8 @@ pub async fn start(
         )
         .await?;
 
+    log::debug!("webserver subsystem completed.");
+
     Ok(())
 }
 

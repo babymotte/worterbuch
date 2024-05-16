@@ -81,6 +81,8 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
         }
     }
 
+    log::debug!("stats subsystem completed.");
+
     Ok(())
 }
 

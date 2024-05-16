@@ -35,16 +35,18 @@ pub mod store;
 mod subscribers;
 mod worterbuch;
 
+use crate::stats::track_stats;
 pub use crate::worterbuch::*;
+use anyhow::Result;
 pub use config::*;
 use serde_json::Value;
 use server::common::{CloneableWbApi, WbFunction};
+use tokio::{
+    select, spawn,
+    sync::{mpsc, oneshot},
+};
 use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_common::{topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
-
-use crate::stats::track_stats;
-use anyhow::Result;
-use tokio::{select, sync::mpsc};
 
 pub const INTERNAL_CLIENT_ID: &str = "internal_client_id";
 
@@ -118,21 +120,51 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         });
     }
 
+    let (persist_tx, mut persist_rx) = oneshot::channel();
+    let mut persist_tx = Some(persist_tx);
+
     loop {
         select! {
             recv = api_rx.recv() => match recv {
                 Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
-            () = subsys.on_shutdown_requested() => break,
+            () = subsys.on_shutdown_requested() => {
+                if use_persistence {
+                    if let Some(persist_tx) = persist_tx.take() {
+                        let api = api.clone();
+                        let config = config.clone();
+                        spawn(async move {
+                            if let Err(e) = persistence::once(&api, &config).await {
+                                log::warn!("Could not persist state: {e}");
+                            }
+                            persist_tx.send(()).ok();
+                        });
+                    }
+                }
+                break;
+            },
         }
     }
 
-    log::info!("Shutting down.");
-
     if use_persistence {
-        persistence::once(&api, config).await?;
+        log::info!("Shutdown sequence triggered, waiting for persistence hook to complete …");
+
+        loop {
+            select! {
+                recv = api_rx.recv() => match recv {
+                    Some(function) => process_api_call(&mut worterbuch, function).await,
+                    None => break,
+                },
+                _ = &mut persist_rx => {
+                    log::info!("Shutdown persistence hook complete.");
+                    break;
+                },
+            }
+        }
     }
+
+    log::debug!("worterbuch subsystem completed.");
 
     Ok(())
 }
