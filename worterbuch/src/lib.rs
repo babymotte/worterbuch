@@ -15,7 +15,10 @@ use worterbuch_common::{digest_token, error::WorterbuchError, topic};
 
 use crate::stats::track_stats;
 use anyhow::Result;
-use tokio::{select, sync::mpsc};
+use tokio::{
+    select, spawn,
+    sync::{mpsc, oneshot},
+};
 
 pub const INTERNAL_CLIENT_ID: &str = "internal_client_id";
 
@@ -86,21 +89,51 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         });
     }
 
+    let (persist_tx, mut persist_rx) = oneshot::channel();
+    let mut persist_tx = Some(persist_tx);
+
     loop {
         select! {
             recv = api_rx.recv() => match recv {
                 Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => break,
+            () = subsys.on_shutdown_requested() => {
+                if use_persistence {
+                    if let Some(persist_tx) = persist_tx.take() {
+                        let api = api.clone();
+                        let config = config.clone();
+                        spawn(async move {
+                            if let Err(e) = persistence::once(&api, &config).await {
+                                log::warn!("Could not persist state: {e}");
+                            }
+                            persist_tx.send(()).ok();
+                        });
+                    }
+                }
+                break;
+            },
         }
     }
 
-    log::info!("Shutting down.");
-
     if use_persistence {
-        persistence::once(&api, config).await?;
+        log::info!("Shutdown sequence triggered, waiting for persistence hook to complete …");
+
+        loop {
+            select! {
+                recv = api_rx.recv() => match recv {
+                    Some(function) => process_api_call(&mut worterbuch, function).await,
+                    None => break,
+                },
+                _ = &mut persist_rx => {
+                    log::info!("Shutdown persistence hook complete.");
+                    break;
+                },
+            }
+        }
     }
+
+    log::debug!("worterbuch subsystem completed.");
 
     Ok(())
 }
