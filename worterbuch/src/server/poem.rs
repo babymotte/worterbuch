@@ -361,7 +361,10 @@ async fn subscribe(
                 if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
                     log::error!("Error stopping subscription: {e}");
                 }
-                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                if let Err(e) = wb_unsub
+                    .disconnected(client_id, remote_addr.to_string())
+                    .await
+                {
                     log::error!("Error disconnecting client: {e}");
                 }
             });
@@ -430,7 +433,10 @@ async fn psubscribe(
                 if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
                     log::error!("Error stopping subscription: {e}");
                 }
-                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                if let Err(e) = wb_unsub
+                    .disconnected(client_id, remote_addr.to_string())
+                    .await
+                {
                     log::error!("Error disconnecting client: {e}");
                 }
             });
@@ -486,7 +492,10 @@ async fn subscribels_root(
                 if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
                     log::error!("Error stopping subscription: {e}");
                 }
-                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                if let Err(e) = wb_unsub
+                    .disconnected(client_id, remote_addr.to_string())
+                    .await
+                {
                     log::error!("Error disconnecting client: {e}");
                 }
             });
@@ -546,7 +555,10 @@ async fn subscribels(
                 if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
                     log::error!("Error stopping subscription: {e}");
                 }
-                if let Err(e) = wb_unsub.disconnected(client_id, remote_addr).await {
+                if let Err(e) = wb_unsub
+                    .disconnected(client_id, remote_addr.to_string())
+                    .await
+                {
                     log::error!("Error disconnecting client: {e}");
                 }
             });
@@ -706,7 +718,10 @@ fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
 }
 
 async fn connected(wb: &CloneableWbApi, client_id: Uuid, remote_addr: SocketAddr) -> Result<()> {
-    if let Err(e) = wb.connected(client_id, remote_addr, Protocol::HTTP).await {
+    if let Err(e) = wb
+        .connected(client_id, remote_addr.to_string(), Protocol::HTTP)
+        .await
+    {
         log::error!("Error adding client {client_id} ({remote_addr}): {e}");
         to_error_response(e)
     } else {

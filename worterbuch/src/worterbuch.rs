@@ -26,7 +26,7 @@ use crate::{
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
-use std::{collections::HashMap, fmt::Display, net::SocketAddr, ops::Deref, time::Duration};
+use std::{collections::HashMap, fmt::Display, ops::Deref, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -230,7 +230,7 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
-    clients: HashMap<Uuid, SocketAddr>,
+    clients: HashMap<Uuid, String>,
 }
 
 impl Worterbuch {
@@ -784,13 +784,8 @@ impl Worterbuch {
         self.store.count_sub_entries(subkey)
     }
 
-    pub async fn connected(
-        &mut self,
-        client_id: Uuid,
-        remote_addr: SocketAddr,
-        protocol: &Protocol,
-    ) {
-        self.clients.insert(client_id, remote_addr);
+    pub async fn connected(&mut self, client_id: Uuid, remote_addr: String, protocol: &Protocol) {
+        self.clients.insert(client_id, remote_addr.clone());
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
             .set(
@@ -806,7 +801,7 @@ impl Worterbuch {
             log::error!("Error updating client protocol: {e}");
         };
 
-        if let Err(e) = self.set_client_address(&client_id, &remote_addr).await {
+        if let Err(e) = self.set_client_address(&client_id, remote_addr).await {
             log::error!("Error updating client address: {e}");
         }
     }
@@ -835,7 +830,7 @@ impl Worterbuch {
     async fn set_client_address(
         &mut self,
         client_id: &Uuid,
-        remote_addr: &SocketAddr,
+        remote_addr: String,
     ) -> WorterbuchResult<()> {
         let remote_addr = serde_json::to_value(remote_addr).map_err(|e| {
             WorterbuchError::SerDeError(e, "could not convert remote address to value".to_owned())
@@ -878,7 +873,7 @@ impl Worterbuch {
     pub async fn disconnected(
         &mut self,
         client_id: Uuid,
-        remote_addr: SocketAddr,
+        remote_addr: String,
     ) -> WorterbuchResult<()> {
         let grave_goods = self.grave_goods(&client_id);
         let last_wills = self.last_wills(&client_id);

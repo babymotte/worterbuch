@@ -120,6 +120,14 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         });
     }
 
+    if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
+        let sapi = api.clone();
+        let path = path.clone();
+        subsys.start("unixserver", move |subsys| {
+            server::unix::start(sapi, path, subsys)
+        });
+    }
+
     let (persist_tx, mut persist_rx) = oneshot::channel();
     let mut persist_tx = Some(persist_tx);
 

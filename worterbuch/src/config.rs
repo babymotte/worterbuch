@@ -18,7 +18,7 @@
  */
 
 use crate::license::{load_license, License};
-use std::{env, net::IpAddr, time::Duration};
+use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use worterbuch_common::{
     error::{ConfigError, ConfigIntContext, ConfigResult},
     AuthToken, Path,
@@ -38,9 +38,15 @@ pub struct WsEndpoint {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UnixEndpoint {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub ws_endpoint: Option<WsEndpoint>,
     pub tcp_endpoint: Option<Endpoint>,
+    pub unix_endpoint: Option<UnixEndpoint>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub data_dir: Path,
@@ -161,6 +167,9 @@ impl Config {
                         tls: false,
                         bind_addr: [127, 0, 0, 1].into(),
                         port: 8081,
+                    }),
+                    unix_endpoint: Some(UnixEndpoint {
+                        path: "/tmp/worterbuch.socket".into(),
                     }),
                     use_persistence: false,
                     persistence_interval: Duration::from_secs(30),

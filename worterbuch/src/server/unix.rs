@@ -1,5 +1,5 @@
 /*
- *  Worterbuch server TCP module
+ *  Worterbuch server Unix Socket module
  *
  *  Copyright (C) 2024 Michael Bachmann
  *
@@ -25,12 +25,15 @@ use crate::{
 };
 use anyhow::anyhow;
 use std::{
-    net::{IpAddr, SocketAddr},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
+    net::{
+        unix::{OwnedWriteHalf, SocketAddr},
+        UnixListener, UnixStream,
+    },
     select, spawn,
     sync::mpsc,
     time::{sleep, MissedTickBehavior},
@@ -41,14 +44,15 @@ use worterbuch_common::{tcp::write_line_and_flush, Protocol, ServerInfo, ServerM
 
 pub async fn start(
     worterbuch: CloneableWbApi,
-    bind_addr: IpAddr,
-    port: u16,
+    bind_addr: PathBuf,
     subsys: SubsystemHandle,
 ) -> anyhow::Result<()> {
-    let addr = format!("{bind_addr}:{port}");
-
-    log::info!("Serving TCP endpoint at {addr}");
-    let listener = TcpListener::bind(&addr).await?;
+    log::info!(
+        "Serving Unix Socket endpoint at {}",
+        bind_addr.to_string_lossy()
+    );
+    tokio::fs::remove_file(&bind_addr).await.ok();
+    let listener = UnixListener::bind(bind_addr)?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut open_connections = 0;
@@ -75,8 +79,8 @@ pub async fn start(
                         let worterbuch = worterbuch.clone();
                         let conn_closed_tx = conn_closed_tx.clone();
                         spawn(async move {
-                            if let Err(e) = serve(remote_addr, worterbuch, socket).await {
-                                log::error!("Connection to client {remote_addr} closed with error: {e}");
+                            if let Err(e) = serve(&remote_addr, worterbuch, socket).await {
+                                log::error!("Connection to client {remote_addr:?} closed with error: {e}");
                             }
                             conn_closed_tx.send(()).await.ok();
                         });
@@ -99,21 +103,21 @@ pub async fn start(
 }
 
 async fn serve(
-    remote_addr: SocketAddr,
+    remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
-    socket: TcpStream,
+    socket: UnixStream,
 ) -> anyhow::Result<()> {
     let client_id = Uuid::new_v4();
 
-    log::info!("New client connected: {client_id} ({remote_addr})");
+    log::info!("New client connected: {client_id} ({remote_addr:?})");
 
     if let Err(e) = worterbuch
-        .connected(client_id, remote_addr.to_string(), Protocol::TCP)
+        .connected(client_id, format!("{remote_addr:?}"), Protocol::TCP)
         .await
     {
         log::error!("Error while adding new client: {e}");
     } else {
-        log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+        log::debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
         if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
             log::error!("Error in serve loop: {e}");
@@ -121,7 +125,7 @@ async fn serve(
     }
 
     worterbuch
-        .disconnected(client_id, remote_addr.to_string())
+        .disconnected(client_id, format!("{remote_addr:?}"))
         .await?;
 
     Ok(())
@@ -131,9 +135,9 @@ type TcpSender = OwnedWriteHalf;
 
 async fn serve_loop(
     client_id: Uuid,
-    remote_addr: SocketAddr,
+    remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
-    socket: TcpStream,
+    socket: UnixStream,
 ) -> anyhow::Result<()> {
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
@@ -205,7 +209,7 @@ async fn serve_loop(
                 },
                 Ok(None) =>  break,
                 Err(e) => {
-                    log::warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
+                    log::warn!("TCP stream of client {client_id} ({remote_addr:?}) closed with error:, {e}");
                     break;
                 }
             } ,

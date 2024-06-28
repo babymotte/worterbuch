@@ -24,10 +24,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use serde::Serialize;
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::{
     spawn,
     sync::{
@@ -342,8 +339,8 @@ pub enum WbFunction {
         String,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
-    Connected(Uuid, SocketAddr, Protocol),
-    Disconnected(Uuid, SocketAddr),
+    Connected(Uuid, String, Protocol),
+    Disconnected(Uuid, String),
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<WorterbuchResult<Value>>),
     Len(oneshot::Sender<usize>),
@@ -515,7 +512,7 @@ impl CloneableWbApi {
     pub async fn connected(
         &self,
         client_id: Uuid,
-        remote_addr: SocketAddr,
+        remote_addr: String,
         protocol: Protocol,
     ) -> WorterbuchResult<()> {
         self.tx
@@ -524,11 +521,7 @@ impl CloneableWbApi {
         Ok(())
     }
 
-    pub async fn disconnected(
-        &self,
-        client_id: Uuid,
-        remote_addr: SocketAddr,
-    ) -> WorterbuchResult<()> {
+    pub async fn disconnected(&self, client_id: Uuid, remote_addr: String) -> WorterbuchResult<()> {
         self.tx
             .send(WbFunction::Disconnected(client_id, remote_addr))
             .await?;
