@@ -42,7 +42,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    env_logger::init();
+    tracing_subscriber::fmt::init();
     let mut config = Config::new();
     let args: Args = Args::parse();
 

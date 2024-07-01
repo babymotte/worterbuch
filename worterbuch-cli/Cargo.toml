@@ -20,7 +20,7 @@ serde = "1.0.157"
 serde_json = "1.0.94"
 clap = { version = "4.1.11", features = ["derive"] }
 log = "0.4.17"
-env_logger = "0.10.0"
+tracing-subscriber = "0.3.18"
 
 [lints.rust]
 unsafe_code = "forbid"

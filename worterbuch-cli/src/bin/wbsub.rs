@@ -61,7 +61,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    env_logger::init();
+    tracing_subscriber::fmt::init();
     Toplevel::new()
         .start("wbsub", run)
         .catch_signals()
