@@ -120,6 +120,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         });
     }
 
+    #[cfg(target_family = "unix")]
     if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
         let sapi = api.clone();
         let path = path.clone();

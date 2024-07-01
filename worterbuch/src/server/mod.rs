@@ -20,4 +20,5 @@
 pub(crate) mod common;
 pub(crate) mod poem;
 pub(crate) mod tcp;
+#[cfg(target_family = "unix")]
 pub(crate) mod unix;

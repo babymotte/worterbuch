@@ -46,6 +46,7 @@ pub struct UnixEndpoint {
 pub struct Config {
     pub ws_endpoint: Option<WsEndpoint>,
     pub tcp_endpoint: Option<Endpoint>,
+    #[cfg(target_family = "unix")]
     pub unix_endpoint: Option<UnixEndpoint>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
@@ -102,6 +103,7 @@ impl Config {
             }
         }
 
+        #[cfg(target_family = "unix")]
         if let Ok(val) = env::var(prefix.to_owned() + "_UNIX_SOCKET_PATH") {
             if let Some(ep) = &mut self.unix_endpoint {
                 ep.path = val.into();
@@ -174,6 +176,7 @@ impl Config {
                         bind_addr: [127, 0, 0, 1].into(),
                         port: 8081,
                     }),
+                    #[cfg(target_family = "unix")]
                     unix_endpoint: Some(UnixEndpoint {
                         path: "/tmp/worterbuch.socket".into(),
                     }),
