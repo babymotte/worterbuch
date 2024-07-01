@@ -60,7 +60,6 @@ impl<E> BearerAuthEndpoint<E> {
     }
 }
 
-#[poem::async_trait]
 impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
     type Output = E::Output;
 

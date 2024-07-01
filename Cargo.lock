@@ -268,6 +268,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+
+[[package]]
 name = "clap"
 version = "4.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,6 +893,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1031,7 +1049,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec6f0033707ce6eb76240e39a592e7eac2f702768636cb03969293227ca8e642"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "bytes",
  "futures-util",
  "headers",
@@ -1042,18 +1059,55 @@ dependencies = [
  "hyper-util",
  "mime",
  "mime_guess",
- "nix",
+ "nix 0.27.1",
  "parking_lot",
  "percent-encoding",
  "pin-project-lite",
- "poem-derive",
+ "poem-derive 2.0.1",
  "regex",
  "rfc7239",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "smallvec",
- "sync_wrapper",
+ "sync_wrapper 0.1.2",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "wildmatch",
+]
+
+[[package]]
+name = "poem"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e88b6912ed1e8833d7c22c9c986c517f4518d7d37e3c04566d917c789aaea591"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "headers",
+ "http",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-util",
+ "mime",
+ "mime_guess",
+ "nix 0.28.0",
+ "parking_lot",
+ "percent-encoding",
+ "pin-project-lite",
+ "poem-derive 3.0.0",
+ "regex",
+ "rfc7239",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "smallvec",
+ "sync_wrapper 1.0.1",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1068,6 +1122,18 @@ name = "poem-derive"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4826d63b6760f8e5d24be9f738a5e38a43d726f32a3c2cc9388b1cc66e587f5c"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "poem-derive"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2b961d58a6c53380c20236394381d9292fda03577f902b158f1638932964dcf"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1450,6 +1516,15 @@ name = "sync_wrapper"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
+dependencies = [
+ "futures-core",
+]
+
+[[package]]
+name = "sync_wrapper"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7065abeca94b6a8a577f9bd45aa0867a2238b74e8eb67cf10d492bc39351394"
 dependencies = [
  "futures-core",
 ]
@@ -2165,7 +2240,7 @@ dependencies = [
  "jsonwebtoken",
  "log",
  "miette 7.2.0",
- "poem",
+ "poem 3.0.1",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2234,7 +2309,7 @@ dependencies = [
  "hostname",
  "log",
  "miette 7.2.0",
- "poem",
+ "poem 2.0.1",
  "serde",
  "serde_json",
  "tokio",

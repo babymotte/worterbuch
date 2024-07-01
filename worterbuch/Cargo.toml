@@ -31,7 +31,7 @@ sha2 = "0.10.6"
 hex = "0.4.3"
 futures = { version = "0.3.27" }
 urlencoding = "2.1.2"
-poem = { version = "2.0.0", features = ["websocket", "static-files", "sse"] }
+poem = { version = "3.0.1", features = ["websocket", "static-files", "sse"] }
 tracing-subscriber = "0.3.16"
 serde_yaml = "0.9.22"
 hashlink = "0.9.0"
