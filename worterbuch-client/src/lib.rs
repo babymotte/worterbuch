@@ -905,7 +905,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     protocol_version: ProtocolVersion,
 ) -> Result<Worterbuch, ConnectionError> {
     // TODO properly implement different protocol versions
-    let supported_protocol_versions = vec!["0.7".to_owned()];
+    let supported_protocol_versions = ["0.7".to_owned()];
 
     if !supported_protocol_versions.contains(&protocol_version) {
         return Err(ConnectionError::WorterbuchError(
