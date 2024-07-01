@@ -80,10 +80,10 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     config.proto = if args.ssl {
         "wss".to_owned()
     } else {
-        "tcp".to_owned()
+        config.proto
     };
     config.host_addr = args.addr.unwrap_or(config.host_addr);
-    config.port = args.port.unwrap_or(config.port);
+    config.port = args.port.or(config.port);
     let json = args.json;
     let raw = args.raw;
     let patterns = args.patterns;

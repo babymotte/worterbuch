@@ -23,7 +23,7 @@ use std::{env, time::Duration};
 pub struct Config {
     pub proto: String,
     pub host_addr: String,
-    pub port: u16,
+    pub port: Option<u16>,
     pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
     pub connection_timeout: Duration,
@@ -42,7 +42,7 @@ impl Config {
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
             if let Ok(port) = val.parse() {
-                self.port = port;
+                self.port = Some(port);
             }
         }
 
@@ -74,7 +74,7 @@ impl Default for Config {
     fn default() -> Self {
         let proto = "ws".to_owned();
         let host_addr = "localhost".to_owned();
-        let port = 8080;
+        let port = Some(8080);
         let keepalive_timeout = Duration::from_secs(5);
         let send_timeout = Duration::from_secs(5);
         let connection_timeout = Duration::from_secs(5);
@@ -98,7 +98,7 @@ impl Config {
         config
     }
 
-    pub fn with_address(proto: String, host_addr: String, port: u16) -> Self {
+    pub fn with_address(proto: String, host_addr: String, port: Option<u16>) -> Self {
         let mut config = Config::new();
         config.proto = proto;
         config.host_addr = host_addr;

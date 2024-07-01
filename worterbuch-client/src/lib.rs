@@ -21,6 +21,7 @@ pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod tcp;
+pub mod unix;
 pub mod ws;
 
 use crate::config::Config;
@@ -39,7 +40,7 @@ use std::{
 use tcp::TcpClientSocket;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
+    net::{TcpStream, UnixStream},
     select, spawn,
     sync::{mpsc, oneshot},
     time::{interval, sleep, MissedTickBehavior},
@@ -48,6 +49,7 @@ use tokio_tungstenite::{
     connect_async_with_config,
     tungstenite::{handshake::client::generate_key, http::Request, Message},
 };
+use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
 
@@ -119,6 +121,7 @@ pub(crate) enum Command {
 enum ClientSocket {
     Tcp(TcpClientSocket),
     Ws(WsClientSocket),
+    Unix(UnixClientSocket),
 }
 
 impl ClientSocket {
@@ -126,6 +129,7 @@ impl ClientSocket {
         match self {
             ClientSocket::Tcp(sock) => sock.send_msg(msg).await,
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
+            ClientSocket::Unix(sock) => sock.send_msg(msg).await,
         }
     }
 
@@ -133,6 +137,7 @@ impl ClientSocket {
         match self {
             ClientSocket::Tcp(sock) => sock.receive_msg().await,
             ClientSocket::Ws(sock) => sock.receive_msg().await,
+            ClientSocket::Unix(sock) => sock.receive_msg().await,
         }
     }
 }
@@ -623,13 +628,35 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
     let host_addr = &config.host_addr;
     let port = config.port;
     let tcp = proto == "tcp";
-    let path = if tcp { "" } else { "/ws" };
-    let url = format!("{proto}://{host_addr}:{port}{path}",);
+    let unix = proto == "unix";
+    let path = if tcp {
+        ""
+    } else if unix {
+        host_addr
+    } else {
+        "/ws"
+    };
+    let url = if unix {
+        path.to_owned()
+    } else {
+        format!(
+            "{proto}://{host_addr}:{}{path}",
+            port.expect("No port specified.")
+        )
+    };
 
     log::debug!("Got server url from config: {url}");
 
     if tcp {
-        connect_tcp(host_addr.to_owned(), port, on_disconnect, config).await
+        connect_tcp(
+            host_addr.to_owned(),
+            port.expect("no port specified for TCP connection"),
+            on_disconnect,
+            config,
+        )
+        .await
+    } else if unix {
+        connect_unix(url, on_disconnect, config).await
     } else {
         connect_ws(url, on_disconnect, config).await
     }
@@ -889,6 +916,142 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     } else {
         connected(
             ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await),
+            on_disconnect,
+            config,
+            client_id,
+            protocol_version,
+        )
+    }
+}
+
+async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
+    path: String,
+    on_disconnect: F,
+    config: Config,
+) -> Result<Worterbuch, ConnectionError> {
+    let timeout = config.connection_timeout;
+    log::debug!(
+        "Connecting to server socket {path} (timeout: {} ms) …",
+        timeout.as_millis()
+    );
+
+    let stream = select! {
+        conn = UnixStream::connect(&path) => conn,
+        _ = sleep(timeout) => {
+            log::error!("Timeout while waiting for TCP connection.");
+            return Err(ConnectionError::Timeout);
+        },
+    }?;
+    log::debug!("Connected to {path}.");
+    let (tcp_rx, mut tcp_tx) = stream.into_split();
+    let mut tcp_rx = BufReader::new(tcp_rx);
+
+    log::debug!("Connected to server.");
+
+    let mut line_buf = String::new();
+
+    let Welcome {
+        client_id,
+        info:
+            ServerInfo {
+                version: _,
+                protocol_version,
+                authorization_required,
+            },
+    } = select! {
+        line = tcp_rx.read_line(&mut line_buf) => match line {
+            Ok(0) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before welcome message",
+                )))
+            }
+            Ok(_) => {
+                let msg = json::from_str::<SM>(&line_buf);
+                let msg = match msg {
+                    Ok(SM::Welcome(welcome)) => {
+                        log::debug!("Welcome message received: {welcome:?}");
+                        welcome
+                    }
+                    Ok(msg) => {
+                        return Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid welcome message: {msg:?}"),
+                        )))
+                    }
+                    Err(e) => {
+                        return Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error parsing welcome message '{line_buf}': {e}"),
+                        )))
+                    }
+                };
+                line_buf.clear();
+                msg
+            }
+            Err(e) => return Err(ConnectionError::IoError(e)),
+        },
+        _ = sleep(timeout) => {
+            log::error!("Timeout while waiting for welcome message.");
+            return Err(ConnectionError::Timeout);
+        },
+    };
+
+    if authorization_required {
+        if let Some(auth_token) = config.auth_token.clone() {
+            let handshake = AuthorizationRequest { auth_token };
+            let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
+            msg.push('\n');
+            log::debug!("Sending authorization message: {msg}");
+            tcp_tx.write_all(msg.as_bytes()).await?;
+
+            match tcp_rx.read_line(&mut line_buf).await {
+                Ok(0) => Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before handshake",
+                ))),
+                Ok(_) => {
+                    let msg = json::from_str::<SM>(&line_buf);
+                    line_buf.clear();
+                    match msg {
+                        Ok(SM::Authorized(_)) => {
+                            log::debug!("Authorization accepted.");
+                            connected(
+                                ClientSocket::Unix(
+                                    UnixClientSocket::new(tcp_tx, tcp_rx.lines()).await,
+                                ),
+                                on_disconnect,
+                                config,
+                                client_id,
+                                protocol_version,
+                            )
+                        }
+                        Ok(SM::Err(e)) => {
+                            log::error!("Authorization failed: {e}");
+                            Err(ConnectionError::WorterbuchError(
+                                WorterbuchError::ServerResponse(e),
+                            ))
+                        }
+                        Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid authetication response: {msg:?}"),
+                        ))),
+                        Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error receiving authorization response: {e}"),
+                        ))),
+                    }
+                }
+                Err(e) => Err(ConnectionError::IoError(e)),
+            }
+        } else {
+            Err(ConnectionError::AuthorizationError(
+                "Server requires authorization but no auth token was provided.".to_owned(),
+            ))
+        }
+    } else {
+        connected(
+            ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx.lines()).await),
             on_disconnect,
             config,
             client_id,
