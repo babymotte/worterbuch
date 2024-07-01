@@ -113,10 +113,7 @@ async fn serve(
 
     log::info!("New client connected: {client_id} ({remote_addr:?})");
 
-    if let Err(e) = worterbuch
-        .connected(client_id, format!("{remote_addr:?}"), Protocol::TCP)
-        .await
-    {
+    if let Err(e) = worterbuch.connected(client_id, None, Protocol::UNIX).await {
         log::error!("Error while adding new client: {e}");
     } else {
         log::debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
@@ -126,9 +123,7 @@ async fn serve(
         }
     }
 
-    worterbuch
-        .disconnected(client_id, format!("{remote_addr:?}"))
-        .await?;
+    worterbuch.disconnected(client_id, None).await?;
 
     Ok(())
 }

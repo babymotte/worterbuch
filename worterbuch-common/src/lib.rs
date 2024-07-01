@@ -128,6 +128,7 @@ pub enum Protocol {
     TCP,
     WS,
     HTTP,
+    UNIX,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

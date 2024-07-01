@@ -26,7 +26,7 @@ use crate::{
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
-use std::{collections::HashMap, fmt::Display, ops::Deref, time::Duration};
+use std::{collections::HashMap, fmt::Display, net::SocketAddr, ops::Deref, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -230,7 +230,7 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
-    clients: HashMap<Uuid, String>,
+    clients: HashMap<Uuid, Option<SocketAddr>>,
 }
 
 impl Worterbuch {
@@ -784,8 +784,13 @@ impl Worterbuch {
         self.store.count_sub_entries(subkey)
     }
 
-    pub async fn connected(&mut self, client_id: Uuid, remote_addr: String, protocol: &Protocol) {
-        self.clients.insert(client_id, remote_addr.clone());
+    pub async fn connected(
+        &mut self,
+        client_id: Uuid,
+        remote_addr: Option<SocketAddr>,
+        protocol: &Protocol,
+    ) {
+        self.clients.insert(client_id, remote_addr);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
             .set(
@@ -830,7 +835,7 @@ impl Worterbuch {
     async fn set_client_address(
         &mut self,
         client_id: &Uuid,
-        remote_addr: String,
+        remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         let remote_addr = serde_json::to_value(remote_addr).map_err(|e| {
             WorterbuchError::SerDeError(e, "could not convert remote address to value".to_owned())
@@ -873,7 +878,7 @@ impl Worterbuch {
     pub async fn disconnected(
         &mut self,
         client_id: Uuid,
-        remote_addr: String,
+        remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         let grave_goods = self.grave_goods(&client_id);
         let last_wills = self.last_wills(&client_id);
@@ -905,8 +910,11 @@ impl Worterbuch {
             .map(ToOwned::to_owned)
             .collect();
         log::info!(
-            "Removing {} subscription(s) of client {client_id} ({remote_addr}).",
-            subscription_keys.len()
+            "Removing {} subscription(s) of client {client_id} ({}).",
+            subscription_keys.len(),
+            remote_addr
+                .map(|it| it.to_string())
+                .unwrap_or_else(|| "<unknown>".to_owned())
         );
         for subscription in subscription_keys {
             if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
@@ -915,11 +923,19 @@ impl Worterbuch {
         }
 
         if let Some(grave_goods) = grave_goods {
-            log::info!("Burying grave goods of client {client_id} ({remote_addr}).");
+            log::info!(
+                "Burying grave goods of client {client_id} ({}).",
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            );
 
             for grave_good in grave_goods {
                 log::debug!(
-                    "Deleting grave good key of client {client_id} ({remote_addr}): {} ",
+                    "Deleting grave good key of client {client_id} ({}): {} ",
+                    remote_addr
+                        .map(|it| it.to_string())
+                        .unwrap_or_else(|| "<unknown>".to_owned()),
                     grave_good
                 );
                 if let Err(e) = self.pdelete(grave_good, &client_id.to_string()).await {
@@ -927,15 +943,28 @@ impl Worterbuch {
                 }
             }
         } else {
-            log::info!("Client {client_id} ({remote_addr}) has no grave goods.");
+            log::info!(
+                "Client {client_id} ({}) has no grave goods.",
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            );
         }
 
         if let Some(last_wills) = last_wills {
-            log::info!("Publishing last will of client {client_id} ({remote_addr}).");
+            log::info!(
+                "Publishing last will of client {client_id} ({}).",
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            );
 
             for last_will in last_wills {
                 log::debug!(
-                    "Setting last will of client {client_id} ({remote_addr}): {} = {}",
+                    "Setting last will of client {client_id} ({}): {} = {}",
+                    remote_addr
+                        .map(|it| it.to_string())
+                        .unwrap_or_else(|| "<unknown>".to_owned()),
                     last_will.key,
                     last_will.value
                 );
@@ -947,7 +976,12 @@ impl Worterbuch {
                 }
             }
         } else {
-            log::info!("Client {client_id} ({remote_addr}) has no last will.");
+            log::info!(
+                "Client {client_id} ({}) has no last will.",
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            );
         }
 
         if self.config.extended_monitoring {

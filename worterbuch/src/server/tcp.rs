@@ -108,7 +108,7 @@ async fn serve(
     log::info!("New client connected: {client_id} ({remote_addr})");
 
     if let Err(e) = worterbuch
-        .connected(client_id, remote_addr.to_string(), Protocol::TCP)
+        .connected(client_id, Some(remote_addr), Protocol::TCP)
         .await
     {
         log::error!("Error while adding new client: {e}");
@@ -121,7 +121,7 @@ async fn serve(
     }
 
     worterbuch
-        .disconnected(client_id, remote_addr.to_string())
+        .disconnected(client_id, Some(remote_addr))
         .await?;
 
     Ok(())
