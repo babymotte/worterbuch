@@ -52,7 +52,7 @@ pub async fn start(
         bind_addr.to_string_lossy()
     );
     tokio::fs::remove_file(&bind_addr).await.ok();
-    let listener = UnixListener::bind(bind_addr)?;
+    let listener = UnixListener::bind(bind_addr.clone())?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut open_connections = 0;
@@ -96,6 +96,8 @@ pub async fn start(
             _ = subsys.on_shutdown_requested() => break,
         }
     }
+
+    tokio::fs::remove_file(&bind_addr).await.ok();
 
     log::debug!("tcpserver subsystem completed.");
 
