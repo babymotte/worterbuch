@@ -21,6 +21,7 @@ pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod tcp;
+#[cfg(target_family = "unix")]
 pub mod unix;
 pub mod ws;
 
@@ -38,9 +39,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tcp::TcpClientSocket;
+#[cfg(target_family = "unix")]
+use tokio::net::UnixStream;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpStream, UnixStream},
+    net::TcpStream,
     select, spawn,
     sync::{mpsc, oneshot},
     time::{interval, sleep, MissedTickBehavior},
@@ -49,6 +52,8 @@ use tokio_tungstenite::{
     connect_async_with_config,
     tungstenite::{handshake::client::generate_key, http::Request, Message},
 };
+
+#[cfg(target_family = "unix")]
 use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
 use ws::WsClientSocket;
@@ -121,6 +126,7 @@ pub(crate) enum Command {
 enum ClientSocket {
     Tcp(TcpClientSocket),
     Ws(WsClientSocket),
+    #[cfg(target_family = "unix")]
     Unix(UnixClientSocket),
 }
 
@@ -129,6 +135,7 @@ impl ClientSocket {
         match self {
             ClientSocket::Tcp(sock) => sock.send_msg(msg).await,
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
+            #[cfg(target_family = "unix")]
             ClientSocket::Unix(sock) => sock.send_msg(msg).await,
         }
     }
@@ -137,6 +144,7 @@ impl ClientSocket {
         match self {
             ClientSocket::Tcp(sock) => sock.receive_msg().await,
             ClientSocket::Ws(sock) => sock.receive_msg().await,
+            #[cfg(target_family = "unix")]
             ClientSocket::Unix(sock) => sock.receive_msg().await,
         }
     }
@@ -656,7 +664,10 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
         )
         .await
     } else if unix {
-        connect_unix(url, on_disconnect, config).await
+        #[cfg(target_family = "unix")]
+        return connect_unix(url, on_disconnect, config).await;
+        #[cfg(not(target_family = "unix"))]
+        return panic!("not supported on non-unix operating systems");
     } else {
         connect_ws(url, on_disconnect, config).await
     }
@@ -924,6 +935,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     }
 }
 
+#[cfg(target_family = "unix")]
 async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
     path: String,
     on_disconnect: F,
