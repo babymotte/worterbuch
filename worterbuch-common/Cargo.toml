@@ -14,7 +14,7 @@ categories = ["database"]
 tokio = { version = "1.26.0", features = ["sync", "io-util"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
-tungstenite = "0.21.0"
+tungstenite = "0.23.0"
 serde_repr = "0.1.16"
 log = "0.4.20"
 random_word = { version = "0.4.3", features = ["en"] }

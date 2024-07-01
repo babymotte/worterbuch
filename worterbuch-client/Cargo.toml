@@ -22,7 +22,7 @@ futures-util = { version = "0.3.27", default-features = false, features = [
     "sink",
     "std",
 ] }
-tokio-tungstenite = "0.21.0"
+tokio-tungstenite = "0.23.1"
 
 [lints.rust]
 unsafe_code = "forbid"
