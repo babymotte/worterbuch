@@ -164,9 +164,9 @@ async fn serve_loop(
                 None => break,
             },
             _ = keepalive_timer.tick() => {
-                // check how long ago the last websocket message was received
+                // check how long ago the last message was received
                 check_client_keepalive(last_keepalive_rx, last_keepalive_tx, client_id, keepalive_timeout)?;
-                // send out websocket message if the last has been more than a second ago
+                // send out message if the last has been more than a second ago
                 send_keepalive(last_keepalive_tx, &ws_send_tx, ).await?;
             }
         }
