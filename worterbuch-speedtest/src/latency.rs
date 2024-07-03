@@ -153,9 +153,16 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
     let n_ary_keys = settings.n_ary_keys;
     let key_length = settings.key_length;
     let values_per_key = settings.messages_per_key;
+    let data = generate_dummy_data(n_ary_keys, key_length, values_per_key);
+
+    log::info!("Dummy data generated.");
+
     thread::spawn(move || {
-        if let Err(e) = generate_dummy_data(n_ary_keys, key_length, values_per_key, dummy_tx) {
-            log::error!("Error sending dummy data: {e}");
+        for (key, value) in data {
+            if let Err(e) = dummy_tx.blocking_send((key.join("/"), value)) {
+                log::error!("Error sending dummy data: {e}");
+                break;
+            }
         }
     });
 
@@ -187,7 +194,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
     loop {
         select! {
             recv = dummy_rx.recv() => if let Some(data) = recv {
-                let key = format!("speedtest/latency/{}",data.0.join("/"));
+                let key = format!("speedtest/latency/{}",data.0);
                 let value = data.1;
                 match wb.set(key, &value).await.into_diagnostic()  {
                     Ok(t) => tid_sent = t,

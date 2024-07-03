@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::{collections::HashMap, sync::mpsc};
 
 use random_word::Lang;
 use serde_json::{json, Value};
@@ -22,12 +22,12 @@ impl KeyValueConsumer for tokio::sync::mpsc::Sender<(Vec<String>, Value)> {
     }
 }
 
-pub fn generate_dummy_data<E>(
+pub fn generate_dummy_data(
     n_ary_keys: usize,
     key_length: u32,
     values_per_key: usize,
-    mut consumer: impl KeyValueConsumer<Error = E>,
-) -> Result<(), E> {
+) -> HashMap<Vec<String>, Value> {
+    let mut data = HashMap::new();
     let mut n: Vec<usize> = vec![0; key_length as usize];
     let mut prefix = Vec::new();
     'outer: while n[prefix.len()] < n_ary_keys {
@@ -38,7 +38,7 @@ pub fn generate_dummy_data<E>(
 
         let path: Vec<String> = prefix.iter().map(ToString::to_string).collect();
         for _ in 0..values_per_key {
-            consumer.accept(path.clone(), json!(random_word::gen(Lang::En)))?;
+            data.insert(path.clone(), json!(random_word::gen(Lang::En)));
         }
 
         prefix.pop();
@@ -53,5 +53,5 @@ pub fn generate_dummy_data<E>(
         }
     }
 
-    Ok(())
+    data
 }

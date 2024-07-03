@@ -15,7 +15,12 @@ fn main() -> Result<(), StoreError> {
 
     eprintln!("Store set up.");
 
-    spawn(move || generate_dummy_data(n_ary, length, values, tx));
+    spawn(move || {
+        let data = generate_dummy_data(n_ary, length, values);
+        for entry in data {
+            tx.send(entry).expect("failed to send dummy data");
+        }
+    });
 
     let mut counter = 0;
 
