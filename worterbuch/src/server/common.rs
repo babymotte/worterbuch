@@ -830,7 +830,7 @@ async fn psubscribe(
             transaction_id,
         };
         spawn(async move {
-            aggregate_loop(rx, subscription, client_sub).await;
+            aggregate_loop(rx, subscription, client_sub, client_id).await;
 
             match wb_unsub.unsubscribe(client_id, transaction_id).await {
                 Ok(()) => {
@@ -893,6 +893,7 @@ async fn aggregate_loop(
     mut rx: Receiver<PStateEvent>,
     subscription: SubscriptionInfo,
     client_sub: mpsc::Sender<ServerMessage>,
+    client_id: Uuid,
 ) {
     if !subscription.live_only {
         log::debug!("Immediately forwarding current state to new subscription {subscription:?} …");
@@ -921,6 +922,7 @@ async fn aggregate_loop(
         subscription.aggregate_duration,
         subscription.transaction_id,
         subscription.channel_buffer_size,
+        client_id,
     );
 
     while let Some(event) = rx.recv().await {

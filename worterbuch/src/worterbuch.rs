@@ -73,14 +73,14 @@ struct PStateAggregatorState {
 }
 
 impl PStateAggregatorState {
-    async fn aggregate_loop(mut self, mut aggregate_rx: Receiver<PStateEvent>) {
+    async fn aggregate_loop(mut self, mut aggregate_rx: Receiver<PStateEvent>, client_id: Uuid) {
         let (send_trigger_tx, mut send_trigger_rx) = mpsc::channel::<()>(1);
 
         loop {
             select! {
                 event = aggregate_rx.recv() => if let Some(event) = event {
-                    if let Err(e) = self.aggregate(event, &send_trigger_tx).await {
-                        log::error!("Error aggregating PState event: {e}");
+                    if let Err(e) = self.aggregate(event, &send_trigger_tx, client_id).await {
+                        log::error!("Error aggregating PState event for client {client_id}: {e}");
                         break;
                     }
                 } else {
@@ -88,7 +88,7 @@ impl PStateAggregatorState {
                 },
                 tick = send_trigger_rx.recv() => if tick.is_some() {
                     if let Err(e) = self.send_current_state().await {
-                        log::error!("Error sending PState event: {e}");
+                        log::error!("Error sending PState event to client {client_id}: {e}");
                         break;
                     }
                 } else {
@@ -102,9 +102,10 @@ impl PStateAggregatorState {
         &mut self,
         event: PStateEvent,
         send_trigger_tx: &mpsc::Sender<()>,
+        client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if !self.send_is_scheduled {
-            self.schedule_send(send_trigger_tx.clone(), self.aggregate_duration);
+            self.schedule_send(send_trigger_tx.clone(), self.aggregate_duration, client_id);
         }
 
         match event {
@@ -177,12 +178,19 @@ impl PStateAggregatorState {
                 .any(|kvp| self.deleted_buffer.contains_key(&kvp.key))
     }
 
-    fn schedule_send(&mut self, send_trigger: mpsc::Sender<()>, aggregate_duration: Duration) {
+    fn schedule_send(
+        &mut self,
+        send_trigger: mpsc::Sender<()>,
+        aggregate_duration: Duration,
+        client_id: Uuid,
+    ) {
         self.send_is_scheduled = true;
         spawn(async move {
             sleep(aggregate_duration).await;
             if let Err(e) = send_trigger.send(()).await {
-                log::error!("Error triggering send of aggregated PState: {e}");
+                log::error!(
+                    "Error triggering send of aggregated PState to client {client_id}: {e}"
+                );
             }
         });
     }
@@ -199,6 +207,7 @@ impl PStateAggregator {
         aggregate_duration: Duration,
         transaction_id: TransactionId,
         channel_buffer_size: usize,
+        client_id: Uuid,
     ) -> Self {
         let aggregator_state = PStateAggregatorState {
             aggregate_duration,
@@ -212,7 +221,7 @@ impl PStateAggregator {
 
         let (aggregate_tx, aggregate_rx) = mpsc::channel(channel_buffer_size);
 
-        spawn(aggregator_state.aggregate_loop(aggregate_rx));
+        spawn(aggregator_state.aggregate_loop(aggregate_rx, client_id));
 
         PStateAggregator {
             aggregate: aggregate_tx,
