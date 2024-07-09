@@ -95,7 +95,8 @@ async fn serve_loop(
     // websocket send loop
     spawn(async move {
         while let Some(msg) = ws_send_rx.recv().await {
-            if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, &keepalive_tx_tx).await
+            if let Err(e) =
+                send_with_timeout(msg, &mut ws_tx, send_timeout, &keepalive_tx_tx, client_id).await
             {
                 log::error!("Error sending WS message: {e}");
                 break;
@@ -180,6 +181,7 @@ async fn send_with_timeout(
     websocket: &mut WebSocketSender,
     send_timeout: Duration,
     keepalive_tx_tx: &mpsc::Sender<Instant>,
+    client_id: Uuid,
 ) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
     let json = serde_json::to_string(&msg)?;
@@ -190,8 +192,8 @@ async fn send_with_timeout(
             keepalive_tx_tx.try_send(Instant::now()).ok();
         },
         _ = sleep(send_timeout) => {
-            log::error!("Send timeout");
-            return Err(anyhow!("Send timeout"));
+            log::error!("Send timeout for client {client_id}");
+            return Err(anyhow!("Send timeout for client {client_id}"));
         },
     }
     log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());

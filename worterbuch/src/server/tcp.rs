@@ -153,7 +153,7 @@ async fn serve_loop(
     spawn(async move {
         while let Some(msg) = tcp_send_rx.recv().await {
             if let Err(e) =
-                send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx).await
+                send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx, client_id).await
             {
                 log::error!("Error sending WS message: {e}");
                 break;
@@ -235,6 +235,7 @@ async fn send_with_timeout<'a>(
     tcp: &mut TcpSender,
     send_timeout: Duration,
     keepalive_tx_tx: &mpsc::Sender<Instant>,
+    client_id: Uuid,
 ) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
     select! {
@@ -243,8 +244,8 @@ async fn send_with_timeout<'a>(
             keepalive_tx_tx.try_send(Instant::now()).ok();
         },
         _ = sleep(send_timeout) => {
-            log::error!("Send timeout");
-            return Err(anyhow!("Send timeout"));
+            log::error!("Send timeout for client {client_id}");
+            return Err(anyhow!("Send timeout for client {client_id}"));
         },
     }
     log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
