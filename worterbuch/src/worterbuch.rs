@@ -40,8 +40,9 @@ use worterbuch_common::{
     parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
     PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
     TransactionId, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
-    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
+    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS,
+    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -1049,7 +1050,10 @@ fn check_for_read_only_key(key: &str, client_id: &str) -> WorterbuchResult<()> {
         return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
     }
 
-    if path[3] == SYSTEM_TOPIC_GRAVE_GOODS || path[3] == SYSTEM_TOPIC_LAST_WILL {
+    if path[3] == SYSTEM_TOPIC_GRAVE_GOODS
+        || path[3] == SYSTEM_TOPIC_LAST_WILL
+        || path[3] == SYSTEM_TOPIC_CLIENT_NAME
+    {
         // clients may modify their last will or grave goods at any time
         return Ok(());
     }
