@@ -92,7 +92,7 @@ pub async fn process_incoming_message(
     auth: Option<JwtClaims>,
     config: &Config,
 ) -> WorterbuchResult<(bool, Option<JwtClaims>)> {
-    log::debug!("Received message: {msg}");
+    log::debug!("Received message from client {client_id}: {msg}");
     let mut authorized = auth;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
