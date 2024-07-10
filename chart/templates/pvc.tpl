@@ -15,3 +15,4 @@ spec:
   resources:
     requests:
       storage: {{ $size }}
+{{- end }}
