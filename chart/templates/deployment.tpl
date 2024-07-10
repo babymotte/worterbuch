@@ -32,9 +32,6 @@ spec:
         - name: {{ include "worterbuch.fullname" . }}
           persistentVolumeClaim:
             claimName: {{ include "worterbuch.fullname" . }}
-        - name: temp
-          persistentVolumeClaim:
-            claimName: temp
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -78,8 +75,6 @@ spec:
           volumeMounts:
             - mountPath: "/data"
               name: {{ include "worterbuch.fullname" . }}
-            - mountPath: "/tmp"
-              name: temp
           {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -15,16 +15,3 @@ spec:
   resources:
     requests:
       storage: {{ $size }}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: temp
-spec:
-  storageClassName: local-path
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10M
-{{- end }}
