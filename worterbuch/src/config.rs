@@ -177,9 +177,7 @@ impl Config {
                         port: 8081,
                     }),
                     #[cfg(target_family = "unix")]
-                    unix_endpoint: Some(UnixEndpoint {
-                        path: "/tmp/worterbuch.socket".into(),
-                    }),
+                    unix_endpoint: None,
                     use_persistence: false,
                     persistence_interval: Duration::from_secs(30),
                     data_dir: "./data".into(),
