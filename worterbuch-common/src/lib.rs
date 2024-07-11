@@ -24,6 +24,7 @@ mod server;
 pub mod tcp;
 
 pub use client::*;
+use serde_json::json;
 pub use server::*;
 
 use error::WorterbuchResult;
@@ -151,6 +152,22 @@ impl From<KeyValuePair> for Option<Value> {
     }
 }
 
+impl From<KeyValuePair> for Value {
+    fn from(kvp: KeyValuePair) -> Self {
+        kvp.value
+    }
+}
+
+impl KeyValuePair {
+    pub fn new<S: Serialize>(key: String, value: S) -> Self {
+        (key, value).into()
+    }
+
+    pub fn of<S: Serialize>(key: String, value: S) -> Self {
+        KeyValuePair::new(key, value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypedKeyValuePair<T: DeserializeOwned> {
     pub key: Key,
@@ -169,39 +186,20 @@ impl<T: DeserializeOwned> TryFrom<KeyValuePair> for TypedKeyValuePair<T> {
     }
 }
 
-impl From<(String, serde_json::Value)> for KeyValuePair {
-    fn from((key, value): (String, serde_json::Value)) -> Self {
+impl<S: Serialize> From<(String, S)> for KeyValuePair {
+    fn from((key, value): (String, S)) -> Self {
+        let value = json!(value);
         KeyValuePair { key, value }
     }
 }
 
-impl From<(&str, serde_json::Value)> for KeyValuePair {
-    fn from((key, value): (&str, serde_json::Value)) -> Self {
+impl<S: Serialize> From<(&str, S)> for KeyValuePair {
+    fn from((key, value): (&str, S)) -> Self {
+        let value = json!(value);
         KeyValuePair {
             key: key.to_owned(),
             value,
         }
-    }
-}
-
-impl TryFrom<(String, &str)> for KeyValuePair {
-    type Error = serde_json::Error;
-
-    fn try_from((key, value): (String, &str)) -> Result<Self, Self::Error> {
-        let value = serde_json::from_str(value)?;
-        Ok(KeyValuePair { key, value })
-    }
-}
-
-impl TryFrom<(&str, &str)> for KeyValuePair {
-    type Error = serde_json::Error;
-
-    fn try_from((key, value): (&str, &str)) -> Result<Self, Self::Error> {
-        let value = serde_json::from_str(value)?;
-        Ok(KeyValuePair {
-            key: key.to_owned(),
-            value,
-        })
     }
 }
 

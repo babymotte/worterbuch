@@ -52,7 +52,6 @@ use tokio_tungstenite::{
     connect_async_with_config,
     tungstenite::{handshake::client::generate_key, http::Request, Message},
 };
-
 #[cfg(target_family = "unix")]
 use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
@@ -168,7 +167,7 @@ impl Worterbuch {
 
     pub async fn set_last_will(
         &self,
-        last_will: &KeyValuePairs,
+        last_will: &[KeyValuePair],
     ) -> ConnectionResult<TransactionId> {
         self.set(
             topic!(
@@ -182,10 +181,7 @@ impl Worterbuch {
         .await
     }
 
-    pub async fn set_grave_goods(
-        &self,
-        grave_goods: &RequestPatterns,
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn set_grave_goods(&self, grave_goods: &[&str]) -> ConnectionResult<TransactionId> {
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
