@@ -198,6 +198,22 @@ impl Worterbuch {
         .await
     }
 
+    pub async fn set_client_name<T: Serialize>(
+        &self,
+        client_name: T,
+    ) -> ConnectionResult<TransactionId> {
+        self.set(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                &self.client_id,
+                SYSTEM_TOPIC_CLIENT_NAME
+            ),
+            client_name,
+        )
+        .await
+    }
+
     pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
@@ -208,7 +224,7 @@ impl Worterbuch {
         Ok(transaction_id)
     }
 
-    pub async fn set<T: Serialize>(&self, key: Key, value: &T) -> ConnectionResult<TransactionId> {
+    pub async fn set<T: Serialize>(&self, key: Key, value: T) -> ConnectionResult<TransactionId> {
         let value = json::to_value(value)?;
         self.set_generic(key, value).await
     }
