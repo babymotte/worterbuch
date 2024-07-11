@@ -281,7 +281,7 @@ impl Worterbuch {
     }
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
-        "0.7".to_owned()
+        "0.8".to_owned()
     }
 
     pub fn get(&self, key: &Key) -> WorterbuchResult<(String, Value)> {
