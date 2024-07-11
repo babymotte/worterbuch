@@ -107,6 +107,8 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_UNIX_SOCKET_PATH") {
             if let Some(ep) = &mut self.unix_endpoint {
                 ep.path = val.into();
+            } else {
+                self.unix_endpoint = Some(UnixEndpoint { path: val.into() });
             }
         }
 
