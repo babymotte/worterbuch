@@ -19,6 +19,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use std::io;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -55,7 +56,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(io::stderr).init();
     Toplevel::new()
         .start("wbpget", run)
         .catch_signals()

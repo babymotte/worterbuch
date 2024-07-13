@@ -19,7 +19,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use std::time::Duration;
+use std::{io, time::Duration};
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::Toplevel;
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
     }
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(io::stderr).init();
     let _args: Args = Args::parse();
 
     Toplevel::new()

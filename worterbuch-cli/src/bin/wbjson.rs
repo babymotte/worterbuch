@@ -20,7 +20,10 @@
 use anyhow::Result;
 use clap::Parser;
 use serde_json::Value;
-use std::{fs, io::Read};
+use std::{
+    fs,
+    io::{self, Read},
+};
 use worterbuch_client::{config::Config, AuthToken, KeyValuePair};
 
 #[derive(Parser)]
@@ -42,7 +45,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(io::stderr).init();
     let mut config = Config::new();
     let args: Args = Args::parse();
 

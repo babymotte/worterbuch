@@ -23,7 +23,7 @@ mod web_ui;
 
 use latency::start_latency_test;
 use miette::IntoDiagnostic;
-use std::time::Duration;
+use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
@@ -32,7 +32,7 @@ use web_ui::run_web_ui;
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(io::stderr).init();
 
     Toplevel::new()
         .start("worterbuch-speedtest", run_speedtests_with_ui)

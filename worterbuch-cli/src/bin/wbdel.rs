@@ -19,7 +19,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use std::time::Duration;
+use std::{io, time::Duration};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
@@ -53,7 +53,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(io::stderr).init();
     Toplevel::new()
         .start("wbdel", wbdel)
         .catch_signals()
