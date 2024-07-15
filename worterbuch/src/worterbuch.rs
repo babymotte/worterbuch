@@ -40,8 +40,8 @@ use worterbuch_common::{
     parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
     PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
     TransactionId, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
-    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS,
-    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
@@ -1038,6 +1038,39 @@ impl Worterbuch {
         }
 
         Ok(())
+    }
+
+    pub async fn keepalive_lag(&mut self, client_id: Uuid, lag: u32) {
+        if self.config.extended_monitoring {
+            self.set(
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG
+                ),
+                json!(lag),
+                INTERNAL_CLIENT_ID,
+            )
+            .await
+            .ok();
+        }
+    }
+
+    pub async fn clear_keepalive_lag(&mut self, client_id: Uuid) {
+        if self.config.extended_monitoring {
+            self.delete(
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG
+                ),
+                INTERNAL_CLIENT_ID,
+            )
+            .await
+            .ok();
+        }
     }
 }
 

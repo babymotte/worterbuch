@@ -253,5 +253,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::SupportedProtocolVersion(tx) => {
             tx.send(worterbuch.supported_protocol_version()).ok();
         }
+        WbFunction::KeepaliveLag(client_id, lag) => {
+            worterbuch.keepalive_lag(client_id, lag).await;
+        }
+        WbFunction::ClearKeepaliveLag(client_id) => {
+            worterbuch.clear_keepalive_lag(client_id).await;
+        }
     }
 }

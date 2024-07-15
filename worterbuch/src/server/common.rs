@@ -348,6 +348,8 @@ pub enum WbFunction {
     Export(oneshot::Sender<WorterbuchResult<Value>>),
     Len(oneshot::Sender<usize>),
     SupportedProtocolVersion(oneshot::Sender<ProtocolVersion>),
+    KeepaliveLag(Uuid, u32),
+    ClearKeepaliveLag(Uuid),
 }
 
 #[derive(Clone)]
@@ -559,6 +561,18 @@ impl CloneableWbApi {
             .send(WbFunction::SupportedProtocolVersion(tx))
             .await?;
         Ok(rx.await?)
+    }
+
+    pub fn keepalive_lag(&self, client_id: Uuid, lag: u32) {
+        self.tx
+            .try_send(WbFunction::KeepaliveLag(client_id, lag))
+            .ok();
+    }
+
+    pub fn clear_keepalive_lag(&self, client_id: Uuid) {
+        self.tx
+            .try_send(WbFunction::ClearKeepaliveLag(client_id))
+            .ok();
     }
 }
 
@@ -1283,6 +1297,7 @@ pub fn check_client_keepalive(
     last_keepalive_tx: Instant,
     client_id: Uuid,
     keepalive_timeout: Duration,
+    wb: &CloneableWbApi,
 ) -> anyhow::Result<()> {
     let lag = last_keepalive_tx - last_keepalive_rx;
 
@@ -1292,6 +1307,9 @@ pub fn check_client_keepalive(
             client_id,
             lag.as_secs()
         );
+        wb.keepalive_lag(client_id, lag.as_secs() as u32);
+    } else {
+        wb.clear_keepalive_lag(client_id);
     }
 
     if lag >= keepalive_timeout {
