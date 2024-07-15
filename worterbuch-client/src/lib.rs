@@ -83,6 +83,11 @@ pub(crate) enum Command {
         oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
     ),
     LsAsync(Option<Key>, oneshot::Sender<TransactionId>),
+    PLs(
+        Option<RequestPattern>,
+        oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
+    ),
+    PLsAsync(Option<RequestPattern>, oneshot::Sender<TransactionId>),
     Subscribe(
         Key,
         UniqueFlag,
@@ -386,6 +391,32 @@ impl Worterbuch {
     ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Ls(parent, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let children = rx.await?;
+        Ok(children)
+    }
+
+    pub async fn pls_async(
+        &self,
+        parent: Option<RequestPattern>,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::PLsAsync(parent, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let tid = rx.await?;
+        Ok(tid)
+    }
+
+    pub async fn pls(
+        &self,
+        parent: Option<RequestPattern>,
+    ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::PLs(parent, tx);
         log::debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         log::debug!("Command queued.");
@@ -1078,7 +1109,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     protocol_version: ProtocolVersion,
 ) -> Result<Worterbuch, ConnectionError> {
     // TODO properly implement different protocol versions
-    let supported_protocol_versions = ["0.8".to_owned()];
+    let supported_protocol_versions = ["0.9".to_owned()];
 
     if !supported_protocol_versions.contains(&protocol_version) {
         return Err(ConnectionError::WorterbuchError(
@@ -1271,6 +1302,20 @@ async fn process_incoming_command(
                 Some(CM::Ls(Ls {
                     transaction_id,
                     parent,
+                }))
+            }
+            Command::PLs(parent_pattern, callback) => {
+                callbacks.ls.insert(transaction_id, callback);
+                Some(CM::PLs(PLs {
+                    transaction_id,
+                    parent_pattern,
+                }))
+            }
+            Command::PLsAsync(parent_pattern, callback) => {
+                callback.send(transaction_id).expect("error in callback");
+                Some(CM::PLs(PLs {
+                    transaction_id,
+                    parent_pattern,
                 }))
             }
             Command::Subscribe(key, unique, tid_callback, value_callback, live_only) => {

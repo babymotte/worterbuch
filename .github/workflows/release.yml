@@ -87,7 +87,7 @@ jobs:
       - name: Package Binaries
         uses: vimtor/action-zip@v1
         with:
-          files: target/release/worterbuch${{ matrix.ext }} target/release/wbdel${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbjson${{ matrix.ext }} target/release/wbls${{ matrix.ext }} target/release/wblssub${{ matrix.ext }} target/release/wbpdel${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbpub${{ matrix.ext }} target/release/wbpubs${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsets${{ matrix.ext }} target/release/wbsub${{ matrix.ext }}
+          files: target/release/worterbuch${{ matrix.ext }} target/release/wbdel${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbjson${{ matrix.ext }} target/release/wbls${{ matrix.ext }} target/release/wblssub${{ matrix.ext }} target/release/wbpdel${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbpls${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbpub${{ matrix.ext }} target/release/wbpubs${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsets${{ matrix.ext }} target/release/wbsub${{ matrix.ext }}
           dest: worterbuch-${{ matrix.target }}.zip
 
       - name: Release
