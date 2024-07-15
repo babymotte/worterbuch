@@ -48,6 +48,9 @@ struct Args {
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
+    /// Set a client name on the server
+    #[arg(short, long)]
+    name: Option<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -85,6 +88,9 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     };
 
     let wb = connect(config, on_disconnect).await?;
+    if let Some(name) = args.name {
+        wb.set_client_name(name).await?;
+    }
     let mut responses = wb.all_messages().await?;
 
     let trans_id = wb.ls_async(parent).await?;

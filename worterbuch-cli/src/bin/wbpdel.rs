@@ -51,6 +51,9 @@ struct Args {
     /// Print only the deleted key/value pairs
     #[arg(short, long)]
     raw: bool,
+    /// Set a client name on the server
+    #[arg(short, long)]
+    name: Option<String>,
 }
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -88,6 +91,9 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     };
 
     let wb = connect(config, on_disconnect).await?;
+    if let Some(name) = args.name {
+        wb.set_client_name(name).await?;
+    }
     let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;
