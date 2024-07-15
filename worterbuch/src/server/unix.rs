@@ -36,7 +36,7 @@ use tokio::{
     },
     select, spawn,
     sync::mpsc,
-    time::{sleep, MissedTickBehavior},
+    time::{timeout, MissedTickBehavior},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
@@ -239,16 +239,18 @@ async fn send_with_timeout<'a>(
     client_id: Uuid,
 ) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
-    select! {
-        r = write_line_and_flush(&msg, tcp)  => {
-            r?;
+
+    match timeout(send_timeout, write_line_and_flush(&msg, tcp)).await {
+        Ok(it) => {
+            it?;
             keepalive_tx_tx.try_send(Instant::now()).ok();
-        },
-        _ = sleep(send_timeout) => {
-            log::error!("Send timeout for client {client_id}");
-            return Err(anyhow!("Send timeout for client {client_id}"));
-        },
+        }
+        Err(e) => {
+            log::error!("Send timeout for client {client_id}: {e}");
+            return Err(anyhow!("Send timeout for client {client_id}: {e}"));
+        }
     }
+
     log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
 
     Ok(())
