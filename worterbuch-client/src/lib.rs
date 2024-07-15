@@ -831,11 +831,9 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     }?;
     log::debug!("Connected to tcp://{host_addr}:{port}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
-    let mut tcp_rx = BufReader::new(tcp_rx);
+    let mut tcp_rx = BufReader::new(tcp_rx).lines();
 
     log::debug!("Connected to server.");
-
-    let mut line_buf = String::new();
 
     let Welcome {
         client_id,
@@ -846,15 +844,15 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                 authorization_required,
             },
     } = select! {
-        line = tcp_rx.read_line(&mut line_buf) => match line {
-            Ok(0) => {
+        line = tcp_rx.next_line() => match line {
+            Ok(None) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before welcome message",
                 )))
             }
-            Ok(_) => {
-                let msg = json::from_str::<SM>(&line_buf);
+            Ok(Some(line)) => {
+                let msg = json::from_str::<SM>(&line);
                 let msg = match msg {
                     Ok(SM::Welcome(welcome)) => {
                         log::debug!("Welcome message received: {welcome:?}");
@@ -869,11 +867,10 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                     Err(e) => {
                         return Err(ConnectionError::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("error parsing welcome message '{line_buf}': {e}"),
+                            format!("error parsing welcome message '{line}': {e}"),
                         )))
                     }
                 };
-                line_buf.clear();
                 msg
             }
             Err(e) => return Err(ConnectionError::IoError(e)),
@@ -892,21 +889,18 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             log::debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
 
-            match tcp_rx.read_line(&mut line_buf).await {
-                Ok(0) => Err(ConnectionError::IoError(io::Error::new(
+            match tcp_rx.next_line().await {
+                Ok(None) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before handshake",
                 ))),
-                Ok(_) => {
-                    let msg = json::from_str::<SM>(&line_buf);
-                    line_buf.clear();
+                Ok(Some(line)) => {
+                    let msg = json::from_str::<SM>(&line);
                     match msg {
                         Ok(SM::Authorized(_)) => {
                             log::debug!("Authorization accepted.");
                             connected(
-                                ClientSocket::Tcp(
-                                    TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await,
-                                ),
+                                ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx).await),
                                 on_disconnect,
                                 config,
                                 client_id,
@@ -938,7 +932,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
         }
     } else {
         connected(
-            ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx.lines()).await),
+            ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx).await),
             on_disconnect,
             config,
             client_id,
@@ -968,11 +962,9 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
     }?;
     log::debug!("Connected to {path}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
-    let mut tcp_rx = BufReader::new(tcp_rx);
+    let mut tcp_rx = BufReader::new(tcp_rx).lines();
 
     log::debug!("Connected to server.");
-
-    let mut line_buf = String::new();
 
     let Welcome {
         client_id,
@@ -983,15 +975,15 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
                 authorization_required,
             },
     } = select! {
-        line = tcp_rx.read_line(&mut line_buf) => match line {
-            Ok(0) => {
+        line = tcp_rx.next_line() => match line {
+            Ok(None) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before welcome message",
                 )))
             }
-            Ok(_) => {
-                let msg = json::from_str::<SM>(&line_buf);
+            Ok(Some(line)) => {
+                let msg = json::from_str::<SM>(&line);
                 let msg = match msg {
                     Ok(SM::Welcome(welcome)) => {
                         log::debug!("Welcome message received: {welcome:?}");
@@ -1006,11 +998,10 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
                     Err(e) => {
                         return Err(ConnectionError::IoError(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("error parsing welcome message '{line_buf}': {e}"),
+                            format!("error parsing welcome message '{line}': {e}"),
                         )))
                     }
                 };
-                line_buf.clear();
                 msg
             }
             Err(e) => return Err(ConnectionError::IoError(e)),
@@ -1029,21 +1020,18 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
             log::debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
 
-            match tcp_rx.read_line(&mut line_buf).await {
-                Ok(0) => Err(ConnectionError::IoError(io::Error::new(
+            match tcp_rx.next_line().await {
+                Ok(None) => Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before handshake",
                 ))),
-                Ok(_) => {
-                    let msg = json::from_str::<SM>(&line_buf);
-                    line_buf.clear();
+                Ok(Some(line)) => {
+                    let msg = json::from_str::<SM>(&line);
                     match msg {
                         Ok(SM::Authorized(_)) => {
                             log::debug!("Authorization accepted.");
                             connected(
-                                ClientSocket::Unix(
-                                    UnixClientSocket::new(tcp_tx, tcp_rx.lines()).await,
-                                ),
+                                ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx).await),
                                 on_disconnect,
                                 config,
                                 client_id,
@@ -1075,7 +1063,7 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
         }
     } else {
         connected(
-            ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx.lines()).await),
+            ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx).await),
             on_disconnect,
             config,
             client_id,
