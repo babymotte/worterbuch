@@ -192,6 +192,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Ls(parent, tx) => {
             tx.send(worterbuch.ls(&parent)).ok();
         }
+        WbFunction::PLs(parent, tx) => {
+            tx.send(worterbuch.pls(&parent)).ok();
+        }
         WbFunction::PGet(pattern, tx) => {
             tx.send(worterbuch.pget(&pattern)).ok();
         }

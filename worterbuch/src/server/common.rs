@@ -39,7 +39,7 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key, KeyValuePair,
-    KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PState, PStateEvent,
+    KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs, PState, PStateEvent,
     PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
     ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag,
     Unsubscribe, UnsubscribeLs, Value,
@@ -254,6 +254,27 @@ pub async fn process_incoming_message(
                     log::trace!("Listing subkeys for client {} done.", client_id);
                 }
             }
+            CM::PLs(msg) => {
+                let pattern = &msg
+                    .parent_pattern
+                    .as_ref()
+                    .map(|it| format!("{it}/?"))
+                    .unwrap_or("?".to_owned());
+                if check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    pattern,
+                    &authorized,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?
+                {
+                    log::trace!("Listing matching subkeys for client {} …", client_id);
+                    pls(msg, worterbuch, tx).await?;
+                    log::trace!("Listing matching subkeys for client {} done.", client_id);
+                }
+            }
             CM::SubscribeLs(msg) => {
                 let pattern = &msg
                     .parent
@@ -306,6 +327,10 @@ pub enum WbFunction {
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
     Ls(
         Option<Key>,
+        oneshot::Sender<WorterbuchResult<Vec<RegularKeySegment>>>,
+    ),
+    PLs(
+        Option<RequestPattern>,
         oneshot::Sender<WorterbuchResult<Vec<RegularKeySegment>>>,
     ),
     PGet(
@@ -407,6 +432,15 @@ impl CloneableWbApi {
     pub async fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Ls(parent, tx)).await?;
+        rx.await?
+    }
+
+    pub async fn pls(
+        &self,
+        parent: Option<RequestPattern>,
+    ) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(WbFunction::PLs(parent, tx)).await?;
         rx.await?
     }
 
@@ -1048,6 +1082,37 @@ async fn ls(
     client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let children = match worterbuch.ls(msg.parent).await {
+        Ok(it) => it,
+        Result::Err(e) => {
+            handle_store_error(e, client, msg.transaction_id).await?;
+            return Ok(());
+        }
+    };
+
+    let response = LsState {
+        transaction_id: msg.transaction_id,
+        children,
+    };
+
+    client
+        .send(ServerMessage::LsState(response))
+        .await
+        .context(|| {
+            format!(
+                "Error sending LSSTATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?;
+
+    Ok(())
+}
+
+async fn pls(
+    msg: PLs,
+    worterbuch: &CloneableWbApi,
+    client: &mpsc::Sender<ServerMessage>,
+) -> WorterbuchResult<()> {
+    let children = match worterbuch.pls(msg.parent_pattern).await {
         Ok(it) => it,
         Result::Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;

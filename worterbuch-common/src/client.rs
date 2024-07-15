@@ -34,6 +34,7 @@ pub enum ClientMessage {
     Delete(Delete),
     PDelete(PDelete),
     Ls(Ls),
+    PLs(PLs),
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
     Transform(Transform),
@@ -55,6 +56,7 @@ impl ClientMessage {
             ClientMessage::Delete(m) => Some(m.transaction_id),
             ClientMessage::PDelete(m) => Some(m.transaction_id),
             ClientMessage::Ls(m) => Some(m.transaction_id),
+            ClientMessage::PLs(m) => Some(m.transaction_id),
             ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::Transform(m) => Some(m.transaction_id),
@@ -145,6 +147,13 @@ pub struct PDelete {
 pub struct Ls {
     pub transaction_id: TransactionId,
     pub parent: Option<Key>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PLs {
+    pub transaction_id: TransactionId,
+    pub parent_pattern: Option<RequestPattern>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

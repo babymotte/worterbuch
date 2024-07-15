@@ -18,7 +18,7 @@
  */
 
 use serde::{Deserialize, Serialize};
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use worterbuch_common::{
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
@@ -398,6 +398,68 @@ impl Store {
         Ok(())
     }
 
+    fn ncollect_matching_children<'p>(
+        node: &Node,
+        mut traversed_path: Vec<&'p str>,
+        remaining_path: &'p [KeySegment],
+        children: &mut HashSet<RegularKeySegment>,
+        subscribers: Option<&SubscribersNode>,
+        ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
+    ) -> StoreResult<()> {
+        if remaining_path.is_empty() {
+            for key in node.t.keys() {
+                children.insert(key.clone());
+            }
+
+            return Ok(());
+        }
+
+        let next = &remaining_path[0];
+        let tail = &remaining_path[1..];
+
+        match next {
+            KeySegment::MultiWildcard => {
+                return Err(StoreError::IllegalMultiWildcard);
+            }
+            KeySegment::Wildcard => {
+                for (key, node) in &node.t {
+                    let new_children = Vec::new();
+                    if let Some(subscribers) = subscribers.as_ref() {
+                        if !subscribers.ls_subscribers.is_empty() {
+                            let subscribers = subscribers.ls_subscribers.clone();
+                            ls_subscribers.push((subscribers, new_children));
+                        }
+                    }
+                    let mut traversed_path = traversed_path.clone();
+                    traversed_path.push(key);
+                    Store::ncollect_matching_children(
+                        node,
+                        traversed_path,
+                        tail,
+                        children,
+                        subscribers.and_then(|s| s.tree.get(key)),
+                        ls_subscribers,
+                    )?;
+                }
+            }
+            KeySegment::Regular(elem) => {
+                traversed_path.push(elem);
+                if let Some(child) = node.t.get(elem) {
+                    Store::ncollect_matching_children(
+                        child,
+                        traversed_path,
+                        tail,
+                        children,
+                        subscribers.and_then(|s| s.tree.get(elem)),
+                        ls_subscribers,
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn insert(
         &mut self,
         path: &[RegularKeySegment],
@@ -475,6 +537,20 @@ impl Store {
 
     pub fn ls_root(&self) -> Vec<RegularKeySegment> {
         self.data.t.keys().map(ToOwned::to_owned).collect()
+    }
+
+    pub fn pls(&self, path: &[KeySegment]) -> StoreResult<Vec<RegularKeySegment>> {
+        let mut children = HashSet::new();
+        let traversed = vec![];
+        Store::ncollect_matching_children(
+            &self.data,
+            traversed,
+            path,
+            &mut children,
+            None,
+            &mut Vec::new(),
+        )?;
+        Ok(children.into_iter().collect())
     }
 
     pub fn merge(&mut self, other: Store) -> Vec<(String, Value)> {

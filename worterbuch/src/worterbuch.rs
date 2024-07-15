@@ -281,7 +281,7 @@ impl Worterbuch {
     }
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
-        "0.8".to_owned()
+        "0.9".to_owned()
     }
 
     pub fn get(&self, key: &Key) -> WorterbuchResult<(String, Value)> {
@@ -786,6 +786,38 @@ impl Worterbuch {
 
         children.map_or_else(
             || Err(WorterbuchError::NoSuchValue(path.join("/"))),
+            Result::Ok,
+        )
+    }
+
+    pub fn pls(
+        &self,
+        parent_pattern: &Option<RequestPattern>,
+    ) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        if let Some(parent_pattern) = parent_pattern {
+            let path: Vec<KeySegment> = KeySegment::parse(parent_pattern);
+            self.pls_path(&path)
+        } else {
+            self.ls(&None)
+        }
+    }
+
+    fn pls_path(&self, path: &[KeySegment]) -> WorterbuchResult<Vec<RegularKeySegment>> {
+        let children = if path.is_empty() {
+            Ok(self.store.ls_root())
+        } else {
+            self.store.pls(path)
+        };
+
+        children.map_or_else(
+            |_| {
+                Err(WorterbuchError::IllegalMultiWildcard(
+                    path.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<String>>()
+                        .join("/"),
+                ))
+            },
             Result::Ok,
         )
     }
