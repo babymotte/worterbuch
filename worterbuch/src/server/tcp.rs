@@ -155,7 +155,7 @@ async fn serve_loop(
             if let Err(e) =
                 send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx, client_id).await
             {
-                log::error!("Error sending WS message: {e}");
+                log::error!("Error sending TCP message: {e}");
                 break;
             }
         }
