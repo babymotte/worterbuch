@@ -853,7 +853,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             }
             Ok(Some(line)) => {
                 let msg = json::from_str::<SM>(&line);
-                let msg = match msg {
+                match msg {
                     Ok(SM::Welcome(welcome)) => {
                         log::debug!("Welcome message received: {welcome:?}");
                         welcome
@@ -870,8 +870,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                             format!("error parsing welcome message '{line}': {e}"),
                         )))
                     }
-                };
-                msg
+                }
             }
             Err(e) => return Err(ConnectionError::IoError(e)),
         },
@@ -984,7 +983,7 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
             }
             Ok(Some(line)) => {
                 let msg = json::from_str::<SM>(&line);
-                let msg = match msg {
+                match msg {
                     Ok(SM::Welcome(welcome)) => {
                         log::debug!("Welcome message received: {welcome:?}");
                         welcome
@@ -1001,8 +1000,7 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
                             format!("error parsing welcome message '{line}': {e}"),
                         )))
                     }
-                };
-                msg
+                }
             }
             Err(e) => return Err(ConnectionError::IoError(e)),
         },
