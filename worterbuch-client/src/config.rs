@@ -72,9 +72,9 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let proto = "ws".to_owned();
+        let proto = "tcp".to_owned();
         let host_addr = "localhost".to_owned();
-        let port = Some(8080);
+        let port = Some(8081);
         let keepalive_timeout = Duration::from_secs(5);
         let send_timeout = Duration::from_secs(5);
         let connection_timeout = Duration::from_secs(5);
