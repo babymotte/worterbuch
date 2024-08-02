@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "0.45.0"
+version = "0.45.1"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -2288,7 +2288,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "0.45.0"
+version = "0.45.1"
 dependencies = [
  "log",
  "random_word",
