@@ -119,7 +119,7 @@ jobs:
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry,push=true' }}
 
   docker-cli:
-    needs: test
+    needs: docker
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
