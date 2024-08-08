@@ -18,7 +18,7 @@ default = ["jemalloc"]
 
 [dependencies]
 worterbuch-common = { version = "0.45.0" }
-tokio = { version = "1.26.0", features = ["signal", "rt-multi-thread", "fs"] }
+tokio = { version = "1.26.0", features = ["rt-multi-thread", "fs"] }
 tokio-graceful-shutdown = "0.13.0"
 log = "0.4.17"
 dotenv = "0.15.0"
@@ -30,7 +30,6 @@ clap = { version = "4.1.11", features = ["derive"] }
 sha2 = "0.10.6"
 hex = "0.4.3"
 futures = { version = "0.3.27" }
-urlencoding = "2.1.2"
 poem = { version = "3.0.1", features = ["websocket", "static-files", "sse"] }
 tracing-subscriber = "0.3.16"
 serde_yaml = "0.9.22"
@@ -39,7 +38,7 @@ tokio-stream = "0.1.14"
 jsonwebtoken = "9.2.0"
 miette = { version = "7.1.0", features = ["fancy"] }
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.5", optional = true }
+tikv-jemallocator = { version = "0.6.0", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
