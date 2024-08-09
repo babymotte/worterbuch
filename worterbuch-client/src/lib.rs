@@ -76,8 +76,8 @@ pub(crate) enum Command {
     PGetAsync(Key, oneshot::Sender<TransactionId>),
     Delete(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
     DeleteAsync(Key, oneshot::Sender<TransactionId>),
-    PDelete(Key, oneshot::Sender<(KeyValuePairs, TransactionId)>),
-    PDeleteAsync(Key, oneshot::Sender<TransactionId>),
+    PDelete(Key, bool, oneshot::Sender<(KeyValuePairs, TransactionId)>),
+    PDeleteAsync(Key, bool, oneshot::Sender<TransactionId>),
     Ls(
         Option<Key>,
         oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
@@ -343,9 +343,9 @@ impl Worterbuch {
         })
     }
 
-    pub async fn pdelete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn pdelete_async(&self, key: Key, quiet: bool) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
-        let cmd = Command::PDeleteAsync(key, tx);
+        let cmd = Command::PDeleteAsync(key, quiet, tx);
         log::debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         log::debug!("Command queued.");
@@ -356,9 +356,10 @@ impl Worterbuch {
     pub async fn pdelete_generic(
         &self,
         key: Key,
+        quiet: bool,
     ) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
         let (tx, rx) = oneshot::channel();
-        let cmd = Command::PDelete(key, tx);
+        let cmd = Command::PDelete(key, quiet, tx);
         log::debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         log::debug!("Command queued.");
@@ -369,8 +370,9 @@ impl Worterbuch {
     pub async fn pdelete<T: DeserializeOwned>(
         &self,
         key: Key,
+        quiet: bool,
     ) -> ConnectionResult<(TypedKeyValuePairs<T>, TransactionId)> {
-        let (kvps, tid) = self.pdelete_generic(key).await?;
+        let (kvps, tid) = self.pdelete_generic(key, quiet).await?;
         let typed_kvps = deserialize_key_value_pairs(kvps)?;
         Ok((typed_kvps, tid))
     }
@@ -1276,18 +1278,20 @@ async fn process_incoming_command(
                     key,
                 }))
             }
-            Command::PDelete(request_pattern, callback) => {
+            Command::PDelete(request_pattern, quiet, callback) => {
                 callbacks.pdel.insert(transaction_id, callback);
                 Some(CM::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
+                    quiet: Some(quiet),
                 }))
             }
-            Command::PDeleteAsync(request_pattern, callback) => {
+            Command::PDeleteAsync(request_pattern, quiet, callback) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
+                    quiet: Some(quiet),
                 }))
             }
             Command::Ls(parent, callback) => {

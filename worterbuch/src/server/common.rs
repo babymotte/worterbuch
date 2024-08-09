@@ -1060,7 +1060,11 @@ async fn pdelete(
     let response = PState {
         transaction_id: msg.transaction_id,
         request_pattern: msg.request_pattern,
-        event: PStateEvent::Deleted(deleted),
+        event: PStateEvent::Deleted(if msg.quiet.unwrap_or(false) {
+            vec![]
+        } else {
+            deleted
+        }),
     };
 
     client

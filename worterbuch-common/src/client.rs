@@ -140,6 +140,7 @@ pub struct Delete {
 pub struct PDelete {
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
+    pub quiet: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

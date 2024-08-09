@@ -176,6 +176,9 @@ properties:
       requestPattern:
         description: The deletion pattern
         type: string
+      quiet:
+        description: If true, the server will not send the deleted values back to the client
+        type: boolean
     additionalProperties: false
     required:
       - transactionId

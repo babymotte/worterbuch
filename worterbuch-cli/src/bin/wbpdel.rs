@@ -54,6 +54,9 @@ struct Args {
     /// Set a client name on the server
     #[arg(short, long)]
     name: Option<String>,
+    /// Don't return deleted values
+    #[arg(short, long)]
+    quiet: bool,
 }
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -125,7 +128,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 }
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some(key ) => trans_id = wb.pdelete_async(key).await?,
+                Some(key ) => trans_id = wb.pdelete_async(key, args.quiet).await?,
                 None => done = true,
             },
         }
