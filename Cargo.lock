@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "0.45.2"
+version = "0.45.3"
 dependencies = [
  "anyhow",
  "clap",
