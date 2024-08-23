@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{ops::ControlFlow, time::Duration};
 use tokio::{
@@ -28,7 +28,8 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use worterbuch_client::{
-    Err, Key, KeyValuePair, LsState, PState, PStateEvent, ServerMessage as SM, State, StateEvent,
+    Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
+    State, StateEvent,
 };
 
 pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
@@ -127,8 +128,8 @@ pub fn provide_key_value_pairs(
             loop {
                 select! {
                     _ = subsys.on_shutdown_requested() => break,
-                    recv = lines.next_line() => if let Ok(Some(kvp)) = recv {
-                        if let ControlFlow::Break(_) = provide_key_value_pair(json, kvp, &tx).await {
+                    recv = lines.next_line() => if let Ok(Some(line)) = recv {
+                        if let ControlFlow::Break(_) = provide_key_value_pair(json, line, &tx).await {
                             break;
                         }
                     } else {
@@ -142,30 +143,45 @@ pub fn provide_key_value_pairs(
     rx
 }
 
+#[derive(Debug, Deserialize)]
+enum Line {
+    #[serde(untagged)]
+    Kvp(KeyValuePair),
+    #[serde(untagged)]
+    Kvps(KeyValuePairs),
+}
+
 async fn provide_key_value_pair(
     json: bool,
-    kvp: String,
+    line: String,
     tx: &mpsc::Sender<(String, Value)>,
 ) -> ControlFlow<()> {
     if json {
-        match serde_json::from_str::<KeyValuePair>(&kvp) {
-            Ok(KeyValuePair { key, value }) => {
+        match serde_json::from_str::<Line>(&line) {
+            Ok(Line::Kvp(KeyValuePair { key, value })) => {
                 if tx.send((key, value)).await.is_err() {
                     return ControlFlow::Break(());
+                }
+            }
+            Ok(Line::Kvps(kvps)) => {
+                for KeyValuePair { key, value } in kvps {
+                    if tx.send((key, value)).await.is_err() {
+                        return ControlFlow::Break(());
+                    }
                 }
             }
             Err(e) => {
                 eprintln!("Error parsing json: {e}");
             }
         }
-    } else if let Some(index) = kvp.find('=') {
-        let key = kvp[..index].to_owned();
-        let value = kvp[index + 1..].to_owned();
+    } else if let Some(index) = line.find('=') {
+        let key = line[..index].to_owned();
+        let value = line[index + 1..].to_owned();
         if tx.send((key, json!(value))).await.is_err() {
             return ControlFlow::Break(());
         }
     } else {
-        eprintln!("no key/value pair (e.g. 'a=b'): {}", kvp);
+        eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
     }
     ControlFlow::Continue(())
 }
