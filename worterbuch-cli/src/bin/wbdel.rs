@@ -21,7 +21,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::{io, time::Duration};
 use tokio::{select, sync::mpsc};
-use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
 use worterbuch_client::{config::Config, connect, AuthToken};
@@ -61,16 +61,17 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Toplevel::new()
-        .start("wbdel", wbdel)
-        .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
-        .await?;
+    Toplevel::new(|s| async move {
+        s.start(SubsystemBuilder::new("wbdel", run));
+    })
+    .catch_signals()
+    .handle_shutdown_requests(Duration::from_millis(1000))
+    .await?;
 
     Ok(())
 }
 
-async fn wbdel(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 
@@ -101,7 +102,11 @@ async fn wbdel(subsys: SubsystemHandle) -> Result<()> {
     let mut trans_id = 0;
     let mut acked = 0;
 
-    let mut rx = provide_keys(keys, subsys.clone());
+    let (tx, mut rx) = mpsc::channel(1);
+    subsys.start(SubsystemBuilder::new("provide_keys", |s| async move {
+        provide_keys(keys, s, tx);
+        Ok(()) as Result<()>
+    }));
     let mut done = false;
 
     loop {
@@ -112,7 +117,7 @@ async fn wbdel(subsys: SubsystemHandle) -> Result<()> {
             _ = subsys.on_shutdown_requested() => break,
             _ = disco_rx.recv() => {
                 log::warn!("Connection to server lost.");
-                subsys.request_global_shutdown();
+                subsys.request_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
                 if let Some(tid) = msg.transaction_id() {

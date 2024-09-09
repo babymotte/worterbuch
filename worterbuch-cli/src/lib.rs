@@ -41,9 +41,7 @@ pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
     }
 }
 
-pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle) -> mpsc::Receiver<String> {
-    let (tx, rx) = mpsc::channel(1);
-
+pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc::Sender<String>) {
     if let Some(keys) = keys {
         spawn(async move {
             for key in keys {
@@ -70,13 +68,9 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle) -> mpsc:
             }
         });
     }
-
-    rx
 }
 
-pub fn provide_values(json: bool, subsys: SubsystemHandle) -> mpsc::Receiver<Value> {
-    let (tx, rx) = mpsc::channel(1);
-
+pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Value>) {
     spawn(async move {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         loop {
@@ -103,17 +97,14 @@ pub fn provide_values(json: bool, subsys: SubsystemHandle) -> mpsc::Receiver<Val
             }
         }
     });
-
-    rx
 }
 
 pub fn provide_key_value_pairs(
     key_value_pairs: Option<Vec<String>>,
     json: bool,
     subsys: SubsystemHandle,
-) -> mpsc::Receiver<(Key, Value)> {
-    let (tx, rx) = mpsc::channel(1);
-
+    tx: mpsc::Sender<(Key, Value)>,
+) {
     if let Some(key_value_pairs) = key_value_pairs {
         spawn(async move {
             for kvp in key_value_pairs {
@@ -139,8 +130,6 @@ pub fn provide_key_value_pairs(
             }
         });
     }
-
-    rx
 }
 
 #[derive(Debug, Deserialize)]

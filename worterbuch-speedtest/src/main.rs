@@ -26,7 +26,7 @@ use miette::IntoDiagnostic;
 use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
-use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing_subscriber::EnvFilter;
 use web_ui::run_web_ui;
 
@@ -38,12 +38,16 @@ async fn main() -> miette::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Toplevel::new()
-        .start("worterbuch-speedtest", run_speedtests_with_ui)
-        .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
-        .await
-        .into_diagnostic()?;
+    Toplevel::new(|s| async move {
+        s.start(SubsystemBuilder::new(
+            "worterbuch-speedtest",
+            run_speedtests_with_ui,
+        ));
+    })
+    .catch_signals()
+    .handle_shutdown_requests(Duration::from_millis(1000))
+    .await
+    .into_diagnostic()?;
 
     Ok(())
 }
@@ -54,7 +58,7 @@ async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
     let (throughput_ui_tx, throughput_ui_rx) = mpsc::channel(1);
     let (latency_ui_tx, latency_ui_rx) = mpsc::channel(1);
 
-    subsys.start("speedtest-web-ui", |s| {
+    subsys.start(SubsystemBuilder::new("speedtest-web-ui", |s| {
         run_web_ui(
             s,
             throughput_ui_rx,
@@ -62,13 +66,13 @@ async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
             throughput_api_tx,
             latency_api_tx,
         )
-    });
-    subsys.start("throughput", move |s| {
+    }));
+    subsys.start(SubsystemBuilder::new("throughput", move |s| {
         start_throughput_test(s, throughput_ui_tx, throughput_api_rx)
-    });
-    subsys.start("latency", move |s| {
+    }));
+    subsys.start(SubsystemBuilder::new("latency", move |s| {
         start_latency_test(s, latency_ui_tx, latency_api_rx)
-    });
+    }));
 
     Ok(())
 }

@@ -110,17 +110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
-name = "async-recursion"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -151,6 +140,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "atomic"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d818003e740b63afc82337e3160717f4f63078720a810b7b903e70a5d1d2994"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -242,6 +240,26 @@ name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
+
+[[package]]
+name = "bytemuck"
+version = "1.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94bbb0ad554ad961ddc5da507a12a29b14e4ae5bda06b19f575a3e6079d2e2ae"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc8b54b395f2fcfbb3d90c47b01c7f444d94d05bdeb775811dec868ac3bbc26"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -792,18 +810,6 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "miette"
-version = "5.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59bb584eaeeab6bd0226ccf3509a69d7936d148cf3d036ad350abe35e8c6856e"
-dependencies = [
- "miette-derive 5.10.0",
- "once_cell",
- "thiserror",
- "unicode-width",
-]
-
-[[package]]
-name = "miette"
 version = "7.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4edc8853320c2a0dab800fbda86253c8938f6ea88510dc92c5f1ed20e794afc1"
@@ -811,7 +817,7 @@ dependencies = [
  "backtrace",
  "backtrace-ext",
  "cfg-if",
- "miette-derive 7.2.0",
+ "miette-derive",
  "owo-colors",
  "supports-color",
  "supports-hyperlinks",
@@ -820,17 +826,6 @@ dependencies = [
  "textwrap",
  "thiserror",
  "unicode-width",
-]
-
-[[package]]
-name = "miette-derive"
-version = "5.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49e7bc1560b95a3c4a25d03de42fe76ca718ab92d1a22a55b9b4cf67b3ae635c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1591,19 +1586,19 @@ dependencies = [
 
 [[package]]
 name = "tokio-graceful-shutdown"
-version = "0.13.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30666f313a52f7e87e9f14212d3e33c2ab59b444c405188ffcf8c36a84ca7688"
+checksum = "fafa3ccdad018530a5eb1c2c87772384fb94273675022240bc5729044f7696e5"
 dependencies = [
- "async-recursion",
  "async-trait",
- "futures",
- "log",
- "miette 5.10.0",
+ "atomic",
+ "bytemuck",
+ "miette",
  "pin-project-lite",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -2104,7 +2099,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "log",
- "miette 7.2.0",
+ "miette",
  "poem",
  "serde",
  "serde_json",
@@ -2172,7 +2167,7 @@ dependencies = [
  "dotenv",
  "hostname",
  "log",
- "miette 7.2.0",
+ "miette",
  "poem",
  "serde",
  "serde_json",

@@ -45,7 +45,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use uuid::Uuid;
 use worterbuch_common::{topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 
@@ -81,12 +81,14 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     let worterbuch_uptime = api.clone();
 
     if use_persistence {
-        subsys.start("persistence", |subsys| {
+        subsys.start(SubsystemBuilder::new("persistence", |subsys| {
             persistence::periodic(worterbuch_pers, config_pers, subsys)
-        });
+        }));
     }
 
-    subsys.start("stats", |subsys| track_stats(worterbuch_uptime, subsys));
+    subsys.start(SubsystemBuilder::new("stats", |subsys| {
+        track_stats(worterbuch_uptime, subsys)
+    }));
 
     if let Some(WsEndpoint {
         endpoint: Endpoint {
@@ -102,9 +104,9 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         let public_addr = public_addr.to_owned();
-        subsys.start("webserver", move |subsys| {
+        subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
             server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys)
-        });
+        }));
     }
 
     if let Some(Endpoint {
@@ -116,18 +118,18 @@ pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
         let sapi = api.clone();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
-        subsys.start("tcpserver", move |subsys| {
+        subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
             server::tcp::start(sapi, bind_addr, port, subsys)
-        });
+        }));
     }
 
     #[cfg(target_family = "unix")]
     if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
         let sapi = api.clone();
         let path = path.clone();
-        subsys.start("unixserver", move |subsys| {
+        subsys.start(SubsystemBuilder::new("unixserver", move |subsys| {
             server::unix::start(sapi, path, subsys)
-        });
+        }));
     }
 
     let (persist_tx, mut persist_rx) = oneshot::channel();

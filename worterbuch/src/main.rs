@@ -22,7 +22,7 @@ use clap::Parser;
 use std::{io, time::Duration};
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
-use tokio_graceful_shutdown::Toplevel;
+use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use tracing_subscriber::EnvFilter;
 use worterbuch::run_worterbuch;
 
@@ -46,11 +46,12 @@ async fn main() -> Result<()> {
         .init();
     let _args: Args = Args::parse();
 
-    Toplevel::new()
-        .start("worterbuch", run_worterbuch)
-        .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
-        .await?;
+    Toplevel::new(|s| async move {
+        s.start(SubsystemBuilder::new("worterbuch", run_worterbuch));
+    })
+    .catch_signals()
+    .handle_shutdown_requests(Duration::from_millis(1000))
+    .await?;
 
     Ok(())
 }
