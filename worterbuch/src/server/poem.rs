@@ -179,7 +179,7 @@ async fn set(
         }
     }
     let client_id = Uuid::new_v4();
-    match wb.set(key, value, client_id.to_string()).await {
+    match wb.set(key, value, client_id).await {
         Ok(()) => Ok(Json("Ok")),
         Err(e) => to_error_response(e),
     }
@@ -215,7 +215,7 @@ async fn delete_value(
         }
     }
     let client_id = Uuid::new_v4();
-    match wb.delete(key, client_id.to_string()).await {
+    match wb.delete(key, client_id).await {
         Ok(value) => Ok(Json(value)),
         Err(e) => to_error_response(e),
     }
@@ -233,7 +233,7 @@ async fn pdelete(
         }
     }
     let client_id = Uuid::new_v4();
-    match wb.pdelete(pattern, client_id.to_string()).await {
+    match wb.pdelete(pattern, client_id).await {
         Ok(kvps) => Ok(Json(kvps)),
         Err(e) => to_error_response(e),
     }

@@ -26,7 +26,13 @@ use crate::{
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_value, Value};
-use std::{collections::HashMap, fmt::Display, net::SocketAddr, ops::Deref, time::Duration};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    fmt::Display,
+    net::SocketAddr,
+    ops::Deref,
+    time::Duration,
+};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -242,7 +248,7 @@ pub struct Worterbuch {
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     clients: HashMap<Uuid, Option<SocketAddr>>,
-    spub_keys: HashMap<TransactionId, Key>,
+    spub_keys: HashMap<Uuid, HashMap<TransactionId, Key>>,
 }
 
 impl Worterbuch {
@@ -297,7 +303,7 @@ impl Worterbuch {
         }
     }
 
-    pub async fn set(&mut self, key: Key, value: Value, client_id: &str) -> WorterbuchResult<()> {
+    pub async fn set(&mut self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -322,10 +328,10 @@ impl Worterbuch {
         &mut self,
         transaction_id: TransactionId,
         key: Key,
-        client_id: &str,
+        client_id: Uuid,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
-        self.store_key(transaction_id, key);
+        self.store_key(client_id, transaction_id, key);
 
         Ok(())
     }
@@ -334,9 +340,9 @@ impl Worterbuch {
         &mut self,
         transaction_id: TransactionId,
         value: Value,
-        client_id: &str,
+        client_id: Uuid,
     ) -> WorterbuchResult<()> {
-        if let Some(key) = self.lookup_key(transaction_id) {
+        if let Some(key) = self.lookup_key(client_id, transaction_id) {
             check_for_read_only_key(&key, client_id)?;
 
             let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -778,7 +784,7 @@ impl Worterbuch {
         log::trace!("Calling {} ls subscribers done.", len);
     }
 
-    pub async fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<Value> {
+    pub async fn delete(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -797,7 +803,7 @@ impl Worterbuch {
     pub async fn pdelete(
         &mut self,
         pattern: RequestPattern,
-        client_id: &str,
+        client_id: Uuid,
     ) -> WorterbuchResult<KeyValuePairs> {
         self.internal_pdelete(pattern, false, client_id).await
     }
@@ -806,7 +812,7 @@ impl Worterbuch {
         &mut self,
         pattern: RequestPattern,
         skip_read_only_check: bool,
-        client_id: &str,
+        client_id: Uuid,
     ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
         if !skip_read_only_check {
             check_for_read_only_key(&pattern, client_id)?;
@@ -984,6 +990,14 @@ impl Worterbuch {
         client_id: Uuid,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
+        if let Some(spubs) = self.spub_keys.remove(&client_id) {
+            log::info!(
+                "Dropping {} pub stream(s) of client {}.",
+                spubs.len(),
+                client_id
+            );
+        }
+
         let grave_goods = self.grave_goods(&client_id);
         let last_wills = self.last_wills(&client_id);
 
@@ -1042,7 +1056,7 @@ impl Worterbuch {
                         .unwrap_or_else(|| "<unknown>".to_owned()),
                     grave_good
                 );
-                if let Err(e) = self.pdelete(grave_good, &client_id.to_string()).await {
+                if let Err(e) = self.pdelete(grave_good, client_id).await {
                     log::error!("Error burying grave goods for client {client_id}: {e}");
                 }
             }
@@ -1072,10 +1086,7 @@ impl Worterbuch {
                     last_will.key,
                     last_will.value
                 );
-                if let Err(e) = self
-                    .set(last_will.key, last_will.value, &client_id.to_string())
-                    .await
-                {
+                if let Err(e) = self.set(last_will.key, last_will.value, client_id).await {
                     log::error!("Error setting last will of client {client_id}: {e}");
                 }
             }
@@ -1167,16 +1178,23 @@ impl Worterbuch {
         }
     }
 
-    fn store_key(&mut self, transaction_id: u64, key: Key) {
-        self.spub_keys.insert(transaction_id, key);
+    fn store_key(&mut self, client_id: Uuid, transaction_id: u64, key: Key) {
+        let keys = match self.spub_keys.entry(client_id) {
+            Entry::Occupied(it) => it.into_mut(),
+            Entry::Vacant(it) => it.insert(HashMap::new()),
+        };
+        keys.insert(transaction_id, key);
     }
 
-    fn lookup_key(&self, transaction_id: u64) -> Option<Key> {
-        self.spub_keys.get(&transaction_id).map(ToOwned::to_owned)
+    fn lookup_key(&self, client_id: Uuid, transaction_id: u64) -> Option<Key> {
+        self.spub_keys
+            .get(&client_id)
+            .and_then(|keys| keys.get(&transaction_id))
+            .map(ToOwned::to_owned)
     }
 }
 
-fn check_for_read_only_key(key: &str, client_id: &str) -> WorterbuchResult<()> {
+fn check_for_read_only_key(key: &str, client_id: Uuid) -> WorterbuchResult<()> {
     if client_id == INTERNAL_CLIENT_ID {
         // modification is made internally by the server, so everything is allowed
         return Ok(());
@@ -1189,7 +1207,7 @@ fn check_for_read_only_key(key: &str, client_id: &str) -> WorterbuchResult<()> {
         return Ok(());
     }
 
-    if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id {
+    if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id.to_string() {
         // the only writable values are under $SYS/clients/[client_id]]/#
         return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
     }

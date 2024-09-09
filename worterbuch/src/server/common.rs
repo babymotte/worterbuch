@@ -148,7 +148,7 @@ pub async fn process_incoming_message(
                 .await?
                 {
                     log::trace!("Setting value for client {} …", client_id);
-                    set(msg, worterbuch, tx, client_id.to_string()).await?;
+                    set(msg, worterbuch, tx, client_id).await?;
                     log::trace!("Setting value for client {} done.", client_id);
                 }
             }
@@ -167,7 +167,7 @@ pub async fn process_incoming_message(
                         "Mapping key to transaction ID for for client {} …",
                         client_id
                     );
-                    spub_init(msg, worterbuch, tx, client_id.to_string()).await?;
+                    spub_init(msg, worterbuch, tx, client_id).await?;
                     log::trace!(
                         "Mapping key to transaction ID for client {} done.",
                         client_id
@@ -176,7 +176,7 @@ pub async fn process_incoming_message(
             }
             CM::SPub(msg) => {
                 log::trace!("Setting value for client {} …", client_id);
-                spub(msg, worterbuch, tx, client_id.to_string()).await?;
+                spub(msg, worterbuch, tx, client_id).await?;
                 log::trace!("Setting value for client {} done.", client_id);
             }
             CM::Publish(msg) => {
@@ -240,7 +240,7 @@ pub async fn process_incoming_message(
                 .await?
                 {
                     log::trace!("Deleting value for client {} …", client_id);
-                    delete(msg, worterbuch, tx, client_id.to_string()).await?;
+                    delete(msg, worterbuch, tx, client_id).await?;
                     log::trace!("Deleting value for client {} done.", client_id);
                 }
             }
@@ -256,7 +256,7 @@ pub async fn process_incoming_message(
                 .await?
                 {
                     log::trace!("DPeleting value for client {} …", client_id);
-                    pdelete(msg, worterbuch, tx, client_id.to_string()).await?;
+                    pdelete(msg, worterbuch, tx, client_id).await?;
                     log::trace!("DPeleting value for client {} done.", client_id);
                 }
             }
@@ -350,17 +350,17 @@ pub async fn process_incoming_message(
 
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
-    Set(Key, Value, String, oneshot::Sender<WorterbuchResult<()>>),
+    Set(Key, Value, Uuid, oneshot::Sender<WorterbuchResult<()>>),
     SPubInit(
         TransactionId,
         Key,
-        String,
+        Uuid,
         oneshot::Sender<WorterbuchResult<()>>,
     ),
     SPub(
         TransactionId,
         Value,
-        String,
+        Uuid,
         oneshot::Sender<WorterbuchResult<()>>,
     ),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
@@ -400,10 +400,10 @@ pub enum WbFunction {
     ),
     Unsubscribe(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
     UnsubscribeLs(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
-    Delete(Key, String, oneshot::Sender<WorterbuchResult<Value>>),
+    Delete(Key, Uuid, oneshot::Sender<WorterbuchResult<Value>>),
     PDelete(
         RequestPattern,
-        String,
+        Uuid,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
     Connected(Uuid, Option<SocketAddr>, Protocol),
@@ -438,7 +438,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn set(&self, key: Key, value: Value, client_id: String) -> WorterbuchResult<()> {
+    pub async fn set(&self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
@@ -466,7 +466,7 @@ impl CloneableWbApi {
         &self,
         transaction_id: TransactionId,
         key: Key,
-        client_id: String,
+        client_id: Uuid,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
@@ -495,7 +495,7 @@ impl CloneableWbApi {
         &self,
         transaction_id: TransactionId,
         value: Value,
-        client_id: String,
+        client_id: Uuid,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
@@ -627,7 +627,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn delete(&self, key: Key, client_id: String) -> WorterbuchResult<Value> {
+    pub async fn delete(&self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Delete(key, client_id, tx)).await?;
         rx.await?
@@ -636,7 +636,7 @@ impl CloneableWbApi {
     pub async fn pdelete(
         &self,
         pattern: RequestPattern,
-        client_id: String,
+        client_id: Uuid,
     ) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -794,7 +794,7 @@ async fn set(
     msg: Set,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: String,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch.set(msg.key, msg.value, client_id).await {
         handle_store_error(e, client, msg.transaction_id).await?;
@@ -822,7 +822,7 @@ async fn spub_init(
     msg: SPubInit,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: String,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch
         .spub_init(msg.transaction_id, msg.key, client_id)
@@ -853,7 +853,7 @@ async fn spub(
     msg: SPub,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: String,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     if let Err(e) = worterbuch
         .spub(msg.transaction_id, msg.value, client_id)
@@ -1167,7 +1167,7 @@ async fn delete(
     msg: Delete,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: String,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let value = match worterbuch.delete(msg.key, client_id).await {
         Ok(it) => it,
@@ -1199,7 +1199,7 @@ async fn pdelete(
     msg: PDelete,
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
-    client_id: String,
+    client_id: Uuid,
 ) -> WorterbuchResult<()> {
     let deleted = match worterbuch
         .pdelete(msg.request_pattern.clone(), client_id)

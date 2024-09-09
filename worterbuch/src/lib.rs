@@ -46,9 +46,10 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use uuid::Uuid;
 use worterbuch_common::{topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION};
 
-pub const INTERNAL_CLIENT_ID: &str = "internal_client_id";
+pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 
 pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
     let config = Config::new().await?;
@@ -184,14 +185,14 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.get(&key)).ok();
         }
         WbFunction::Set(key, value, client_id, tx) => {
-            tx.send(worterbuch.set(key, value, &client_id).await).ok();
+            tx.send(worterbuch.set(key, value, client_id).await).ok();
         }
         WbFunction::SPubInit(transaction_id, key, client_id, tx) => {
-            tx.send(worterbuch.spub_init(transaction_id, key, &client_id).await)
+            tx.send(worterbuch.spub_init(transaction_id, key, client_id).await)
                 .ok();
         }
         WbFunction::SPub(transaction_id, value, client_id, tx) => {
-            tx.send(worterbuch.spub(transaction_id, value, &client_id).await)
+            tx.send(worterbuch.spub(transaction_id, value, client_id).await)
                 .ok();
         }
         WbFunction::Publish(key, value, tx) => {
@@ -239,10 +240,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                 .ok();
         }
         WbFunction::Delete(key, client_id, tx) => {
-            tx.send(worterbuch.delete(key, &client_id).await).ok();
+            tx.send(worterbuch.delete(key, client_id).await).ok();
         }
         WbFunction::PDelete(pattern, client_id, tx) => {
-            tx.send(worterbuch.pdelete(pattern, &client_id).await).ok();
+            tx.send(worterbuch.pdelete(pattern, client_id).await).ok();
         }
         WbFunction::Connected(client_id, remote_addr, protocol) => {
             worterbuch
