@@ -26,7 +26,7 @@ use tokio::{
     sync::mpsc,
     time::sleep,
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use worterbuch_client::{
     Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
     State, StateEvent,
@@ -52,11 +52,11 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
             drop(tx);
         });
     } else {
-        spawn(async move {
+        subsys.start(SubsystemBuilder::new("read-stdin", |s| async move {
             let mut lines = BufReader::new(tokio::io::stdin()).lines();
             loop {
                 select! {
-                    _ = subsys.on_shutdown_requested() => break,
+                    _ = s.on_shutdown_requested() => break,
                     recv = lines.next_line() => if let Ok(Some(key)) = recv {
                         if tx.send(key).await.is_err() {
                             break;
@@ -66,16 +66,17 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
                     }
                 }
             }
-        });
+            Ok(()) as anyhow::Result<()>
+        }));
     }
 }
 
 pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Value>) {
-    spawn(async move {
+    subsys.start(SubsystemBuilder::new("read-stdin", move |s| async move {
         let mut lines = BufReader::new(tokio::io::stdin()).lines();
         loop {
             select! {
-                _ = subsys.on_shutdown_requested() => break,
+                _ = s.on_shutdown_requested() => break,
                 recv = lines.next_line() => if let Ok(Some(line)) = recv {
                     if json {
                         match serde_json::from_str::<Value>(&line) {
@@ -96,7 +97,8 @@ pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Valu
                 }
             }
         }
-    });
+        Ok(()) as anyhow::Result<()>
+    }));
 }
 
 pub fn provide_key_value_pairs(
@@ -114,11 +116,11 @@ pub fn provide_key_value_pairs(
             }
         });
     } else {
-        spawn(async move {
+        subsys.start(SubsystemBuilder::new("read-stdin", move|s| async move {
             let mut lines = BufReader::new(tokio::io::stdin()).lines();
             loop {
                 select! {
-                    _ = subsys.on_shutdown_requested() => break,
+                    _ = s.on_shutdown_requested() => break,
                     recv = lines.next_line() => if let Ok(Some(line)) = recv {
                         if let ControlFlow::Break(_) = provide_key_value_pair(json, line, &tx).await {
                             break;
@@ -128,7 +130,8 @@ pub fn provide_key_value_pairs(
                     }
                 }
             }
-        });
+            Ok(()) as anyhow::Result<()>
+        }));
     }
 }
 
