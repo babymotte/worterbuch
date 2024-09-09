@@ -18,7 +18,7 @@ serde_json = "1.0.114"
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-graceful-shutdown = "0.13.0"
 tokio-stream = { version = "0.1.14", features = ["sync"] }
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 worterbuch-client = { path = "../worterbuch-client" }
 
 [lints.rust]

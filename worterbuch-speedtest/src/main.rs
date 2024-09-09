@@ -27,6 +27,7 @@ use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use tracing_subscriber::EnvFilter;
 use web_ui::run_web_ui;
 
 #[tokio::main]
