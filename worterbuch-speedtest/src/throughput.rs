@@ -220,7 +220,7 @@ pub async fn start_throughput_test(
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
                             log::debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(&format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
+                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
@@ -269,7 +269,7 @@ pub async fn start_throughput_test(
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
                             log::debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(&format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
+                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
