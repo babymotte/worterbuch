@@ -73,6 +73,34 @@ properties:
       - transactionId
       - key
       - value
+  sPubInit:
+    description: A message sent by a client to initiate a new publish stream
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        description: The key to be used in this pub stream
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+  sPub:
+    description: A message sent by a client to publish to an existing pub stream
+    type: object
+    properties:
+      transactionId:
+        description: The transaction ID of the pub stream to publish to
+        type: integer
+        format: u64
+      value:
+        description: The new value to be published
+    additionalProperties: false
+    required:
+      - transactionId
+      - value
   publish:
     description: A message sent by a client to publish a new value for a key. The value will not be persisted on the server
     type: object
@@ -289,6 +317,10 @@ oneOf:
       - pGet
   - required:
       - set
+  - required:
+      - sPubInit
+  - required:
+      - sPub
   - required:
       - publish
   - required:

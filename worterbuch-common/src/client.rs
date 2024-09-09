@@ -27,6 +27,8 @@ pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
     Set(Set),
+    SPubInit(SPubInit),
+    SPub(SPub),
     Publish(Publish),
     Subscribe(Subscribe),
     PSubscribe(PSubscribe),
@@ -49,6 +51,8 @@ impl ClientMessage {
             ClientMessage::Get(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
+            ClientMessage::SPubInit(m) => Some(m.transaction_id),
+            ClientMessage::SPub(m) => Some(m.transaction_id),
             ClientMessage::Publish(m) => Some(m.transaction_id),
             ClientMessage::Subscribe(m) => Some(m.transaction_id),
             ClientMessage::PSubscribe(m) => Some(m.transaction_id),
@@ -90,6 +94,20 @@ pub struct PGet {
 pub struct Set {
     pub transaction_id: TransactionId,
     pub key: Key,
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SPubInit {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SPub {
+    pub transaction_id: TransactionId,
     pub value: Value,
 }
 
@@ -351,6 +369,58 @@ mod test {
                   }
                 }),
             })
+        );
+    }
+
+    #[test]
+    fn spub_init_is_deserialized_correctly() {
+        let json = r#"{"sPubInit": {"transactionId": 2, "key": "hello/world"}}"#;
+        let expected = ClientMessage::SPubInit(SPubInit {
+            transaction_id: 2,
+            key: "hello/world".into(),
+        });
+        assert_eq!(
+            serde_json::from_str::<ClientMessage>(json).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn spub_is_deserialized_correctly() {
+        let json = r#"{"sPub": {"transactionId": 2, "value": 123}}"#;
+        let expected = ClientMessage::SPub(SPub {
+            transaction_id: 2,
+            value: json!(123),
+        });
+        assert_eq!(
+            serde_json::from_str::<ClientMessage>(json).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn spub_init_is_serialized_correctly() {
+        let json = r#"{"sPubInit":{"transactionId":2,"key":"hello/world"}}"#;
+        let expected = SPubInit {
+            transaction_id: 2,
+            key: "hello/world".into(),
+        };
+        assert_eq!(
+            &serde_json::to_string(&ClientMessage::SPubInit(expected)).unwrap(),
+            json
+        );
+    }
+
+    #[test]
+    fn spub_is_serialized_correctly() {
+        let json = r#"{"sPub":{"transactionId":2,"value":123}}"#;
+        let expected = SPub {
+            transaction_id: 2,
+            value: json!(123),
+        };
+        assert_eq!(
+            &serde_json::to_string(&ClientMessage::SPub(expected)).unwrap(),
+            json
         );
     }
 }

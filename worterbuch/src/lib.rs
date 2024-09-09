@@ -186,6 +186,14 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Set(key, value, client_id, tx) => {
             tx.send(worterbuch.set(key, value, &client_id).await).ok();
         }
+        WbFunction::SPubInit(transaction_id, key, client_id, tx) => {
+            tx.send(worterbuch.spub_init(transaction_id, key, &client_id).await)
+                .ok();
+        }
+        WbFunction::SPub(transaction_id, value, client_id, tx) => {
+            tx.send(worterbuch.spub(transaction_id, value, &client_id).await)
+                .ok();
+        }
         WbFunction::Publish(key, value, tx) => {
             tx.send(worterbuch.publish(key, value).await).ok();
         }

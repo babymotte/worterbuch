@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{server::Err, ErrorCode, Key, MetaData, Privilege, RequestPattern};
+use crate::{server::Err, ErrorCode, Key, MetaData, Privilege, RequestPattern, TransactionId};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{
     broadcast,
@@ -128,6 +128,7 @@ pub enum WorterbuchError {
     AuthorizationRequired(Privilege),
     AlreadyAuthorized,
     Unauthorized(AuthorizationError),
+    NoPubStream(TransactionId),
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -169,6 +170,12 @@ impl fmt::Display for WorterbuchError {
                 write!(f, "Handshake already done")
             }
             WorterbuchError::Unauthorized(err) => err.fmt(f),
+            WorterbuchError::NoPubStream(tid) => {
+                write!(
+                    f,
+                    "There is no active publish stream for transaction ID {tid}"
+                )
+            }
         }
     }
 }
@@ -320,6 +327,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::AuthorizationRequired(_) => ErrorCode::AuthorizationRequired,
             WorterbuchError::AlreadyAuthorized => ErrorCode::AlreadyAuthorized,
             WorterbuchError::Unauthorized(_) => ErrorCode::Unauthorized,
+            WorterbuchError::NoPubStream(_) => ErrorCode::NoPubStream,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

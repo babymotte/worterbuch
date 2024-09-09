@@ -33,7 +33,7 @@ use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
-pub const PROTOCOL_VERSION: &str = "0.9";
+pub const PROTOCOL_VERSION: &str = "0.10";
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
@@ -103,6 +103,7 @@ pub enum ErrorCode {
     AlreadyAuthorized = 0b00001100,
     MissingValue = 0b00001101,
     Unauthorized = 0b00001110,
+    NoPubStream = 0b00001111,
     Other = 0b11111111,
 }
 
@@ -309,9 +310,8 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
 
 #[cfg(test)]
 mod test {
-    use std::cmp::Ordering;
-
     use crate::{ClientMessage, ErrorCode, ServerMessage};
+    use std::cmp::Ordering;
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {

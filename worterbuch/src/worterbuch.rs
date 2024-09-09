@@ -242,6 +242,7 @@ pub struct Worterbuch {
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     clients: HashMap<Uuid, Option<SocketAddr>>,
+    spub_keys: HashMap<TransactionId, Key>,
 }
 
 impl Worterbuch {
@@ -257,6 +258,7 @@ impl Worterbuch {
             store: Default::default(),
             subscribers: Default::default(),
             subscriptions: Default::default(),
+            spub_keys: Default::default(),
         }
     }
 
@@ -270,6 +272,7 @@ impl Worterbuch {
             ls_subscriptions: Default::default(),
             subscribers: Default::default(),
             subscriptions: Default::default(),
+            spub_keys: Default::default(),
         })
     }
 
@@ -313,6 +316,48 @@ impl Worterbuch {
         log::trace!("Notifying subscribers done.");
 
         Ok(())
+    }
+
+    pub async fn spub_init(
+        &mut self,
+        transaction_id: TransactionId,
+        key: Key,
+        client_id: &str,
+    ) -> WorterbuchResult<()> {
+        check_for_read_only_key(&key, client_id)?;
+        self.store_key(transaction_id, key);
+
+        Ok(())
+    }
+
+    pub async fn spub(
+        &mut self,
+        transaction_id: TransactionId,
+        value: Value,
+        client_id: &str,
+    ) -> WorterbuchResult<()> {
+        if let Some(key) = self.lookup_key(transaction_id) {
+            check_for_read_only_key(&key, client_id)?;
+
+            let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+
+            let (changed, ls_subscribers) = self
+                .store
+                .insert(&path, value.clone())
+                .map_err(|e| e.for_pattern(key.to_owned()))?;
+
+            log::trace!("Notifying ls subscribers …");
+            self.notify_ls_subscribers(ls_subscribers).await;
+            log::trace!("Notifying ls subscribers done.");
+            log::trace!("Notifying subscribers …");
+            self.notify_subscribers(&path, &key, &value, changed, false)
+                .await;
+            log::trace!("Notifying subscribers done.");
+
+            Ok(())
+        } else {
+            Err(WorterbuchError::NoPubStream(transaction_id))
+        }
     }
 
     pub async fn publish(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
@@ -1120,6 +1165,14 @@ impl Worterbuch {
             .await
             .ok();
         }
+    }
+
+    fn store_key(&mut self, transaction_id: u64, key: Key) {
+        self.spub_keys.insert(transaction_id, key);
+    }
+
+    fn lookup_key(&self, transaction_id: u64) -> Option<Key> {
+        self.spub_keys.get(&transaction_id).map(ToOwned::to_owned)
     }
 }
 
