@@ -237,16 +237,16 @@ fn print_pstate(msg: &PState, json: bool, raw: bool) {
 fn print_state(msg: &State, json: bool, raw: bool) {
     match (json, raw) {
         (true, true) => {
-            if let StateEvent::Value(kvp) = &msg.event {
-                print_msg_as_json(&kvp);
+            if let StateEvent::Value(val) = &msg.event {
+                print_msg_as_json(val);
             } else {
                 print_msg_as_json(Value::Null);
             }
         }
         (true, false) => print_msg_as_json(msg),
         (false, true) => {
-            if let StateEvent::Value(kvp) = &msg.event {
-                println!("{}", kvp);
+            if let StateEvent::Value(val) = &msg.event {
+                println!("{}", val);
             } else {
                 println!("{}", Value::Null);
             }
@@ -282,21 +282,21 @@ fn print_msg_as_json(msg: impl Serialize) {
 
 fn print_state_change(msg: &State, json: bool) {
     if json {
-        if let StateEvent::Value(kvp) = &msg.event {
-            print_msg_as_json(&kvp);
+        if let StateEvent::Value(val) = &msg.event {
+            print_msg_as_json(val);
         }
-    } else if let StateEvent::Value(kvp) = &msg.event {
-        println!("{}", kvp);
+    } else if let StateEvent::Value(val) = &msg.event {
+        println!("{}", val);
     }
 }
 
 fn print_state_del(msg: &State, json: bool) {
     if json {
-        if let StateEvent::Deleted(kvp) = &msg.event {
-            print_msg_as_json(&kvp);
+        if let StateEvent::Deleted(val) = &msg.event {
+            print_msg_as_json(val);
         }
-    } else if let StateEvent::Deleted(kvp) = &msg.event {
-        println!("{}", kvp);
+    } else if let StateEvent::Deleted(val) = &msg.event {
+        println!("{}", val);
     }
 }
 
