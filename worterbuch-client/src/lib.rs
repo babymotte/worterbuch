@@ -92,7 +92,7 @@ pub(crate) enum Command {
         Key,
         UniqueFlag,
         oneshot::Sender<TransactionId>,
-        mpsc::UnboundedSender<(Option<Value>, Key)>,
+        mpsc::UnboundedSender<Option<Value>>,
         LiveOnlyFlag,
     ),
     SubscribeAsync(
@@ -445,7 +445,7 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<(Option<Value>, Key)>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
@@ -517,7 +517,7 @@ impl Worterbuch {
         unique: bool,
         live_only: bool,
         aggregation_duration: Option<Duration>,
-    ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedStateEvents<T>>, TransactionId)> {
+    ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedPStateEvent<T>>, TransactionId)> {
         let (event_rx, transaction_id) = self
             .psubscribe_generic(request_pattern, unique, live_only, aggregation_duration)
             .await?;
@@ -586,24 +586,22 @@ impl Worterbuch {
 }
 
 async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
-    mut val_rx: mpsc::UnboundedReceiver<(Option<Value>, Key)>,
+    mut val_rx: mpsc::UnboundedReceiver<Option<Value>>,
     typed_val_tx: mpsc::UnboundedSender<Option<T>>,
 ) {
-    while let Some((val, key)) = val_rx.recv().await {
+    while let Some(val) = val_rx.recv().await {
         match val {
-            Some(val) => {
-                match json::from_value(val) {
-                    Ok(typed_val) => {
-                        if typed_val_tx.send(typed_val).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("could not deserialize json value of key '{key}' to requested type: {e}");
+            Some(val) => match json::from_value(val) {
+                Ok(typed_val) => {
+                    if typed_val_tx.send(typed_val).is_err() {
                         break;
                     }
                 }
-            }
+                Err(e) => {
+                    log::error!("could not deserialize json value to requested type: {e}");
+                    break;
+                }
+            },
             None => {
                 if typed_val_tx.send(None).is_err() {
                     break;
@@ -615,7 +613,7 @@ async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
 
 async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
     mut event_rx: mpsc::UnboundedReceiver<PStateEvent>,
-    typed_event_tx: mpsc::UnboundedSender<TypedStateEvents<T>>,
+    typed_event_tx: mpsc::UnboundedSender<TypedPStateEvent<T>>,
 ) {
     while let Some(evt) = event_rx.recv().await {
         match deserialize_pstate_event(evt) {
@@ -640,7 +638,7 @@ struct Callbacks {
     del: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
     pdel: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
     ls: HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>,
-    sub: HashMap<TransactionId, mpsc::UnboundedSender<(Option<Value>, Key)>>,
+    sub: HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>,
     psub: HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>,
     subls: HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>,
 }
@@ -1111,7 +1109,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     protocol_version: ProtocolVersion,
 ) -> Result<Worterbuch, ConnectionError> {
     // TODO properly implement different protocol versions
-    let supported_protocol_versions = ["0.9".to_owned()];
+    let supported_protocol_versions = [PROTOCOL_VERSION.to_owned()];
 
     if !supported_protocol_versions.contains(&protocol_version) {
         return Err(ConnectionError::WorterbuchError(
@@ -1456,21 +1454,21 @@ fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
 
 async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.get.remove(&state.transaction_id) {
-        if let StateEvent::KeyValue(kvp) = &state.event {
-            cb.send((Some(kvp.value.clone()), state.transaction_id))
+        if let StateEvent::Value(v) = &state.event {
+            cb.send((Some(v.clone()), state.transaction_id))
                 .expect("error in callback");
         }
     }
     if let Some(cb) = callbacks.del.remove(&state.transaction_id) {
-        if let StateEvent::Deleted(kvp) = &state.event {
-            cb.send((Some(kvp.value.clone()), state.transaction_id))
+        if let StateEvent::Deleted(v) = &state.event {
+            cb.send((Some(v.clone()), state.transaction_id))
                 .expect("error in callback");
         }
     }
     if let Some(cb) = callbacks.sub.get(&state.transaction_id) {
         let value = match state.event {
-            StateEvent::KeyValue(kv) => (Some(kv.value), kv.key),
-            StateEvent::Deleted(kv) => (None, kv.key),
+            StateEvent::Value(v) => Some(v),
+            StateEvent::Deleted(_) => None,
         };
         cb.send(value)?;
     }
@@ -1537,6 +1535,6 @@ fn deserialize_key_value_pairs<T: DeserializeOwned>(
 
 fn deserialize_pstate_event<T: DeserializeOwned>(
     pstate: PStateEvent,
-) -> Result<TypedStateEvents<T>, SubscriptionError> {
+) -> Result<TypedPStateEvent<T>, SubscriptionError> {
     Ok(pstate.try_into()?)
 }

@@ -44,16 +44,16 @@ properties:
         description: A unique transaction ID
         type: integer
         format: u64
-      keyValue:
-        $ref: "#/components/schemas/KeyValuePair"
+      value:
+        $ref: "#/components/schemas/Value"
       deleted:
-        $ref: "#/components/schemas/KeyValuePair"
+        $ref: "#/components/schemas/Value"
     additionalProperties: false
     required:
       - transactionId
     oneOf:
       - required:
-          - keyValue
+          - value
       - required:
           - deleted
   pState:
@@ -155,6 +155,8 @@ components:
         - version
         - protocolVersion
         - authorizationRequired
+    Value:
+      description: A value on worterbuch
     KeyValuePair:
       description: A key/value pair where the key is always a string and the value can be anything
       type: object
@@ -163,7 +165,7 @@ components:
           description: The key
           type: string
         value:
-          description: The value
+          $ref: "#/components/schemas/Value"
       additionalProperties: false
       required:
         - key

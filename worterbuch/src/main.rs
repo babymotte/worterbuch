@@ -23,6 +23,7 @@ use std::{io, time::Duration};
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::Toplevel;
+use tracing_subscriber::EnvFilter;
 use worterbuch::run_worterbuch;
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
@@ -39,7 +40,10 @@ async fn main() -> Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "info");
     }
-    tracing_subscriber::fmt().with_writer(io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     let _args: Args = Args::parse();
 
     Toplevel::new()

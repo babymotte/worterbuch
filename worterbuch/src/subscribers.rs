@@ -17,11 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::collections::{hash_map::Entry, HashMap};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
-use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, TransactionId};
+use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, TransactionId};
 
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<KeySegment, Node>;
@@ -42,9 +42,15 @@ impl SubscriptionId {
 }
 
 #[derive(Clone, Debug)]
+pub enum EventSender {
+    State(Sender<StateEvent>),
+    PState(Sender<PStateEvent>),
+}
+
+#[derive(Clone, Debug)]
 pub struct Subscriber {
     pattern: Vec<KeySegment>,
-    tx: Sender<PStateEvent>,
+    tx: EventSender,
     id: SubscriptionId,
     unique: bool,
 }
@@ -53,7 +59,7 @@ impl Subscriber {
     pub fn new(
         id: SubscriptionId,
         pattern: Vec<KeySegment>,
-        tx: Sender<PStateEvent>,
+        tx: EventSender,
         unique: bool,
     ) -> Subscriber {
         Subscriber {
@@ -64,13 +70,37 @@ impl Subscriber {
         }
     }
 
-    pub async fn send(&self, event: PStateEvent) -> Result<()> {
-        self.tx.send(event).await?;
-        Ok(())
+    pub async fn send_pstate(&self, event: PStateEvent) -> Result<()> {
+        if let EventSender::PState(tx) = &self.tx {
+            tx.send(event).await?;
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Tried to send a PSatetEvent to a StateEvent subscriber"
+            ))
+        }
+    }
+
+    pub async fn send_state(&self, event: StateEvent) -> Result<()> {
+        if let EventSender::State(tx) = &self.tx {
+            tx.send(event).await?;
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Tried to send a SatetEvent to a PStateEvent subscriber"
+            ))
+        }
     }
 
     pub fn is_unique(&self) -> bool {
         self.unique
+    }
+
+    pub fn is_pstate_subscriber(&self) -> bool {
+        match self.tx {
+            EventSender::State(_) => false,
+            EventSender::PState(_) => true,
+        }
     }
 }
 
@@ -233,7 +263,7 @@ mod test {
         let subscriber = Subscriber::new(
             id,
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
-            tx,
+            EventSender::PState(tx),
             false,
         );
 
@@ -259,7 +289,7 @@ mod test {
         let subscriber = Subscriber::new(
             id.clone(),
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
-            tx,
+            EventSender::PState(tx),
             false,
         );
 

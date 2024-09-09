@@ -20,7 +20,7 @@
 use crate::{
     config::Config,
     store::{Store, StoreStats},
-    subscribers::{LsSubscriber, Subscriber, Subscribers, SubscriptionId},
+    subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
     INTERNAL_CLIENT_ID,
 };
 use hashlink::LinkedHashMap;
@@ -39,9 +39,10 @@ use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
     PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
-    TransactionId, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
-    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    StateEvent, TransactionId, PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS,
+    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG,
+    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS,
+    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
@@ -281,17 +282,14 @@ impl Worterbuch {
     }
 
     pub fn supported_protocol_version(&self) -> ProtocolVersion {
-        "0.9".to_owned()
+        PROTOCOL_VERSION.to_owned()
     }
 
-    pub fn get(&self, key: &Key) -> WorterbuchResult<(String, Value)> {
+    pub fn get(&self, key: &Key) -> WorterbuchResult<Value> {
         let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
         match self.store.get(&path) {
-            Some(value) => {
-                let key_value = (key.to_owned(), value.to_owned());
-                Ok(key_value)
-            }
+            Some(value) => Ok(value.to_owned()),
             None => Err(WorterbuchError::NoSuchValue(key.to_owned())),
         }
     }
@@ -340,20 +338,25 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
-        let (tx, rx) = channel(self.config.channel_buffer_size);
+        let (tx, rx) = channel::<StateEvent>(self.config.channel_buffer_size);
         let subscription = SubscriptionId::new(client_id, transaction_id);
-        let subscriber = Subscriber::new(subscription.clone(), path.clone(), tx.clone(), unique);
+        let subscriber = Subscriber::new(
+            subscription.clone(),
+            path.clone(),
+            EventSender::State(tx.clone()),
+            unique,
+        );
         self.subscribers.add_subscriber(&path, subscriber);
         if !live_only {
             let matches = match self.get(&key) {
-                Ok((key, value)) => Some((key, value)),
+                Ok(value) => Some(value),
                 Err(WorterbuchError::NoSuchValue(_)) => None,
                 Err(e) => return Err(e),
             };
-            if let Some((key, value)) = matches {
-                tx.send(PStateEvent::KeyValuePairs(vec![(key, value).into()]))
+            if let Some(value) = matches {
+                tx.send(StateEvent::Value(value))
                     .await
                     .expect("rx is neither closed nor dropped");
             }
@@ -425,7 +428,7 @@ impl Worterbuch {
         let subscriber = Subscriber::new(
             subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
-            tx.clone(),
+            EventSender::PState(tx.clone()),
             unique,
         );
         self.subscribers.add_subscriber(&path, subscriber);
@@ -686,14 +689,28 @@ impl Worterbuch {
         let len = filtered_subscribers.len();
         log::trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
         for subscriber in filtered_subscribers {
-            let kvps = vec![(key.clone(), value.clone()).into()];
-            if let Err(e) = if deleted {
-                subscriber.send(PStateEvent::Deleted(kvps)).await
+            if subscriber.is_pstate_subscriber() {
+                let kvps = vec![(key.clone(), value.clone()).into()];
+                if let Err(e) = if deleted {
+                    subscriber.send_pstate(PStateEvent::Deleted(kvps)).await
+                } else {
+                    subscriber
+                        .send_pstate(PStateEvent::KeyValuePairs(kvps))
+                        .await
+                } {
+                    log::debug!("Error calling subscriber: {e}");
+                    self.subscribers.remove_subscriber(subscriber);
+                }
             } else {
-                subscriber.send(PStateEvent::KeyValuePairs(kvps)).await
-            } {
-                log::debug!("Error calling subscriber: {e}");
-                self.subscribers.remove_subscriber(subscriber);
+                let value = value.to_owned();
+                if let Err(e) = if deleted {
+                    subscriber.send_state(StateEvent::Deleted(value)).await
+                } else {
+                    subscriber.send_state(StateEvent::Value(value)).await
+                } {
+                    log::debug!("Error calling subscriber: {e}");
+                    self.subscribers.remove_subscriber(subscriber);
+                }
             }
         }
         log::trace!("Calling {} subscribers: {} = {:?} done.", len, key, value);
@@ -716,7 +733,7 @@ impl Worterbuch {
         log::trace!("Calling {} ls subscribers done.", len);
     }
 
-    pub async fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<(String, Value)> {
+    pub async fn delete(&mut self, key: Key, client_id: &str) -> WorterbuchResult<Value> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -726,7 +743,7 @@ impl Worterbuch {
                 self.notify_ls_subscribers(ls_subscribers).await;
                 self.notify_subscribers(&path, &key, &value, true, true)
                     .await;
-                Ok((key, value))
+                Ok(value)
             }
             None => Err(WorterbuchError::NoSuchValue(key)),
         }
@@ -903,7 +920,7 @@ impl Worterbuch {
             SYSTEM_TOPIC_GRAVE_GOODS
         );
         let value = self.get(&key).ok();
-        value.and_then(|it| serde_json::from_value(it.1).ok())
+        value.and_then(|it| serde_json::from_value(it).ok())
     }
 
     fn last_wills(&self, client_id: &Uuid) -> Option<LastWill> {
@@ -914,7 +931,7 @@ impl Worterbuch {
             SYSTEM_TOPIC_LAST_WILL
         );
         let value = self.get(&key).ok();
-        value.and_then(|it| serde_json::from_value(it.1).ok())
+        value.and_then(|it| serde_json::from_value(it).ok())
     }
 
     pub async fn disconnected(

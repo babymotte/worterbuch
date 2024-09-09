@@ -24,6 +24,7 @@ use std::{
     fs,
     io::{self, Read},
 };
+use tracing_subscriber::EnvFilter;
 use worterbuch_client::{config::Config, AuthToken, KeyValuePair};
 
 #[derive(Parser)]
@@ -45,7 +46,10 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt().with_writer(io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     let mut config = Config::new();
     let args: Args = Args::parse();
 

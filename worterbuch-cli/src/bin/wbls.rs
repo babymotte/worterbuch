@@ -24,6 +24,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemHandle, Toplevel};
+use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
 use worterbuch_client::config::Config;
 use worterbuch_client::{connect, AuthToken};
@@ -56,7 +57,10 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt().with_writer(io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     Toplevel::new()
         .start("wbls", run)
         .catch_signals()

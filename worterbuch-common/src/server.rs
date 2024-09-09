@@ -19,7 +19,7 @@
 
 use crate::{
     ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
-    TransactionId, TypedKeyValuePair, Value, Version,
+    TransactionId, TypedKeyValuePair, TypedKeyValuePairs, Value, Version,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
@@ -76,22 +76,40 @@ pub enum PStateEvent {
     Deleted(KeyValuePairs),
 }
 
-impl From<PStateEvent> for Vec<StateEvent> {
-    fn from(e: PStateEvent) -> Self {
-        match e {
-            PStateEvent::KeyValuePairs(kvps) => {
-                kvps.into_iter().map(StateEvent::KeyValue).collect()
-            }
-            PStateEvent::Deleted(kvps) => kvps.into_iter().map(StateEvent::Deleted).collect(),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypedPStateEvent<T: DeserializeOwned> {
+    KeyValuePairs(TypedKeyValuePairs<T>),
+    Deleted(TypedKeyValuePairs<T>),
+}
+
+impl<T: DeserializeOwned> TryFrom<PStateEvent> for TypedPStateEvent<T> {
+    type Error = serde_json::Error;
+
+    fn try_from(value: PStateEvent) -> Result<Self, Self::Error> {
+        match value {
+            PStateEvent::KeyValuePairs(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
+                try_to_typed_key_value_pairs(kvps)?,
+            )),
+            PStateEvent::Deleted(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
+                try_to_typed_key_value_pairs(kvps)?,
+            )),
         }
     }
 }
 
-impl From<PState> for Vec<StateEvent> {
-    fn from(pstate: PState) -> Self {
-        pstate.event.into()
+fn try_to_typed_key_value_pairs<T: DeserializeOwned>(
+    kvps: KeyValuePairs,
+) -> Result<TypedKeyValuePairs<T>, serde_json::Error> {
+    let mut out = vec![];
+
+    for kvp in kvps {
+        out.push(kvp.try_into()?);
     }
+
+    Ok(out)
 }
+
+pub type TypedPStateEvents<T> = Vec<TypedPStateEvent<T>>;
 
 impl From<PStateEvent> for Vec<Option<Value>> {
     fn from(e: PStateEvent) -> Self {
@@ -154,14 +172,14 @@ pub struct State {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StateEvent {
-    KeyValue(KeyValuePair),
-    Deleted(KeyValuePair),
+    Value(Value),
+    Deleted(Value),
 }
 
 impl From<StateEvent> for Option<Value> {
     fn from(e: StateEvent) -> Self {
         match e {
-            StateEvent::KeyValue(kv) => Some(kv.value),
+            StateEvent::Value(v) => Some(v),
             StateEvent::Deleted(_) => None,
         }
     }
@@ -175,14 +193,14 @@ impl From<State> for Option<Value> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypedStateEvent<T: DeserializeOwned> {
-    KeyValue(TypedKeyValuePair<T>),
-    Deleted(TypedKeyValuePair<T>),
+    Value(T),
+    Deleted(T),
 }
 
 impl<T: DeserializeOwned> From<TypedStateEvent<T>> for Option<T> {
     fn from(e: TypedStateEvent<T>) -> Self {
         match e {
-            TypedStateEvent::KeyValue(kvp) => Some(kvp.value),
+            TypedStateEvent::Value(v) => Some(v),
             TypedStateEvent::Deleted(_) => None,
         }
     }
@@ -190,49 +208,30 @@ impl<T: DeserializeOwned> From<TypedStateEvent<T>> for Option<T> {
 
 impl<T: DeserializeOwned> From<TypedKeyValuePair<T>> for TypedStateEvent<T> {
     fn from(kvp: TypedKeyValuePair<T>) -> Self {
-        TypedStateEvent::KeyValue(kvp)
+        TypedStateEvent::Value(kvp.value)
     }
 }
 
-impl<T: DeserializeOwned> TryFrom<StateEvent> for TypedStateEvent<T> {
+impl<T: DeserializeOwned + TryFrom<Value, Error = serde_json::Error>> TryFrom<StateEvent>
+    for TypedStateEvent<T>
+{
     type Error = serde_json::Error;
 
     fn try_from(e: StateEvent) -> Result<Self, Self::Error> {
         match e {
-            StateEvent::KeyValue(kvp) => Ok(TypedStateEvent::KeyValue(kvp.try_into()?)),
-            StateEvent::Deleted(kvp) => Ok(TypedStateEvent::Deleted(kvp.try_into()?)),
+            StateEvent::Value(v) => Ok(TypedStateEvent::Value(v.try_into()?)),
+            StateEvent::Deleted(v) => Ok(TypedStateEvent::Deleted(v.try_into()?)),
         }
     }
 }
 
 pub type TypedStateEvents<T> = Vec<TypedStateEvent<T>>;
 
-impl<T: DeserializeOwned> TryFrom<PStateEvent> for TypedStateEvents<T> {
-    type Error = serde_json::Error;
-
-    fn try_from(event: PStateEvent) -> Result<Self, Self::Error> {
-        let state_events: Vec<StateEvent> = event.into();
-        let mut typed_events = TypedStateEvents::new();
-        for event in state_events {
-            typed_events.push(event.try_into()?);
-        }
-        Ok(typed_events)
-    }
-}
-
-impl<T: DeserializeOwned> TryFrom<PState> for TypedStateEvents<T> {
-    type Error = serde_json::Error;
-
-    fn try_from(pstate: PState) -> Result<Self, Self::Error> {
-        pstate.event.try_into()
-    }
-}
-
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.event {
-            StateEvent::KeyValue(kvp) => write!(f, "{}={}", kvp.key, kvp.value),
-            StateEvent::Deleted(kvp) => write!(f, "{}!={}", kvp.key, kvp.value),
+            StateEvent::Value(v) => write!(f, "{}", v),
+            StateEvent::Deleted(v) => write!(f, "!{}", v),
         }
     }
 }
@@ -315,25 +314,27 @@ pub struct ServerInfo {
 
 #[cfg(test)]
 mod test {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
     fn state_is_serialized_correctly() {
         let state = State {
             transaction_id: 1,
-            event: StateEvent::KeyValue(("$SYS/clients", 2).into()),
+            event: StateEvent::Value(json!(2)),
         };
 
-        let json = r#"{"transactionId":1,"keyValue":{"key":"$SYS/clients","value":2}}"#;
+        let json = r#"{"transactionId":1,"value":2}"#;
 
         assert_eq!(json, &serde_json::to_string(&state).unwrap());
 
         let state = State {
             transaction_id: 1,
-            event: StateEvent::Deleted(("$SYS/clients", 2).into()),
+            event: StateEvent::Deleted(json!(2)),
         };
 
-        let json = r#"{"transactionId":1,"deleted":{"key":"$SYS/clients","value":2}}"#;
+        let json = r#"{"transactionId":1,"deleted":2}"#;
 
         assert_eq!(json, &serde_json::to_string(&state).unwrap());
     }
@@ -342,19 +343,19 @@ mod test {
     fn state_is_deserialized_correctly() {
         let state = State {
             transaction_id: 1,
-            event: StateEvent::KeyValue(("$SYS/clients", 2).into()),
+            event: StateEvent::Value(json!(2)),
         };
 
-        let json = r#"{"transactionId":1,"keyValue":{"key":"$SYS/clients","value":2}}"#;
+        let json = r#"{"transactionId":1,"value":2}"#;
 
         assert_eq!(state, serde_json::from_str(&json).unwrap());
 
         let state = State {
             transaction_id: 1,
-            event: StateEvent::Deleted(("$SYS/clients", 2).into()),
+            event: StateEvent::Deleted(json!(2)),
         };
 
-        let json = r#"{"transactionId":1,"deleted":{"key":"$SYS/clients","value":2}}"#;
+        let json = r#"{"transactionId":1,"deleted":2}"#;
 
         assert_eq!(state, serde_json::from_str(&json).unwrap());
     }

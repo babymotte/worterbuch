@@ -121,8 +121,8 @@ async fn get_value(
     let pointer = params.get("pointer");
     let raw = params.get("raw");
     let content_type = req.content_type().map(str::to_lowercase);
-    match wb.get(key).await {
-        Ok((key, value)) => {
+    match wb.get(key.clone()).await {
+        Ok(value) => {
             if let Some(pointer) = pointer {
                 let key = key + pointer;
                 let extracted = value.pointer(pointer);
@@ -216,7 +216,7 @@ async fn delete_value(
     }
     let client_id = Uuid::new_v4();
     match wb.delete(key, client_id.to_string()).await {
-        Ok(kvp) => Ok(Json(kvp.1)),
+        Ok(value) => Ok(Json(value)),
         Err(e) => to_error_response(e),
     }
 }
@@ -297,10 +297,6 @@ async fn subscribe(
         .get("liveOnly")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
-    let raw: bool = params
-        .get("raw")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
     let wb_unsub = wb.clone();
     match wb
         .subscribe(client_id, transaction_id, key, unique, live_only)
@@ -312,34 +308,10 @@ async fn subscribe(
                 'recv_loop: loop {
                     select! {
                         _ = sse_tx.closed() => break 'recv_loop,
-                        recv = rx.recv() => if let Some(pstate) = recv {
-                            let events: Vec<StateEvent> = pstate.into();
-                            for e in events {
-                                if raw {
-                                    match &e {
-                                        StateEvent::KeyValue(kv) => {
-                                            match serde_json::to_string(&kv.value) {
-                                                Ok(json) => {
-                                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                                        log::error!("Error forwarding state event: {e}");
-                                                        break 'recv_loop;
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Error serializiing state event: {e}");
-                                                    break 'recv_loop;
-                                                }
-                                            }
-                                        },
-                                        StateEvent::Deleted(_) => {
-                                            if let Err(e) = sse_tx.send(Event::message("null")).await {
-                                                log::error!("Error forwarding state event: {e}");
-                                                break 'recv_loop;
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    match serde_json::to_string(&e) {
+                        recv = rx.recv() => if let Some(state) = recv {
+                            match state {
+                                StateEvent::Value(value) => {
+                                    match serde_json::to_string(&value) {
                                         Ok(json) => {
                                             if let Err(e) = sse_tx.send(Event::message(json)).await {
                                                 log::error!("Error forwarding state event: {e}");
@@ -351,7 +323,13 @@ async fn subscribe(
                                             break 'recv_loop;
                                         }
                                     }
-                                }
+                                },
+                                StateEvent::Deleted(_) => {
+                                    if let Err(e) = sse_tx.send(Event::message("null")).await {
+                                        log::error!("Error forwarding state event: {e}");
+                                        break 'recv_loop;
+                                    }
+                                },
                             }
                         } else {
                             break 'recv_loop;

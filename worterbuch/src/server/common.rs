@@ -322,7 +322,7 @@ pub async fn process_incoming_message(
 }
 
 pub enum WbFunction {
-    Get(Key, oneshot::Sender<WorterbuchResult<(String, Value)>>),
+    Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
     Set(Key, Value, String, oneshot::Sender<WorterbuchResult<()>>),
     Publish(Key, Value, oneshot::Sender<WorterbuchResult<()>>),
     Ls(
@@ -343,7 +343,7 @@ pub enum WbFunction {
         Key,
         UniqueFlag,
         LiveOnlyFlag,
-        oneshot::Sender<WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)>>,
     ),
     PSubscribe(
         Uuid,
@@ -361,7 +361,7 @@ pub enum WbFunction {
     ),
     Unsubscribe(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
     UnsubscribeLs(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
-    Delete(Key, String, oneshot::Sender<WorterbuchResult<(Key, Value)>>),
+    Delete(Key, String, oneshot::Sender<WorterbuchResult<Value>>),
     PDelete(
         RequestPattern,
         String,
@@ -387,7 +387,7 @@ impl CloneableWbApi {
         CloneableWbApi { tx }
     }
 
-    pub async fn get(&self, key: Key) -> WorterbuchResult<(String, Value)> {
+    pub async fn get(&self, key: Key) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Get(key, tx)).await?;
         rx.await?
@@ -451,7 +451,7 @@ impl CloneableWbApi {
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::Subscribe(
@@ -530,7 +530,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn delete(&self, key: Key, client_id: String) -> WorterbuchResult<(Key, Value)> {
+    pub async fn delete(&self, key: Key, client_id: String) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Delete(key, client_id, tx)).await?;
         rx.await?
@@ -635,8 +635,8 @@ async fn get(
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
-    let key_value = match worterbuch.get(msg.key).await {
-        Ok(key_value) => key_value.into(),
+    let value: Value = match worterbuch.get(msg.key).await {
+        Ok(it) => it,
         Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(());
@@ -645,7 +645,7 @@ async fn get(
 
     let response = State {
         transaction_id: msg.transaction_id,
-        event: StateEvent::KeyValue(key_value),
+        event: StateEvent::Value(value),
     };
 
     client
@@ -793,18 +793,14 @@ async fn subscribe(
     spawn(async move {
         log::debug!("Receiving events for subscription {subscription:?} …");
         while let Some(event) = rx.recv().await {
-            let state_events: Vec<StateEvent> = event.into();
-
-            for event in state_events {
-                let state = State {
-                    transaction_id,
-                    event,
-                };
-                if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
-                    log::error!("Error sending STATE message to client: {e}");
-                    break;
-                };
-            }
+            let state = State {
+                transaction_id,
+                event,
+            };
+            if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
+                log::error!("Error sending STATE message to client: {e}");
+                break;
+            };
         }
 
         match wb_unsub.unsubscribe(client_id, transaction_id).await {
@@ -1014,8 +1010,8 @@ async fn delete(
     client: &mpsc::Sender<ServerMessage>,
     client_id: String,
 ) -> WorterbuchResult<()> {
-    let key_value = match worterbuch.delete(msg.key, client_id).await {
-        Ok(key_value) => key_value.into(),
+    let value = match worterbuch.delete(msg.key, client_id).await {
+        Ok(it) => it,
         Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(());
@@ -1024,7 +1020,7 @@ async fn delete(
 
     let response = State {
         transaction_id: msg.transaction_id,
-        event: StateEvent::Deleted(key_value),
+        event: StateEvent::Deleted(value),
     };
 
     client

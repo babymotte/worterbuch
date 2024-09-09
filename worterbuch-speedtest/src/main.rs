@@ -32,7 +32,10 @@ use web_ui::run_web_ui;
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt().with_writer(io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
 
     Toplevel::new()
         .start("worterbuch-speedtest", run_speedtests_with_ui)
