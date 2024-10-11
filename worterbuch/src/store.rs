@@ -48,7 +48,7 @@ impl StoreError {
 
 pub type StoreResult<T> = Result<T, StoreError>;
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub v: NodeValue,
@@ -56,7 +56,7 @@ pub struct Node {
     pub t: Tree,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SubscribersNode {
     _subscribers: Vec<Subscriber>,
     ls_subscribers: Vec<LsSubscriber>,
@@ -68,7 +68,7 @@ pub struct StoreStats {
     num_entries: usize,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Store {
     data: Node,
     #[serde(skip_serializing, default = "usize::default")]
@@ -82,6 +82,10 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn data(&self) -> &Node {
+        &self.data
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }
