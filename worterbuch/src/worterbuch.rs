@@ -524,12 +524,9 @@ impl Worterbuch {
     }
 
     pub fn export(&self, tx: oneshot::Sender<Value>) {
-        let data = self.store.data().to_owned();
+        let store = self.store.slim_copy();
         spawn(async move {
-            let mut value = json!(data);
-            if let Some(Value::Object(obj)) = value.pointer_mut("/t") {
-                obj.remove(SYSTEM_TOPIC_ROOT);
-            }
+            let value = json!(store);
             tx.send(value).ok();
         });
     }

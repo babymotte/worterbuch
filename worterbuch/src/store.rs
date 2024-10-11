@@ -22,6 +22,7 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 use worterbuch_common::{
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
+    SYSTEM_TOPIC_ROOT,
 };
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
@@ -82,8 +83,26 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn data(&self) -> &Node {
-        &self.data
+    pub fn slim_copy(&self) -> Self {
+        let data = Node {
+            v: self.data.v.clone(),
+            t: self.slim_copy_top_level_children(),
+        };
+
+        Self {
+            data,
+            ..Default::default()
+        }
+    }
+
+    fn slim_copy_top_level_children(&self) -> Tree {
+        let mut children = Tree::new();
+        for (k, v) in &self.data.t {
+            if k != SYSTEM_TOPIC_ROOT {
+                children.insert(k.to_owned(), v.to_owned());
+            }
+        }
+        children
     }
 
     pub fn len(&self) -> usize {
