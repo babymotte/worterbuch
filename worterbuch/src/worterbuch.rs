@@ -25,7 +25,7 @@ use crate::{
 };
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_str, json, to_value, Value};
+use serde_json::{from_str, json, Value};
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Display,
