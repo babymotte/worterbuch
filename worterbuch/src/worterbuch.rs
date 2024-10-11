@@ -37,7 +37,10 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
     select, spawn,
-    sync::mpsc::{self, channel, Receiver},
+    sync::{
+        mpsc::{self, channel, Receiver},
+        oneshot,
+    },
     time::sleep,
 };
 use uuid::Uuid;
@@ -574,13 +577,12 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&self) -> WorterbuchResult<Value> {
-        let mut value = to_value(&self.store)
-            .context(|| "Error generating JSON from worterbuch store during export".to_owned())?;
-        if let Some(Value::Object(obj)) = value.pointer_mut("/data/t") {
-            obj.remove(SYSTEM_TOPIC_ROOT);
-        }
-        Ok(value)
+    pub fn export(&self, tx: oneshot::Sender<Value>) {
+        let store = self.store.slim_copy();
+        spawn(async move {
+            let value = json!(store);
+            tx.send(value).ok();
+        });
     }
 
     pub async fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
@@ -604,7 +606,10 @@ impl Worterbuch {
 
     pub async fn export_to_file(&self, file: &mut File) -> WorterbuchResult<()> {
         log::debug!("Exporting to {file:?} …");
-        let json = self.export()?.to_string();
+
+        let (tx, rx) = oneshot::channel();
+        self.export(tx);
+        let json = rx.await?.to_string();
         let json_bytes = json.as_bytes();
 
         file.write_all(json_bytes)
@@ -1247,7 +1252,10 @@ mod test {
         )
         .await
         .unwrap();
-        let export = wb.export().unwrap();
+
+        let (tx, rx) = oneshot::channel();
+        wb.export(tx);
+        let export = rx.await.unwrap();
         assert_eq!(
             r#"{"data":{"t":{"hello":{"t":{"world":{"v":"test"}}}}}}"#,
             &serde_json::to_string(&export).unwrap()

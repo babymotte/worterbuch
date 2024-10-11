@@ -259,7 +259,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.config().clone()).ok();
         }
         WbFunction::Export(tx) => {
-            tx.send(worterbuch.export()).ok();
+            worterbuch.export(tx);
         }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
