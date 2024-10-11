@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     Toplevel::new()
         .start("worterbuch", run_worterbuch)
         .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
+        .handle_shutdown_requests(Duration::from_secs(10))
         .await?;
 
     Ok(())
