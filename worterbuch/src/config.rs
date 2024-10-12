@@ -58,6 +58,7 @@ pub struct Config {
     pub extended_monitoring: bool,
     pub auth_token: Option<AuthToken>,
     pub license: License,
+    pub shutdown_timeout: Duration,
 }
 
 impl Config {
@@ -152,6 +153,11 @@ impl Config {
             self.auth_token = Some(val);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_SHUTDOWN_TIMEOUT") {
+            let secs = val.parse().to_interval()?;
+            self.shutdown_timeout = Duration::from_secs(secs);
+        }
+
         Ok(())
     }
 
@@ -184,6 +190,7 @@ impl Config {
                     extended_monitoring: true,
                     auth_token: None,
                     license,
+                    shutdown_timeout: Duration::from_secs(1),
                 };
                 config.load_env()?;
                 Ok(config)

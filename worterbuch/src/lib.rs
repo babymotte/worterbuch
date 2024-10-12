@@ -51,8 +51,7 @@ use worterbuch_common::{topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCO
 
 pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 
-pub async fn run_worterbuch(subsys: SubsystemHandle) -> Result<()> {
-    let config = Config::new().await?;
+pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<()> {
     let config_pers = config.clone();
 
     let channel_buffer_size = config.channel_buffer_size;
