@@ -18,22 +18,20 @@
  */
 
 use crate::{
-    server::common::{
-        check_client_keepalive, process_incoming_message, send_keepalive, CloneableWbApi,
-    },
+    server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
 };
 use anyhow::anyhow;
 use std::{
     net::{IpAddr, SocketAddr},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
     select, spawn,
     sync::mpsc,
-    time::{timeout, MissedTickBehavior},
+    time::timeout,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
@@ -138,23 +136,15 @@ async fn serve_loop(
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
-    let keepalive_timeout = config.keepalive_timeout;
-    let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
-    let mut last_keepalive_tx = Instant::now();
-    let mut last_keepalive_rx = Instant::now();
     let mut authorized = None;
-    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (tcp_rx, mut tcp_tx) = socket.into_split();
     let (tcp_send_tx, mut tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
-    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::channel(config.channel_buffer_size);
 
     // tcp socket send loop
     spawn(async move {
         while let Some(msg) = tcp_send_rx.recv().await {
-            if let Err(e) =
-                send_with_timeout(msg, &mut tcp_tx, send_timeout, &keepalive_tx_tx, client_id).await
-            {
+            if let Err(e) = send_with_timeout(msg, &mut tcp_tx, send_timeout, client_id).await {
                 log::error!("Error sending TCP message: {e}");
                 break;
             }
@@ -181,12 +171,6 @@ async fn serve_loop(
         select! {
             recv = tcp_rx.next_line() => match recv {
                 Ok(Some(json)) => {
-                    last_keepalive_rx = Instant::now();
-
-                    // drain the send buffer to make room for the response
-                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                        last_keepalive_tx = keepalive;
-                    }
                     log::trace!("Processing incoming message …");
                     let (msg_processed, auth) = process_incoming_message(
                         client_id,
@@ -208,21 +192,6 @@ async fn serve_loop(
                     log::warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
                     break;
                 }
-            } ,
-            recv = keepalive_tx_rx.recv() => match recv {
-                Some(keepalive) => {
-                    last_keepalive_tx = keepalive;
-                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                        last_keepalive_tx = keepalive;
-                    }
-                },
-                None => break,
-            },
-            _ = keepalive_timer.tick() => {
-                // check how long ago the last message was received
-                check_client_keepalive(last_keepalive_rx, last_keepalive_tx, client_id, keepalive_timeout, &worterbuch)?;
-                // send out message if the last has been more than a second ago
-                send_keepalive(last_keepalive_tx, &tcp_send_tx, ).await?;
             }
         }
     }
@@ -234,7 +203,6 @@ async fn send_with_timeout<'a>(
     msg: ServerMessage,
     tcp: &mut TcpSender,
     send_timeout: Duration,
-    keepalive_tx_tx: &mpsc::Sender<Instant>,
     client_id: Uuid,
 ) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
@@ -242,7 +210,6 @@ async fn send_with_timeout<'a>(
     match timeout(send_timeout, write_line_and_flush(&msg, tcp)).await {
         Ok(it) => {
             it?;
-            keepalive_tx_tx.try_send(Instant::now()).ok();
         }
         Err(e) => {
             log::error!("Send timeout for client {client_id}: {e}");
