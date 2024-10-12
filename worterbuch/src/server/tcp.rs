@@ -21,17 +21,12 @@ use crate::{
     server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
 };
-use anyhow::anyhow;
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::net::{IpAddr, SocketAddr};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{tcp::OwnedWriteHalf, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream},
     select, spawn,
     sync::mpsc,
-    time::timeout,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use uuid::Uuid;
@@ -125,8 +120,6 @@ async fn serve(
     Ok(())
 }
 
-type TcpSender = OwnedWriteHalf;
-
 async fn serve_loop(
     client_id: Uuid,
     remote_addr: SocketAddr,
@@ -144,7 +137,7 @@ async fn serve_loop(
     // tcp socket send loop
     spawn(async move {
         while let Some(msg) = tcp_send_rx.recv().await {
-            if let Err(e) = send_with_timeout(msg, &mut tcp_tx, send_timeout, client_id).await {
+            if let Err(e) = write_line_and_flush(msg, &mut tcp_tx, send_timeout, client_id).await {
                 log::error!("Error sending TCP message: {e}");
                 break;
             }
@@ -195,29 +188,6 @@ async fn serve_loop(
             }
         }
     }
-
-    Ok(())
-}
-
-async fn send_with_timeout<'a>(
-    msg: ServerMessage,
-    tcp: &mut TcpSender,
-    send_timeout: Duration,
-    client_id: Uuid,
-) -> anyhow::Result<()> {
-    log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
-
-    match timeout(send_timeout, write_line_and_flush(&msg, tcp)).await {
-        Ok(it) => {
-            it?;
-        }
-        Err(e) => {
-            log::error!("Send timeout for client {client_id}: {e}");
-            return Err(anyhow!("Send timeout for client {client_id}: {e}"));
-        }
-    }
-
-    log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
 
     Ok(())
 }

@@ -19,14 +19,16 @@
 
 use crate::error::{ConnectionError, ConnectionResult};
 use serde::Serialize;
-use std::io;
-use tokio::io::AsyncWriteExt;
+use std::{fmt::Display, io, time::Duration};
+use tokio::{io::AsyncWriteExt, time::timeout};
 
 pub async fn write_line_and_flush(
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
+    send_timeout: Duration,
+    remote: impl Display,
 ) -> ConnectionResult<()> {
-    let json = serde_json::to_string(&msg)?;
+    let mut json = serde_json::to_string(&msg)?;
     if json.contains('\n') {
         return Err(ConnectionError::IoError(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -39,13 +41,25 @@ pub async fn write_line_and_flush(
             format!("invalid JSON: '{json}' is empty"),
         )));
     }
+
+    json.push('\n');
+    let bytes = json.as_bytes();
+
     log::debug!("Sending message: {json}");
     log::trace!("Writing line …");
-    tx.write_all(json.as_bytes()).await?;
+    for chunk in bytes.chunks(1024) {
+        let mut written = 0;
+        while written < chunk.len() {
+            written += timeout(send_timeout, tx.write(&chunk[written..]))
+                .await
+                .map_err(|_| {
+                    ConnectionError::Timeout(format!(
+                        "timeout while sending tcp message to {remote}"
+                    ))
+                })??;
+        }
+    }
     log::trace!("Writing line done.");
-    log::trace!("Writing newline …");
-    tx.write_u8(b'\n').await?;
-    log::trace!("Writing newline done.");
     log::trace!("Flushing channel …");
     tx.flush().await?;
     log::trace!("Flushing channel done.");

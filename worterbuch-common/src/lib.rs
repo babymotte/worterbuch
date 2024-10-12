@@ -33,7 +33,7 @@ use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
-pub const PROTOCOL_VERSION: &str = "0.10";
+pub const PROTOCOL_VERSION: &str = "0.11";
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";

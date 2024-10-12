@@ -24,10 +24,11 @@ pub struct Config {
     pub proto: String,
     pub host_addr: String,
     pub port: Option<u16>,
-    pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
     pub connection_timeout: Duration,
     pub auth_token: Option<String>,
+    pub use_backpressure: bool,
+    pub channel_buffer_size: usize,
 }
 
 impl Config {
@@ -43,29 +44,42 @@ impl Config {
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
             if let Ok(port) = val.parse() {
                 self.port = Some(port);
-            }
-        }
-
-        if let Ok(val) = env::var("WORTERBUCH_KEEPALIVE_TIMEOUT") {
-            if let Ok(secs) = val.parse() {
-                self.keepalive_timeout = Duration::from_secs(secs);
+            } else {
+                log::error!("invalid port: {val}");
             }
         }
 
         if let Ok(val) = env::var("WORTERBUCH_SEND_TIMEOUT") {
             if let Ok(secs) = val.parse() {
                 self.send_timeout = Duration::from_secs(secs);
+            } else {
+                log::error!("invalid timeout: {val}");
             }
         }
 
         if let Ok(val) = env::var("WORTERBUCH_CONNECTION_TIMEOUT") {
             if let Ok(secs) = val.parse() {
                 self.connection_timeout = Duration::from_secs(secs);
+            } else {
+                log::error!("invalid timeout: {val}");
             }
         }
 
         if let Ok(val) = env::var("WORTERBUCH_AUTH_TOKEN") {
             self.auth_token = Some(val);
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_CHANNEL_BUFFER_SIZE") {
+            if let Ok(size) = val.parse() {
+                self.channel_buffer_size = size;
+            } else {
+                log::error!("invalid buffer size: {val}");
+            }
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_USE_BACKPRESSURE") {
+            let val = val.to_lowercase() == "true";
+            self.use_backpressure = val;
         }
     }
 }
@@ -75,18 +89,20 @@ impl Default for Config {
         let proto = "tcp".to_owned();
         let host_addr = "localhost".to_owned();
         let port = Some(8081);
-        let keepalive_timeout = Duration::from_secs(5);
         let send_timeout = Duration::from_secs(5);
         let connection_timeout = Duration::from_secs(5);
+        let channel_buffer_size = 1;
+        let use_backpressure = true;
 
         Config {
             proto,
             host_addr,
             port,
-            keepalive_timeout,
             send_timeout,
             connection_timeout,
             auth_token: None,
+            channel_buffer_size,
+            use_backpressure,
         }
     }
 }

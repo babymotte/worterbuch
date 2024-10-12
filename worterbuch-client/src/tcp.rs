@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use std::time::Duration;
 use tokio::{
     io::{BufReader, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -27,20 +28,32 @@ use worterbuch_common::{
     error::ConnectionResult, tcp::write_line_and_flush, ClientMessage, ServerMessage,
 };
 
+const SERVER_ID: &str = "worterbuch server";
+
 pub struct TcpClientSocket {
-    tx: mpsc::UnboundedSender<ClientMessage>,
+    tx: mpsc::Sender<ClientMessage>,
     rx: Lines<BufReader<OwnedReadHalf>>,
 }
 
 impl TcpClientSocket {
-    pub async fn new(tx: OwnedWriteHalf, rx: Lines<BufReader<OwnedReadHalf>>) -> Self {
-        let (send_tx, send_rx) = mpsc::unbounded_channel();
-        spawn(forward_tcp_messages(tx, send_rx));
+    pub async fn new(
+        tx: OwnedWriteHalf,
+        rx: Lines<BufReader<OwnedReadHalf>>,
+        send_timeout: Duration,
+        buffer_size: usize,
+    ) -> Self {
+        let (send_tx, send_rx) = mpsc::channel(buffer_size);
+        spawn(forward_tcp_messages(tx, send_rx, send_timeout));
         Self { tx: send_tx, rx }
     }
 
-    pub async fn send_msg(&self, msg: ClientMessage) -> ConnectionResult<()> {
-        self.tx.send(msg)?;
+    pub async fn send_msg(&self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
+        if wait {
+            self.tx.send(msg).await?;
+        } else {
+            self.tx.try_send(msg)?;
+        }
+
         Ok(())
     }
 
@@ -63,10 +76,11 @@ impl TcpClientSocket {
 
 async fn forward_tcp_messages(
     mut tx: OwnedWriteHalf,
-    mut send_rx: mpsc::UnboundedReceiver<ClientMessage>,
+    mut send_rx: mpsc::Receiver<ClientMessage>,
+    timeout: Duration,
 ) {
     while let Some(msg) = send_rx.recv().await {
-        if let Err(e) = write_line_and_flush(msg, &mut tx).await {
+        if let Err(e) = write_line_and_flush(msg, &mut tx, timeout, SERVER_ID).await {
             log::error!("Error sending TCP message: {e}");
             break;
         }

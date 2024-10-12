@@ -17,7 +17,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{server::Err, ErrorCode, Key, MetaData, Privilege, RequestPattern, TransactionId};
+use crate::{
+    server::Err, ClientMessage, ErrorCode, Key, MetaData, Privilege, RequestPattern, TransactionId,
+};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{
     broadcast,
@@ -226,7 +228,7 @@ pub enum ConnectionError {
     ConfigError(ConfigError),
     SerdeError(serde_json::Error),
     AckError(broadcast::error::SendError<u64>),
-    Timeout,
+    Timeout(String),
     HttpError(tungstenite::http::Error),
     AuthorizationError(String),
 }
@@ -246,7 +248,7 @@ impl fmt::Display for ConnectionError {
             Self::ConfigError(e) => fmt::Display::fmt(&e, f),
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
             Self::AckError(e) => fmt::Display::fmt(&e, f),
-            Self::Timeout => fmt::Display::fmt("timeout", f),
+            Self::Timeout(msg) => fmt::Display::fmt(msg, f),
             Self::HttpError(e) => fmt::Display::fmt(&e, f),
             Self::AuthorizationError(msg) => fmt::Display::fmt(&msg, f),
         }
@@ -300,6 +302,12 @@ impl From<serde_json::Error> for ConnectionError {
 impl From<broadcast::error::SendError<u64>> for ConnectionError {
     fn from(e: broadcast::error::SendError<u64>) -> Self {
         Self::AckError(e)
+    }
+}
+
+impl From<mpsc::error::TrySendError<ClientMessage>> for ConnectionError {
+    fn from(e: mpsc::error::TrySendError<ClientMessage>) -> Self {
+        Self::TrySendError(Box::new(e))
     }
 }
 

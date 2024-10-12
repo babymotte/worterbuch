@@ -31,13 +31,7 @@ use error::SubscriptionError;
 use futures_util::{SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self as json};
-use std::{
-    collections::HashMap,
-    future::Future,
-    io,
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, future::Future, io, ops::ControlFlow, time::Duration};
 use tcp::TcpClientSocket;
 #[cfg(target_family = "unix")]
 use tokio::net::UnixStream;
@@ -46,7 +40,7 @@ use tokio::{
     net::TcpStream,
     select, spawn,
     sync::{mpsc, oneshot},
-    time::{interval, sleep, MissedTickBehavior},
+    time::sleep,
 };
 use tokio_tungstenite::{
     connect_async_with_config,
@@ -135,9 +129,9 @@ enum ClientSocket {
 }
 
 impl ClientSocket {
-    pub async fn send_msg(&mut self, msg: ClientMessage) -> ConnectionResult<()> {
+    pub async fn send_msg(&mut self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
         match self {
-            ClientSocket::Tcp(sock) => sock.send_msg(msg).await,
+            ClientSocket::Tcp(sock) => sock.send_msg(msg, wait).await,
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
             #[cfg(target_family = "unix")]
             ClientSocket::Unix(sock) => sock.send_msg(msg).await,
@@ -856,8 +850,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
     let stream = select! {
         conn = TcpStream::connect(format!("{host_addr}:{port}")) => conn,
         _ = sleep(timeout) => {
-            log::error!("Timeout while waiting for TCP connection.");
-            return Err(ConnectionError::Timeout);
+            return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
         },
     }?;
     log::debug!("Connected to tcp://{host_addr}:{port}.");
@@ -906,8 +899,7 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
             Err(e) => return Err(ConnectionError::IoError(e)),
         },
         _ = sleep(timeout) => {
-            log::error!("Timeout while waiting for welcome message.");
-            return Err(ConnectionError::Timeout);
+            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
 
@@ -930,7 +922,15 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
                         Ok(SM::Authorized(_)) => {
                             log::debug!("Authorization accepted.");
                             connected(
-                                ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx).await),
+                                ClientSocket::Tcp(
+                                    TcpClientSocket::new(
+                                        tcp_tx,
+                                        tcp_rx,
+                                        config.send_timeout,
+                                        config.channel_buffer_size,
+                                    )
+                                    .await,
+                                ),
                                 on_disconnect,
                                 config,
                                 client_id,
@@ -962,7 +962,15 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
         }
     } else {
         connected(
-            ClientSocket::Tcp(TcpClientSocket::new(tcp_tx, tcp_rx).await),
+            ClientSocket::Tcp(
+                TcpClientSocket::new(
+                    tcp_tx,
+                    tcp_rx,
+                    config.connection_timeout,
+                    config.channel_buffer_size,
+                )
+                .await,
+            ),
             on_disconnect,
             config,
             client_id,
@@ -986,8 +994,7 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
     let stream = select! {
         conn = UnixStream::connect(&path) => conn,
         _ = sleep(timeout) => {
-            log::error!("Timeout while waiting for TCP connection.");
-            return Err(ConnectionError::Timeout);
+            return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
         },
     }?;
     log::debug!("Connected to {path}.");
@@ -1036,8 +1043,7 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
             Err(e) => return Err(ConnectionError::IoError(e)),
         },
         _ = sleep(timeout) => {
-            log::error!("Timeout while waiting for welcome message.");
-            return Err(ConnectionError::Timeout);
+            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
 
@@ -1060,7 +1066,15 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
                         Ok(SM::Authorized(_)) => {
                             log::debug!("Authorization accepted.");
                             connected(
-                                ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx).await),
+                                ClientSocket::Unix(
+                                    UnixClientSocket::new(
+                                        tcp_tx,
+                                        tcp_rx,
+                                        config.send_timeout,
+                                        config.channel_buffer_size,
+                                    )
+                                    .await,
+                                ),
                                 on_disconnect,
                                 config,
                                 client_id,
@@ -1092,7 +1106,15 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
         }
     } else {
         connected(
-            ClientSocket::Unix(UnixClientSocket::new(tcp_tx, tcp_rx).await),
+            ClientSocket::Unix(
+                UnixClientSocket::new(
+                    tcp_tx,
+                    tcp_rx,
+                    config.send_timeout,
+                    config.channel_buffer_size,
+                )
+                .await,
+            ),
             on_disconnect,
             config,
             client_id,
@@ -1137,10 +1159,6 @@ async fn run(
 ) {
     let mut callbacks = Callbacks::default();
     let mut transaction_ids = TransactionIds::default();
-    let mut last_keepalive_rx = Instant::now();
-    let mut last_keepalive_tx = Instant::now();
-    let mut keepalive_timer = interval(Duration::from_secs(1));
-    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         log::trace!("loop: wait for command / ws message / shutdown request");
@@ -1149,26 +1167,7 @@ async fn run(
                 log::debug!("Shutdown request received.");
                 break;
             },
-            _ = keepalive_timer.tick() => {
-                let lag = last_keepalive_tx - last_keepalive_rx;
-
-                if lag >= Duration::from_secs(2) {
-                    log::warn!("Server has been inactive for {} seconds", lag.as_secs());
-                }
-                if lag >= config.keepalive_timeout {
-                    log::error!("Server has been inactive for too long. Disconnecting.");
-                    break;
-                }
-                if last_keepalive_tx.elapsed().as_secs() >= 1 {
-                    last_keepalive_tx = Instant::now();
-                    if let Err(e) = send_keepalive(&mut client_socket, config.send_timeout).await {
-                        log::error!("Error sending keepalive signal: {e}");
-                        break;
-                    }
-                }
-            },
             ws_msg = client_socket.receive_msg() => {
-                last_keepalive_rx = Instant::now();
                 match process_incoming_server_message(ws_msg, &mut callbacks).await {
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {
@@ -1181,8 +1180,7 @@ async fn run(
             cmd = cmd_rx.recv() => {
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
-                        last_keepalive_tx = Instant::now();
-                        if let Err(e) = send_with_timeout(&mut client_socket, msg, config.send_timeout).await {
+                        if let Err(e) = client_socket.send_msg(msg, config.use_backpressure).await {
                             log::error!("Error sending message to server: {e}");
                             break;
                         }
@@ -1195,17 +1193,6 @@ async fn run(
                 }
             }
         }
-    }
-}
-
-async fn send_with_timeout(
-    sock: &mut ClientSocket,
-    msg: ClientMessage,
-    timeout: Duration,
-) -> ConnectionResult<()> {
-    select! {
-        r = sock.send_msg(msg) => Ok(r?),
-        _ = sleep(timeout) => Err(ConnectionError::Timeout),
     }
 }
 
@@ -1515,12 +1502,6 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
         cb.send((None, err.transaction_id))
             .expect("error in callback");
     }
-}
-
-async fn send_keepalive(websocket: &mut ClientSocket, timeout: Duration) -> ConnectionResult<()> {
-    log::trace!("Sending keepalive");
-    send_with_timeout(websocket, ClientMessage::Keepalive, timeout).await?;
-    Ok(())
 }
 
 fn deserialize_key_value_pairs<T: DeserializeOwned>(

@@ -53,7 +53,6 @@ pub struct Config {
     pub data_dir: Path,
     pub single_threaded: bool,
     pub web_root_path: Option<String>,
-    pub keepalive_timeout: Duration,
     pub send_timeout: Duration,
     pub channel_buffer_size: usize,
     pub extended_monitoring: bool,
@@ -133,11 +132,6 @@ impl Config {
             self.web_root_path = Some(val);
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_TIMEOUT") {
-            let secs = val.parse().to_interval()?;
-            self.keepalive_timeout = Duration::from_secs(secs);
-        }
-
         if let Ok(val) = env::var(prefix.to_owned() + "_SEND_TIMEOUT") {
             let secs = val.parse().to_interval()?;
             self.send_timeout = Duration::from_secs(secs);
@@ -185,7 +179,6 @@ impl Config {
                     data_dir: "./data".into(),
                     single_threaded: false,
                     web_root_path: None,
-                    keepalive_timeout: Duration::from_secs(5),
                     send_timeout: Duration::from_secs(5),
                     channel_buffer_size: 1_000,
                     extended_monitoring: true,

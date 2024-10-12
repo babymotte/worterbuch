@@ -22,12 +22,8 @@ use crate::{
     subscribers::SubscriptionId,
     Config, PStateAggregator, INTERNAL_CLIENT_ID,
 };
-use anyhow::anyhow;
 use serde::Serialize;
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Duration};
 use tokio::{
     spawn,
     sync::{
@@ -412,8 +408,6 @@ pub enum WbFunction {
     Export(oneshot::Sender<Value>),
     Len(oneshot::Sender<usize>),
     SupportedProtocolVersion(oneshot::Sender<ProtocolVersion>),
-    KeepaliveLag(Uuid, u32),
-    ClearKeepaliveLag(Uuid),
 }
 
 #[derive(Clone)]
@@ -692,18 +686,6 @@ impl CloneableWbApi {
             .send(WbFunction::SupportedProtocolVersion(tx))
             .await?;
         Ok(rx.await?)
-    }
-
-    pub fn keepalive_lag(&self, client_id: Uuid, lag: u32) {
-        self.tx
-            .try_send(WbFunction::KeepaliveLag(client_id, lag))
-            .ok();
-    }
-
-    pub fn clear_keepalive_lag(&self, client_id: Uuid) {
-        self.tx
-            .try_send(WbFunction::ClearKeepaliveLag(client_id))
-            .ok();
     }
 }
 
@@ -1510,47 +1492,5 @@ impl From<(&Box<dyn std::error::Error + Send + Sync>, MetaData)> for Meta {
             cause: e.0.to_string(),
             meta: e.1,
         }
-    }
-}
-
-pub async fn send_keepalive(
-    last_keepalive_tx: Instant,
-    send_tx: &mpsc::Sender<ServerMessage>,
-) -> anyhow::Result<()> {
-    if last_keepalive_tx.elapsed().as_secs() >= 1 {
-        log::trace!("Sending keepalive");
-        send_tx.send(ServerMessage::Keepalive).await?;
-    }
-    Ok(())
-}
-
-pub fn check_client_keepalive(
-    last_keepalive_rx: Instant,
-    last_keepalive_tx: Instant,
-    client_id: Uuid,
-    keepalive_timeout: Duration,
-    wb: &CloneableWbApi,
-) -> anyhow::Result<()> {
-    let lag = last_keepalive_tx - last_keepalive_rx;
-
-    if lag >= Duration::from_secs(2) {
-        log::warn!(
-            "Client {} has been inactive for {} seconds …",
-            client_id,
-            lag.as_secs()
-        );
-        wb.keepalive_lag(client_id, lag.as_secs() as u32);
-    } else {
-        wb.clear_keepalive_lag(client_id);
-    }
-
-    if lag >= keepalive_timeout {
-        log::warn!(
-            "Client {} has been inactive for too long. Disconnecting.",
-            client_id
-        );
-        Err(anyhow!("Client has been inactive for too long"))
-    } else {
-        Ok(())
     }
 }
