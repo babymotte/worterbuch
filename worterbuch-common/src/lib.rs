@@ -310,7 +310,7 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
 
 #[cfg(test)]
 mod test {
-    use crate::{ClientMessage, ErrorCode, ServerMessage};
+    use crate::ErrorCode;
     use std::cmp::Ordering;
 
     #[test]
@@ -348,38 +348,6 @@ mod test {
         assert_eq!(
             "hello/world/foo/bar",
             topic!("hello", "world", "foo", "bar")
-        );
-    }
-
-    #[test]
-    fn server_keepalive_can_be_serialized() {
-        assert_eq!(
-            r#""""#,
-            serde_json::to_string(&ServerMessage::Keepalive).unwrap()
-        );
-    }
-
-    #[test]
-    fn server_keepalive_can_be_deserialized() {
-        assert_eq!(
-            ServerMessage::Keepalive,
-            serde_json::from_str(r#""""#).unwrap()
-        );
-    }
-
-    #[test]
-    fn client_keepalive_can_be_serialized() {
-        assert_eq!(
-            r#""""#,
-            serde_json::to_string(&ClientMessage::Keepalive).unwrap()
-        );
-    }
-
-    #[test]
-    fn client_keepalive_can_be_deserialized() {
-        assert_eq!(
-            ClientMessage::Keepalive,
-            serde_json::from_str(r#""""#).unwrap()
         );
     }
 

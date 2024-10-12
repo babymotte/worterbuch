@@ -40,8 +40,6 @@ pub enum ClientMessage {
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
     Transform(Transform),
-    #[serde(rename = "")]
-    Keepalive,
 }
 
 impl ClientMessage {
@@ -64,7 +62,6 @@ impl ClientMessage {
             ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::Transform(m) => Some(m.transaction_id),
-            ClientMessage::Keepalive => None,
         }
     }
 }

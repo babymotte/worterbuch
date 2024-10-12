@@ -34,8 +34,6 @@ pub enum ServerMessage {
     Err(Err),
     Authorized(Ack),
     LsState(LsState),
-    #[serde(rename = "")]
-    Keepalive,
 }
 
 impl ServerMessage {
@@ -48,7 +46,6 @@ impl ServerMessage {
             ServerMessage::Err(msg) => Some(msg.transaction_id),
             ServerMessage::LsState(msg) => Some(msg.transaction_id),
             ServerMessage::Authorized(_) => Some(0),
-            ServerMessage::Keepalive => None,
         }
     }
 }

@@ -329,7 +329,6 @@ pub async fn process_incoming_message(
                 // TODO
                 return Ok((false, authorized));
             }
-            CM::Keepalive => (),
         },
         Ok(None) => {
             // client disconnected

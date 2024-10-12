@@ -1414,7 +1414,7 @@ async fn process_incoming_server_message(
                 SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
                 SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 SM::Err(err) => deliver_err(err, callbacks).await,
-                SM::Ack(_) | SM::Welcome(_) | SM::Authorized(_) | SM::Keepalive => (),
+                SM::Ack(_) | SM::Welcome(_) | SM::Authorized(_) => (),
             }
             Ok(ControlFlow::Continue(()))
         }
