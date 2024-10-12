@@ -18,9 +18,7 @@
  */
 
 use crate::{
-    server::common::{
-        check_client_keepalive, process_incoming_message, send_keepalive, CloneableWbApi,
-    },
+    server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
 };
 use anyhow::anyhow;
@@ -29,15 +27,8 @@ use futures::{
     stream::{SplitSink, StreamExt},
 };
 use poem::web::websocket::{Message, WebSocketStream};
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
-use tokio::{
-    select, spawn,
-    sync::mpsc,
-    time::{sleep, MissedTickBehavior},
-};
+use std::{net::SocketAddr, time::Duration};
+use tokio::{select, spawn, sync::mpsc, time::sleep};
 use uuid::Uuid;
 use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
 
@@ -81,23 +72,15 @@ async fn serve_loop(
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
-    let keepalive_timeout = config.keepalive_timeout;
-    let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
-    let mut last_keepalive_tx = Instant::now();
-    let mut last_keepalive_rx = Instant::now();
     let mut authorized = None;
-    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let (mut ws_tx, mut ws_rx) = websocket.split();
     let (ws_send_tx, mut ws_send_rx) = mpsc::channel(config.channel_buffer_size);
-    let (keepalive_tx_tx, mut keepalive_tx_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
     spawn(async move {
         while let Some(msg) = ws_send_rx.recv().await {
-            if let Err(e) =
-                send_with_timeout(msg, &mut ws_tx, send_timeout, &keepalive_tx_tx, client_id).await
-            {
+            if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, client_id).await {
                 log::error!("Error sending WS message: {e}");
                 break;
             }
@@ -122,12 +105,6 @@ async fn serve_loop(
             recv = ws_rx.next() => if let Some(msg) = recv {
                 match msg {
                     Ok(incoming_msg) => {
-                        last_keepalive_rx = Instant::now();
-
-                        // drain the send buffer to make room for the response
-                        while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                            last_keepalive_tx = keepalive;
-                        }
                         log::trace!("Processing incoming message …");
                         if let Message::Text(text) = incoming_msg {
                             let (msg_processed, auth) = process_incoming_message(
@@ -155,21 +132,6 @@ async fn serve_loop(
                 log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
                 break;
             },
-            recv = keepalive_tx_rx.recv() => match recv {
-                Some(keepalive) => {
-                    last_keepalive_tx = keepalive;
-                    while let Ok(keepalive) = keepalive_tx_rx.try_recv() {
-                        last_keepalive_tx = keepalive;
-                    }
-                },
-                None => break,
-            },
-            _ = keepalive_timer.tick() => {
-                // check how long ago the last message was received
-                check_client_keepalive(last_keepalive_rx, last_keepalive_tx, client_id, keepalive_timeout, &worterbuch)?;
-                // send out message if the last has been more than a second ago
-                send_keepalive(last_keepalive_tx, &ws_send_tx, ).await?;
-            }
         }
     }
 
@@ -180,7 +142,6 @@ async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
     send_timeout: Duration,
-    keepalive_tx_tx: &mpsc::Sender<Instant>,
     client_id: Uuid,
 ) -> anyhow::Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
@@ -189,7 +150,6 @@ async fn send_with_timeout(
     select! {
         r = websocket.send(msg) => {
             r?;
-            keepalive_tx_tx.try_send(Instant::now()).ok();
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout for client {client_id}");
