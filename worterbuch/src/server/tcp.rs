@@ -24,7 +24,7 @@ use crate::{
 use std::net::{IpAddr, SocketAddr};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{TcpListener, TcpStream},
+    net::{TcpSocket, TcpStream},
     select, spawn,
     sync::mpsc,
 };
@@ -41,7 +41,13 @@ pub async fn start(
     let addr = format!("{bind_addr}:{port}");
 
     log::info!("Serving TCP endpoint at {addr}");
-    let listener = TcpListener::bind(&addr).await?;
+    let sock = TcpSocket::new_v4()?;
+    sock.set_keepalive(true)?;
+    sock.set_nodelay(true)?;
+    #[cfg(not(target_os = "windows"))]
+    sock.set_reuseaddr(true)?;
+    sock.bind(addr.parse()?)?;
+    let listener = sock.listen(1024)?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut open_connections = 0;
