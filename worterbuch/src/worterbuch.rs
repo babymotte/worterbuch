@@ -346,24 +346,7 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if let Some(key) = self.lookup_key(client_id, transaction_id) {
-            check_for_read_only_key(&key, client_id)?;
-
-            let path: Vec<RegularKeySegment> = parse_segments(&key)?;
-
-            let (changed, ls_subscribers) = self
-                .store
-                .insert(&path, value.clone())
-                .map_err(|e| e.for_pattern(key.to_owned()))?;
-
-            log::trace!("Notifying ls subscribers …");
-            self.notify_ls_subscribers(ls_subscribers).await;
-            log::trace!("Notifying ls subscribers done.");
-            log::trace!("Notifying subscribers …");
-            self.notify_subscribers(&path, &key, &value, changed, false)
-                .await;
-            log::trace!("Notifying subscribers done.");
-
-            Ok(())
+            self.publish(key, value).await
         } else {
             Err(WorterbuchError::NoPubStream(transaction_id))
         }
