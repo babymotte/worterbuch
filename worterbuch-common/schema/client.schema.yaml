@@ -83,6 +83,7 @@ properties:
         format: u64
       key:
         description: The key to be used in this pub stream
+        type: string
     additionalProperties: false
     required:
       - transactionId
