@@ -52,10 +52,16 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result
     let json_path = file_paths(config, true).await?;
 
     log::debug!("Exporting database state …");
-    let json = worterbuch.export().await?.to_string();
-    log::debug!("Exporting database state done.");
-
-    write_and_check(json.as_bytes(), &json_path).await?;
+    match worterbuch.export().await? {
+        Some(json) => {
+            log::debug!("Exporting database state done.");
+            let json = json.to_string();
+            write_and_check(json.as_bytes(), &json_path).await?;
+        }
+        None => {
+            log::debug!("No unsaved changes, skipping export.");
+        }
+    }
 
     Ok(())
 }

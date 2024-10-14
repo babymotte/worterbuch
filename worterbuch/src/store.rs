@@ -80,14 +80,22 @@ pub struct Store {
         default = "SubscribersNode::default"
     )]
     subscribers: SubscribersNode,
+    #[serde(skip_serializing, default = "bool::default")]
+    unsaved_changes: bool,
 }
 
 impl Store {
-    pub fn slim_copy(&self) -> Self {
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.unsaved_changes
+    }
+
+    pub fn export_for_persistence(&mut self) -> Self {
         let data = Node {
             v: self.data.v.clone(),
             t: self.slim_copy_top_level_children(),
         };
+
+        self.unsaved_changes = false;
 
         Self {
             data,
@@ -147,6 +155,7 @@ impl Store {
         .0;
         if removed.is_some() {
             self.len -= 1;
+            self.unsaved_changes = true;
         }
         removed.map(|it| (it, ls_subscribers))
     }
@@ -185,6 +194,9 @@ impl Store {
             self.len = 0;
         } else {
             self.len -= matches.len();
+        }
+        if !matches.is_empty() {
+            self.unsaved_changes = true;
         }
         // TODO notify subscribers
         Ok((matches, ls_subscribers))
@@ -539,6 +551,10 @@ impl Store {
             })
             .collect();
 
+        if changed {
+            self.unsaved_changes = true;
+        }
+
         Ok((changed, ls_subscribers))
     }
 
@@ -581,6 +597,7 @@ impl Store {
         let path = Vec::new();
         Store::nmerge(&mut self.data, other.data, None, &mut insertions, &path);
         self.len = Store::ncount_values(&self.data);
+        self.unsaved_changes = true;
         // TODO notify subscribers
         insertions
     }

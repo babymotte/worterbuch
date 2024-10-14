@@ -35,7 +35,7 @@ use std::{
 };
 use tokio::{
     fs::File,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     select, spawn,
     sync::{
         mpsc::{self, channel, Receiver},
@@ -49,9 +49,8 @@ use worterbuch_common::{
     parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
     PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
     StateEvent, TransactionId, PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG,
-    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS,
-    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
@@ -560,11 +559,15 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&self, tx: oneshot::Sender<Value>) {
-        let store = self.store.slim_copy();
+    pub fn export(&mut self, tx: oneshot::Sender<Option<Value>>) {
+        if !self.store.has_unsaved_changes() {
+            tx.send(None).ok();
+            return;
+        }
+        let store = self.store.export_for_persistence();
         spawn(async move {
             let value = json!(store);
-            tx.send(value).ok();
+            tx.send(Some(value)).ok();
         });
     }
 
@@ -587,20 +590,20 @@ impl Worterbuch {
         Ok(imported_values)
     }
 
-    pub async fn export_to_file(&self, file: &mut File) -> WorterbuchResult<()> {
-        log::debug!("Exporting to {file:?} …");
+    // pub async fn export_to_file(&mut self, file: &mut File) -> WorterbuchResult<()> {
+    //     log::debug!("Exporting to {file:?} …");
 
-        let (tx, rx) = oneshot::channel();
-        self.export(tx);
-        let json = rx.await?.to_string();
-        let json_bytes = json.as_bytes();
+    //     let (tx, rx) = oneshot::channel();
+    //     self.export(tx);
+    //     let json = rx.await?.to_string();
+    //     let json_bytes = json.as_bytes();
 
-        file.write_all(json_bytes)
-            .await
-            .context(|| format!("Error writing to file {file:?}"))?;
-        log::debug!("Done.");
-        Ok(())
-    }
+    //     file.write_all(json_bytes)
+    //         .await
+    //         .context(|| format!("Error writing to file {file:?}"))?;
+    //     log::debug!("Done.");
+    //     Ok(())
+    // }
 
     pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {
         log::info!("Importing from {path} …");
@@ -1131,39 +1134,6 @@ impl Worterbuch {
         }
 
         Ok(())
-    }
-
-    pub async fn keepalive_lag(&mut self, client_id: Uuid, lag: u32) {
-        if self.config.extended_monitoring {
-            self.set(
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG
-                ),
-                json!(lag),
-                INTERNAL_CLIENT_ID,
-            )
-            .await
-            .ok();
-        }
-    }
-
-    pub async fn clear_keepalive_lag(&mut self, client_id: Uuid) {
-        if self.config.extended_monitoring {
-            self.delete(
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG
-                ),
-                INTERNAL_CLIENT_ID,
-            )
-            .await
-            .ok();
-        }
     }
 
     fn store_key(&mut self, client_id: Uuid, transaction_id: u64, key: Key) {

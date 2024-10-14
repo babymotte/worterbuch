@@ -44,7 +44,6 @@ pub const SYSTEM_TOPIC_SOURCES: &str = "source-code";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
 pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
-pub const SYSTEM_TOPIC_CLIENTS_KEEPALIVE_LAG: &str = "keepaliveLag";
 pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
 pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
 pub const SYSTEM_TOPIC_CLIENT_NAME: &str = "clientName";
