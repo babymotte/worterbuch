@@ -16,9 +16,11 @@
  */
 
 use super::{config::Config, PeerMessage};
-use crate::cluster_orchestrator::{utils::listen, Heartbeat, PeerInfo, PublicEndpoints, Vote};
+use crate::cluster_orchestrator::{
+    utils::{listen, send_heartbeat_response, support_vote},
+    Heartbeat, PeerInfo, PublicEndpoints, Vote,
+};
 use miette::{IntoDiagnostic, Result};
-use std::future::pending;
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 
@@ -30,88 +32,80 @@ pub async fn follow(
     let (leader_info_tx_serv, mut leader_info_rx_serv) = mpsc::channel::<PeerInfo>(1);
     let (leader_info_tx_conf, mut leader_info_rx_conf) = mpsc::channel::<PublicEndpoints>(1);
 
-    let wb_server = subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
-        let mut leader_info: Option<PeerInfo> = None;
+    subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
 
         loop {
             select! {
-                Some(info) = leader_info_rx_serv.recv() => {
-                    log::info!("Received new leader address: {}@{}",info.node_id, info.address);
-                    leader_info = Some(info);
+                recv = leader_info_rx_serv.recv() => match recv {
+                    Some(info) => {
+                        log::info!("Received new leader address: {}@{}. (Re-)Starting worterbuch server in follower mode …", info.node_id, info.address);
+                        // TODO restart wb server with new leader config
+                    },
+                    None => break,
                 },
-                res = async {
-                    if let Some(info) = &leader_info {
-                        log::info!("Starting worterbuch server in follower mode …");
-                        // TODO
-                        pending::<()>().await;
-                        log::info!("Worterbuch server stopped.");
-                        Ok::<(), miette::Error>(())
-                    } else {
-                        Ok(pending().await)
-                    }
-                } => res?,
                 _ = s.on_shutdown_requested() => break,
             }
         }
 
+        log::info!("worterbuch server subsystem stopped.");
+
         Ok::<(), miette::Error>(())
     }));
 
-    let rest_endpoint = subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
-        let mut leader_endpoints: Option<PublicEndpoints> = None;
-
+    subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
         loop {
             select! {
-                Some(endpoints) = leader_info_rx_conf.recv() => {
-                    log::info!("Received new leader endpoints.");
-                    leader_endpoints = Some(endpoints);
-                },
-                res = async {
-                    if let Some(endpoints) = &leader_endpoints {
-                        log::info!("Starting config REST endpoint …");
+                recv = leader_info_rx_conf.recv() => match recv {
+                    Some(endpoints) => {
+                        log::info!("Received new leader endpoint info. (Re-)Starting config REST endpoint …");
                         // TODO
-                        pending::<()>().await;
-                        log::info!("Config endpoint stopped.");
-                        Ok::<(), miette::Error>(())
-                    } else {
-                        Ok(pending().await)
-                    }
-                } => res?,
+                    },
+                    None => break,
+                },
                 _ = s.on_shutdown_requested() => break,
             }
         }
 
+        log::info!("Config REST endpoint subsystem stopped.");
+
         Ok::<(), miette::Error>(())
     }));
-
-    // TODO
-    // - listen for heartbeats and/or vote requests
-    // - on vote request: support new leader
-    // - on heartbeat timeout try to become new leader
 
     let mut buf = [0u8; 65507];
+
+    let mut leader_id = None;
 
     loop {
         select! {
             _ = sleep(config.heartbeat_timeout()) => {
                 log::info!("Leader heartbeat timed out. Starting election …");
-                wb_server.initiate_shutdown();
-                rest_endpoint.initiate_shutdown();
                 break;
             },
             msg = listen(&socket, &mut buf) => {
                 match msg? {
-                    Some(PeerMessage::Vote(Vote::Request(vote))) => {},
-                    Some(PeerMessage::Vote(Vote::Response(vote))) => {},
-                    Some(PeerMessage::Heartbeat(Heartbeat::Request(heartbeat))) => {},
+                    Some(PeerMessage::Vote(Vote::Request(vote))) => {
+                        log::info!("Node '{}' has started a leader election and requested our support. Let's support it.", vote.node_id);
+                        support_vote(vote, config, socket).await?;
+                    },
+                    Some(PeerMessage::Vote(Vote::Response(vote))) => {
+                        log::warn!("Node '{}' is sending me vote responses, but I did not start an election. Weird.", vote.node_id);
+                    },
+                    Some(PeerMessage::Heartbeat(Heartbeat::Request(heartbeat))) => {
+                        let this_leader_id = Some(heartbeat.peer_info.node_id.clone());
+                        if leader_id != this_leader_id {
+                            log::info!("Node '{}' seems to be the new leader.", heartbeat.peer_info.node_id);
+                            leader_info_tx_serv.send(heartbeat.peer_info.clone()).await.into_diagnostic()?;
+                            leader_info_tx_conf.send(heartbeat.public_endpoints.clone()).await.into_diagnostic()?;
+                            leader_id = this_leader_id;
+                        }
+                        send_heartbeat_response(&heartbeat, config, &socket).await?;
+                    },
                     Some(PeerMessage::Heartbeat(Heartbeat::Response(heartbeat))) => {
                         log::warn!("Node '{}' is sending me heartbeat responses but I'm not the leader. Weird.", heartbeat.node_id);
                     },
                     None => (),
                 }
             }
-            res = wb_server.join() => { res?; break; },
-            res = rest_endpoint.join() => { res?; break; },
             _ = subsys.on_shutdown_requested() => break,
         }
     }

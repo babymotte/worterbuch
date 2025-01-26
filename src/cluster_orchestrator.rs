@@ -70,7 +70,7 @@ pub enum Heartbeat {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatRequest {
-    node_id: String,
+    peer_info: PeerInfo,
     public_endpoints: PublicEndpoints,
 }
 

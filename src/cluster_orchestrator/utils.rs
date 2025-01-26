@@ -15,21 +15,75 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::{config::Config, HeartbeatRequest, PeerMessage};
+use super::{
+    config::Config, HeartbeatRequest, PeerInfo, PeerMessage, PublicEndpoints, VoteRequest,
+    VoteResponse,
+};
 use miette::{IntoDiagnostic, Result};
 use tokio::net::UdpSocket;
 
 pub async fn send_heartbeat_requests(config: &Config, socket: &UdpSocket) -> Result<()> {
-    // TODO
+    let peer_info = PeerInfo {
+        node_id: config.node_id.clone(),
+        address: config.address,
+    };
+
+    // TODO get and use actual public endpoints
+    let public_endpoints = PublicEndpoints {
+        address: config.address.ip().to_string(),
+        tcp_port: 8081,
+        ws_port: 8080,
+    };
+
+    let msg = PeerMessage::Heartbeat(super::Heartbeat::Request(HeartbeatRequest {
+        peer_info,
+        public_endpoints,
+    }));
+    let data = serde_json::to_string(&msg).into_diagnostic()?;
+    let data = data.as_bytes();
+
+    for peer in &config.peer_nodes {
+        socket.send_to(data, peer.address).await.into_diagnostic()?;
+    }
 
     Ok(())
 }
 
 pub async fn send_heartbeat_response(
     heartbeat: &HeartbeatRequest,
+    config: &Config,
     socket: &UdpSocket,
 ) -> Result<()> {
-    // TODO
+    let msg = PeerMessage::Heartbeat(super::Heartbeat::Response(super::HeartbeatResponse {
+        node_id: config.node_id.clone(),
+    }));
+    let data = serde_json::to_string(&msg).into_diagnostic()?;
+    let data = data.as_bytes();
+
+    socket
+        .send_to(data, heartbeat.peer_info.address)
+        .await
+        .into_diagnostic()?;
+
+    Ok(())
+}
+
+pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket) -> Result<()> {
+    if let Some(addr) = config.get_node_addr(&vote.node_id) {
+        let resp = PeerMessage::Vote(super::Vote::Response(VoteResponse {
+            node_id: config.node_id.to_owned(),
+        }));
+
+        let data = serde_json::to_string(&resp).into_diagnostic()?;
+        let data = data.as_bytes();
+
+        socket.send_to(&data, addr).await.into_diagnostic()?;
+    } else {
+        log::warn!(
+            "Cannot support vote request of noe '{}', no socket address is configured for it!",
+            vote.node_id
+        );
+    }
 
     Ok(())
 }

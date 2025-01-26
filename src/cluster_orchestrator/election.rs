@@ -18,7 +18,6 @@
 use super::{config::Config, utils::listen};
 use crate::cluster_orchestrator::{Heartbeat, PeerMessage, Vote};
 use miette::{IntoDiagnostic, Result};
-use std::time::Duration;
 use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
 
@@ -81,7 +80,7 @@ impl<'a> Election<'a> {
                             log::info!("Looks like node '{}' is also trying to become leader. Traitor!", vote.node_id);
                         },
                         Some(PeerMessage::Heartbeat(Heartbeat::Request(heartbeat))) => {
-                            log::info!("Node '{}' has apparently been elected, returning to follower mode.", heartbeat.node_id);
+                            log::info!("Node '{}' has apparently been elected, returning to follower mode.", heartbeat.peer_info.node_id);
                             return Ok(false);
                         },
                         Some(PeerMessage::Heartbeat(Heartbeat::Response(heartbeat))) => {
@@ -97,10 +96,6 @@ impl<'a> Election<'a> {
 
     async fn listen(&self, buf: &mut [u8]) -> Result<Option<PeerMessage>> {
         listen(self.socket, buf).await
-    }
-
-    async fn support(&self, vote: &Vote) -> Result<()> {
-        todo!()
     }
 
     async fn request_votes(&self) -> Result<()> {
@@ -140,10 +135,4 @@ pub async fn elect_leader(
     }
 
     Ok(false)
-}
-
-async fn wait(millis: u64, range: u64) {
-    // TODO randomize time
-    let rand = 0 * range;
-    sleep(Duration::from_millis(millis + rand)).await;
 }

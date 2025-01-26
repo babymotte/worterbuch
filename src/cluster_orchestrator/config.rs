@@ -127,7 +127,8 @@ async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
 
 pub struct Config {
     pub node_id: String,
-    pub heartbeat_interval: u64,
+    pub address: SocketAddr,
+    pub heartbeat_interval: Duration,
     pub heartbeat_min_timeout: u64,
     pub orchestration_port: u16,
     pub quorum: usize,
@@ -139,6 +140,13 @@ impl Config {
         let randomized =
             (rand::random::<f64>() * 0.5 * self.heartbeat_min_timeout as f64).round() as u64;
         Duration::from_millis(self.heartbeat_min_timeout + randomized)
+    }
+
+    pub fn get_node_addr(&self, node_id: &str) -> Option<SocketAddr> {
+        self.peer_nodes
+            .iter()
+            .find(|p| p.node_id == node_id)
+            .map(|p| p.address)
     }
 }
 
@@ -152,6 +160,11 @@ pub async fn load_config() -> Result<Config> {
         .into_iter()
         .map(PeerInfo::try_from)
         .collect::<Result<Vec<PeerInfo>>>()?;
+    let address = nodes
+        .iter()
+        .find(|p| p.node_id == args.node_id)
+        .ok_or_else(|| miette!("No socket address configured for this node."))?
+        .address;
     let peers = nodes
         .iter()
         .filter_map(|p| {
@@ -168,7 +181,8 @@ pub async fn load_config() -> Result<Config> {
 
     Ok(Config {
         node_id: args.node_id,
-        heartbeat_interval: args.heartbeat_interval,
+        address,
+        heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
         orchestration_port: args.port,
         quorum: quorum_sanity_check(args.quorum, &nodes)?,
