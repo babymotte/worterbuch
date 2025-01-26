@@ -54,6 +54,10 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
 
     let mut heartbeat_responses = HashMap::new();
 
+    for peer in &config.peer_nodes {
+        heartbeat_responses.insert(peer.node_id.clone(), Instant::now());
+    }
+
     loop {
         select! {
             _ = interval.tick() => {
@@ -108,7 +112,7 @@ fn check_heartbeat_responses(
         if timestamp.elapsed().as_millis() > config.heartbeat_min_timeout as u128 {
             unresponsive_nodes += 1;
             responsive_nodes = number_of_nodes - unresponsive_nodes;
-            log::warn!(
+            log::debug!(
                 "Heartbeat response of node '{}' is overdue ({}/{} node(s) responsive; quorum: {}).",
                 node_id,
                 responsive_nodes, number_of_nodes, config.quorum

@@ -42,6 +42,13 @@ impl<'a> Election<'a> {
         log::info!("Requesting peers to vote for me …");
 
         self.votes_in_my_favor += 1;
+
+        // this will allow self-election, which is usually an antipattern. We allow it here to be able to support not fully redundant two-node clusters.
+        if self.votes_in_my_favor >= self.config.quorum {
+            log::info!("I am now the supreme leader!");
+            return Ok(true);
+        }
+
         self.request_votes().await?;
 
         let mut timeout = Box::pin(sleep(self.config.heartbeat_timeout()));
