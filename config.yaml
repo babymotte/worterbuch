@@ -1,0 +1,7 @@
+nodes:
+  - nodeId: alice
+    address: 127.0.0.1:1337
+  - nodeId: bob
+    address: localhost:1338
+  # - nodeId: carl
+  #   address: localhost:1339
