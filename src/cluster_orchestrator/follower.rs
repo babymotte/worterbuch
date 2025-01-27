@@ -33,7 +33,7 @@ pub async fn follow(
     let (leader_info_tx_serv, mut leader_info_rx_serv) = mpsc::channel::<PeerInfo>(1);
     let (leader_info_tx_conf, mut leader_info_rx_conf) = mpsc::channel::<PublicEndpoints>(1);
 
-    subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
+    let wb_server = subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
 
         loop {
             select! {
@@ -53,7 +53,7 @@ pub async fn follow(
         Ok::<(), miette::Error>(())
     }));
 
-    subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
+    let rest_endpoint = subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
         loop {
             select! {
                 recv = leader_info_rx_conf.recv() => match recv {
@@ -112,6 +112,12 @@ pub async fn follow(
             _ = subsys.on_shutdown_requested() => break,
         }
     }
+
+    wb_server.initiate_shutdown();
+    wb_server.join().await?;
+
+    rest_endpoint.initiate_shutdown();
+    rest_endpoint.join().await?;
 
     Ok(())
 }

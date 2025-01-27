@@ -97,7 +97,10 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
     }
 
     wb_server.initiate_shutdown();
+    wb_server.join().await?;
+
     rest_endpoint.initiate_shutdown();
+    rest_endpoint.join().await?;
 
     Ok(())
 }
