@@ -20,6 +20,7 @@ use clap::Parser;
 use miette::{miette, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::{
+    collections::HashSet,
     net::{SocketAddr, ToSocketAddrs},
     path::Path,
     time::Duration,
@@ -133,6 +134,7 @@ pub struct Config {
     pub orchestration_port: u16,
     pub quorum: usize,
     pub peer_nodes: Vec<PeerInfo>,
+    peer_addresses: HashSet<SocketAddr>,
 }
 
 impl Config {
@@ -148,10 +150,16 @@ impl Config {
             .find(|p| p.node_id == node_id)
             .map(|p| p.address)
     }
+
+    pub(crate) fn is_peer(&self, addr: SocketAddr) -> bool {
+        self.peer_addresses.contains(&addr)
+    }
 }
 
 pub async fn load_config() -> Result<Config> {
     log::info!("Loading orchestrator config …");
+
+    let mut peer_addresses = HashSet::new();
 
     let args: Args = Args::parse();
     let config_file = load_config_file(args.config_path).await?;
@@ -169,6 +177,7 @@ pub async fn load_config() -> Result<Config> {
         .iter()
         .filter_map(|p| {
             if p.node_id != args.node_id {
+                peer_addresses.insert(p.address);
                 Some(p.to_owned())
             } else {
                 None
@@ -187,5 +196,6 @@ pub async fn load_config() -> Result<Config> {
         orchestration_port: args.port,
         quorum: quorum_sanity_check(args.quorum, &nodes)?,
         peer_nodes: peers,
+        peer_addresses,
     })
 }

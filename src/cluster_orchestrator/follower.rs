@@ -21,6 +21,7 @@ use crate::cluster_orchestrator::{
     Heartbeat, PeerInfo, PublicEndpoints, Vote,
 };
 use miette::{IntoDiagnostic, Result};
+use std::ops::ControlFlow;
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 
@@ -81,16 +82,16 @@ pub async fn follow(
                 log::info!("Leader heartbeat timed out. Starting election …");
                 break;
             },
-            msg = listen(&socket, &mut buf) => {
-                match msg? {
-                    Some(PeerMessage::Vote(Vote::Request(vote))) => {
+            flow = listen(&socket, &mut buf, config, |msg| async {
+                match msg {
+                    PeerMessage::Vote(Vote::Request(vote)) => {
                         log::info!("Node '{}' has started a leader election and requested our support. Let's support it.", vote.node_id);
                         support_vote(vote, config, socket).await?;
                     },
-                    Some(PeerMessage::Vote(Vote::Response(vote))) => {
+                    PeerMessage::Vote(Vote::Response(vote)) => {
                         log::warn!("Node '{}' is sending me vote responses, but I did not start an election. Weird.", vote.node_id);
                     },
-                    Some(PeerMessage::Heartbeat(Heartbeat::Request(heartbeat))) => {
+                    PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
                         let this_leader_id = Some(heartbeat.peer_info.node_id.clone());
                         if leader_id != this_leader_id {
                             log::info!("Node '{}' seems to be the new leader.", heartbeat.peer_info.node_id);
@@ -100,12 +101,14 @@ pub async fn follow(
                         }
                         send_heartbeat_response(&heartbeat, config, &socket).await?;
                     },
-                    Some(PeerMessage::Heartbeat(Heartbeat::Response(heartbeat))) => {
+                    PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                         log::warn!("Node '{}' is sending me heartbeat responses but I'm not the leader. Weird.", heartbeat.node_id);
-                    },
-                    None => (),
+                    }
                 }
-            }
+                Ok(ControlFlow::Continue::<()>(()))
+            }) => if let ControlFlow::Break(_) = flow? {
+                break;
+            },
             _ = subsys.on_shutdown_requested() => break,
         }
     }

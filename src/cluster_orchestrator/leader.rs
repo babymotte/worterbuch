@@ -21,7 +21,7 @@ use crate::cluster_orchestrator::{
     Heartbeat, PeerMessage, Vote,
 };
 use miette::Result;
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, time::interval};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 
@@ -67,27 +67,29 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
                     break;
                 }
             },
-            msg = listen(&socket, &mut buf) => {
-                match msg? {
-                    Some(PeerMessage::Vote(Vote::Request(vote))) => {
+            flow = listen(&socket, &mut buf, config, |msg| async {
+                match msg {
+                    PeerMessage::Vote(Vote::Request(vote)) => {
                         log::info!("Node '{}' wants to take the lead, let's support it and fall back to follower mode.", vote.node_id);
                         support_vote(vote, config, socket).await?;
-                        break;
+                        return Ok(ControlFlow::Break(()));
                     },
-                    Some(PeerMessage::Vote(Vote::Response(vote))) => {
-                        log::warn!("Node '{}' is sending me vote responses, but I did not start an election. Weird.", vote.node_id);
+                    PeerMessage::Vote(Vote::Response(_)) => {
+                        // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
                     },
-                    Some(PeerMessage::Heartbeat(Heartbeat::Request(heartbeat))) => {
-                        log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. TODO figure out how to resolve this. Dropping to follower status for now.", heartbeat.peer_info.node_id);
-                        break;
+                    PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+                        log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.peer_info.node_id);
+                        return Ok(ControlFlow::Break(()));
                     },
-                    Some(PeerMessage::Heartbeat(Heartbeat::Response(heartbeat))) => {
+                    PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                         log::trace!("Received heartbeat response from node '{}'.", heartbeat.node_id);
                         heartbeat_responses.insert(heartbeat.node_id, Instant::now());
                     },
-                    None => (),
                 }
-            }
+                Ok(ControlFlow::Continue(()))
+            }) => if let ControlFlow::Break(_) = flow? {
+                break;
+            },
             res = wb_server.join() => { res?; break; },
             res = rest_endpoint.join() => { res?; break; },
             _ = subsys.on_shutdown_requested() => break,
@@ -106,7 +108,7 @@ fn check_heartbeat_responses(
 ) -> bool {
     let number_of_nodes = config.peer_nodes.len() + 1;
     let mut unresponsive_nodes = 0;
-    let mut responsive_nodes = number_of_nodes - unresponsive_nodes;
+    let mut responsive_nodes;
 
     for (node_id, timestamp) in heartbeat_responses {
         if timestamp.elapsed().as_millis() > config.heartbeat_min_timeout as u128 {

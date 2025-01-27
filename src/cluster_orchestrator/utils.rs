@@ -20,6 +20,7 @@ use super::{
     VoteResponse,
 };
 use miette::{IntoDiagnostic, Result};
+use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
 
 pub async fn send_heartbeat_requests(config: &Config, socket: &UdpSocket) -> Result<()> {
@@ -88,17 +89,32 @@ pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket
     Ok(())
 }
 
-pub async fn listen(socket: &UdpSocket, buf: &mut [u8]) -> Result<Option<PeerMessage>> {
-    let received = socket.recv(buf).await.into_diagnostic()?;
+pub async fn listen<F, T>(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+    config: &Config,
+    op: impl FnOnce(PeerMessage) -> F,
+) -> Result<ControlFlow<T>>
+where
+    F: Future<Output = Result<ControlFlow<T>>>,
+{
+    let (received, addr) = socket.recv_from(buf).await.into_diagnostic()?;
+
     if received <= 0 {
-        return Ok(None);
+        return Ok(ControlFlow::Continue(()));
     }
+
+    if !config.is_peer(addr) {
+        log::warn!("Received peer message from a sender that is not configured as a peer node. Your cluster may be misconfigured or somebody might be trying to DoS it.");
+        return Ok(ControlFlow::Continue(()));
+    }
+
     match serde_json::from_slice(&buf[..received]) {
-        Ok(msg) => Ok(Some(msg)),
+        Ok(msg) => op(msg).await,
         Err(e) => {
             log::error!("Could not parse peer message: {e}");
             log::debug!("Message: {}", String::from_utf8_lossy(&buf[..received]));
-            Ok(None)
+            Ok(ControlFlow::Continue(()))
         }
     }
 }
