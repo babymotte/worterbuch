@@ -15,14 +15,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM messense/rust-musl-cross:x86_64-musl AS worterbuch-builder
-WORKDIR /src/worterbuch
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
+WORKDIR /app
+
+FROM worterbuch-chef AS worterbuch-planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM worterbuch-chef AS worterbuch-builder 
+COPY --from=worterbuch-planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build -p worterbuch --release
 
-FROM scratch
+FROM debian:bookworm-slim
 WORKDIR /app
-COPY --from=worterbuch-builder /src/worterbuch/target/x86_64-unknown-linux-musl/release/worterbuch .
+COPY --from=worterbuch-builder /app/target/release/worterbuch /usr/local/bin
 ENV RUST_LOG=info
 ENV WORTERBUCH_WS_BIND_ADDRESS=0.0.0.0
 ENV WORTERBUCH_TCP_BIND_ADDRESS=0.0.0.0
@@ -34,4 +42,4 @@ ENV WORTERBUCH_TCP_SERVER_PORT=9090
 ENV WORTERBUCH_SINGLE_THREADED=false
 ENV WORTERBUCH_WEBAPP=false
 VOLUME [ "/data" ]
-CMD ["./worterbuch"]
+ENTRYPOINT ["/usr/local/bin/worterbuch"]
