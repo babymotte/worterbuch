@@ -74,6 +74,7 @@ pub async fn run_cluster_sync_port(
     };
 
     socket.set_reuseaddr(true)?;
+    #[cfg(target_family = "unix")]
     socket.set_reuseport(true)?;
     socket.bind(SocketAddr::new(ip, port))?;
 
