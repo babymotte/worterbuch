@@ -166,13 +166,8 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
         }
     });
 
-    let (disco_tx, mut disco_rx) = oneshot::channel();
-
-    let on_disconnect = async {
-        disco_tx.send(()).ok();
-    };
-    let wb = match connect_with_default_config(on_disconnect).await {
-        Ok((wb, _)) => wb,
+    let (wb, mut on_disconnect) = match connect_with_default_config().await {
+        Ok((wb, on_disconnect, _)) => (wb, on_disconnect),
         Err(e) => {
             log::error!("Could not start worterbuch client: {e}");
             return 0;
@@ -215,7 +210,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
             } else {
                 return counter;
             },
-            _ = &mut disco_rx => return counter,
+            _ = &mut on_disconnect => return counter,
             _ = &mut stop_rx => return counter,
         }
     }

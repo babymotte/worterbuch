@@ -345,7 +345,7 @@ async fn client(
     subsys: SubsystemHandle,
     on_connected: mpsc::Sender<()>,
 ) -> miette::Result<()> {
-    let (wb, _) = worterbuch_client::connect_with_default_config(async move {})
+    let (wb, _on_disconnect, _) = worterbuch_client::connect_with_default_config()
         .await
         .into_diagnostic()
         .context("Failed to connect to worterbuch server.")?;
