@@ -89,11 +89,15 @@ impl Store {
         self.unsaved_changes
     }
 
-    pub fn export_for_persistence(&mut self) -> Self {
-        let data = Node {
+    pub fn export(&mut self) -> Node {
+        Node {
             v: self.data.v.clone(),
             t: self.slim_copy_top_level_children(),
-        };
+        }
+    }
+
+    pub fn export_for_persistence(&mut self) -> Self {
+        let data = self.export();
 
         self.unsaved_changes = false;
 
@@ -565,10 +569,7 @@ impl Store {
         let mut current = &self.data;
 
         for elem in path {
-            current = match current.t.get(elem.as_ref()) {
-                Some(e) => e,
-                None => return None,
-            }
+            current = current.t.get(elem.as_ref())?;
         }
 
         Some(current.t.keys().map(ToOwned::to_owned).collect())
@@ -705,6 +706,12 @@ impl Store {
             log::debug!("no matching subscription found")
         }
         removed
+    }
+
+    pub(crate) fn reset(&mut self, data: Node) {
+        self.data = data;
+        self.count_entries();
+        self.unsaved_changes = true;
     }
 }
 

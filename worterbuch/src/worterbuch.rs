@@ -19,7 +19,7 @@
 
 use crate::{
     config::Config,
-    store::{Store, StoreStats},
+    store::{Node, Store, StoreStats},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
     INTERNAL_CLIENT_ID,
 };
@@ -559,7 +559,11 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&mut self, tx: oneshot::Sender<Option<Value>>) {
+    pub fn export(&mut self) -> Node {
+        self.store.export()
+    }
+
+    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<Option<Value>>) {
         if !self.store.has_unsaved_changes() {
             tx.send(None).ok();
             return;
@@ -1150,6 +1154,10 @@ impl Worterbuch {
             .and_then(|keys| keys.get(&transaction_id))
             .map(ToOwned::to_owned)
     }
+
+    pub(crate) fn reset_store(&mut self, data: Node) {
+        self.store.reset(data);
+    }
 }
 
 fn check_for_read_only_key(key: &str, client_id: Uuid) -> WorterbuchResult<()> {
@@ -1206,9 +1214,7 @@ mod test {
         .await
         .unwrap();
 
-        let (tx, rx) = oneshot::channel();
-        wb.export(tx);
-        let export = rx.await.unwrap();
+        let export = wb.export();
         assert_eq!(
             r#"{"data":{"t":{"hello":{"t":{"world":{"v":"test"}}}}}}"#,
             &serde_json::to_string(&export).unwrap()

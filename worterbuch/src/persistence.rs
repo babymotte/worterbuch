@@ -19,6 +19,7 @@
 
 use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
 use anyhow::{anyhow, Context, Result};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::{
@@ -62,6 +63,18 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result
             log::debug!("No unsaved changes, skipping export.");
         }
     }
+
+    Ok(())
+}
+
+pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) -> Result<()> {
+    let json_path = file_paths(config, true).await?;
+
+    log::debug!("Exporting database state …");
+    let data = worterbuch.export();
+    log::debug!("Exporting database state done.");
+    let json = json!({ "data": data }).to_string();
+    write_and_check(json.as_bytes(), &json_path).await?;
 
     Ok(())
 }

@@ -18,7 +18,6 @@
  */
 
 use anyhow::Result;
-use clap::Parser;
 use std::io;
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
@@ -30,10 +29,6 @@ use worterbuch::{run_worterbuch, Config};
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[derive(Parser)]
-#[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
-struct Args {}
-
 #[tokio::main()]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -44,7 +39,6 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    let _args: Args = Args::parse();
 
     let config = Config::new().await?;
 

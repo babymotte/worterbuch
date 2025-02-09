@@ -425,7 +425,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn pget<'a>(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
+    pub async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::PGet(pattern, tx)).await?;
         rx.await?

@@ -18,11 +18,39 @@
  */
 
 use crate::license::{load_license, License};
+use clap::Parser;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use worterbuch_common::{
     error::{ConfigError, ConfigIntContext, ConfigResult},
     AuthToken, Path,
 };
+
+#[derive(Parser)]
+#[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
+pub struct Args {
+    /// Start server in leader mode (requires --sync-port)
+    #[arg(
+        long,
+        conflicts_with = "follower",
+        requires = "sync_port",
+        default_value_t = false
+    )]
+    leader: bool,
+    /// Start server in follower mode (requires --leader_address)
+    #[arg(
+        long,
+        conflicts_with = "leader",
+        requires = "leader_address",
+        default_value_t = false
+    )]
+    follower: bool,
+    /// Port at which to listen for cluster peer sync connections (only with --leader)
+    #[arg(long, short)]
+    sync_port: Option<u16>,
+    /// Socket address of the leader node to sync to in the form <IP or hostname>:<port> (only with --follower)
+    #[arg(long, short)]
+    leader_address: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Endpoint {
@@ -59,6 +87,10 @@ pub struct Config {
     pub auth_token: Option<AuthToken>,
     pub license: License,
     pub shutdown_timeout: Duration,
+    pub leader: bool,
+    pub follower: bool,
+    pub sync_port: Option<u16>,
+    pub leader_address: Option<String>,
 }
 
 impl Config {
@@ -112,7 +144,9 @@ impl Config {
             }
         }
 
-        if let Ok(val) = env::var(prefix.to_owned() + "_USE_PERSISTENCE") {
+        if self.follower || self.leader {
+            self.use_persistence = true;
+        } else if let Ok(val) = env::var(prefix.to_owned() + "_USE_PERSISTENCE") {
             self.use_persistence = val.to_lowercase() == "true";
         }
 
@@ -162,6 +196,8 @@ impl Config {
     }
 
     pub async fn new() -> ConfigResult<Self> {
+        let args = Args::parse();
+
         match load_license().await {
             Ok(license) => {
                 let mut config = Config {
@@ -191,6 +227,10 @@ impl Config {
                     auth_token: None,
                     license,
                     shutdown_timeout: Duration::from_secs(1),
+                    follower: args.follower,
+                    leader: args.leader,
+                    sync_port: args.sync_port,
+                    leader_address: args.leader_address,
                 };
                 config.load_env()?;
                 Ok(config)
