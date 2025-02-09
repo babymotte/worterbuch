@@ -15,14 +15,13 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod cluster_orchestrator;
-
 use miette::Result;
 use std::{io, time::Duration};
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use tracing_subscriber::EnvFilter;
+use worterbuch_cluster_orchestrator::run;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     tracing_subscriber::fmt()
@@ -30,10 +29,7 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .init();
     Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new(
-            "cluster-orchestrator",
-            cluster_orchestrator::run,
-        ));
+        s.start(SubsystemBuilder::new("cluster-orchestrator", run));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(5))

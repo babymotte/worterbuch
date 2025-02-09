@@ -73,20 +73,46 @@ struct Args {
     #[arg()]
     node_id: String,
     /// Path to the cluster config file
-    #[arg(short, long, default_value = "./config.yaml")]
+    #[arg(
+        short,
+        long,
+        env = "WBCLUSTER_CONGIF_PATH",
+        default_value = "./config.yaml"
+    )]
     config_path: String,
     /// Interval at which leader sends heartbeat to followers (in ms)
-    #[arg(short = 'H', long = "heartbeat", default_value = "100")]
+    #[arg(
+        short = 'H',
+        long = "heartbeat",
+        env = "WBCLUSTER_HEARTBEAT_INTERVAL",
+        default_value = "100"
+    )]
     heartbeat_interval: u64,
     /// Minimum time before heartbeat times out (actual time will be longer since a randomized amount of time will be added)
-    #[arg(short = 't', long = "timeout", default_value = "500")]
+    #[arg(
+        short = 't',
+        long = "timeout",
+        env = "WBCLUSTER_HEARTBEAT_MIN_TIMEOUT",
+        default_value = "500"
+    )]
     heartbeat_min_timeout: u64,
     /// Port at which orchestrator will listen for votes and heartbeats from other nodes
-    #[arg(short, long, default_value = "8181")]
+    #[arg(short, long, env = "WBCLUSTER_PORT", default_value = "8181")]
     port: u16,
     /// The quorum required for a successful leader election vote [default: <number of nodes> / 2 + 1]
-    #[arg(short, long)]
+    #[arg(short, long, env = "WBCLUSTER_QUORUM")]
     quorum: Option<usize>,
+    /// Port used by followers to sync with the leader
+    #[arg(short, long, env = "WBCLUSTER_SYNC_PORT", default_value = "8282")]
+    sync_port: u16,
+    /// Path to the worterbuch executable. If omitted, it will be looked up from the environment's PATH
+    #[arg(
+        long,
+        short,
+        env = "WBCLUSTER_WB_EXECUTABLE",
+        default_value = "worterbuch"
+    )]
+    worterbuch_executable: String,
 }
 
 fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<usize> {
@@ -126,6 +152,7 @@ async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
     serde_yaml::from_str(&yaml).into_diagnostic()
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     pub node_id: String,
     pub address: SocketAddr,
@@ -134,6 +161,8 @@ pub struct Config {
     pub orchestration_port: u16,
     pub quorum: usize,
     pub peer_nodes: Vec<PeerInfo>,
+    pub sync_port: u16,
+    pub worterbuch_executable: String,
     peer_addresses: HashSet<SocketAddr>,
 }
 
@@ -196,6 +225,8 @@ pub async fn load_config() -> Result<Config> {
         orchestration_port: args.port,
         quorum: quorum_sanity_check(args.quorum, &nodes)?,
         peer_nodes: peers,
+        sync_port: args.sync_port,
+        worterbuch_executable: args.worterbuch_executable,
         peer_addresses,
     })
 }

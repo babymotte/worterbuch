@@ -754,6 +754,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d61fa4ffa3de412bfea335c6ecff681de2b609ba3c77ef3e00e521813a9ed9e"
 dependencies = [
  "backtrace",
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",
@@ -790,6 +791,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio-process-terminate"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a90d43f53c2807f66cdb8c8c3cbc15b8b39b3e2ffbd419d2ae2761466bfa1c4"
+dependencies = [
+ "async-trait",
+ "libc",
+ "tokio",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1014,6 +1027,7 @@ dependencies = [
  "serde_yaml",
  "tokio",
  "tokio-graceful-shutdown",
+ "tokio-process-terminate",
  "tracing-subscriber",
 ]
 

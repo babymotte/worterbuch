@@ -19,10 +19,9 @@ mod config;
 mod election;
 mod follower;
 mod leader;
+mod process_manager;
 mod socket;
 mod utils;
-
-use std::net::SocketAddr;
 
 use config::load_config;
 use election::elect_leader;
@@ -31,6 +30,7 @@ use leader::lead;
 use miette::Result;
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
+use std::net::SocketAddr;
 use tokio::select;
 use tokio_graceful_shutdown::SubsystemHandle;
 

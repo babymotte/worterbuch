@@ -15,38 +15,25 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::config::Config;
-use crate::cluster_orchestrator::{
+use super::{
+    config::Config,
+    process_manager::{ChildProcessManager, CommandDefinition},
+};
+use crate::{
     utils::{listen, send_heartbeat_requests, support_vote},
     Heartbeat, PeerMessage, Vote,
 };
 use miette::Result;
 use std::{collections::HashMap, ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, time::interval};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tokio_graceful_shutdown::SubsystemHandle;
 
 pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Config) -> Result<()> {
-    let wb_server = subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
-        log::info!("Starting worterbuch server in leader mode …");
+    let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-leader", false);
 
-        // TODO start worterbuch server in leader mode
-        _ = s.on_shutdown_requested().await;
+    log::info!("Starting worterbuch server in leader mode …");
 
-        log::info!("worterbuch server subsystem stopped.");
-
-        Ok::<(), miette::Error>(())
-    }));
-
-    let rest_endpoint = subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
-        log::info!("Starting config REST endpoint …");
-
-        // TODO open rest endpoint for clients to connect to to request leader socket addresses
-        _ = s.on_shutdown_requested().await;
-
-        log::info!("Config REST endpoint subsystem stopped.");
-
-        Ok::<(), miette::Error>(())
-    }));
+    proc_manager.restart(cmd(config)).await;
 
     let mut buf = [0u8; 65507];
 
@@ -67,7 +54,7 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
                     break;
                 }
             },
-            flow = listen(&socket, &mut buf, config, |msg| async {
+            flow = listen(socket, &mut buf, config, |msg| async {
                 match msg {
                     PeerMessage::Vote(Vote::Request(vote)) => {
                         log::info!("Node '{}' wants to take the lead, let's support it and fall back to follower mode.", vote.node_id);
@@ -90,17 +77,11 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
             }) => if let ControlFlow::Break(_) = flow? {
                 break;
             },
-            res = wb_server.join() => { res?; break; },
-            res = rest_endpoint.join() => { res?; break; },
             _ = subsys.on_shutdown_requested() => break,
         }
     }
 
-    wb_server.initiate_shutdown();
-    wb_server.join().await?;
-
-    rest_endpoint.initiate_shutdown();
-    rest_endpoint.join().await?;
+    proc_manager.stop().await?;
 
     Ok(())
 }
@@ -131,4 +112,15 @@ fn check_heartbeat_responses(
     } else {
         true
     }
+}
+
+fn cmd(config: &Config) -> CommandDefinition {
+    CommandDefinition::new(
+        config.worterbuch_executable.to_owned(),
+        vec![
+            "--leader".to_owned(),
+            "--sync-port".to_owned(),
+            config.sync_port.to_string(),
+        ],
+    )
 }

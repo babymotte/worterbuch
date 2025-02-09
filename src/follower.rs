@@ -15,62 +15,26 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::{config::Config, PeerMessage};
-use crate::cluster_orchestrator::{
-    utils::{listen, send_heartbeat_response, support_vote},
-    Heartbeat, PeerInfo, PublicEndpoints, Vote,
+use super::{
+    config::Config,
+    process_manager::{ChildProcessManager, CommandDefinition},
+    PeerMessage,
 };
-use miette::{IntoDiagnostic, Result};
-use std::ops::ControlFlow;
-use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use crate::{
+    utils::{listen, send_heartbeat_response, support_vote},
+    Heartbeat, Vote,
+};
+use miette::Result;
+use std::{net::IpAddr, ops::ControlFlow};
+use tokio::{net::UdpSocket, select, time::sleep};
+use tokio_graceful_shutdown::SubsystemHandle;
 
 pub async fn follow(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &Config,
 ) -> Result<()> {
-    let (leader_info_tx_serv, mut leader_info_rx_serv) = mpsc::channel::<PeerInfo>(1);
-    let (leader_info_tx_conf, mut leader_info_rx_conf) = mpsc::channel::<PublicEndpoints>(1);
-
-    let wb_server = subsys.start(SubsystemBuilder::new("worterbuch-server", |s| async move {
-
-        loop {
-            select! {
-                recv = leader_info_rx_serv.recv() => match recv {
-                    Some(info) => {
-                        log::info!("Received new leader address: {}@{}. (Re-)Starting worterbuch server in follower mode …", info.node_id, info.address);
-                        // TODO restart wb server with new leader config
-                    },
-                    None => break,
-                },
-                _ = s.on_shutdown_requested() => break,
-            }
-        }
-
-        log::info!("worterbuch server subsystem stopped.");
-
-        Ok::<(), miette::Error>(())
-    }));
-
-    let rest_endpoint = subsys.start(SubsystemBuilder::new("config-endpoint", |s| async move {
-        loop {
-            select! {
-                recv = leader_info_rx_conf.recv() => match recv {
-                    Some(endpoints) => {
-                        log::info!("Received new leader endpoint info. (Re-)Starting config REST endpoint …");
-                        // TODO
-                    },
-                    None => break,
-                },
-                _ = s.on_shutdown_requested() => break,
-            }
-        }
-
-        log::info!("Config REST endpoint subsystem stopped.");
-
-        Ok::<(), miette::Error>(())
-    }));
+    let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-follower", true);
 
     let mut buf = [0u8; 65507];
 
@@ -82,7 +46,7 @@ pub async fn follow(
                 log::info!("Leader heartbeat timed out. Starting election …");
                 break;
             },
-            flow = listen(&socket, &mut buf, config, |msg| async {
+            flow = listen(socket, &mut buf, config, |msg| async {
                 match msg {
                     PeerMessage::Vote(Vote::Request(vote)) => {
                         log::info!("Node '{}' has started a leader election and requested our support. Let's support it.", vote.node_id);
@@ -94,12 +58,11 @@ pub async fn follow(
                     PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
                         let this_leader_id = Some(heartbeat.peer_info.node_id.clone());
                         if leader_id != this_leader_id {
-                            log::info!("Node '{}' seems to be the new leader.", heartbeat.peer_info.node_id);
-                            leader_info_tx_serv.send(heartbeat.peer_info.clone()).await.into_diagnostic()?;
-                            leader_info_tx_conf.send(heartbeat.public_endpoints.clone()).await.into_diagnostic()?;
+                            log::info!("Node '{}' seems to be the new leader. (Re-)Starting worterbuch server in follower mode …", heartbeat.peer_info.node_id);
+                            proc_manager.restart(cmd(heartbeat.peer_info.address.ip(), config)).await;
                             leader_id = this_leader_id;
                         }
-                        send_heartbeat_response(&heartbeat, config, &socket).await?;
+                        send_heartbeat_response(&heartbeat, config, socket).await?;
                     },
                     PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                         log::warn!("Node '{}' is sending me heartbeat responses but I'm not the leader. Weird.", heartbeat.node_id);
@@ -113,11 +76,20 @@ pub async fn follow(
         }
     }
 
-    wb_server.initiate_shutdown();
-    wb_server.join().await?;
+    proc_manager.stop().await?;
 
-    rest_endpoint.initiate_shutdown();
-    rest_endpoint.join().await?;
+    log::info!("Worterbuch server follower instance stopped.");
 
     Ok(())
+}
+
+fn cmd(leader: IpAddr, config: &Config) -> CommandDefinition {
+    CommandDefinition::new(
+        config.worterbuch_executable.to_owned(),
+        vec![
+            "--follower".to_owned(),
+            "--leader-address".to_owned(),
+            format!("{}:{}", leader, config.sync_port),
+        ],
+    )
 }

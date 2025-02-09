@@ -16,7 +16,7 @@
  */
 
 use super::{config::Config, utils::listen};
-use crate::cluster_orchestrator::{Heartbeat, PeerMessage, Vote};
+use crate::{Heartbeat, PeerMessage, Vote};
 use miette::{IntoDiagnostic, Result};
 use std::ops::ControlFlow;
 use tokio::{net::UdpSocket, select, time::sleep};
@@ -46,7 +46,7 @@ impl<'a> Election<'a> {
 
         // this will allow self-election, which is usually an antipattern. We allow it here to be able to support not fully redundant two-node clusters.
         if self.votes_in_my_favor >= self.config.quorum {
-            log::info!("I am now the supreme leader!");
+            log::info!("This instance is now the leader.");
             return Ok(true);
         }
 
@@ -80,7 +80,7 @@ impl<'a> Election<'a> {
                             log::info!("Node '{}' voted for me ({}/{}, quorum: {}/{})", vote.node_id, self.votes_in_my_favor, self.config.peer_nodes.len(), self.config.quorum, self.config.peer_nodes.len());
                             self.votes_in_my_favor += 1;
                             if self.votes_in_my_favor >= self.config.quorum {
-                                log::info!("I am now the supreme leader!");
+                                log::info!("This instance is now the leader.");
                                 return Ok(ControlFlow::Break(true));
                             }
                         },
@@ -131,14 +131,9 @@ pub async fn elect_leader(
     socket: &mut UdpSocket,
     config: &Config,
 ) -> Result<bool> {
-    loop {
-        let mut election = Election::new(subsys, socket, config);
-
-        select! {
-            leader = election.run() => return Ok(leader?),
-            _ = subsys.on_shutdown_requested() => break,
-        }
+    let mut election = Election::new(subsys, socket, config);
+    select! {
+        leader = election.run() => leader,
+        _ = subsys.on_shutdown_requested() => Ok(false),
     }
-
-    Ok(false)
 }

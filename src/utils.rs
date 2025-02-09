@@ -78,7 +78,7 @@ pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket
         let data = serde_json::to_string(&resp).into_diagnostic()?;
         let data = data.as_bytes();
 
-        socket.send_to(&data, addr).await.into_diagnostic()?;
+        socket.send_to(data, addr).await.into_diagnostic()?;
     } else {
         log::warn!(
             "Cannot support vote request of noe '{}', no socket address is configured for it!",
@@ -100,7 +100,7 @@ where
 {
     let (received, addr) = socket.recv_from(buf).await.into_diagnostic()?;
 
-    if received <= 0 {
+    if received == 0 {
         return Ok(ControlFlow::Continue(()));
     }
 
