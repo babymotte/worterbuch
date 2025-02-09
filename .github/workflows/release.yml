@@ -29,6 +29,8 @@ jobs:
           default: true
           override: true
 
+      - name: Run format check
+        run: cargo fmt --check
       - name: Run linter FOSS
         run: cargo clippy
       - name: Run linter commercial
