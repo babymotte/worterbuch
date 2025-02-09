@@ -682,7 +682,7 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
     let mut err = None;
     for addr in &config.host_addrs {
         log::info!("Trying to connect to server {addr} …");
-        match try_connect(config.clone(), &addr).await {
+        match try_connect(config.clone(), addr).await {
             Ok(con) => {
                 log::info!("Successfully connected to server {addr}");
                 return Ok(con);
