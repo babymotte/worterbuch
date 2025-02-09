@@ -231,6 +231,7 @@ pub enum ConnectionError {
     Timeout(String),
     HttpError(tungstenite::http::Error),
     AuthorizationError(String),
+    NoServerAddressesConfigured,
 }
 
 impl std::error::Error for ConnectionError {}
@@ -251,6 +252,9 @@ impl fmt::Display for ConnectionError {
             Self::Timeout(msg) => fmt::Display::fmt(msg, f),
             Self::HttpError(e) => fmt::Display::fmt(&e, f),
             Self::AuthorizationError(msg) => fmt::Display::fmt(&msg, f),
+            Self::NoServerAddressesConfigured => {
+                fmt::Display::fmt("no server addresses configured", f)
+            }
         }
     }
 }

@@ -87,18 +87,22 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     } else {
         config.proto
     };
-    config.host_addr = args.addr.unwrap_or(config.host_addr);
+    config.host_addrs = args
+        .addr
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<String>>()
+                .into()
+        })
+        .unwrap_or(config.host_addrs);
     config.port = args.port.or(config.port);
     let json = args.json;
     let raw = args.raw;
     let patterns = args.patterns;
 
-    let (disco_tx, mut disco_rx) = mpsc::channel(1);
-    let on_disconnect = async move {
-        disco_tx.send(()).await.ok();
-    };
-
-    let wb = connect(config, on_disconnect).await?;
+    let (wb, mut on_disconnect) = connect(config).await?;
     if let Some(name) = args.name {
         wb.set_client_name(name).await?;
     }
@@ -120,7 +124,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         }
         select! {
             _ = subsys.on_shutdown_requested() => break,
-            _ = disco_rx.recv() => {
+            _ = &mut on_disconnect => {
                 log::warn!("Connection to server lost.");
                 subsys.request_shutdown();
             }

@@ -18,9 +18,12 @@
  */
 
 use crate::error::{ConnectionError, ConnectionResult};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Display, io, time::Duration};
-use tokio::{io::AsyncWriteExt, time::timeout};
+use tokio::{
+    io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
+    time::timeout,
+};
 
 pub async fn write_line_and_flush(
     msg: impl Serialize,
@@ -65,4 +68,22 @@ pub async fn write_line_and_flush(
     log::trace!("Flushing channel done.");
 
     Ok(())
+}
+
+pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
+    rx: &mut Lines<BufReader<R>>,
+) -> ConnectionResult<Option<T>> {
+    let read = rx.next_line().await;
+    match read {
+        Ok(None) => Ok(None),
+        Ok(Some(json)) => {
+            log::debug!("Received message: {json}");
+            let sm = serde_json::from_str(&json);
+            if let Err(e) = &sm {
+                log::error!("Error deserializing message '{json}': {e}")
+            }
+            Ok(sm?)
+        }
+        Err(e) => Err(e.into()),
+    }
 }
