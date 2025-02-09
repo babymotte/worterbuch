@@ -28,7 +28,7 @@ pub mod ws;
 use crate::config::Config;
 use buffer::SendBuffer;
 use error::SubscriptionError;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self as json};
 use std::{collections::HashMap, future::Future, io, ops::ControlFlow, time::Duration};
@@ -657,20 +657,54 @@ impl TransactionIds {
     }
 }
 
-pub async fn connect_with_default_config<F: Future<Output = ()> + Send + 'static>(
-    on_disconnect: F,
-) -> ConnectionResult<(Worterbuch, Config)> {
-    let config = Config::new();
-    let conn = connect(config.clone(), on_disconnect).await?;
-    Ok((conn, config))
+pub struct OnDisconnect {
+    rx: oneshot::Receiver<()>,
 }
 
-pub async fn connect<F: Future<Output = ()> + Send + 'static>(
+impl Future for OnDisconnect {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.rx.poll_unpin(cx).map(|_| ())
+    }
+}
+
+pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDisconnect, Config)> {
+    let config = Config::new();
+    let (conn, disconnected) = connect(config.clone()).await?;
+    Ok((conn, disconnected, config))
+}
+
+pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
+    let mut err = None;
+    for addr in &config.host_addrs {
+        log::info!("Trying to connect to server {addr} …");
+        match try_connect(config.clone(), &addr).await {
+            Ok(con) => {
+                log::info!("Successfully connected to server {addr}");
+                return Ok(con);
+            }
+            Err(e) => {
+                log::warn!("Could not connect to server {addr}: {e}");
+                err = Some(e);
+            }
+        }
+    }
+    if let Some(e) = err {
+        Err(e)
+    } else {
+        Err(ConnectionError::NoServerAddressesConfigured)
+    }
+}
+
+pub async fn try_connect(
     config: Config,
-    on_disconnect: F,
-) -> ConnectionResult<Worterbuch> {
+    host_addr: &str,
+) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let proto = &config.proto;
-    let host_addr = &config.host_addr;
     let port = config.port;
     let tcp = proto == "tcp";
     let unix = proto == "unix";
@@ -692,27 +726,34 @@ pub async fn connect<F: Future<Output = ()> + Send + 'static>(
 
     log::debug!("Got server url from config: {url}");
 
-    if tcp {
+    let (disco_tx, disco_rx) = oneshot::channel();
+
+    let wb = if tcp {
         connect_tcp(
             host_addr.to_owned(),
             port.expect("no port specified for TCP connection"),
-            on_disconnect,
+            disco_tx,
             config,
         )
-        .await
+        .await?
     } else if unix {
         #[cfg(target_family = "unix")]
-        return connect_unix(url, on_disconnect, config).await;
+        let wb = connect_unix(url, disco_tx, config).await?;
         #[cfg(not(target_family = "unix"))]
-        return panic!("not supported on non-unix operating systems");
+        let wb = panic!("not supported on non-unix operating systems");
+        wb
     } else {
-        connect_ws(url, on_disconnect, config).await
-    }
+        connect_ws(url, disco_tx, config).await?
+    };
+
+    let disconnected = OnDisconnect { rx: disco_rx };
+
+    Ok((wb, disconnected))
 }
 
-async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
+async fn connect_ws(
     url: String,
-    on_disconnect: F,
+    on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     log::debug!("Connecting to server {url} over websocket …");
@@ -835,10 +876,10 @@ async fn connect_ws<F: Future<Output = ()> + Send + 'static>(
     }
 }
 
-async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
+async fn connect_tcp(
     host_addr: String,
     port: u16,
-    on_disconnect: F,
+    on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let timeout = config.connection_timeout;
@@ -980,9 +1021,9 @@ async fn connect_tcp<F: Future<Output = ()> + Send + 'static>(
 }
 
 #[cfg(target_family = "unix")]
-async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
+async fn connect_unix(
     path: String,
-    on_disconnect: F,
+    on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let timeout = config.connection_timeout;
@@ -1123,9 +1164,9 @@ async fn connect_unix<F: Future<Output = ()> + Send + 'static>(
     }
 }
 
-fn connected<F: Future<Output = ()> + Send + 'static>(
+fn connected(
     client_socket: ClientSocket,
-    on_disconnect: F,
+    on_disconnect: oneshot::Sender<()>,
     config: Config,
     client_id: String,
     protocol_version: ProtocolVersion,
@@ -1145,7 +1186,7 @@ fn connected<F: Future<Output = ()> + Send + 'static>(
     spawn(async move {
         run(cmd_rx, client_socket, stop_rx, config).await;
         log::debug!("Connection closed.");
-        on_disconnect.await;
+        on_disconnect.send(()).ok();
     });
 
     Ok(Worterbuch::new(cmd_tx, stop_tx, client_id))

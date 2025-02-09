@@ -25,7 +25,9 @@ use tokio::{
     sync::mpsc,
 };
 use worterbuch_common::{
-    error::ConnectionResult, tcp::write_line_and_flush, ClientMessage, ServerMessage,
+    error::ConnectionResult,
+    tcp::{self, write_line_and_flush},
+    ClientMessage, ServerMessage,
 };
 
 const SERVER_ID: &str = "worterbuch server";
@@ -58,19 +60,7 @@ impl TcpClientSocket {
     }
 
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
-        let read = self.rx.next_line().await;
-        match read {
-            Ok(None) => Ok(None),
-            Ok(Some(json)) => {
-                log::debug!("Received messaeg: {json}");
-                let sm = serde_json::from_str(&json);
-                if let Err(e) = &sm {
-                    log::error!("Error deserializing message '{json}': {e}")
-                }
-                Ok(sm?)
-            }
-            Err(e) => Err(e.into()),
-        }
+        tcp::receive_msg(&mut self.rx).await
     }
 }
 

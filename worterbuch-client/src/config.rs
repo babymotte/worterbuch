@@ -22,7 +22,7 @@ use std::{env, time::Duration};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
-    pub host_addr: String,
+    pub host_addrs: Box<[String]>,
     pub port: Option<u16>,
     pub send_timeout: Duration,
     pub connection_timeout: Duration,
@@ -37,8 +37,14 @@ impl Config {
             self.proto = val;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
-            self.host_addr = val;
+        if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESSES") {
+            self.host_addrs = val
+                .split(',')
+                .map(str::trim)
+                .map(ToOwned::to_owned)
+                .collect();
+        } else if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
+            self.host_addrs = vec![val].into();
         }
 
         if let Ok(val) = env::var("WORTERBUCH_PORT") {
@@ -87,7 +93,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         let proto = "tcp".to_owned();
-        let host_addr = "localhost".to_owned();
+        let host_addrs = vec!["localhost".to_owned()].into();
         let port = Some(8081);
         let send_timeout = Duration::from_secs(5);
         let connection_timeout = Duration::from_secs(5);
@@ -96,7 +102,7 @@ impl Default for Config {
 
         Config {
             proto,
-            host_addr,
+            host_addrs,
             port,
             send_timeout,
             connection_timeout,
@@ -114,10 +120,10 @@ impl Config {
         config
     }
 
-    pub fn with_address(proto: String, host_addr: String, port: Option<u16>) -> Self {
+    pub fn with_addresses(proto: String, host_addr: &[String], port: Option<u16>) -> Self {
         let mut config = Config::new();
         config.proto = proto;
-        config.host_addr = host_addr;
+        config.host_addrs = host_addr.into();
         config.port = port;
         config
     }
