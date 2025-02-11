@@ -1,0 +1,8 @@
+/target/*
+/data/*
+.env
+.dockerignore
+/.git/*
+/.github/*
+/.vscode/*
+/chart/*
