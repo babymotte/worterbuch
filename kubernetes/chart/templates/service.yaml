@@ -1,7 +1,28 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "worterbuch-cluster.fullname" . }}
+  name: {{ include "worterbuch-cluster.fullname" . }}-internal
+  labels:
+    {{- include "worterbuch-cluster.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port.clusterSync }}
+      targetPort: cluster-sync
+      protocol: TCP
+      name: cluster-sync
+    - port: {{ .Values.service.port.raft }}
+      targetPort: raft
+      protocol: UDP
+      name: raft
+  selector:
+    {{- include "worterbuch-cluster.selectorLabels" . | nindent 4 }}
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "worterbuch-cluster.fullname" . }}-leader
   labels:
     {{- include "worterbuch-cluster.labels" . | nindent 4 }}
 spec:
@@ -15,17 +36,6 @@ spec:
       targetPort: tcp
       protocol: TCP
       name: tcp
-    - port: {{ .Values.service.port.clusterSync }}
-      targetPort: cluster-sync
-      protocol: TCP
-      name: cluster-sync
-    - port: {{ .Values.service.port.raft }}
-      targetPort: raft
-      protocol: UDP
-      name: raft
-    - port: {{ .Values.service.port.test }}
-      targetPort: test
-      protocol: UDP
-      name: test
   selector:
     {{- include "worterbuch-cluster.selectorLabels" . | nindent 4 }}
+  publishNotReadyAddresses: false

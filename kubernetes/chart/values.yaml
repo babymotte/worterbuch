@@ -62,7 +62,6 @@ service:
     tcp: 9090
     clusterSync: 8282
     raft: 9292
-    test: 9393
 
 # This block is for setting up the ingress for more information can be found here: https://kubernetes.io/docs/concepts/services-networking/ingress/
 ingress:
@@ -100,10 +99,14 @@ resources:
 #   httpGet:
 #     path: /
 #     port: http
-# readinessProbe:
-#   httpGet:
-#     path: /api/v1/get/%24SYS/uptime
-#     port: http
+readinessProbe:
+  httpGet:
+    path: /api/v1/get/%24SYS/uptime
+    port: http
+  periodSeconds: 1
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 1
 
 # This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
 autoscaling:

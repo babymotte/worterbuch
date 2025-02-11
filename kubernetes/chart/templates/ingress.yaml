@@ -35,7 +35,7 @@ spec:
             {{- end }}
             backend:
               service:
-                name: {{ include "worterbuch-cluster.fullname" $ }}
+                name: {{ include "worterbuch-cluster.fullname" $ }}-leader
                 port:
                   number: {{ $.Values.service.port.http }}
           {{- end }}

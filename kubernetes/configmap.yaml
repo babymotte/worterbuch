@@ -6,8 +6,8 @@ data:
   config.yaml: |
     nodes:
       - nodeId: alice
-        address: alice-worterbuch-cluster.wb-cluster.svc.cluster.local:9292
+        address: alice-worterbuch-cluster-internal.wb-cluster.svc.cluster.local:9292
       - nodeId: bob
-        address: bob-worterbuch-cluster.wb-cluster.svc.cluster.local:9292
+        address: bob-worterbuch-cluster-internal.wb-cluster.svc.cluster.local:9292
       - nodeId: carl
-        address: carl-worterbuch-cluster.wb-cluster.svc.cluster.local:9292
+        address: carl-worterbuch-cluster-internal.wb-cluster.svc.cluster.local:9292

@@ -104,10 +104,12 @@ where
         return Ok(ControlFlow::Continue(()));
     }
 
-    if !config.is_peer(addr) {
-        log::warn!("Received peer message from a sender that is not configured as a peer node. Your cluster may be misconfigured or somebody might be trying to DoS it.");
-        return Ok(ControlFlow::Continue(()));
-    }
+    // TODO this fails in kubernetes due to service and pod using different IPs. This needs some stronger form of authentication
+
+    // if !config.is_peer(addr) {
+    //     log::warn!("Received peer message from a sender that is not configured as a peer node. Your cluster may be misconfigured or somebody might be trying to DoS it.");
+    //     return Ok(ControlFlow::Continue(()));
+    // }
 
     match serde_json::from_slice(&buf[..received]) {
         Ok(msg) => op(msg).await,

@@ -11,6 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
 
 [dependencies]
+axum = { version = "0.8.1", features = ["http2"] }
 clap = { version = "4.5.27", features = ["derive", "env"] }
 dotenv = "0.15.0"
 log = "0.4.25"

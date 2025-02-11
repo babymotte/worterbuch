@@ -17,14 +17,18 @@
 
 use super::config::Config;
 use miette::{IntoDiagnostic, Result};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
 
 pub async fn init_socket(config: &Config) -> Result<UdpSocket> {
-    log::info!("Creating node socket …");
+    let bind_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+    let port = config.orchestration_port;
 
-    let sock = UdpSocket::bind(format!("0.0.0.0:{}", config.orchestration_port))
-        .await
-        .into_diagnostic()?;
+    let addr = SocketAddr::new(bind_addr, port);
+
+    log::info!("Creating node socket at {addr} …");
+
+    let sock = UdpSocket::bind(addr).await.into_diagnostic()?;
 
     // TODO configure socket
 

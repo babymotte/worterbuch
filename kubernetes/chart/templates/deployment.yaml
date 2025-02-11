@@ -46,7 +46,7 @@ spec:
             - name: RUST_LOG
               value: info
             - name: WBCLUSTER_PORT
-              value: "9292"
+              value: "{{ .Values.service.port.raft }}"
           ports:
             - name: http
               containerPort: {{ .Values.service.port.http }}
@@ -59,9 +59,6 @@ spec:
               protocol: TCP
             - name: raft
               containerPort: {{ .Values.service.port.raft }}
-              protocol: UDP
-            - name: test
-              containerPort: {{ .Values.service.port.test }}
               protocol: UDP
           {{- with .Values.livenessProbe }}
           livenessProbe:
