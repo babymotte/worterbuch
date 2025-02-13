@@ -19,7 +19,7 @@ use super::{
     config::Config, HeartbeatRequest, PeerInfo, PeerMessage, PublicEndpoints, VoteRequest,
     VoteResponse,
 };
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
 
@@ -40,11 +40,20 @@ pub async fn send_heartbeat_requests(config: &Config, socket: &UdpSocket) -> Res
         peer_info,
         public_endpoints,
     }));
-    let data = serde_json::to_string(&msg).into_diagnostic()?;
+    let data = serde_json::to_string(&msg).expect("PeerMessage not serializeable");
     let data = data.as_bytes();
 
     for peer in &config.peer_nodes {
-        socket.send_to(data, peer.address).await.into_diagnostic()?;
+        socket
+            .send_to(data, peer.address)
+            .await
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "error sending peer message to {}@{}",
+                    peer.node_id, peer.address
+                )
+            })?;
     }
 
     Ok(())
@@ -58,13 +67,19 @@ pub async fn send_heartbeat_response(
     let msg = PeerMessage::Heartbeat(super::Heartbeat::Response(super::HeartbeatResponse {
         node_id: config.node_id.clone(),
     }));
-    let data = serde_json::to_string(&msg).into_diagnostic()?;
+    let data = serde_json::to_string(&msg).expect("PeerMessage not serializeable");
     let data = data.as_bytes();
 
     socket
         .send_to(data, heartbeat.peer_info.address)
         .await
-        .into_diagnostic()?;
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "error sending peer message to {}@{}",
+                heartbeat.peer_info.node_id, heartbeat.peer_info.address
+            )
+        })?;
 
     Ok(())
 }
@@ -75,10 +90,14 @@ pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket
             node_id: config.node_id.to_owned(),
         }));
 
-        let data = serde_json::to_string(&resp).into_diagnostic()?;
+        let data = serde_json::to_string(&resp).expect("PeerMessage not serializeable");
         let data = data.as_bytes();
 
-        socket.send_to(data, addr).await.into_diagnostic()?;
+        socket
+            .send_to(data, addr)
+            .await
+            .into_diagnostic()
+            .wrap_err_with(|| format!("error sending peer message to {}@{}", vote.node_id, addr))?;
     } else {
         log::warn!(
             "Cannot support vote request of noe '{}', no socket address is configured for it!",
@@ -98,7 +117,11 @@ pub async fn listen<F, T>(
 where
     F: Future<Output = Result<ControlFlow<T>>>,
 {
-    let (received, addr) = socket.recv_from(buf).await.into_diagnostic()?;
+    let (received, addr) = socket
+        .recv_from(buf)
+        .await
+        .into_diagnostic()
+        .wrap_err("error receiving peer message")?;
 
     if received == 0 {
         return Ok(ControlFlow::Continue(()));

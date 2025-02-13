@@ -23,6 +23,7 @@ use worterbuch_cluster_orchestrator::run;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    miette::set_panic_hook();
     dotenv::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())

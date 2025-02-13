@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use std::{error::Error, process::Stdio, time::Duration};
 use tokio::{
     process::{Child, ChildStdin, Command},
@@ -93,7 +93,7 @@ impl ChildProcessManagerActor {
                             break;
                         },
                         exit_code = proc.wait() => {
-                            match exit_code.into_diagnostic()?.code() {
+                            match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {}", cmd))?.code() {
                                 Some(exit_code) => log::warn!("Child process {} terminated with exit code {exit_code}.", cmd),
                                 None => log::warn!("Child process {} terminated with unknown exit code", cmd)
                             }
@@ -118,7 +118,10 @@ impl ChildProcessManagerActor {
                     log::info!("(Re-)starting child daemon process {} …", command.cmd);
                     let cmd = command.cmd.to_owned();
                     let mut command = Command::from(command);
-                    let mut proc = command.spawn().into_diagnostic()?;
+                    let mut proc = command
+                        .spawn()
+                        .into_diagnostic()
+                        .wrap_err_with(|| format!("could not start child process {}", cmd))?;
                     self.stdin = proc.stdin.take();
                     self.process = Some((proc, cmd));
                     self.started = true;
@@ -171,7 +174,10 @@ impl ChildProcessManagerActor {
         self.stopped = true;
         if let Some((mut proc, cmd)) = self.process.take() {
             terminate(&mut proc, &cmd).await?;
-            proc.wait().await.into_diagnostic()?;
+            proc.wait()
+                .await
+                .into_diagnostic()
+                .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?;
         } else {
             log::warn!("Process was not running, nothing to stop.");
         }
@@ -209,14 +215,24 @@ impl ChildProcessManager {
 
     pub async fn stop(&self) -> Result<()> {
         self.subsys.initiate_shutdown();
-        self.subsys.join().await.into_diagnostic()?;
+        self.subsys
+            .join()
+            .await
+            .into_diagnostic()
+            .wrap_err("error waiting for subsystem to stop")?;
         Ok(())
     }
 }
 
 async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
     log::info!("Terminating child process {cmd} …");
-    match proc.terminate_wait().await.into_diagnostic()?.code() {
+    match proc
+        .terminate_wait()
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?
+        .code()
+    {
         Some(exit_code) => log::info!("Child process terminated with exit code {exit_code}."),
         None => log::warn!("Child process did not terminate cleanly."),
     }

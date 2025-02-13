@@ -47,6 +47,10 @@ spec:
               value: info
             - name: WBCLUSTER_PORT
               value: "{{ .Values.service.port.raft }}"
+            - name: WBCLUSTER_HEARTBEAT_INTERVAL
+              value: "100"
+            - name: WBCLUSTER_HEARTBEAT_MIN_TIMEOUT
+              value: "10000"
           ports:
             - name: http
               containerPort: {{ .Values.service.port.http }}
@@ -72,14 +76,23 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.volumeMounts }}
           volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-      {{- with .Values.volumes }}
+            - name: wb-cluster-config
+              mountPath: "/cfg"
+              readOnly: true
+            {{- if .Values.storage.enabled }}
+            - mountPath: "/data"
+              name: {{ include "worterbuch-cluster.serviceAccountName" . }}
+            {{- end }}
       volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        - name: wb-cluster-config
+          configMap:
+            name: wb-cluster-config
+        {{- if .Values.storage.enabled }}
+        - name: {{ include "worterbuch-cluster.serviceAccountName" . }}
+          persistentVolumeClaim:
+            claimName: {{ include "worterbuch-cluster.serviceAccountName" . }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

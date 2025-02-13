@@ -17,7 +17,7 @@
 
 use super::PeerInfo;
 use clap::Parser;
-use miette::{miette, IntoDiagnostic, Result};
+use miette::{miette, Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::{
     collections::HashSet,
@@ -38,7 +38,17 @@ impl TryFrom<RawPeerInfo> for PeerInfo {
     type Error = miette::Error;
 
     fn try_from(value: RawPeerInfo) -> std::result::Result<Self, Self::Error> {
-        let addrs: Vec<SocketAddr> = value.address.to_socket_addrs().into_diagnostic()?.collect();
+        let addrs: Vec<SocketAddr> = value
+            .address
+            .to_socket_addrs()
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "could not resolve address {} of node '{}'",
+                    value.address, value.node_id
+                )
+            })?
+            .collect();
 
         log::debug!(
             "Resolved socket addresses for node {}@{}: {:?}",
@@ -148,8 +158,18 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<usiz
 }
 
 async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
-    let yaml = fs::read_to_string(path).await.into_diagnostic()?;
-    serde_yaml::from_str(&yaml).into_diagnostic()
+    let yaml = fs::read_to_string(&path)
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "could not read config file {}",
+                path.as_ref().to_string_lossy()
+            )
+        })?;
+    serde_yaml::from_str(&yaml)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("could not parse YAML: {}", yaml))
 }
 
 #[derive(Debug, Clone)]

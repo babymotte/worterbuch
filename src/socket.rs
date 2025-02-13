@@ -16,7 +16,7 @@
  */
 
 use super::config::Config;
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
 
@@ -28,7 +28,10 @@ pub async fn init_socket(config: &Config) -> Result<UdpSocket> {
 
     log::info!("Creating node socket at {addr} …");
 
-    let sock = UdpSocket::bind(addr).await.into_diagnostic()?;
+    let sock = UdpSocket::bind(addr)
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("error opening UDP socket at {addr}"))?;
 
     // TODO configure socket
 

@@ -17,7 +17,7 @@
 
 use super::{config::Config, utils::listen};
 use crate::{Heartbeat, PeerMessage, Vote};
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use std::ops::ControlFlow;
 use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -108,7 +108,7 @@ impl<'a> Election<'a> {
         let msg = PeerMessage::Vote(Vote::Request(super::VoteRequest {
             node_id: self.config.node_id.clone(),
         }));
-        let buf = serde_json::to_vec(&msg).into_diagnostic()?;
+        let buf = serde_json::to_vec(&msg).expect("PeerMessage not serializeable");
 
         for peer in &self.config.peer_nodes {
             log::debug!(
@@ -119,7 +119,13 @@ impl<'a> Election<'a> {
             self.socket
                 .send_to(&buf, peer.address)
                 .await
-                .into_diagnostic()?;
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "could not send peer message to {}@{}",
+                        peer.node_id, peer.address
+                    )
+                })?;
         }
 
         Ok(())

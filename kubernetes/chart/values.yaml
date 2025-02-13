@@ -117,16 +117,16 @@ autoscaling:
   # targetMemoryUtilizationPercentage: 80
 
 # Additional volumes on the output Deployment definition.
-volumes:
-  - name: wb-cluster-config
-    configMap:
-      name: wb-cluster-config
+# volumes:
+#   - name: wb-cluster-config
+#     configMap:
+#       name: wb-cluster-config
 
 # Additional volumeMounts on the output Deployment definition.
-volumeMounts:
-  - name: wb-cluster-config
-    mountPath: "/cfg"
-    readOnly: true
+# volumeMounts:
+#   - name: wb-cluster-config
+#     mountPath: "/cfg"
+#     readOnly: true
 
 nodeSelector: {}
 
@@ -139,3 +139,8 @@ deployment:
 
 config:
   nodes: []
+
+storage:
+  enabled: true
+  size: 3Gi
+  class: ""
