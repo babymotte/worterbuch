@@ -21,6 +21,7 @@ mod follower;
 mod leader;
 mod process_manager;
 mod socket;
+mod stats;
 mod utils;
 
 use config::load_config;
@@ -30,6 +31,7 @@ use leader::lead;
 use miette::Result;
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
+use stats::start_stats_endpoint;
 use std::net::SocketAddr;
 use tokio::select;
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -99,21 +101,26 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
     let config = load_config().await?;
     let mut socket = init_socket(&config).await?;
 
+    let stats = start_stats_endpoint(&subsys, &config).await?;
+    stats.candidate().await;
+
     let mut leader = false;
 
     while !subsys.is_shutdown_requested() {
         if leader {
+            stats.leader().await;
             select! {
                 it = lead(&subsys, &mut socket, &config) => it?,
                 _ = subsys.on_shutdown_requested() => break,
             }
         } else {
             select! {
-                it = follow(&subsys, &mut socket,  &config) => it?,
+                it = follow(&subsys, &mut socket,  &config, &stats) => it?,
                 _ = subsys.on_shutdown_requested() => break,
             }
         }
 
+        stats.candidate().await;
         select! {
             res = elect_leader(&subsys, &mut socket, &config) => leader = res?,
             _ = subsys.on_shutdown_requested() => break,

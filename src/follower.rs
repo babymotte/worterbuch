@@ -21,6 +21,7 @@ use super::{
     PeerMessage,
 };
 use crate::{
+    stats::StatsSender,
     utils::{listen, send_heartbeat_response, support_vote},
     Heartbeat, Vote,
 };
@@ -33,6 +34,7 @@ pub async fn follow(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &Config,
+    stats: &StatsSender,
 ) -> Result<()> {
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-follower", true);
 
@@ -59,6 +61,7 @@ pub async fn follow(
                         let this_leader_id = Some(heartbeat.peer_info.node_id.clone());
                         if leader_id != this_leader_id {
                             log::info!("Node '{}' seems to be the new leader. (Re-)Starting worterbuch server in follower mode …", heartbeat.peer_info.node_id);
+                            stats.follower().await;
                             proc_manager.restart(cmd(heartbeat.peer_info.address.ip(), config)).await;
                             leader_id = this_leader_id;
                         }

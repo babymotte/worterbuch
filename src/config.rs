@@ -123,6 +123,9 @@ struct Args {
         default_value = "worterbuch"
     )]
     worterbuch_executable: String,
+    /// Port for stats endpoint
+    #[arg(long, env = "WBCLUSTER_STATS_PORT", default_value = "8383")]
+    stats_port: u16,
 }
 
 fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<usize> {
@@ -183,6 +186,7 @@ pub struct Config {
     pub peer_nodes: Vec<PeerInfo>,
     pub sync_port: u16,
     pub worterbuch_executable: String,
+    pub stats_port: u16,
     peer_addresses: HashSet<SocketAddr>,
 }
 
@@ -247,6 +251,7 @@ pub async fn load_config() -> Result<Config> {
         peer_nodes: peers,
         sync_port: args.sync_port,
         worterbuch_executable: args.worterbuch_executable,
+        stats_port: args.stats_port,
         peer_addresses,
     })
 }

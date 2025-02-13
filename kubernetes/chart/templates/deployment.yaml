@@ -47,6 +47,8 @@ spec:
               value: info
             - name: WBCLUSTER_PORT
               value: "{{ .Values.service.port.raft }}"
+            - name: WBCLUSTER_STATS_PORT
+              value: "{{ .Values.service.port.stats }}"
             - name: WBCLUSTER_HEARTBEAT_INTERVAL
               value: "100"
             - name: WBCLUSTER_HEARTBEAT_MIN_TIMEOUT
@@ -64,6 +66,9 @@ spec:
             - name: raft
               containerPort: {{ .Values.service.port.raft }}
               protocol: UDP
+            - name: stats
+              containerPort: {{ .Values.service.port.stats }}
+              protocol: TCP
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
