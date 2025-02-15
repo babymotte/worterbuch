@@ -111,14 +111,13 @@ pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket
 pub async fn listen<F, T>(
     socket: &UdpSocket,
     buf: &mut [u8],
-    config: &Config,
     op: impl FnOnce(PeerMessage) -> F,
 ) -> Result<ControlFlow<T>>
 where
     F: Future<Output = Result<ControlFlow<T>>>,
 {
-    let (received, addr) = socket
-        .recv_from(buf)
+    let received = socket
+        .recv(buf)
         .await
         .into_diagnostic()
         .wrap_err("error receiving peer message")?;
@@ -126,13 +125,6 @@ where
     if received == 0 {
         return Ok(ControlFlow::Continue(()));
     }
-
-    // TODO this fails in kubernetes due to service and pod using different IPs. This needs some stronger form of authentication
-
-    // if !config.is_peer(addr) {
-    //     log::warn!("Received peer message from a sender that is not configured as a peer node. Your cluster may be misconfigured or somebody might be trying to DoS it.");
-    //     return Ok(ControlFlow::Continue(()));
-    // }
 
     match serde_json::from_slice(&buf[..received]) {
         Ok(msg) => op(msg).await,

@@ -1,2 +1,10 @@
 deployment:
   name: carl
+
+ingress:
+  enabled: true
+  hosts:
+    - host: wb.homelab
+      paths:
+        - path: /
+          pathType: Prefix

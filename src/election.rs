@@ -15,12 +15,17 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::{config::Config, utils::listen};
-use crate::{Heartbeat, PeerMessage, Vote};
+use super::config::Config;
+use crate::{utils::support_vote, Heartbeat, HeartbeatRequest, PeerMessage, Vote, VoteRequest};
 use miette::{Context, IntoDiagnostic, Result};
-use std::ops::ControlFlow;
 use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
+
+pub enum ElectionOutcome {
+    Leader,
+    Follower(HeartbeatRequest),
+    Cancelled,
+}
 
 struct Election<'a> {
     subsys: &'a SubsystemHandle,
@@ -39,67 +44,155 @@ impl<'a> Election<'a> {
         }
     }
 
-    async fn run(&mut self) -> Result<bool> {
-        log::info!("Requesting peers to vote for me …");
-
-        self.votes_in_my_favor += 1;
-
-        // this will allow self-election, which is usually an antipattern. We allow it here to be able to support not fully redundant two-node clusters.
-        if self.votes_in_my_favor >= self.config.quorum {
-            log::info!("This instance is now the leader.");
-            return Ok(true);
+    async fn recv_peer_msg(&self, buf: &mut [u8]) -> Result<Option<PeerMessage>> {
+        let received = self
+            .socket
+            .recv(buf)
+            .await
+            .into_diagnostic()
+            .wrap_err("error receiving peer message")?;
+        if received == 0 {
+            return Ok(None);
         }
 
-        self.request_votes().await?;
+        serde_json::from_slice(&mut buf[..received])
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "Could not parse peer message '{}'",
+                    String::from_utf8_lossy(&buf[..received])
+                )
+            })
+    }
 
-        let mut timeout = Box::pin(sleep(self.config.heartbeat_timeout()));
-
-        let mut peers = self
-            .config
-            .peer_nodes
-            .iter()
-            .map(|p| p.node_id.as_ref())
-            .collect::<Vec<&str>>();
-
+    async fn run(&mut self) -> Result<ElectionOutcome> {
         let mut buf = [0u8; 65507];
 
         loop {
+            log::info!("Waiting for other candidates or existing leader …");
+            let timeout = sleep(self.config.election_timeout());
+
             select! {
-                _ = &mut timeout => {
-                    log::warn!("Could not get enough supporting votes in time, returning to follower mode.");
-                    return Ok(false);
+                outcome = self.support_other_candidates() => if let Some(outcome) = outcome? {
+                    return Ok(outcome);
                 },
-                flow = listen(self.socket, &mut buf, self.config, |msg| async {
+                _ = timeout => log::info!("No other candidate asked for votes or sent a heartbeat in time. Trying to become leader myself …"),
+            }
+
+            log::info!("Requesting peers to vote for me …");
+
+            self.votes_in_my_favor = 1;
+
+            // this will allow self-election, which is usually an antipattern. We allow it here to be able to support not fully redundant two-node clusters.
+            if self.votes_in_my_favor >= self.config.quorum {
+                log::info!("This instance is now the leader.");
+                return Ok(ElectionOutcome::Leader);
+            }
+
+            self.request_votes().await?;
+
+            let mut timeout = Box::pin(sleep(self.config.heartbeat_timeout()));
+
+            let mut peers = self
+                .config
+                .peer_nodes
+                .iter()
+                .map(|p| p.node_id.as_ref())
+                .collect::<Vec<&str>>();
+
+            loop {
+                select! {
+                    _ = &mut timeout => {
+                        log::warn!("Could not get enough supporting votes in time, starting over …");
+                        break;
+                    },
+                    msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
+                        match msg {
+                            PeerMessage::Vote(Vote::Response(vote)) => {
+                                // making sure we don't count votes from any node twice
+                                if !peers.contains(&vote.node_id.as_ref()) {
+                                    continue;
+                                }
+                                peers.retain(|it| it != &vote.node_id);
+                                log::info!("Node '{}' voted for me ({}/{}, quorum: {}/{})", vote.node_id, self.votes_in_my_favor, self.config.peer_nodes.len(), self.config.quorum, self.config.peer_nodes.len());
+                                self.votes_in_my_favor += 1;
+                                if self.votes_in_my_favor >= self.config.quorum {
+                                    log::info!("This instance is now the leader.");
+                                    return Ok(ElectionOutcome::Leader);
+                                }
+                            },
+                            PeerMessage::Vote(Vote::Request(vote)) => {
+                                log::info!("Looks like node '{}' is also trying to become leader. Traitor!", vote.node_id);
+                            },
+                            PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+                                log::info!("Node '{}' seems to think it's the new leader. Let's see …", heartbeat.peer_info.node_id);
+                            },
+                            PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
+                                log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
+                            },
+                        }
+                    },
+                    _ = self.subsys.on_shutdown_requested() => return Ok(ElectionOutcome::Cancelled),
+                }
+            }
+        }
+    }
+
+    async fn support_other_candidates(&self) -> Result<Option<ElectionOutcome>> {
+        let mut buf = [0u8; 65507];
+        loop {
+            select! {
+                msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
                     match msg {
                         PeerMessage::Vote(Vote::Response(vote)) => {
-                            // making sure we don't count votes from any node twice
-                            if !peers.contains(&vote.node_id.as_ref()) {
-                                return Ok(ControlFlow::Continue(()));
-                            }
-                            peers.retain(|it| it != &vote.node_id);
-                            log::info!("Node '{}' voted for me ({}/{}, quorum: {}/{})", vote.node_id, self.votes_in_my_favor, self.config.peer_nodes.len(), self.config.quorum, self.config.peer_nodes.len());
-                            self.votes_in_my_favor += 1;
-                            if self.votes_in_my_favor >= self.config.quorum {
-                                log::info!("This instance is now the leader.");
-                                return Ok(ControlFlow::Break(true));
-                            }
+                            log::info!("Node '{}' is voting for us, be haven't requested any votes yet. Weird.", vote.node_id);
                         },
                         PeerMessage::Vote(Vote::Request(vote)) => {
-                            log::info!("Looks like node '{}' is also trying to become leader. Traitor!", vote.node_id);
+                            log::info!("Looks like node '{}' is trying to become leader. Let's support it.", vote.node_id);
+                            support_vote(vote.clone(), self.config, self.socket).await?;
+                            return self.wait_for_heartbeat(&vote).await;
                         },
                         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                            log::info!("Node '{}' has apparently been elected, returning to follower mode.", heartbeat.peer_info.node_id);
-                            return Ok(ControlFlow::Break(false));
+                            log::info!("Node '{}' seems to be leader. Let's follow it.", heartbeat.peer_info.node_id);
+                            return Ok(Some(ElectionOutcome::Follower(heartbeat)));
                         },
                         PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                             log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
                         },
                     }
-                    Ok(ControlFlow::Continue(()))
-                }) => if let ControlFlow::Break(leader) = flow? {
-                    return Ok(leader);
                 },
-                _ = self.subsys.on_shutdown_requested() => return Ok(false),
+                _ = self.subsys.on_shutdown_requested() => return Ok(None),
+            }
+        }
+    }
+
+    async fn wait_for_heartbeat(
+        &self,
+        supported_vote: &VoteRequest,
+    ) -> Result<Option<ElectionOutcome>> {
+        let mut buf = [0u8; 65507];
+        loop {
+            select! {
+                msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
+                    match msg {
+                        PeerMessage::Vote(Vote::Response(vote)) => {
+                            log::info!("Node '{}' is voting for us, be haven't requested any votes yet. Weird.", vote.node_id);
+                        },
+                        PeerMessage::Vote(Vote::Request(vote)) => {
+                            if &vote != supported_vote {
+                                log::info!("Looks like node '{}' is also trying to become leader, but we already voted for '{}'. Ignoring it …", vote.node_id, supported_vote.node_id);
+                            }
+                        },
+                        PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+                            log::info!("Node '{}' seems to have won the election. Let's follow it.", heartbeat.peer_info.node_id);
+                            return Ok(Some(ElectionOutcome::Follower(heartbeat)));
+                        },
+                        PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
+                            log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
+                        },
+                    }
+                },
+                _ = self.subsys.on_shutdown_requested() => return Ok(None),
             }
         }
     }
@@ -136,10 +229,10 @@ pub async fn elect_leader(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &Config,
-) -> Result<bool> {
+) -> Result<ElectionOutcome> {
     let mut election = Election::new(subsys, socket, config);
     select! {
         leader = election.run() => leader,
-        _ = subsys.on_shutdown_requested() => Ok(false),
+        _ = subsys.on_shutdown_requested() => Ok(ElectionOutcome::Cancelled),
     }
 }

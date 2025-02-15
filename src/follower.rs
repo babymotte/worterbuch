@@ -21,9 +21,8 @@ use super::{
     PeerMessage,
 };
 use crate::{
-    stats::StatsSender,
-    utils::{listen, send_heartbeat_response, support_vote},
-    Heartbeat, Vote,
+    utils::{listen, send_heartbeat_response},
+    Heartbeat, HeartbeatRequest, Vote,
 };
 use miette::Result;
 use std::{net::IpAddr, ops::ControlFlow};
@@ -34,13 +33,14 @@ pub async fn follow(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &Config,
-    stats: &StatsSender,
+    leader_heartbeat: HeartbeatRequest,
 ) -> Result<()> {
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-follower", true);
+    proc_manager
+        .restart(cmd(leader_heartbeat.peer_info.address.ip(), config))
+        .await;
 
     let mut buf = [0u8; 65507];
-
-    let mut leader_id = None;
 
     loop {
         select! {
@@ -48,27 +48,23 @@ pub async fn follow(
                 log::info!("Leader heartbeat timed out. Starting election …");
                 break;
             },
-            flow = listen(socket, &mut buf, config, |msg| async {
+            flow = listen(socket, &mut buf, |msg| async {
                 match msg {
                     PeerMessage::Vote(Vote::Request(vote)) => {
-                        log::info!("Node '{}' has started a leader election and requested our support. Let's support it.", vote.node_id);
-                        support_vote(vote, config, socket).await?;
+                        log::info!("Node '{}' has started a leader election and requested our support, but we are still following '{}'. Ignoring it …", vote.node_id, leader_heartbeat.peer_info.node_id);
                     },
                     PeerMessage::Vote(Vote::Response(vote)) => {
-                        log::warn!("Node '{}' is sending me vote responses, but I did not start an election. Weird.", vote.node_id);
+                        log::warn!("Node '{}' is sending us vote responses, but we did not start an election. Weird.", vote.node_id);
                     },
                     PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                        let this_leader_id = Some(heartbeat.peer_info.node_id.clone());
-                        if leader_id != this_leader_id {
-                            log::info!("Node '{}' seems to be the new leader. (Re-)Starting worterbuch server in follower mode …", heartbeat.peer_info.node_id);
-                            stats.follower().await;
-                            proc_manager.restart(cmd(heartbeat.peer_info.address.ip(), config)).await;
-                            leader_id = this_leader_id;
+                        if heartbeat == leader_heartbeat {
+                            send_heartbeat_response(&heartbeat, config, socket).await?;
+                        } else {
+                            log::info!("Node '{}' seems to think its the new leader, but we are still following '{}'. Ignoring it …", heartbeat.peer_info.node_id, leader_heartbeat.peer_info.node_id);
                         }
-                        send_heartbeat_response(&heartbeat, config, socket).await?;
                     },
                     PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                        log::warn!("Node '{}' is sending me heartbeat responses but I'm not the leader. Weird.", heartbeat.node_id);
+                        log::warn!("Node '{}' is sending us heartbeat responses but we are not the leader. Weird.", heartbeat.node_id);
                     }
                 }
                 Ok(ControlFlow::Continue::<()>(()))

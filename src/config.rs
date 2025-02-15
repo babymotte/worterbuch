@@ -128,7 +128,7 @@ struct Args {
     stats_port: u16,
 }
 
-fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<usize> {
+fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usize, bool)> {
     let node_count = peers.len();
 
     let recommended_min_quorum = node_count / 2 + 1;
@@ -157,7 +157,7 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<usiz
         log::warn!("An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node.");
     }
 
-    Ok(quorum)
+    Ok((quorum, quorum < recommended_min_quorum))
 }
 
 async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
@@ -183,18 +183,21 @@ pub struct Config {
     pub heartbeat_min_timeout: u64,
     pub orchestration_port: u16,
     pub quorum: usize,
+    pub quorum_too_low: bool,
     pub peer_nodes: Vec<PeerInfo>,
     pub sync_port: u16,
     pub worterbuch_executable: String,
     pub stats_port: u16,
-    peer_addresses: HashSet<SocketAddr>,
 }
 
 impl Config {
-    pub fn heartbeat_timeout(&self) -> Duration {
-        let randomized =
-            (rand::random::<f64>() * 0.5 * self.heartbeat_min_timeout as f64).round() as u64;
+    pub fn election_timeout(&self) -> Duration {
+        let randomized = (rand::random::<f64>() * self.heartbeat_min_timeout as f64).round() as u64;
         Duration::from_millis(self.heartbeat_min_timeout + randomized)
+    }
+
+    pub fn heartbeat_timeout(&self) -> Duration {
+        Duration::from_millis(self.heartbeat_min_timeout)
     }
 
     pub fn get_node_addr(&self, node_id: &str) -> Option<SocketAddr> {
@@ -202,10 +205,6 @@ impl Config {
             .iter()
             .find(|p| p.node_id == node_id)
             .map(|p| p.address)
-    }
-
-    pub(crate) fn is_peer(&self, addr: SocketAddr) -> bool {
-        self.peer_addresses.contains(&addr)
     }
 }
 
@@ -241,17 +240,19 @@ pub async fn load_config() -> Result<Config> {
     log::debug!("Configured nodes: {nodes:?}");
     log::debug!("Configured peers: {peers:?}");
 
+    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum, &nodes)?;
+
     Ok(Config {
         node_id: args.node_id,
         address,
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
         orchestration_port: args.port,
-        quorum: quorum_sanity_check(args.quorum, &nodes)?,
+        quorum,
+        quorum_too_low,
         peer_nodes: peers,
         sync_port: args.sync_port,
         worterbuch_executable: args.worterbuch_executable,
         stats_port: args.stats_port,
-        peer_addresses,
     })
 }

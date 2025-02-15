@@ -25,7 +25,7 @@ mod stats;
 mod utils;
 
 use config::load_config;
-use election::elect_leader;
+use election::{elect_leader, ElectionOutcome};
 use follower::follow;
 use leader::lead;
 use miette::Result;
@@ -102,28 +102,30 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut socket = init_socket(&config).await?;
 
     let stats = start_stats_endpoint(&subsys, &config).await?;
-    stats.candidate().await;
-
-    let mut leader = false;
 
     while !subsys.is_shutdown_requested() {
-        if leader {
-            stats.leader().await;
-            select! {
-                it = lead(&subsys, &mut socket, &config) => it?,
-                _ = subsys.on_shutdown_requested() => break,
-            }
-        } else {
-            select! {
-                it = follow(&subsys, &mut socket,  &config, &stats) => it?,
-                _ = subsys.on_shutdown_requested() => break,
-            }
-        }
-
         stats.candidate().await;
-        select! {
-            res = elect_leader(&subsys, &mut socket, &config) => leader = res?,
+        let outcome = select! {
+            res = elect_leader(&subsys, &mut socket, &config) => res?,
             _ = subsys.on_shutdown_requested() => break,
+        };
+
+        match outcome {
+            ElectionOutcome::Leader => {
+                stats.leader().await;
+                select! {
+                    it = lead(&subsys, &mut socket, &config) => it?,
+                    _ = subsys.on_shutdown_requested() => break,
+                }
+            }
+            ElectionOutcome::Follower(heartbeat) => {
+                stats.follower().await;
+                select! {
+                    it = follow(&subsys, &mut socket,  &config, heartbeat) => it?,
+                    _ = subsys.on_shutdown_requested() => break,
+                }
+            }
+            ElectionOutcome::Cancelled => break,
         }
     }
 

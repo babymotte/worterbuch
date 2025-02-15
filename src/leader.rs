@@ -20,7 +20,7 @@ use super::{
     process_manager::{ChildProcessManager, CommandDefinition},
 };
 use crate::{
-    utils::{listen, send_heartbeat_requests, support_vote},
+    utils::{listen, send_heartbeat_requests},
     Heartbeat, PeerMessage, Vote,
 };
 use miette::Result;
@@ -54,19 +54,19 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
                     break;
                 }
             },
-            flow = listen(socket, &mut buf, config, |msg| async {
+            flow = listen(socket, &mut buf, |msg| async {
                 match msg {
                     PeerMessage::Vote(Vote::Request(vote)) => {
-                        log::info!("Node '{}' wants to take the lead, let's support it and fall back to follower mode.", vote.node_id);
-                        support_vote(vote, config, socket).await?;
-                        return Ok(ControlFlow::Break(()));
+                        log::info!("Node '{}' wants to take the lead. Over my cold, dead body …", vote.node_id);
                     },
                     PeerMessage::Vote(Vote::Response(_)) => {
                         // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
                     },
                     PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                        log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.peer_info.node_id);
-                        return Ok(ControlFlow::Break(()));
+                        if config.quorum_too_low {
+                            log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.peer_info.node_id);
+                            return Ok(ControlFlow::Break(()));
+                        }
                     },
                     PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                         log::trace!("Received heartbeat response from node '{}'.", heartbeat.node_id);
@@ -95,7 +95,7 @@ fn check_heartbeat_responses(
     let mut responsive_nodes;
 
     for (node_id, timestamp) in heartbeat_responses {
-        if timestamp.elapsed().as_millis() > config.heartbeat_min_timeout as u128 {
+        if timestamp.elapsed() > config.heartbeat_timeout() {
             unresponsive_nodes += 1;
             responsive_nodes = number_of_nodes - unresponsive_nodes;
             log::debug!(

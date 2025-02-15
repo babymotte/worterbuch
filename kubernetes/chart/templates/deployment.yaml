@@ -50,9 +50,9 @@ spec:
             - name: WBCLUSTER_STATS_PORT
               value: "{{ .Values.service.port.stats }}"
             - name: WBCLUSTER_HEARTBEAT_INTERVAL
-              value: "100"
+              value: "{{ .Values.leaderElection.heartbeat.interval }}"
             - name: WBCLUSTER_HEARTBEAT_MIN_TIMEOUT
-              value: "10000"
+              value: "{{ .Values.leaderElection.heartbeat.timeout }}"
           ports:
             - name: http
               containerPort: {{ .Values.service.port.http }}
