@@ -1291,7 +1291,7 @@ mod test {
 
         let export = wb.export();
         assert_eq!(
-            r#"{"t":{"hello":{"t":{"world":{"v":"test"}}}}}"#,
+            r#"[{"t":{"hello":{"t":{"world":{"v":"test"}}}}},[],[]]"#,
             &serde_json::to_string(&export).unwrap()
         );
     }
