@@ -13,21 +13,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo
-
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           default: true
           override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wb-${{ runner.os }}-cargo
+          key: wb-${{ runner.os }}-cargo
 
       - name: Run format check
         run: cargo fmt --check
@@ -53,21 +50,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo
-
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           default: true
           override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wb-${{ runner.os }}-cargo
+          key: wb-${{ runner.os }}-cargo
 
       - name: Publish to crates.io
         run: ./publish.sh
@@ -142,21 +136,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo
-
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           default: true
           override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wb-${{ runner.os }}-cargo
+          key: wb-${{ runner.os }}-cargo
 
       - name: Build
         run: cargo build --release
