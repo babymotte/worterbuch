@@ -19,6 +19,7 @@
 
 use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
 use miette::{miette, Context, IntoDiagnostic, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,13 @@ use tokio::{
     time::interval,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use worterbuch_common::{GraveGoods, LastWill};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GraveGoodsLastWill {
+    grave_goods: GraveGoods,
+    last_will: LastWill,
+}
 
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
@@ -50,14 +58,24 @@ pub(crate) async fn periodic(
 }
 
 pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result<()> {
-    let json_path = file_paths(config, true).await?;
+    let (store_path, grave_goods_last_will_path) = file_paths(config, true).await?;
+
+    // TODO persist grave goods and last wills to disk
 
     log::debug!("Exporting database state …");
     match worterbuch.export().await? {
-        Some(json) => {
+        Some((json, grave_goods, last_will)) => {
             log::debug!("Exporting database state done.");
+
             let json = json.to_string();
-            write_and_check(json.as_bytes(), &json_path).await?;
+            write_and_check(json.as_bytes(), &store_path).await?;
+
+            let json = serde_json::to_string(&GraveGoodsLastWill {
+                grave_goods,
+                last_will,
+            })
+            .into_diagnostic()?;
+            write_and_check(json.as_bytes(), &grave_goods_last_will_path).await?;
         }
         None => {
             log::debug!("No unsaved changes, skipping export.");
@@ -68,18 +86,28 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result
 }
 
 pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) -> Result<()> {
-    let json_path = file_paths(config, true).await?;
+    let (store_path, grave_goods_last_will_path) = file_paths(config, true).await?;
+
+    // TODO persist grave goods and last wills to disk
 
     log::debug!("Exporting database state …");
-    let data = worterbuch.export();
+    let (data, grave_goods, last_will) = worterbuch.export();
     log::debug!("Exporting database state done.");
+
     let json = json!({ "data": data }).to_string();
-    write_and_check(json.as_bytes(), &json_path).await?;
+    write_and_check(json.as_bytes(), &store_path).await?;
+
+    let json = serde_json::to_string(&GraveGoodsLastWill {
+        grave_goods,
+        last_will,
+    })
+    .into_diagnostic()?;
+    write_and_check(json.as_bytes(), &grave_goods_last_will_path).await?;
 
     Ok(())
 }
 
-async fn file_paths(config: &Config, write: bool) -> Result<PathBuf> {
+async fn file_paths(config: &Config, write: bool) -> Result<(PathBuf, PathBuf)> {
     let dir = PathBuf::from(&config.data_dir);
 
     let mut toggle_path = dir.clone();
@@ -87,14 +115,18 @@ async fn file_paths(config: &Config, write: bool) -> Result<PathBuf> {
 
     let main = toggle_alternating_files(&toggle_path, write).await?;
 
-    let mut json_path = dir.clone();
-    json_path.push(if main {
-        ".store.a.json"
-    } else {
-        ".store.b.json"
-    });
+    let mut store_path = dir.clone();
+    let mut grave_goods_last_will_path = dir;
 
-    Ok(json_path)
+    if main {
+        store_path.push(".store.a.json");
+        grave_goods_last_will_path.push(".gglw.a.json");
+    } else {
+        store_path.push(".store.b.json");
+        grave_goods_last_will_path.push(".gglw.b.json");
+    }
+
+    Ok((store_path, grave_goods_last_will_path))
 }
 
 async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
@@ -190,23 +222,47 @@ pub(crate) async fn load(config: Config) -> Result<Worterbuch> {
 
 async fn load_v2(config: &Config) -> Result<Worterbuch> {
     log::info!("Restoring Wörterbuch form persistence …");
-    let json_path = file_paths(config, false).await?;
+    let (store_path, grave_goods_last_will_path) = file_paths(config, false).await?;
 
-    match try_load(&json_path, config).await {
+    let mut wb = match try_load(&store_path, config).await {
         Ok(worterbuch) => Ok(worterbuch),
         Err(e) => {
             log::warn!(
                 "Could not load persistence file {}: {e}",
-                json_path.to_string_lossy()
+                store_path.to_string_lossy()
             );
-            let json_path = file_paths(config, true).await?;
+            let (store_path, _) = file_paths(config, true).await?;
             log::info!(
                 "Trying to load persistence file {} …",
-                json_path.to_string_lossy()
+                store_path.to_string_lossy()
             );
-            try_load(&json_path, config).await
+            try_load(&store_path, config).await
         }
+    }?;
+
+    if let Ok(grave_goods_last_will) =
+        match try_load_grave_goods_last_will(&grave_goods_last_will_path).await {
+            Ok(gglw) => Ok(gglw),
+            Err(e) => {
+                log::warn!(
+                    "Could not load persistence file {}: {e}",
+                    grave_goods_last_will_path.to_string_lossy()
+                );
+                let (_, grave_goods_last_will_path) = file_paths(config, true).await?;
+                log::info!(
+                    "Trying to load persistence file {} …",
+                    grave_goods_last_will_path.to_string_lossy()
+                );
+                try_load_grave_goods_last_will(&grave_goods_last_will_path).await
+            }
+        }
+    {
+        wb.apply_grave_goods(grave_goods_last_will.grave_goods)
+            .await;
+        wb.apply_last_wills(grave_goods_last_will.last_will).await;
     }
+
+    Ok(wb)
 }
 
 async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch> {
@@ -214,6 +270,13 @@ async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch> {
     let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
     log::info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
+}
+
+async fn try_load_grave_goods_last_will(path: &Path) -> Result<GraveGoodsLastWill> {
+    let json = fs::read_to_string(path).await.into_diagnostic()?;
+    let grave_goods_last_will = serde_json::from_str(&json).into_diagnostic()?;
+    log::info!("Grave goods and last will successfully restored form persistence.");
+    Ok(grave_goods_last_will)
 }
 
 mod legacy {

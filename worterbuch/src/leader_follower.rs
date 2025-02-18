@@ -31,7 +31,9 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use worterbuch_common::{tcp::write_line_and_flush, Key, RequestPattern, Value};
+use worterbuch_common::{
+    tcp::write_line_and_flush, GraveGoods, Key, LastWill, RequestPattern, Value,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,7 +52,7 @@ pub enum ClientWriteCommand {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StateSync(pub Node);
+pub struct StateSync(pub Node, pub GraveGoods, pub LastWill);
 
 pub async fn run_cluster_sync_port(
     subsys: SubsystemHandle,

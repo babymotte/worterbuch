@@ -58,7 +58,8 @@ use tokio::{
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use uuid::Uuid;
 use worterbuch_common::{
-    tcp::receive_msg, topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    tcp::receive_msg, topic, KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
 };
 
@@ -331,11 +332,70 @@ async fn run_in_leader_mode(
         run_cluster_sync_port(s, cfg, follower_connected_tx)
     }));
 
+    let (mut grave_goods_rx, _) = worterbuch
+        .psubscribe(
+            INTERNAL_CLIENT_ID,
+            0,
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                KeySegment::Wildcard,
+                SYSTEM_TOPIC_GRAVE_GOODS
+            ),
+            true,
+            false,
+        )
+        .await?;
+    let (mut last_will_rx, _) = worterbuch
+        .psubscribe(
+            INTERNAL_CLIENT_ID,
+            0,
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                KeySegment::Wildcard,
+                SYSTEM_TOPIC_LAST_WILL
+            ),
+            true,
+            false,
+        )
+        .await?;
+
     loop {
         select! {
+            recv = grave_goods_rx.recv() => if let Some(e) = recv {
+                log::debug!("Forwarding grave goods change: {e:?}");
+                match e {
+                    PStateEvent::KeyValuePairs(kvps) => {
+                        for kvp in kvps {
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                        }
+                    },
+                    PStateEvent::Deleted(kvps) => {
+                        for kvp in kvps {
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Delete(kvp.key, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                        }
+                    },
+                }
+            },
+            recv = last_will_rx.recv() => if let Some(e) = recv {
+                log::debug!("Forwarding last will change: {e:?}");
+                match e {
+                    PStateEvent::KeyValuePairs(kvps) => {
+                        for kvp in kvps {
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                        }
+                    },
+                    PStateEvent::Deleted(kvps) => {
+                        for kvp in kvps {
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Delete(kvp.key, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                        }
+                    },
+                }
+            },
             recv = api_rx.recv() => match recv {
                 Some(function) => {
-                    forward_api_call(&mut client_write_txs, &mut dead, &function).await;
+                    forward_api_call(&mut client_write_txs, &mut dead, &function, true).await;
                     process_api_call(worterbuch, function).await;
                 },
                 None => break,
@@ -343,8 +403,8 @@ async fn run_in_leader_mode(
             recv = follower_connected_rx.recv() => match recv {
                 Some(state_tx) => {
                     let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
-                    let current_state = worterbuch.export();
-                    if state_tx.send((StateSync(current_state), client_write_rx)).is_ok() {
+                    let (current_state, grave_goods, last_will) = worterbuch.export();
+                    if state_tx.send((StateSync(current_state, grave_goods, last_will), client_write_rx)).is_ok() {
                         client_write_txs.push((tx_id, client_write_tx));
                         tx_id += 1;
                     }
@@ -372,6 +432,7 @@ async fn run_in_follower_mode(
 
     shutdown_on_stdin_close(&subsys);
 
+    // TODO configure lower persistence interval for follower
     let mut persistence_interval = interval(config.persistence_interval);
 
     let stream = TcpStream::connect(leader_addr).await.into_diagnostic()?;
@@ -456,6 +517,7 @@ async fn forward_api_call(
     client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
     dead: &mut Vec<usize>,
     function: &WbFunction,
+    filter_sys: bool,
 ) {
     if let Some(cmd) = match function {
         WbFunction::Get(_, _)
@@ -477,21 +539,21 @@ async fn forward_api_call(
         | WbFunction::Len(_)
         | WbFunction::SupportedProtocolVersion(_) => None,
         WbFunction::Set(key, value, _, _) => {
-            if !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Set(key.to_owned(), value.to_owned()))
             } else {
                 None
             }
         }
         WbFunction::Delete(key, _, _) => {
-            if !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Delete(key.to_owned()))
             } else {
                 None
             }
         }
         WbFunction::PDelete(pattern, _, _) => {
-            if !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+            if !filter_sys || !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::PDelete(pattern.to_owned()))
             } else {
                 None

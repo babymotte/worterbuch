@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "clap",
  "dotenv",

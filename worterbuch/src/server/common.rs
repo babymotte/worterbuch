@@ -34,11 +34,11 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Key, KeyValuePair,
-    KeyValuePairs, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs, PState, PStateEvent,
-    PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment, RequestPattern,
-    SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
-    UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, GraveGoods, Key,
+    KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs,
+    PState, PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish,
+    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent,
+    Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -404,7 +404,7 @@ pub enum WbFunction {
     Connected(Uuid, Option<SocketAddr>, Protocol),
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
-    Export(oneshot::Sender<Option<Value>>),
+    Export(oneshot::Sender<Option<(Value, GraveGoods, LastWill)>>),
     Len(oneshot::Sender<usize>),
     SupportedProtocolVersion(oneshot::Sender<ProtocolVersion>),
 }
@@ -667,7 +667,7 @@ impl CloneableWbApi {
         Ok(rx.await?)
     }
 
-    pub async fn export(&self) -> WorterbuchResult<Option<Value>> {
+    pub async fn export(&self) -> WorterbuchResult<Option<(Value, GraveGoods, LastWill)>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Export(tx)).await?;
         Ok(rx.await?)

@@ -560,19 +560,29 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&mut self) -> Node {
-        self.store.export()
+    pub fn export(&mut self) -> (Node, GraveGoods, LastWill) {
+        let store = self.store.export();
+        let grave_goods = self.grave_goods();
+        let last_will = self.last_wills();
+
+        (store, grave_goods, last_will)
     }
 
-    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<Option<Value>>) {
+    pub fn export_for_persistence(
+        &mut self,
+        tx: oneshot::Sender<Option<(Value, GraveGoods, LastWill)>>,
+    ) {
         if !self.store.has_unsaved_changes() {
             tx.send(None).ok();
             return;
         }
+
         let store = self.store.export_for_persistence();
+        let grave_goods = self.grave_goods();
+        let last_will = self.last_wills();
         spawn(async move {
             let value = json!(store);
-            tx.send(Some(value)).ok();
+            tx.send(Some((value, grave_goods, last_will))).ok();
         });
     }
 
@@ -960,7 +970,7 @@ impl Worterbuch {
         .await
     }
 
-    fn grave_goods(&self, client_id: &Uuid) -> Option<GraveGoods> {
+    fn grave_goods_for_client(&self, client_id: &Uuid) -> Option<GraveGoods> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -971,7 +981,7 @@ impl Worterbuch {
         value.and_then(|it| serde_json::from_value(it).ok())
     }
 
-    fn last_wills(&self, client_id: &Uuid) -> Option<LastWill> {
+    fn last_will_for_client(&self, client_id: &Uuid) -> Option<LastWill> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -995,8 +1005,8 @@ impl Worterbuch {
             );
         }
 
-        let grave_goods = self.grave_goods(&client_id);
-        let last_wills = self.last_wills(&client_id);
+        let grave_goods = self.grave_goods_for_client(&client_id);
+        let last_wills = self.last_will_for_client(&client_id);
 
         let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         if self.config.extended_monitoring {
@@ -1162,11 +1172,11 @@ impl Worterbuch {
     }
 
     pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self) {
-        self.apply_grave_goods().await;
-        self.apply_last_wills().await;
+        self.apply_grave_goods(self.grave_goods()).await;
+        self.apply_last_wills(self.last_wills()).await;
     }
 
-    async fn apply_grave_goods(&mut self) {
+    fn grave_goods(&self) -> GraveGoods {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1174,18 +1184,22 @@ impl Worterbuch {
             SYSTEM_TOPIC_GRAVE_GOODS
         );
 
+        let mut ggs = vec![];
+
         if let Ok(grave_goods) = self.pget(&pattern) {
             for KeyValuePair { key: _, value } in grave_goods {
                 if let Ok(keys) = serde_json::from_value::<Vec<String>>(value) {
                     for key in keys {
-                        self.pdelete(key, INTERNAL_CLIENT_ID).await.ok();
+                        ggs.push(key);
                     }
                 }
             }
         }
+
+        ggs
     }
 
-    async fn apply_last_wills(&mut self) {
+    fn last_wills(&self) -> LastWill {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1193,14 +1207,30 @@ impl Worterbuch {
             SYSTEM_TOPIC_LAST_WILL
         );
 
+        let mut lws = vec![];
+
         if let Ok(last_will) = self.pget(&pattern) {
             for KeyValuePair { key: _, value } in last_will {
                 if let Ok(kvps) = serde_json::from_value::<Vec<KeyValuePair>>(value) {
-                    for KeyValuePair { key, value } in kvps {
-                        self.set(key, value, INTERNAL_CLIENT_ID).await.ok();
+                    for kvp in kvps {
+                        lws.push(kvp);
                     }
                 }
             }
+        }
+
+        lws
+    }
+
+    pub(crate) async fn apply_grave_goods(&mut self, grave_goods: GraveGoods) {
+        for gg in grave_goods {
+            self.pdelete(gg, INTERNAL_CLIENT_ID).await.ok();
+        }
+    }
+
+    pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill) {
+        for lw in last_wills {
+            self.set(lw.key, lw.value, INTERNAL_CLIENT_ID).await.ok();
         }
     }
 }
