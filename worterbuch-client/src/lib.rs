@@ -821,7 +821,7 @@ async fn connect_ws(
             let handshake = AuthorizationRequest { auth_token };
             let msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
             log::debug!("Sending authorization message: {msg}");
-            websocket.send(Message::Text(msg)).await?;
+            websocket.send(Message::Text(msg.into())).await?;
 
             match websocket.next().await {
                 Some(Err(e)) => Err(e.into()),

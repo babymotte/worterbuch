@@ -714,15 +714,14 @@ async fn run_ws_server(
                     let worterbuch = worterbuch.clone();
                     let conn_closed_tx = conn_closed_tx.clone();
 
-                    let cid = id.clone();
                     let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
                         select! {
-                            s = serve(cid, remote_addr, worterbuch, socket) => if let Err(e) = s {
-                                log::error!("Connection to client {cid} ({remote_addr:?}) closed with error: {e}");
+                            s = serve(id, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                log::error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                             },
                             _ = s.on_shutdown_requested() => (),
                         }
-                        conn_closed_tx.send(cid).await.ok();
+                        conn_closed_tx.send(id).await.ok();
                         Ok::<(),miette::Error>(())
                     }));
                     clients.insert(id, client);

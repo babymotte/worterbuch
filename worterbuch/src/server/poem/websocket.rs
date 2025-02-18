@@ -27,7 +27,6 @@ use futures::{
 };
 use miette::{miette, IntoDiagnostic, Result};
 use poem::web::websocket::{Message, WebSocketStream};
-use serde_json::json;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{select, spawn, sync::mpsc, time::sleep};
 use uuid::Uuid;
@@ -146,7 +145,7 @@ async fn send_with_timeout(
     client_id: Uuid,
 ) -> Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
-    let json = json!(msg).to_string();
+    let json = serde_json::to_string(&msg).into_diagnostic()?;
     let msg = Message::Text(json);
     select! {
         r = websocket.send(msg) => {

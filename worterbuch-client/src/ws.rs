@@ -34,7 +34,7 @@ impl WsClientSocket {
     pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {
         let json = serde_json::to_string(msg)?;
         log::debug!("Sending message: {json}");
-        let msg = Message::Text(json);
+        let msg = Message::Text(json.into());
         self.websocket.send(msg).await?;
         Ok(())
     }
