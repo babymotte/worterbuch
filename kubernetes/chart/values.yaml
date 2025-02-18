@@ -59,10 +59,13 @@ service:
   # This sets the ports more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#field-spec-ports
   port:
     http: 80
+    httpNodePort: 30080
     tcp: 9090
+    tcpNodePort: 30090
     clusterSync: 8282
     raft: 9292
     stats: 8383
+    statsNodePort: 30083
 
 # This block is for setting up the ingress for more information can be found here: https://kubernetes.io/docs/concepts/services-networking/ingress/
 ingress:

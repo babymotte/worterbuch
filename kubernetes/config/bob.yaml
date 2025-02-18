@@ -8,3 +8,10 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+
+service:
+  type: NodePort
+  port:
+    httpNodePort: 30082
+    tcpNodePort: 30092
+    statsNodePort: 30085
