@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use anyhow::{anyhow, Result};
+use miette::{miette, IntoDiagnostic, Result};
 use std::collections::{hash_map::Entry, HashMap};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -72,10 +72,10 @@ impl Subscriber {
 
     pub async fn send_pstate(&self, event: PStateEvent) -> Result<()> {
         if let EventSender::PState(tx) = &self.tx {
-            tx.send(event).await?;
+            tx.send(event).await.into_diagnostic()?;
             Ok(())
         } else {
-            Err(anyhow!(
+            Err(miette!(
                 "Tried to send a PSatetEvent to a StateEvent subscriber"
             ))
         }
@@ -83,10 +83,10 @@ impl Subscriber {
 
     pub async fn send_state(&self, event: StateEvent) -> Result<()> {
         if let EventSender::State(tx) = &self.tx {
-            tx.send(event).await?;
+            tx.send(event).await.into_diagnostic()?;
             Ok(())
         } else {
-            Err(anyhow!(
+            Err(miette!(
                 "Tried to send a SatetEvent to a PStateEvent subscriber"
             ))
         }
@@ -121,7 +121,7 @@ impl LsSubscriber {
     }
 
     pub async fn send(&self, children: Vec<RegularKeySegment>) -> Result<()> {
-        self.tx.send(children).await?;
+        self.tx.send(children).await.into_diagnostic()?;
         Ok(())
     }
 }

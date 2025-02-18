@@ -45,10 +45,10 @@ use tokio::{
 };
 use uuid::Uuid;
 use worterbuch_common::{
-    error::{Context, WorterbuchError, WorterbuchResult},
-    parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern, ServerMessage,
-    StateEvent, TransactionId, PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS,
+    error::{WorterbuchError, WorterbuchResult},
+    parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill,
+    PState, PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern,
+    ServerMessage, StateEvent, TransactionId, PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS,
     SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
     SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUBSCRIPTIONS,
@@ -271,7 +271,8 @@ impl Worterbuch {
     }
 
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
-        let mut store: Store = from_str(json).context(|| "Error parsing JSON".to_owned())?;
+        let mut store: Store = from_str(json)
+            .map_err(|e| WorterbuchError::SerDeError(e, "Error parsing store JSON".to_owned()))?;
         store.count_entries();
         Ok(Worterbuch {
             config,
@@ -577,8 +578,9 @@ impl Worterbuch {
 
     pub async fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
         log::debug!("Parsing store data …");
-        let store: Store =
-            from_str(json).context(|| "Error parsing JSON during import".to_owned())?;
+        let store: Store = from_str(json).map_err(|e| {
+            WorterbuchError::SerDeError(e, "Error parsing JSON during import".to_owned())
+        })?;
         log::debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store);
 
@@ -613,11 +615,11 @@ impl Worterbuch {
         log::info!("Importing from {path} …");
         let mut file = File::open(path)
             .await
-            .context(|| format!("Error opening file {path:?}"))?;
+            .map_err(|e| WorterbuchError::IoError(e, format!("Error opening file {path:?}")))?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)
             .await
-            .context(|| format!("Error reading file {path}"))?;
+            .map_err(|e| WorterbuchError::IoError(e, format!("Error reading file {path:?}")))?;
         let json = String::from_utf8_lossy(&contents).to_string();
         self.import(&json).await?;
         log::info!("Done.");
@@ -1157,6 +1159,49 @@ impl Worterbuch {
 
     pub(crate) fn reset_store(&mut self, data: Node) {
         self.store.reset(data);
+    }
+
+    pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self) {
+        self.apply_grave_goods().await;
+        self.apply_last_wills().await;
+    }
+
+    async fn apply_grave_goods(&mut self) {
+        let pattern = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            KeySegment::Wildcard,
+            SYSTEM_TOPIC_GRAVE_GOODS
+        );
+
+        if let Ok(grave_goods) = self.pget(&pattern) {
+            for KeyValuePair { key: _, value } in grave_goods {
+                if let Ok(keys) = serde_json::from_value::<Vec<String>>(value) {
+                    for key in keys {
+                        self.pdelete(key, INTERNAL_CLIENT_ID).await.ok();
+                    }
+                }
+            }
+        }
+    }
+
+    async fn apply_last_wills(&mut self) {
+        let pattern = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            KeySegment::Wildcard,
+            SYSTEM_TOPIC_LAST_WILL
+        );
+
+        if let Ok(last_will) = self.pget(&pattern) {
+            for KeyValuePair { key: _, value } in last_will {
+                if let Ok(kvps) = serde_json::from_value::<Vec<KeyValuePair>>(value) {
+                    for KeyValuePair { key, value } in kvps {
+                        self.set(key, value, INTERNAL_CLIENT_ID).await.ok();
+                    }
+                }
+            }
+        }
     }
 }
 

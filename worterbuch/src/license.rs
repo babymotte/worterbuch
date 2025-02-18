@@ -107,12 +107,12 @@ pub mod commercial {
     pub async fn load_license() -> miette::Result<License> {
         let license_file = env::var("WORTERBUCH_LICENSE_FILE")
             .into_diagnostic()
-            .context("WORTERBUCH_LICENSE_FILE is not set")?;
+            .wrap_err("WORTERBUCH_LICENSE_FILE is not set")?;
 
         let license_file = fs::read_to_string(license_file)
             .await
             .into_diagnostic()
-            .context("Could not read license file")?;
+            .wrap_err("Could not read license file")?;
 
         let token = decode::<License>(
             &license_file,
@@ -120,7 +120,7 @@ pub mod commercial {
             &Validation::default(),
         )
         .into_diagnostic()
-        .context("Validity of license token could not be confirmed")?;
+        .wrap_err("Validity of license token could not be confirmed")?;
 
         Ok(token.claims)
     }

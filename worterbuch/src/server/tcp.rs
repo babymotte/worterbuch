@@ -21,14 +21,18 @@ use crate::{
     server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
 };
-use std::net::{IpAddr, SocketAddr};
+use miette::{IntoDiagnostic, Result};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{TcpSocket, TcpStream},
     select, spawn,
     sync::mpsc,
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use uuid::Uuid;
 use worterbuch_common::{tcp::write_line_and_flush, Protocol, ServerInfo, ServerMessage, Welcome};
 
@@ -37,30 +41,32 @@ pub async fn start(
     bind_addr: IpAddr,
     port: u16,
     subsys: SubsystemHandle,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
     log::info!("Serving TCP endpoint at {addr}");
-    let sock = TcpSocket::new_v4()?;
-    sock.set_keepalive(true)?;
-    sock.set_nodelay(true)?;
+    let sock = TcpSocket::new_v4().into_diagnostic()?;
+    sock.set_keepalive(true).into_diagnostic()?;
+    sock.set_nodelay(true).into_diagnostic()?;
     #[cfg(not(target_os = "windows"))]
-    sock.set_reuseaddr(true)?;
-    sock.bind(addr.parse()?)?;
-    let listener = sock.listen(1024)?;
+    sock.set_reuseaddr(true).into_diagnostic()?;
+    sock.bind(addr.parse().into_diagnostic()?)
+        .into_diagnostic()?;
+    let listener = sock.listen(1024).into_diagnostic()?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
-    let mut open_connections = 0;
     let mut waiting_for_free_connections = false;
+
+    let mut clients = HashMap::new();
 
     loop {
         select! {
-            recv = conn_closed_rx.recv() => if recv.is_some() {
-                open_connections -= 1;
-                while conn_closed_rx.try_recv().is_ok() {
-                    open_connections -= 1;
+            recv = conn_closed_rx.recv() => if let Some(id) = recv {
+                clients.remove(&id);
+                while let Ok(id) = conn_closed_rx.try_recv() {
+                    clients.remove(&id);
                 }
-                log::debug!("{open_connections} TCP connection(s) open.");
+                log::debug!("{} TCP connection(s) open.", clients.len());
                 waiting_for_free_connections = false;
             } else {
                 break;
@@ -69,20 +75,27 @@ pub async fn start(
                 log::debug!("Trying to accept new client connection.");
                 match con {
                     Ok((socket, remote_addr)) => {
-                        open_connections += 1;
-                        log::debug!("{open_connections} TCP connection(s) open.");
+                        let id = Uuid::new_v4();
+                        log::debug!("{} TCP connection(s) open.",clients.len());
                         let worterbuch = worterbuch.clone();
                         let conn_closed_tx = conn_closed_tx.clone();
-                        spawn(async move {
-                            if let Err(e) = serve(remote_addr, worterbuch, socket).await {
-                                log::error!("Connection to client {remote_addr} closed with error: {e}");
+
+                        let cid = id.clone();
+                        let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
+                            select! {
+                                s = serve(cid, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                    log::error!("Connection to client {cid} ({remote_addr:?}) closed with error: {e}");
+                                },
+                                _ = s.on_shutdown_requested() => (),
                             }
-                            conn_closed_tx.send(()).await.ok();
-                        });
+                            conn_closed_tx.send(cid).await.ok();
+                            Ok::<(),miette::Error>(())
+                        }));
+                        clients.insert(id, client);
                     },
                     Err(e) => {
                         log::error!("Error while trying to accept client connection: {e}");
-                        log::warn!("{open_connections} TCP connections open, waiting for connections to close.");
+                        log::warn!("{} TCP connections open, waiting for connections to close.", clients.len());
                         waiting_for_free_connections = true;
                     }
                 }
@@ -92,18 +105,28 @@ pub async fn start(
         }
     }
 
+    for (cid, subsys) in clients {
+        subsys.initiate_shutdown();
+        log::debug!("Waiting for connection to client {cid} to close …");
+        if let Err(e) = subsys.join().await {
+            log::error!("Error waiting for client {cid} to disconnect: {e}");
+        }
+    }
+    log::debug!("All clients disconnected.");
+
+    drop(listener);
+
     log::debug!("tcpserver subsystem completed.");
 
     Ok(())
 }
 
 async fn serve(
+    client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
-) -> anyhow::Result<()> {
-    let client_id = Uuid::new_v4();
-
+) -> Result<()> {
     log::info!("New client connected: {client_id} ({remote_addr})");
 
     if let Err(e) = worterbuch
@@ -131,7 +154,7 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
@@ -164,7 +187,8 @@ async fn serve_loop(
                 protocol_version,
             },
         }))
-        .await?;
+        .await
+        .into_diagnostic()?;
 
     loop {
         select! {

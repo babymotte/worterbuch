@@ -36,20 +36,22 @@ pub mod store;
 mod subscribers;
 mod worterbuch;
 
+use std::error::Error;
+
 use crate::stats::track_stats;
 pub use crate::worterbuch::*;
-use anyhow::{anyhow, Result};
 pub use config::*;
 use leader_follower::{
     process_leader_message, run_cluster_sync_port, shutdown_on_stdin_close, ClientWriteCommand,
     StateSync,
 };
+use miette::{miette, IntoDiagnostic, Result};
 use serde_json::Value;
 use server::common::{CloneableWbApi, WbFunction};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
-    select, spawn,
+    select,
     sync::{mpsc, oneshot},
     time::interval,
 };
@@ -59,6 +61,8 @@ use worterbuch_common::{
     tcp::receive_msg, topic, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
 };
+
+type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
 
 pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 
@@ -102,7 +106,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             track_stats(worterbuch_uptime, subsys)
         }));
 
-        if let Some(WsEndpoint {
+        let web_server = if let Some(WsEndpoint {
             endpoint:
                 Endpoint {
                     tls,
@@ -117,12 +121,16 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             let bind_addr = bind_addr.to_owned();
             let port = port.to_owned();
             let public_addr = public_addr.to_owned();
-            subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
-                server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys)
-            }));
-        }
+            Some(
+                subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
+                    server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys)
+                })),
+            )
+        } else {
+            None
+        };
 
-        if let Some(Endpoint {
+        let tcp_server = if let Some(Endpoint {
             tls: _,
             bind_addr,
             port,
@@ -131,60 +139,53 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             let sapi = api.clone();
             let bind_addr = bind_addr.to_owned();
             let port = port.to_owned();
-            subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
-                server::tcp::start(sapi, bind_addr, port, subsys)
-            }));
-        }
+            Some(
+                subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
+                    server::tcp::start(sapi, bind_addr, port, subsys)
+                })),
+            )
+        } else {
+            None
+        };
 
         #[cfg(target_family = "unix")]
-        if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
+        let unix_socket = if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
             let sapi = api.clone();
             let path = path.clone();
-            subsys.start(SubsystemBuilder::new("unixserver", move |subsys| {
-                server::unix::start(sapi, path, subsys)
-            }));
-        }
+            Some(
+                subsys.start(SubsystemBuilder::new("unixsocket", move |subsys| {
+                    server::unix::start(sapi, path, subsys)
+                })),
+            )
+        } else {
+            None
+        };
 
-        let (persist_tx, mut persist_rx) = oneshot::channel();
-        let persist_tx = Some(persist_tx);
+        #[cfg(not(target_family = "unix"))]
+        let unix_socket = None;
 
         if config.leader {
             run_in_leader_mode(
                 subsys,
                 &mut worterbuch,
-                api,
                 &mut api_rx,
                 config,
-                persist_tx,
+                web_server,
+                tcp_server,
+                unix_socket,
             )
             .await?;
         } else {
             run_in_regular_mode(
                 subsys,
                 &mut worterbuch,
-                api,
                 &mut api_rx,
                 config,
-                persist_tx,
+                web_server,
+                tcp_server,
+                unix_socket,
             )
             .await?;
-        }
-
-        if use_persistence {
-            log::info!("Shutdown sequence triggered, waiting for persistence hook to complete …");
-
-            loop {
-                select! {
-                    recv = api_rx.recv() => match recv {
-                        Some(function) => process_api_call(&mut worterbuch, function).await,
-                        None => break,
-                    },
-                    _ = &mut persist_rx => {
-                        log::info!("Shutdown persistence hook complete.");
-                        break;
-                    },
-                }
-            }
         }
     }
 
@@ -285,10 +286,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
 async fn run_in_regular_mode(
     subsys: SubsystemHandle,
     worterbuch: &mut Worterbuch,
-    api: CloneableWbApi,
     api_rx: &mut mpsc::Receiver<WbFunction>,
     config: Config,
-    mut persist_tx: Option<oneshot::Sender<()>>,
+    web_server: Option<ServerSubsystem>,
+    tcp_server: Option<ServerSubsystem>,
+    unix_socket: Option<ServerSubsystem>,
 ) -> Result<()> {
     loop {
         select! {
@@ -296,34 +298,21 @@ async fn run_in_regular_mode(
                 Some(function) => process_api_call(worterbuch, function).await,
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => {
-                if config.use_persistence {
-                    if let Some(persist_tx) = persist_tx.take() {
-                        let api = api.clone();
-                        let config = config.clone();
-                        spawn(async move {
-                            if let Err(e) = persistence::once(&api, &config).await {
-                                log::warn!("Could not persist state: {e}");
-                            }
-                            persist_tx.send(()).ok();
-                        });
-                    }
-                }
-                break;
-            },
+            _ = subsys.on_shutdown_requested() => break,
         }
     }
 
-    Ok(())
+    shutdown(worterbuch, config, web_server, tcp_server, unix_socket).await
 }
 
 async fn run_in_leader_mode(
     subsys: SubsystemHandle,
     worterbuch: &mut Worterbuch,
-    api: CloneableWbApi,
     api_rx: &mut mpsc::Receiver<WbFunction>,
     config: Config,
-    mut persist_tx: Option<oneshot::Sender<()>>,
+    web_server: Option<ServerSubsystem>,
+    tcp_server: Option<ServerSubsystem>,
+    unix_socket: Option<ServerSubsystem>,
 ) -> Result<()> {
     log::info!("Running in LEADER mode.");
 
@@ -362,25 +351,11 @@ async fn run_in_leader_mode(
                 },
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => {
-                if config.use_persistence {
-                    if let Some(persist_tx) = persist_tx.take() {
-                        let api = api.clone();
-                        let config = config.clone();
-                        spawn(async move {
-                            if let Err(e) = persistence::once(&api, &config).await {
-                                log::warn!("Could not persist state: {e}");
-                            }
-                            persist_tx.send(()).ok();
-                        });
-                    }
-                }
-                break;
-            },
+            _ = subsys.on_shutdown_requested() => break,
         }
     }
 
-    Ok(())
+    shutdown(worterbuch, config, web_server, tcp_server, unix_socket).await
 }
 
 async fn run_in_follower_mode(
@@ -391,7 +366,7 @@ async fn run_in_follower_mode(
     let leader_addr = if let Some(it) = &config.leader_address {
         it
     } else {
-        return Err(anyhow!("No valid leader address configured."));
+        return Err(miette!("No valid leader address configured."));
     };
     log::info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
 
@@ -399,7 +374,7 @@ async fn run_in_follower_mode(
 
     let mut persistence_interval = interval(config.persistence_interval);
 
-    let stream = TcpStream::connect(leader_addr).await?;
+    let stream = TcpStream::connect(leader_addr).await.into_diagnostic()?;
 
     let mut lines = BufReader::new(stream).lines();
 
@@ -420,13 +395,61 @@ async fn run_in_follower_mode(
         }
     }
 
+    shutdown(worterbuch, config, None, None, None).await
+}
+
+async fn shutdown(
+    worterbuch: &mut Worterbuch,
+    config: Config,
+    web_server: Option<ServerSubsystem>,
+    tcp_server: Option<ServerSubsystem>,
+    unix_socket: Option<ServerSubsystem>,
+) -> Result<()> {
+    log::info!("Shutdown sequence triggered");
+
+    shutdown_servers(web_server, tcp_server, unix_socket).await;
+
+    log::info!("Applying grave goods and last wills …");
+
+    worterbuch.apply_all_grave_goods_and_last_wills().await;
+
     if config.use_persistence {
-        if let Err(e) = persistence::synchronous(worterbuch, &config).await {
-            log::warn!("Could not persist state: {e}");
-        }
+        log::info!("Waiting for persistence hook to complete …");
+        persistence::synchronous(worterbuch, &config).await?;
+        log::info!("Shutdown persistence hook complete.");
     }
 
     Ok(())
+}
+
+async fn shutdown_servers(
+    web_server: Option<ServerSubsystem>,
+    tcp_server: Option<ServerSubsystem>,
+    unix_socket: Option<ServerSubsystem>,
+) {
+    if let Some(it) = web_server {
+        log::info!("Shutting down web server …");
+        it.initiate_shutdown();
+        if let Err(e) = it.join().await {
+            log::error!("Error waiting for web server to shut down: {e}");
+        }
+    }
+
+    if let Some(it) = tcp_server {
+        log::info!("Shutting down tcp server …");
+        it.initiate_shutdown();
+        if let Err(e) = it.join().await {
+            log::error!("Error waiting for tcp server to shut down: {e}");
+        }
+    }
+
+    if let Some(it) = unix_socket {
+        log::info!("Shutting down unix socket …");
+        it.initiate_shutdown();
+        if let Err(e) = it.join().await {
+            log::error!("Error waiting for unix socket to shut down: {e}");
+        }
+    }
 }
 
 async fn forward_api_call(

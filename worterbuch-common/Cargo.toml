@@ -19,6 +19,7 @@ serde_repr = "0.1.16"
 log = "0.4.20"
 random_word = { version = "0.4.3", features = ["en"] }
 sha2 = "0.10.8"
+miette = "7.5.0"
 
 [lints.rust]
 unsafe_code = "forbid"

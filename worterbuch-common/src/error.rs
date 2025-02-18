@@ -20,6 +20,7 @@
 use crate::{
     server::Err, ClientMessage, ErrorCode, Key, MetaData, Privilege, RequestPattern, TransactionId,
 };
+use miette::Diagnostic;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use tokio::sync::{
     broadcast,
@@ -27,7 +28,7 @@ use tokio::sync::{
     oneshot,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Diagnostic)]
 pub enum ConfigError {
     InvalidSeparator(String),
     InvalidWildcard(String),
@@ -88,8 +89,7 @@ pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
 pub trait Context<T, E: std::error::Error> {
     fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError>;
 }
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Diagnostic)]
 pub enum AuthorizationError {
     InsufficientPrivileges(Privilege, RequestPattern),
     TokenDecodeError(String),
@@ -113,7 +113,7 @@ impl std::error::Error for AuthorizationError {}
 
 pub type AuthorizationResult<T> = Result<T, AuthorizationError>;
 
-#[derive(Debug)]
+#[derive(Debug, Diagnostic)]
 pub enum WorterbuchError {
     IllegalWildcard(RequestPattern),
     IllegalMultiWildcard(RequestPattern),
@@ -216,7 +216,7 @@ impl From<oneshot::error::RecvError> for WorterbuchError {
 
 pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 
-#[derive(Debug)]
+#[derive(Debug, Diagnostic)]
 pub enum ConnectionError {
     IoError(io::Error),
     SendError(Box<dyn std::error::Error + Send + Sync>),

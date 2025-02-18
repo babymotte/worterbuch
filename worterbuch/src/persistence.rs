@@ -18,7 +18,7 @@
  */
 
 use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
-use anyhow::{anyhow, Context, Result};
+use miette::{miette, Context, IntoDiagnostic, Result};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -106,7 +106,7 @@ async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
             );
             Ok(false)
         } else {
-            File::create(path).await?;
+            File::create(path).await.into_diagnostic()?;
             log::debug!(
                 "toggle file {} created, writing to main",
                 path.to_string_lossy()
@@ -141,11 +141,16 @@ async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
     log::debug!("Writing file {} …", path.to_string_lossy());
     let mut file = File::create(path)
         .await
-        .context(format!("creating file {} failed", path.to_string_lossy()))?;
+        .into_diagnostic()
+        .wrap_err_with(|| format!("creating file {} failed", path.to_string_lossy()))?;
     file.write_all(data)
         .await
-        .context("writing backup checksum file failed")?;
-    file.flush().await.context("failed to flush file")?;
+        .into_diagnostic()
+        .wrap_err("writing backup checksum file failed")?;
+    file.flush()
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to flush file")?;
     log::debug!("Writing file {} done.", path.to_string_lossy());
 
     Ok(())
@@ -154,16 +159,17 @@ async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
 async fn validate_file_content(path: &Path, data: &[u8]) -> Result<()> {
     log::debug!("Validating content of file {} …", path.to_string_lossy());
     let mut written_data = vec![];
-    let mut file = File::open(path).await?;
+    let mut file = File::open(path).await.into_diagnostic()?;
     file.read_to_end(&mut written_data)
         .await
-        .context(format!("failed to read written file {:?}", file))?;
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read written file {:?}", file))?;
 
     if written_data != data {
-        Err(anyhow!(format!(
+        Err(miette!(
             "writing file {} failed: written data and actual data don't match",
             path.to_string_lossy()
-        )))?;
+        ))?;
     }
 
     log::debug!("Content of file {} is OK.", path.to_string_lossy());
@@ -203,8 +209,8 @@ async fn load_v2(config: &Config) -> Result<Worterbuch> {
     }
 }
 
-async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch, anyhow::Error> {
-    let json = fs::read_to_string(path).await?;
+async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch> {
+    let json = fs::read_to_string(path).await.into_diagnostic()?;
     let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
     log::info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
@@ -242,8 +248,8 @@ mod legacy {
         sha_path: &PathBuf,
         config: &Config,
     ) -> Result<Worterbuch> {
-        let json = fs::read_to_string(json_path).await?;
-        let sha = fs::read_to_string(sha_path).await?;
+        let json = fs::read_to_string(json_path).await.into_diagnostic()?;
+        let sha = fs::read_to_string(sha_path).await.into_diagnostic()?;
 
         let mut hasher = Sha256::new();
         hasher.update(&json);
@@ -251,7 +257,7 @@ mod legacy {
         let loaded_sha = hex::encode(result);
 
         if sha != loaded_sha {
-            Err(anyhow::Error::msg("checksums did not match"))
+            Err(miette!("checksums did not match"))
         } else {
             let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
             Ok(worterbuch)

@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use anyhow::Result;
+use miette::Result;
 use std::io;
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;

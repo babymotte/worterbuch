@@ -21,24 +21,24 @@ use crate::{
     server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
 };
-use anyhow::anyhow;
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, StreamExt},
 };
+use miette::{miette, IntoDiagnostic, Result};
 use poem::web::websocket::{Message, WebSocketStream};
+use serde_json::json;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{select, spawn, sync::mpsc, time::sleep};
 use uuid::Uuid;
 use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
 
 pub(crate) async fn serve(
+    client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-) -> anyhow::Result<()> {
-    let client_id = Uuid::new_v4();
-
+) -> Result<()> {
     log::info!("New client connected: {client_id} ({remote_addr})");
 
     if let Err(e) = worterbuch
@@ -68,7 +68,7 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
@@ -98,7 +98,8 @@ async fn serve_loop(
                 protocol_version,
             },
         }))
-        .await?;
+        .await
+        .into_diagnostic()?;
 
     loop {
         select! {
@@ -143,17 +144,17 @@ async fn send_with_timeout(
     websocket: &mut WebSocketSender,
     send_timeout: Duration,
     client_id: Uuid,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
-    let json = serde_json::to_string(&msg)?;
+    let json = json!(msg).to_string();
     let msg = Message::Text(json);
     select! {
         r = websocket.send(msg) => {
-            r?;
+            r.into_diagnostic()?;
         },
         _ = sleep(send_timeout) => {
             log::error!("Send timeout for client {client_id}");
-            return Err(anyhow!("Send timeout for client {client_id}"));
+            return Err(miette!("Send timeout for client {client_id}"));
         },
     }
     log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());

@@ -25,6 +25,7 @@ use crate::{
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
 };
+use miette::IntoDiagnostic;
 use poem::{
     delete,
     endpoint::StaticFilesEndpoint,
@@ -35,7 +36,7 @@ use poem::{
     post,
     web::{
         sse::{Event, SSE},
-        websocket::WebSocket,
+        websocket::{WebSocket, WebSocketStream},
         Data, Json, Path, Query, RemoteAddr,
     },
     Addr, EndpointExt, IntoResponse, Request, Response, Result, Route,
@@ -48,8 +49,9 @@ use std::{
     time::Duration,
 };
 use tokio::{select, spawn, sync::mpsc};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use uuid::Uuid;
+use websocket::serve;
 use worterbuch_common::{
     error::WorterbuchError, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo,
     StateEvent,
@@ -71,19 +73,20 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 #[handler]
 fn ws(
     ws: WebSocket,
-    Data(wb): Data<&CloneableWbApi>,
+    Data(ws_tx): Data<&mpsc::Sender<(WebSocketStream, SocketAddr)>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<impl IntoResponse> {
     log::info!("Client connected");
-    let worterbuch = wb.to_owned();
     let remote = to_socket_addr(addr)?;
-    Ok(ws
-        .protocols(vec!["worterbuch"])
-        .on_upgrade(move |socket| async move {
-            if let Err(e) = websocket::serve(remote, worterbuch, socket).await {
-                log::error!("Error in WS connection: {e}");
-            }
-        }))
+
+    let ws_tx = ws_tx.clone();
+    let callback = move |socket| async move {
+        ws_tx.send((socket, remote)).await.ok();
+    };
+
+    let res = ws.protocols(vec!["worterbuch"]).on_upgrade(callback);
+
+    Ok(res)
 }
 
 #[handler]
@@ -543,16 +546,22 @@ pub async fn start(
     port: u16,
     public_addr: String,
     subsys: SubsystemHandle,
-) -> anyhow::Result<()> {
+) -> miette::Result<()> {
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
 
     let addr = format!("{bind_addr}:{port}");
 
+    let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
+    let wb = worterbuch.clone();
+    let wsserver = subsys.start(SubsystemBuilder::new("wsserver", |s| {
+        run_ws_server(s, ws_stream_rx, wb)
+    }));
+
     log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
     let mut app = Route::new();
 
-    app = app.at("/ws", get(ws.with(AddData::new(worterbuch.clone()))));
+    app = app.at("/ws", get(ws.with(AddData::new(ws_stream_tx))));
 
     let config = worterbuch.config().await?;
     let rest_api_version = 1;
@@ -662,9 +671,82 @@ pub async fn start(
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )
-        .await?;
+        .await
+        .into_diagnostic()?;
+
+    wsserver.initiate_shutdown();
+    if let Err(e) = wsserver.join().await {
+        log::error!("Error waiting for ws server to shut down: {e}");
+    }
 
     log::debug!("webserver subsystem completed.");
+
+    Ok(())
+}
+
+async fn run_ws_server(
+    subsys: SubsystemHandle,
+    mut listener: mpsc::Receiver<(WebSocketStream, SocketAddr)>,
+    worterbuch: CloneableWbApi,
+) -> Result<()> {
+    let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
+    let mut waiting_for_free_connections = false;
+
+    let mut clients = HashMap::new();
+
+    loop {
+        select! {
+            recv = conn_closed_rx.recv() => if let Some(id) = recv {
+                clients.remove(&id);
+                while let Ok(id) = conn_closed_rx.try_recv() {
+                    clients.remove(&id);
+                }
+                log::debug!("{} WS connection(s) open.", clients.len());
+                waiting_for_free_connections = false;
+            } else {
+                break;
+            },
+            con = listener.recv(), if !waiting_for_free_connections => {
+                log::debug!("Trying to accept new client connection.");
+                if let Some((socket, remote_addr)) = con {
+                    let id = Uuid::new_v4();
+                    log::debug!("{} WS connection(s) open.",clients.len());
+                    let worterbuch = worterbuch.clone();
+                    let conn_closed_tx = conn_closed_tx.clone();
+
+                    let cid = id.clone();
+                    let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
+                        select! {
+                            s = serve(cid, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                log::error!("Connection to client {cid} ({remote_addr:?}) closed with error: {e}");
+                            },
+                            _ = s.on_shutdown_requested() => (),
+                        }
+                        conn_closed_tx.send(cid).await.ok();
+                        Ok::<(),miette::Error>(())
+                    }));
+                    clients.insert(id, client);
+                } else {
+                    break;
+                }
+                log::debug!("Ready to accept new connections.");
+            },
+            _ = subsys.on_shutdown_requested() => break,
+        }
+    }
+
+    for (cid, subsys) in clients {
+        subsys.initiate_shutdown();
+        log::debug!("Waiting for connection to client {cid} to close …");
+        if let Err(e) = subsys.join().await {
+            log::error!("Error waiting for client {cid} to disconnect: {e}");
+        }
+    }
+    log::debug!("All clients disconnected.");
+
+    drop(listener);
+
+    log::debug!("wsserver subsystem completed.");
 
     Ok(())
 }

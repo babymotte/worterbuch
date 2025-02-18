@@ -1625,6 +1625,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-graceful-shutdown"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75ddc890a3cd9a4a253244eb3222c101b39e6e8081847854b45241d5c0805181"
+dependencies = [
+ "async-trait",
+ "atomic",
+ "bytemuck",
+ "miette",
+ "pin-project-lite",
+ "thiserror 2.0.11",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "tokio-macros"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2087,7 +2104,6 @@ dependencies = [
 name = "worterbuch"
 version = "1.0.1"
 dependencies = [
- "anyhow",
  "clap",
  "dotenv",
  "futures",
@@ -2103,7 +2119,7 @@ dependencies = [
  "sha2",
  "tikv-jemallocator",
  "tokio",
- "tokio-graceful-shutdown",
+ "tokio-graceful-shutdown 0.16.0",
  "tokio-stream",
  "tokio-util",
  "tracing-subscriber",
@@ -2122,7 +2138,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-graceful-shutdown",
+ "tokio-graceful-shutdown 0.15.3",
  "tracing-subscriber",
  "worterbuch-client",
 ]
@@ -2147,6 +2163,7 @@ name = "worterbuch-common"
 version = "1.0.0"
 dependencies = [
  "log",
+ "miette",
  "random_word",
  "serde",
  "serde_json",
@@ -2169,7 +2186,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-graceful-shutdown",
+ "tokio-graceful-shutdown 0.15.3",
  "tokio-stream",
  "tracing-subscriber",
  "worterbuch-client",

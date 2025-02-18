@@ -18,7 +18,7 @@
  */
 
 use crate::{store::Node, Config, Worterbuch, INTERNAL_CLIENT_ID};
-use anyhow::{Error, Result};
+use miette::{Error, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     io::{self, BufRead, ErrorKind},
@@ -69,16 +69,16 @@ pub async fn run_cluster_sync_port(
     log::info!("Starting cluster sync endpoint at {}:{} …", ip, port);
 
     let socket = match ip {
-        IpAddr::V4(_) => TcpSocket::new_v4()?,
-        IpAddr::V6(_) => TcpSocket::new_v6()?,
+        IpAddr::V4(_) => TcpSocket::new_v4().into_diagnostic()?,
+        IpAddr::V6(_) => TcpSocket::new_v6().into_diagnostic()?,
     };
 
-    socket.set_reuseaddr(true)?;
+    socket.set_reuseaddr(true).into_diagnostic()?;
     #[cfg(target_family = "unix")]
-    socket.set_reuseport(true)?;
-    socket.bind(SocketAddr::new(ip, port))?;
+    socket.set_reuseport(true).into_diagnostic()?;
+    socket.bind(SocketAddr::new(ip, port)).into_diagnostic()?;
 
-    let listener = socket.listen(1024)?;
+    let listener = socket.listen(1024).into_diagnostic()?;
 
     loop {
         select! {
@@ -225,7 +225,7 @@ pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
         }
         log::info!("Shutting down …");
         s.request_shutdown();
-        Ok::<(), anyhow::Error>(())
+        Ok::<(), miette::Error>(())
     }));
 
     thread::spawn(move || {
