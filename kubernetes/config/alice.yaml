@@ -8,6 +8,18 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+    - host: wb.local
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: worterbuch.homelab
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: worterbuch.local
+      paths:
+        - path: /
+          pathType: Prefix
 
 service:
   type: NodePort
