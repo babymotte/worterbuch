@@ -17,18 +17,25 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{env, time::Duration};
+use std::{
+    env,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    ops::Deref,
+    path::PathBuf,
+    time::Duration,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
-    pub host_addrs: Box<[String]>,
-    pub port: Option<u16>,
+    pub servers: Box<[SocketAddr]>,
     pub send_timeout: Duration,
     pub connection_timeout: Duration,
     pub auth_token: Option<String>,
     pub use_backpressure: bool,
     pub channel_buffer_size: usize,
+    #[cfg(target_family = "unix")]
+    pub socket_path: Option<PathBuf>,
 }
 
 impl Config {
@@ -37,21 +44,29 @@ impl Config {
             self.proto = val;
         }
 
-        if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESSES") {
-            self.host_addrs = val
+        if let Ok(val) = env::var("WORTERBUCH_SERVERS") {
+            self.servers = val
                 .split(',')
                 .map(str::trim)
-                .map(ToOwned::to_owned)
+                .filter_map(|s| s.to_socket_addrs().ok())
+                .flatten()
                 .collect();
         } else if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
-            self.host_addrs = vec![val].into();
-        }
-
-        if let Ok(val) = env::var("WORTERBUCH_PORT") {
-            if let Ok(port) = val.parse() {
-                self.port = Some(port);
+            let default_port = match self.proto.to_lowercase().deref() {
+                "ws" | "wss" | "http" | "https" => 8080,
+                _ => 8081,
+            };
+            let port = if let Ok(val) = env::var("WORTERBUCH_PORT") {
+                if let Ok(port) = val.parse() {
+                    port
+                } else {
+                    default_port
+                }
             } else {
-                log::error!("invalid port: {val}");
+                default_port
+            };
+            if let Ok(addr) = format!("{val}:{port}").to_socket_addrs() {
+                self.servers = addr.collect();
             }
         }
 
@@ -93,22 +108,28 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         let proto = "tcp".to_owned();
-        let host_addrs = vec!["localhost".to_owned()].into();
-        let port = Some(8081);
+        let servers = vec![SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(127, 0, 0, 1),
+            8081,
+        ))]
+        .into();
         let send_timeout = Duration::from_secs(5);
         let connection_timeout = Duration::from_secs(5);
         let channel_buffer_size = 1;
         let use_backpressure = true;
+        #[cfg(target_family = "unix")]
+        let socket_path = Some("/tmp/worterbuch.socket".into());
 
         Config {
             proto,
-            host_addrs,
-            port,
+            servers,
             send_timeout,
             connection_timeout,
             auth_token: None,
             channel_buffer_size,
             use_backpressure,
+            #[cfg(target_family = "unix")]
+            socket_path,
         }
     }
 }
@@ -120,11 +141,10 @@ impl Config {
         config
     }
 
-    pub fn with_addresses(proto: String, host_addr: &[String], port: Option<u16>) -> Self {
+    pub fn with_servers(proto: String, servers: Box<[SocketAddr]>) -> Self {
         let mut config = Config::new();
         config.proto = proto;
-        config.host_addrs = host_addr.into();
-        config.port = port;
+        config.servers = servers;
         config
     }
 }

@@ -35,12 +35,9 @@ struct Args {
     /// Connect to the Wörterbuch server using SSL encryption.
     #[arg(short, long)]
     ssl: bool,
-    /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
+    /// The addresses of the Wörterbuch servers in form <ip>:<port>[,<ip2>:<port2>,…]. When omitted, the value of the env var WORTERBUCH_SERVERS will be used. If that is not set, 127.0.0.1:8081 will be used.
     #[arg(short, long)]
     addr: Option<String>,
-    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
-    #[arg(short, long)]
-    port: Option<u16>,
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
@@ -91,17 +88,15 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     } else {
         config.proto
     };
-    config.host_addrs = args
+    config.servers = args
         .addr
         .map(|s| {
             s.split(',')
                 .map(str::trim)
-                .map(ToOwned::to_owned)
-                .collect::<Vec<String>>()
-                .into()
+                .filter_map(|s| s.parse().ok())
+                .collect()
         })
-        .unwrap_or(config.host_addrs);
-    config.port = args.port.or(config.port);
+        .unwrap_or(config.servers);
     let json = args.json;
     let raw = args.raw;
     let keys = args.keys;

@@ -31,7 +31,9 @@ use error::SubscriptionError;
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{self as json};
-use std::{collections::HashMap, future::Future, io, ops::ControlFlow, time::Duration};
+use std::{
+    collections::HashMap, future::Future, io, net::SocketAddr, ops::ControlFlow, time::Duration,
+};
 use tcp::TcpClientSocket;
 #[cfg(target_family = "unix")]
 use tokio::net::UnixStream;
@@ -680,9 +682,9 @@ pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDi
 
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let mut err = None;
-    for addr in &config.host_addrs {
+    for addr in &config.servers {
         log::info!("Trying to connect to server {addr} …");
-        match try_connect(config.clone(), addr).await {
+        match try_connect(config.clone(), *addr).await {
             Ok(con) => {
                 log::info!("Successfully connected to server {addr}");
                 return Ok(con);
@@ -702,40 +704,32 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
 
 pub async fn try_connect(
     config: Config,
-    host_addr: &str,
+    host_addr: SocketAddr,
 ) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let proto = &config.proto;
-    let port = config.port;
     let tcp = proto == "tcp";
     let unix = proto == "unix";
-    let path = if tcp {
-        ""
-    } else if unix {
-        host_addr
-    } else {
-        "/ws"
-    };
+    let path = if tcp { "" } else { "/ws" };
+    #[cfg(target_family = "unix")]
     let url = if unix {
-        path.to_owned()
+        config
+            .socket_path
+            .clone()
+            .unwrap_or_else(|| "/tmp/worterbuch.socket".into())
+            .to_string_lossy()
+            .to_string()
     } else {
-        format!(
-            "{proto}://{host_addr}:{}{path}",
-            port.expect("No port specified.")
-        )
+        format!("{proto}://{host_addr}{path}")
     };
+    #[cfg(not(target_family = "unix"))]
+    let url = format!("{proto}://{host_addr}{path}");
 
     log::debug!("Got server url from config: {url}");
 
     let (disco_tx, disco_rx) = oneshot::channel();
 
     let wb = if tcp {
-        connect_tcp(
-            host_addr.to_owned(),
-            port.expect("no port specified for TCP connection"),
-            disco_tx,
-            config,
-        )
-        .await?
+        connect_tcp(host_addr, disco_tx, config).await?
     } else if unix {
         #[cfg(target_family = "unix")]
         let wb = connect_unix(url, disco_tx, config).await?;
@@ -877,24 +871,23 @@ async fn connect_ws(
 }
 
 async fn connect_tcp(
-    host_addr: String,
-    port: u16,
+    host_addr: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let timeout = config.connection_timeout;
     log::debug!(
-        "Connecting to server tcp://{host_addr}:{port} (timeout: {} ms) …",
+        "Connecting to server tcp://{host_addr} (timeout: {} ms) …",
         timeout.as_millis()
     );
 
     let stream = select! {
-        conn = TcpStream::connect(format!("{host_addr}:{port}")) => conn,
+        conn = TcpStream::connect(host_addr) => conn,
         _ = sleep(timeout) => {
             return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
         },
     }?;
-    log::debug!("Connected to tcp://{host_addr}:{port}.");
+    log::debug!("Connected to tcp://{host_addr}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
     let mut tcp_rx = BufReader::new(tcp_rx).lines();
 
