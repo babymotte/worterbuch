@@ -20,11 +20,16 @@ use super::{
     process_manager::{ChildProcessManager, CommandDefinition},
 };
 use crate::{
+    persist_leader_timestamp,
     utils::{listen, send_heartbeat_requests},
     Heartbeat, PeerMessage, Vote,
 };
 use miette::Result;
-use std::{collections::HashMap, ops::ControlFlow, time::Instant};
+use std::{
+    collections::HashMap,
+    ops::ControlFlow,
+    time::{Duration, Instant},
+};
 use tokio::{net::UdpSocket, select, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
 
@@ -37,7 +42,8 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
 
     let mut buf = [0u8; 65507];
 
-    let mut interval = interval(config.heartbeat_interval);
+    let mut heartbeat_interval = interval(config.heartbeat_interval);
+    let mut leader_timestamp_interval = interval(Duration::from_secs(1));
 
     let mut heartbeat_responses = HashMap::new();
 
@@ -47,12 +53,15 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
 
     loop {
         select! {
-            _ = interval.tick() => {
+            _ = heartbeat_interval.tick() => {
                 log::trace!("Sending heartbeat …");
                 send_heartbeat_requests(config, socket).await?;
                 if !check_heartbeat_responses(&heartbeat_responses, config) {
                     break;
                 }
+            },
+            _ = leader_timestamp_interval.tick() => {
+                persist_leader_timestamp(&config.data_dir).await?;
             },
             flow = listen(socket, &mut buf, |msg| async {
                 match msg {
@@ -80,6 +89,8 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
             _ = subsys.on_shutdown_requested() => break,
         }
     }
+
+    persist_leader_timestamp(&config.data_dir).await?;
 
     proc_manager.stop().await?;
 

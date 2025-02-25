@@ -21,12 +21,17 @@ use super::{
     PeerMessage,
 };
 use crate::{
+    persist_follower_timestamp,
     utils::{listen, send_heartbeat_response},
     Heartbeat, HeartbeatRequest, Vote,
 };
 use miette::Result;
-use std::{net::IpAddr, ops::ControlFlow};
-use tokio::{net::UdpSocket, select, time::sleep};
+use std::{net::IpAddr, ops::ControlFlow, time::Duration};
+use tokio::{
+    net::UdpSocket,
+    select,
+    time::{interval, sleep},
+};
 use tokio_graceful_shutdown::SubsystemHandle;
 
 pub async fn follow(
@@ -40,6 +45,8 @@ pub async fn follow(
         .restart(cmd(leader_heartbeat.peer_info.address.ip(), config))
         .await;
 
+    let mut follower_timestamp_interval = interval(Duration::from_secs(1));
+
     let mut buf = [0u8; 65507];
 
     loop {
@@ -47,6 +54,9 @@ pub async fn follow(
             _ = sleep(config.heartbeat_timeout()) => {
                 log::info!("Leader heartbeat timed out. Starting election …");
                 break;
+            },
+            _ = follower_timestamp_interval.tick() => {
+                persist_follower_timestamp(&config.data_dir).await?;
             },
             flow = listen(socket, &mut buf, |msg| async {
                 match msg {

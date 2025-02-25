@@ -16,13 +16,14 @@
  */
 
 use super::PeerInfo;
+use crate::{load_millis_since_follower, load_millis_since_leader, Priority};
 use clap::Parser;
 use miette::{miette, Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::{
     collections::HashSet,
     net::{SocketAddr, ToSocketAddrs},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tokio::fs;
@@ -126,6 +127,12 @@ struct Args {
     /// Port for stats endpoint
     #[arg(long, env = "WBCLUSTER_STATS_PORT", default_value = "8383")]
     stats_port: u16,
+    /// Leader election priority
+    #[arg(long = "prio", env = "WBCLUSTER_ELECTION_PRIO")]
+    priority: Option<i64>,
+    /// Data directory
+    #[arg(long, env = "WORTERBUCH_DATA_DIR", default_value = "./data")]
+    data_dir: PathBuf,
 }
 
 fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usize, bool)> {
@@ -188,6 +195,8 @@ pub struct Config {
     pub sync_port: u16,
     pub worterbuch_executable: String,
     pub stats_port: u16,
+    pub data_dir: PathBuf,
+    priority: Option<i64>,
 }
 
 impl Config {
@@ -205,6 +214,26 @@ impl Config {
             .iter()
             .find(|p| p.node_id == node_id)
             .map(|p| p.address)
+    }
+
+    pub async fn priority(&self) -> Priority {
+        if let Some(prio) = self.priority {
+            log::info!("Configured priority: {prio}");
+            return Priority::Primary(prio);
+        }
+
+        if let Some(prio) = load_millis_since_leader(&self.data_dir).await {
+            log::info!("Prio from time since last leader: {prio}");
+            return Priority::Primary(prio);
+        }
+
+        if let Some(prio) = load_millis_since_follower(&self.data_dir).await {
+            log::info!("Prio from time since last follower: {prio}");
+            return Priority::Secondary(prio);
+        }
+
+        log::info!("No prio configured and never been leader or follower.");
+        Priority::Secondary(i64::MAX)
     }
 }
 
@@ -236,6 +265,8 @@ pub async fn load_config() -> Result<Config> {
             }
         })
         .collect();
+    let data_dir = args.data_dir;
+    let priority = args.priority;
 
     log::debug!("Configured nodes: {nodes:?}");
     log::debug!("Configured peers: {peers:?}");
@@ -254,5 +285,7 @@ pub async fn load_config() -> Result<Config> {
         sync_port: args.sync_port,
         worterbuch_executable: args.worterbuch_executable,
         stats_port: args.stats_port,
+        priority,
+        data_dir,
     })
 }

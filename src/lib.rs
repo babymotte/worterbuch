@@ -28,12 +28,12 @@ use config::load_config;
 use election::{elect_leader, ElectionOutcome};
 use follower::follow;
 use leader::lead;
-use miette::Result;
+use miette::{IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;
-use std::net::SocketAddr;
-use tokio::select;
+use std::{cmp::Ordering, net::SocketAddr, path::Path};
+use tokio::{fs::File, select};
 use tokio_graceful_shutdown::SubsystemHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +54,25 @@ pub enum Vote {
 #[serde(rename_all = "camelCase")]
 pub struct VoteRequest {
     node_id: String,
+    priority: Priority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Priority {
+    Primary(i64),
+    Secondary(i64),
+}
+
+impl PartialOrd for Priority {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Priority::Primary(a), Priority::Primary(b))
+            | (Priority::Secondary(a), Priority::Secondary(b)) => b.partial_cmp(a),
+            (Priority::Primary(_), Priority::Secondary(_)) => Some(Ordering::Greater),
+            (Priority::Secondary(_), Priority::Primary(_)) => Some(Ordering::Less),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,4 +149,75 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
     }
 
     Ok(())
+}
+
+const LEADER_TIMESTAMP_FILE_NAME: &str = ".leader";
+const FOLLOWER_TIMESTAMP_FILE_NAME: &str = ".follower";
+
+pub async fn persist_leader_timestamp(path: &Path) -> Result<()> {
+    persist_timestamp(&path.join(LEADER_TIMESTAMP_FILE_NAME)).await
+}
+
+pub async fn persist_follower_timestamp(path: &Path) -> Result<()> {
+    persist_timestamp(&path.join(FOLLOWER_TIMESTAMP_FILE_NAME)).await
+}
+
+pub async fn load_millis_since_leader(path: &Path) -> Option<i64> {
+    load_millis_since(&path.join(LEADER_TIMESTAMP_FILE_NAME)).await
+}
+pub async fn load_millis_since_follower(path: &Path) -> Option<i64> {
+    load_millis_since(&path.join(FOLLOWER_TIMESTAMP_FILE_NAME)).await
+}
+
+async fn persist_timestamp(path: &Path) -> Result<()> {
+    File::create(path).await.into_diagnostic()?;
+    Ok(())
+}
+
+async fn load_millis_since(path: &Path) -> Option<i64> {
+    log::debug!("getting metadata of file {path:?}");
+    let file = File::open(path).await.ok()?;
+    let last_modified = file.metadata().await.ok()?.modified().ok()?;
+    log::debug!("{path:?} last modified: {last_modified:?}");
+    let elapsed = last_modified.elapsed().ok()?;
+    Some(elapsed.as_millis() as i64)
+}
+
+#[cfg(test)]
+mod lib_test {
+
+    use super::*;
+
+    #[test]
+    fn primary_priority_always_takes_precendence() {
+        assert!(Priority::Primary(i64::MIN) > Priority::Secondary(i64::MAX));
+        assert!(Priority::Primary(i64::MAX) > Priority::Secondary(i64::MIN));
+        assert!(Priority::Primary(10) > Priority::Secondary(200));
+        assert!(Priority::Primary(200) > Priority::Secondary(10));
+        assert!(Priority::Primary(-10) > Priority::Secondary(200));
+        assert!(Priority::Primary(200) > Priority::Secondary(-10));
+        assert!(Priority::Primary(0) > Priority::Secondary(0));
+    }
+
+    #[test]
+    fn primary_priorities_are_ordered_by_value() {
+        assert!(Priority::Primary(i64::MIN) > Priority::Primary(i64::MAX));
+        assert!(Priority::Primary(i64::MAX) < Priority::Primary(i64::MIN));
+        assert!(Priority::Primary(10) > Priority::Primary(200));
+        assert!(Priority::Primary(200) < Priority::Primary(10));
+        assert!(Priority::Primary(-10) > Priority::Primary(200));
+        assert!(Priority::Primary(200) < Priority::Primary(-10));
+        assert!(Priority::Primary(0) == Priority::Primary(0));
+    }
+
+    #[test]
+    fn secondary_priorities_are_ordered_by_value() {
+        assert!(Priority::Secondary(i64::MIN) > Priority::Secondary(i64::MAX));
+        assert!(Priority::Secondary(i64::MAX) < Priority::Secondary(i64::MIN));
+        assert!(Priority::Secondary(10) > Priority::Secondary(200));
+        assert!(Priority::Secondary(200) < Priority::Secondary(10));
+        assert!(Priority::Secondary(-10) > Priority::Secondary(200));
+        assert!(Priority::Secondary(200) < Priority::Secondary(-10));
+        assert!(Priority::Secondary(0) == Priority::Secondary(0));
+    }
 }
