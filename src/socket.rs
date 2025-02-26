@@ -22,7 +22,7 @@ use tokio::net::UdpSocket;
 
 pub async fn init_socket(config: &Config) -> Result<UdpSocket> {
     let bind_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-    let port = config.orchestration_port;
+    let port = config.raft_port;
 
     let addr = SocketAddr::new(bind_addr, port);
 

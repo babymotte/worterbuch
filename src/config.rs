@@ -34,14 +34,15 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 pub struct RawPeerInfo {
     node_id: String,
     address: String,
+    raft_port: u16,
+    sync_port: u16,
 }
 
 impl TryFrom<&RawPeerInfo> for PeerInfo {
     type Error = miette::Error;
 
     fn try_from(value: &RawPeerInfo) -> std::result::Result<Self, Self::Error> {
-        let addrs: Vec<SocketAddr> = value
-            .address
+        let addrs: Vec<SocketAddr> = format!("{}:{}", value.address, value.raft_port)
             .to_socket_addrs()
             .into_diagnostic()
             .wrap_err_with(|| {
@@ -68,7 +69,9 @@ impl TryFrom<&RawPeerInfo> for PeerInfo {
 
         Ok(PeerInfo {
             node_id: value.node_id.to_owned(),
-            address,
+            address: address.ip(),
+            raft_port: value.raft_port,
+            sync_port: value.sync_port,
         })
     }
 }
@@ -109,7 +112,7 @@ struct Args {
     )]
     heartbeat_min_timeout: u64,
     /// Port at which orchestrator will listen for votes and heartbeats from other nodes
-    #[arg(short, long, env = "WBCLUSTER_PORT", default_value = "8181")]
+    #[arg(short, long, env = "WBCLUSTER_RAFT_PORT", default_value = "8181")]
     port: u16,
     /// The quorum required for a successful leader election vote [default: <number of nodes> / 2 + 1]
     #[arg(short, long, env = "WBCLUSTER_QUORUM")]
@@ -194,21 +197,27 @@ impl Peers {
         &self.0
     }
 
-    pub fn get_node_addr(&self, node_id: &str) -> Option<SocketAddr> {
+    pub fn raft_addr(&self, node_id: &str) -> Option<SocketAddr> {
         self.0
             .iter()
             .find(|p| p.node_id == node_id)
-            .map(|p| p.address)
+            .map(|p| p.raft_addr())
+    }
+
+    pub fn sync_addr(&self, node_id: &str) -> Option<SocketAddr> {
+        self.0
+            .iter()
+            .find(|p| p.node_id == node_id)
+            .map(|p| p.sync_addr())
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub node_id: String,
-    pub address: SocketAddr,
     pub heartbeat_interval: Duration,
     pub heartbeat_min_timeout: u64,
-    pub orchestration_port: u16,
+    pub raft_port: u16,
     pub quorum: usize,
     pub quorum_too_low: bool,
     pub sync_port: u16,
@@ -270,11 +279,14 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
         .iter()
         .map(PeerInfo::try_from)
         .collect::<Result<Vec<PeerInfo>>>()?;
-    let address = nodes
-        .iter()
-        .find(|p| p.node_id == args.node_id)
-        .ok_or_else(|| miette!("No socket address configured for this node."))?
-        .address;
+
+    if !nodes.iter().any(|p| p.node_id == args.node_id) {
+        return Err(miette!(
+            "Node '{}' is not defined in the cluster config.",
+            args.node_id
+        ));
+    }
+
     let peers: Vec<PeerInfo> = nodes
         .iter()
         .filter_map(|p| {
@@ -299,10 +311,9 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
 
     let config = Config {
         node_id: args.node_id.clone(),
-        address,
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
-        orchestration_port: args.port,
+        raft_port: args.port,
         quorum,
         quorum_too_low,
         sync_port: args.sync_port,

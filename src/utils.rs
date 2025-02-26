@@ -17,10 +17,7 @@
 
 use crate::config::Peers;
 
-use super::{
-    config::Config, HeartbeatRequest, PeerInfo, PeerMessage, PublicEndpoints, VoteRequest,
-    VoteResponse,
-};
+use super::{config::Config, HeartbeatRequest, PeerMessage, VoteRequest, VoteResponse};
 use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
@@ -30,28 +27,15 @@ pub async fn send_heartbeat_requests(
     socket: &UdpSocket,
     peers: &Peers,
 ) -> Result<()> {
-    let peer_info = PeerInfo {
-        node_id: config.node_id.clone(),
-        address: config.address,
-    };
+    let node_id = config.node_id.clone();
 
-    // TODO get and use actual public endpoints
-    let public_endpoints = PublicEndpoints {
-        address: config.address.ip().to_string(),
-        tcp_port: 8081,
-        ws_port: 8080,
-    };
-
-    let msg = PeerMessage::Heartbeat(super::Heartbeat::Request(HeartbeatRequest {
-        peer_info,
-        public_endpoints,
-    }));
+    let msg = PeerMessage::Heartbeat(super::Heartbeat::Request(HeartbeatRequest { node_id }));
     let data = serde_json::to_string(&msg).expect("PeerMessage not serializeable");
     let data = data.as_bytes();
 
     for peer in peers.peer_nodes() {
         socket
-            .send_to(data, peer.address)
+            .send_to(data, peer.raft_addr())
             .await
             .into_diagnostic()
             .wrap_err_with(|| {
@@ -68,8 +52,15 @@ pub async fn send_heartbeat_requests(
 pub async fn send_heartbeat_response(
     heartbeat: &HeartbeatRequest,
     config: &Config,
+    peers: &Peers,
     socket: &UdpSocket,
 ) -> Result<()> {
+    let peer_addr = if let Some(it) = peers.raft_addr(&heartbeat.node_id) {
+        it
+    } else {
+        return Ok(());
+    };
+
     let msg = PeerMessage::Heartbeat(super::Heartbeat::Response(super::HeartbeatResponse {
         node_id: config.node_id.clone(),
     }));
@@ -77,13 +68,13 @@ pub async fn send_heartbeat_response(
     let data = data.as_bytes();
 
     socket
-        .send_to(data, heartbeat.peer_info.address)
+        .send_to(data, peer_addr)
         .await
         .into_diagnostic()
         .wrap_err_with(|| {
             format!(
                 "error sending peer message to {}@{}",
-                heartbeat.peer_info.node_id, heartbeat.peer_info.address
+                heartbeat.node_id, peer_addr
             )
         })?;
 
@@ -96,7 +87,7 @@ pub async fn support_vote(
     socket: &UdpSocket,
     peers: &Peers,
 ) -> Result<()> {
-    if let Some(addr) = peers.get_node_addr(&vote.node_id) {
+    if let Some(addr) = peers.raft_addr(&vote.node_id) {
         let resp = PeerMessage::Vote(super::Vote::Response(VoteResponse {
             node_id: config.node_id.to_owned(),
         }));

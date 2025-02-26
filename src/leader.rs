@@ -99,7 +99,7 @@ pub async fn lead(
                     },
                     PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
                         if config.quorum_too_low {
-                            log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.peer_info.node_id);
+                            log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.node_id);
                             return Ok(ControlFlow::Break(()));
                         }
                     },

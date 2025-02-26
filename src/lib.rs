@@ -32,7 +32,11 @@ use miette::{miette, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;
-use std::{cmp::Ordering, net::SocketAddr, path::Path};
+use std::{
+    cmp::Ordering,
+    net::{IpAddr, SocketAddr},
+    path::Path,
+};
 use tokio::{fs::File, select};
 use tokio_graceful_shutdown::SubsystemHandle;
 
@@ -57,7 +61,7 @@ pub struct VoteRequest {
     priority: Priority,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Priority(i64);
 
@@ -89,8 +93,7 @@ pub enum Heartbeat {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatRequest {
-    peer_info: PeerInfo,
-    public_endpoints: PublicEndpoints,
+    node_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,15 +106,19 @@ pub struct HeartbeatResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
     node_id: String,
-    address: SocketAddr,
+    address: IpAddr,
+    raft_port: u16,
+    sync_port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicEndpoints {
-    address: String,
-    tcp_port: u16,
-    ws_port: u16,
+impl PeerInfo {
+    pub fn raft_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.address, self.raft_port)
+    }
+
+    pub fn sync_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.address, self.sync_port)
+    }
 }
 
 pub async fn run(subsys: SubsystemHandle) -> Result<()> {
@@ -127,9 +134,11 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
     let stats = start_stats_endpoint(&subsys, config.stats_port).await?;
 
     while !subsys.is_shutdown_requested() {
+        let prio = config.priority().await;
+
         stats.candidate().await;
         let outcome = select! {
-            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => res?,
+            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
             _ = subsys.on_shutdown_requested() => break,
         };
 
@@ -144,7 +153,7 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
             ElectionOutcome::Follower(heartbeat) => {
                 stats.follower().await;
                 select! {
-                    it = follow(&subsys, &mut socket,  &config, heartbeat) => it?,
+                    it = follow(&subsys, &mut socket,  &config, &peers, heartbeat) => it?,
                     _ = subsys.on_shutdown_requested() => break,
                 }
             }
