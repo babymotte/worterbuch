@@ -21,7 +21,7 @@ use super::{
 };
 use crate::{
     config::Peers,
-    persist_leader_timestamp,
+    persist_active_timestamp,
     utils::{listen, send_heartbeat_requests},
     Heartbeat, PeerMessage, Vote,
 };
@@ -80,7 +80,7 @@ pub async fn lead(
                 }
             },
             _ = leader_timestamp_interval.tick() => {
-                persist_leader_timestamp(&config.data_dir).await?;
+                persist_active_timestamp(&config.data_dir).await?;
             },
             recv = peers_rx.recv() => if let Some(p) = recv {
                 log::info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
@@ -116,7 +116,7 @@ pub async fn lead(
         }
     }
 
-    persist_leader_timestamp(&config.data_dir).await?;
+    persist_active_timestamp(&config.data_dir).await?;
 
     proc_manager.stop().await?;
 

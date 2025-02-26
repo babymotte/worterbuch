@@ -16,7 +16,7 @@
  */
 
 use super::PeerInfo;
-use crate::{load_millis_since_follower, load_millis_since_leader, Priority};
+use crate::{load_millis_since_active, Priority};
 use clap::Parser;
 use miette::{miette, Context, IntoDiagnostic, Result};
 use serde::Deserialize;
@@ -233,21 +233,16 @@ impl Config {
     pub async fn priority(&self) -> Priority {
         if let Some(prio) = self.priority {
             log::debug!("Configured priority: {prio}");
-            return Priority::Primary(prio);
+            return Priority(prio);
         }
 
-        if let Some(prio) = load_millis_since_leader(&self.data_dir).await {
-            log::debug!("Prio from time since last leader: {prio}");
-            return Priority::Primary(prio);
-        }
-
-        if let Some(prio) = load_millis_since_follower(&self.data_dir).await {
-            log::debug!("Prio from time since last follower: {prio}");
-            return Priority::Secondary(prio);
+        if let Some(prio) = load_millis_since_active(&self.data_dir).await {
+            log::debug!("Prio from time since last active: {prio}");
+            return Priority(prio);
         }
 
         log::debug!("No prio configured and never been leader or follower.");
-        Priority::Secondary(i64::MAX)
+        Priority(i64::MAX)
     }
 
     pub fn update_quorum(&mut self, peers: &Peers) -> Result<()> {
