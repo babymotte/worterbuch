@@ -15,6 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::config::Peers;
+
 use super::{
     config::Config, HeartbeatRequest, PeerInfo, PeerMessage, PublicEndpoints, VoteRequest,
     VoteResponse,
@@ -23,7 +25,11 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
 
-pub async fn send_heartbeat_requests(config: &Config, socket: &UdpSocket) -> Result<()> {
+pub async fn send_heartbeat_requests(
+    config: &Config,
+    socket: &UdpSocket,
+    peers: &Peers,
+) -> Result<()> {
     let peer_info = PeerInfo {
         node_id: config.node_id.clone(),
         address: config.address,
@@ -43,7 +49,7 @@ pub async fn send_heartbeat_requests(config: &Config, socket: &UdpSocket) -> Res
     let data = serde_json::to_string(&msg).expect("PeerMessage not serializeable");
     let data = data.as_bytes();
 
-    for peer in &config.peer_nodes {
+    for peer in peers.peer_nodes() {
         socket
             .send_to(data, peer.address)
             .await
@@ -84,8 +90,13 @@ pub async fn send_heartbeat_response(
     Ok(())
 }
 
-pub async fn support_vote(vote: VoteRequest, config: &Config, socket: &UdpSocket) -> Result<()> {
-    if let Some(addr) = config.get_node_addr(&vote.node_id) {
+pub async fn support_vote(
+    vote: VoteRequest,
+    config: &Config,
+    socket: &UdpSocket,
+    peers: &Peers,
+) -> Result<()> {
+    if let Some(addr) = peers.get_node_addr(&vote.node_id) {
         let resp = PeerMessage::Vote(super::Vote::Response(VoteResponse {
             node_id: config.node_id.to_owned(),
         }));

@@ -28,7 +28,7 @@ use config::load_config;
 use election::{elect_leader, ElectionOutcome};
 use follower::follow;
 use leader::lead;
-use miette::{IntoDiagnostic, Result};
+use miette::{miette, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;
@@ -117,15 +117,21 @@ pub struct PublicEndpoints {
 }
 
 pub async fn run(subsys: SubsystemHandle) -> Result<()> {
-    let config = load_config().await?;
+    let (mut config, mut peers_rx) = load_config(&subsys).await?;
+
+    let mut peers = peers_rx
+        .recv()
+        .await
+        .ok_or_else(|| miette!("peers sender dropped"))?;
+
     let mut socket = init_socket(&config).await?;
 
-    let stats = start_stats_endpoint(&subsys, &config).await?;
+    let stats = start_stats_endpoint(&subsys, config.stats_port).await?;
 
     while !subsys.is_shutdown_requested() {
         stats.candidate().await;
         let outcome = select! {
-            res = elect_leader(&subsys, &mut socket, &config) => res?,
+            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => res?,
             _ = subsys.on_shutdown_requested() => break,
         };
 
@@ -133,7 +139,7 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
             ElectionOutcome::Leader => {
                 stats.leader().await;
                 select! {
-                    it = lead(&subsys, &mut socket, &config) => it?,
+                    it = lead(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => it?,
                     _ = subsys.on_shutdown_requested() => break,
                 }
             }

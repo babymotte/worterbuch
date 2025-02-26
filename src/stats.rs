@@ -1,4 +1,3 @@
-use crate::config::Config;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use miette::{Context, IntoDiagnostic, Result};
 use serde_json::json;
@@ -77,16 +76,12 @@ impl Server {
     }
 }
 
-pub async fn start_stats_endpoint(
-    subsys: &SubsystemHandle,
-    config: &Config,
-) -> Result<StatsSender> {
+pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
     let (evt_tx, evt_rx) = mpsc::channel(1);
     let (api_tx, api_rx) = mpsc::channel(1);
 
     StatsActor::start(subsys, evt_rx, api_rx);
 
-    let port = config.stats_port;
     subsys.start(SubsystemBuilder::new("stats-endpoint", move |s| {
         run_server(s, api_tx, port)
     }));

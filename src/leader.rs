@@ -20,6 +20,7 @@ use super::{
     process_manager::{ChildProcessManager, CommandDefinition},
 };
 use crate::{
+    config::Peers,
     persist_leader_timestamp,
     utils::{listen, send_heartbeat_requests},
     Heartbeat, PeerMessage, Vote,
@@ -30,10 +31,16 @@ use std::{
     ops::ControlFlow,
     time::{Duration, Instant},
 };
-use tokio::{net::UdpSocket, select, time::interval};
+use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
 
-pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Config) -> Result<()> {
+pub async fn lead(
+    subsys: &SubsystemHandle,
+    socket: &mut UdpSocket,
+    config: &mut Config,
+    peers: &mut Peers,
+    peers_rx: &mut mpsc::Receiver<Peers>,
+) -> Result<()> {
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-leader", false);
 
     log::info!("Starting worterbuch server in leader mode …");
@@ -47,21 +54,40 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
 
     let mut heartbeat_responses = HashMap::new();
 
-    for peer in &config.peer_nodes {
+    for peer in peers.peer_nodes() {
         heartbeat_responses.insert(peer.node_id.clone(), Instant::now());
     }
 
+    let mut peers_changed: Option<Instant> = None;
+
     loop {
+        let update_quorum = if let Some(instant) = &peers_changed {
+            instant.elapsed().as_secs() > 10 + 2 * config.config_scan_interval
+        } else {
+            false
+        };
+        if update_quorum {
+            peers_changed = None;
+            config.update_quorum(&peers)?;
+        }
+
         select! {
             _ = heartbeat_interval.tick() => {
                 log::trace!("Sending heartbeat …");
-                send_heartbeat_requests(config, socket).await?;
-                if !check_heartbeat_responses(&heartbeat_responses, config) {
+                send_heartbeat_requests(config, socket, &peers).await?;
+                if !check_heartbeat_responses(&heartbeat_responses, config, &peers) {
                     break;
                 }
             },
             _ = leader_timestamp_interval.tick() => {
                 persist_leader_timestamp(&config.data_dir).await?;
+            },
+            recv = peers_rx.recv() => if let Some(p) = recv {
+                log::info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
+                *peers = p;
+                peers_changed = Some(Instant::now());
+            } else {
+                break;
             },
             flow = listen(socket, &mut buf, |msg| async {
                 match msg {
@@ -100,24 +126,26 @@ pub async fn lead(subsys: &SubsystemHandle, socket: &mut UdpSocket, config: &Con
 fn check_heartbeat_responses(
     heartbeat_responses: &HashMap<String, Instant>,
     config: &Config,
+    peers: &Peers,
 ) -> bool {
-    let number_of_nodes = config.peer_nodes.len() + 1;
-    let mut unresponsive_nodes = 0;
-    let mut responsive_nodes;
+    let mut unresponsive_nodes = peers.peer_nodes().len();
+    let mut responsive_nodes = 1;
+    let number_of_nodes = unresponsive_nodes + 1;
 
-    for (node_id, timestamp) in heartbeat_responses {
-        if timestamp.elapsed() > config.heartbeat_timeout() {
-            unresponsive_nodes += 1;
-            responsive_nodes = number_of_nodes - unresponsive_nodes;
+    for (peer, timestamp) in heartbeat_responses {
+        if timestamp.elapsed() <= config.heartbeat_timeout() {
+            responsive_nodes += 1;
+            unresponsive_nodes = unresponsive_nodes.saturating_sub(1);
+        } else {
             log::debug!(
                 "Heartbeat response of node '{}' is overdue ({}/{} node(s) responsive; quorum: {}).",
-                node_id,
+                peer,
                 responsive_nodes, number_of_nodes, config.quorum
             );
         }
     }
 
-    if number_of_nodes - unresponsive_nodes < config.quorum {
+    if responsive_nodes < config.quorum {
         log::warn!("Quorum of {} is no longer met, too many unresponsive peers. Cluster is no longer able to build a consensus, dropping to follower state to allow re-election.", config.quorum);
         false
     } else {

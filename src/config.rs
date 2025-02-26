@@ -26,19 +26,20 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::fs;
+use tokio::{fs, select, sync::mpsc, time::interval};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawPeerInfo {
     node_id: String,
     address: String,
 }
 
-impl TryFrom<RawPeerInfo> for PeerInfo {
+impl TryFrom<&RawPeerInfo> for PeerInfo {
     type Error = miette::Error;
 
-    fn try_from(value: RawPeerInfo) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: &RawPeerInfo) -> std::result::Result<Self, Self::Error> {
         let addrs: Vec<SocketAddr> = value
             .address
             .to_socket_addrs()
@@ -66,13 +67,13 @@ impl TryFrom<RawPeerInfo> for PeerInfo {
             .ok_or_else(|| miette!("could not resolve address {}", value.address))?;
 
         Ok(PeerInfo {
-            node_id: value.node_id,
+            node_id: value.node_id.to_owned(),
             address,
         })
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 struct ConfigFile {
     nodes: Vec<RawPeerInfo>,
 }
@@ -133,10 +134,13 @@ struct Args {
     /// Data directory
     #[arg(long, env = "WORTERBUCH_DATA_DIR", default_value = "./data")]
     data_dir: PathBuf,
+    /// Config scan interval in seconds
+    #[arg(long, env = "WBCLUSTER_CONFIG_SCAN_INTERVAL", default_value_t = 5)]
+    config_scan_interval: u64,
 }
 
 fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usize, bool)> {
-    let node_count = peers.len();
+    let node_count = peers.len() + 1;
 
     let recommended_min_quorum = node_count / 2 + 1;
 
@@ -183,6 +187,22 @@ async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
 }
 
 #[derive(Debug, Clone)]
+pub struct Peers(Vec<PeerInfo>);
+
+impl Peers {
+    pub fn peer_nodes(&self) -> &[PeerInfo] {
+        &self.0
+    }
+
+    pub fn get_node_addr(&self, node_id: &str) -> Option<SocketAddr> {
+        self.0
+            .iter()
+            .find(|p| p.node_id == node_id)
+            .map(|p| p.address)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub node_id: String,
     pub address: SocketAddr,
@@ -191,12 +211,13 @@ pub struct Config {
     pub orchestration_port: u16,
     pub quorum: usize,
     pub quorum_too_low: bool,
-    pub peer_nodes: Vec<PeerInfo>,
     pub sync_port: u16,
     pub worterbuch_executable: String,
     pub stats_port: u16,
     pub data_dir: PathBuf,
+    pub config_scan_interval: u64,
     priority: Option<i64>,
+    quorum_configured: Option<usize>,
 }
 
 impl Config {
@@ -209,44 +230,49 @@ impl Config {
         Duration::from_millis(self.heartbeat_min_timeout)
     }
 
-    pub fn get_node_addr(&self, node_id: &str) -> Option<SocketAddr> {
-        self.peer_nodes
-            .iter()
-            .find(|p| p.node_id == node_id)
-            .map(|p| p.address)
-    }
-
     pub async fn priority(&self) -> Priority {
         if let Some(prio) = self.priority {
-            log::info!("Configured priority: {prio}");
+            log::debug!("Configured priority: {prio}");
             return Priority::Primary(prio);
         }
 
         if let Some(prio) = load_millis_since_leader(&self.data_dir).await {
-            log::info!("Prio from time since last leader: {prio}");
+            log::debug!("Prio from time since last leader: {prio}");
             return Priority::Primary(prio);
         }
 
         if let Some(prio) = load_millis_since_follower(&self.data_dir).await {
-            log::info!("Prio from time since last follower: {prio}");
+            log::debug!("Prio from time since last follower: {prio}");
             return Priority::Secondary(prio);
         }
 
-        log::info!("No prio configured and never been leader or follower.");
+        log::debug!("No prio configured and never been leader or follower.");
         Priority::Secondary(i64::MAX)
+    }
+
+    pub fn update_quorum(&mut self, peers: &Peers) -> Result<()> {
+        let (quorum, quorum_too_low) =
+            quorum_sanity_check(self.quorum_configured.clone(), peers.peer_nodes())?;
+
+        self.quorum = quorum;
+        self.quorum_too_low = quorum_too_low;
+
+        Ok(())
     }
 }
 
-pub async fn load_config() -> Result<Config> {
+pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Receiver<Peers>)> {
+    let (tx, rx) = mpsc::channel(1);
+
     log::info!("Loading orchestrator config …");
 
     let mut peer_addresses = HashSet::new();
 
     let args: Args = Args::parse();
-    let config_file = load_config_file(args.config_path).await?;
+    let config_file = load_config_file(&args.config_path).await?;
     let nodes = config_file
         .nodes
-        .into_iter()
+        .iter()
         .map(PeerInfo::try_from)
         .collect::<Result<Vec<PeerInfo>>>()?;
     let address = nodes
@@ -254,7 +280,7 @@ pub async fn load_config() -> Result<Config> {
         .find(|p| p.node_id == args.node_id)
         .ok_or_else(|| miette!("No socket address configured for this node."))?
         .address;
-    let peers = nodes
+    let peers: Vec<PeerInfo> = nodes
         .iter()
         .filter_map(|p| {
             if p.node_id != args.node_id {
@@ -265,27 +291,113 @@ pub async fn load_config() -> Result<Config> {
             }
         })
         .collect();
-    let data_dir = args.data_dir;
-    let priority = args.priority;
 
     log::debug!("Configured nodes: {nodes:?}");
     log::debug!("Configured peers: {peers:?}");
 
-    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum, &nodes)?;
+    let data_dir = args.data_dir;
+    let priority = args.priority;
 
-    Ok(Config {
-        node_id: args.node_id,
+    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum.clone(), &peers)?;
+
+    let peers = Peers(peers);
+
+    let config = Config {
+        node_id: args.node_id.clone(),
         address,
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
         orchestration_port: args.port,
         quorum,
         quorum_too_low,
-        peer_nodes: peers,
         sync_port: args.sync_port,
         worterbuch_executable: args.worterbuch_executable,
         stats_port: args.stats_port,
         priority,
         data_dir,
-    })
+        quorum_configured: args.quorum,
+        config_scan_interval: args.config_scan_interval,
+    };
+
+    tx.send(peers).await.ok();
+
+    let config_path = args.config_path.into();
+    let scan_interval = Duration::from_secs(args.config_scan_interval);
+    let node_id = args.node_id;
+    subsys.start(SubsystemBuilder::new("config-file-watcher", move |s| {
+        watch_config_file(s, config_path, tx, scan_interval, config_file, node_id)
+    }));
+
+    Ok((config, rx))
+}
+
+async fn watch_config_file(
+    subsys: SubsystemHandle,
+    path: PathBuf,
+    tx: mpsc::Sender<Peers>,
+    scan_interval: Duration,
+    config_file: ConfigFile,
+    node_id: String,
+) -> Result<()> {
+    let mut interval = interval(scan_interval);
+
+    let mut config_file = config_file;
+
+    loop {
+        select! {
+            _ = interval.tick() => config_file = reload_config(&subsys, &path, config_file, &node_id, &tx).await?,
+            _ = subsys.on_shutdown_requested() => break,
+        }
+    }
+
+    Ok(())
+}
+
+async fn reload_config(
+    subsys: &SubsystemHandle,
+    path: &Path,
+    config_file: ConfigFile,
+    node_id: &str,
+    tx: &mpsc::Sender<Peers>,
+) -> Result<ConfigFile> {
+    let cf = load_config_file(&path).await?;
+    if cf != config_file {
+        let nodes = cf
+            .nodes
+            .iter()
+            .map(PeerInfo::try_from)
+            .collect::<Result<Vec<PeerInfo>>>()?;
+
+        if nodes
+            .iter()
+            .filter(|n| n.node_id == node_id)
+            .next()
+            .is_none()
+        {
+            log::error!("This node is no longer part of the cluster config, shutting down …");
+            subsys.request_shutdown();
+        }
+
+        let peers = nodes
+            .iter()
+            .filter_map(|p| {
+                if p.node_id != node_id {
+                    Some(p.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let peers = Peers(peers);
+
+        if tx.try_send(peers).is_ok() {
+            log::info!("Change in cluster config detected.");
+            log::debug!("Configured nodes changed: {nodes:?}");
+        }
+
+        Ok(cf)
+    } else {
+        Ok(config_file)
+    }
 }
