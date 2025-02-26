@@ -68,14 +68,14 @@ pub async fn lead(
         };
         if update_quorum {
             peers_changed = None;
-            config.update_quorum(&peers)?;
+            config.update_quorum(peers)?;
         }
 
         select! {
             _ = heartbeat_interval.tick() => {
                 log::trace!("Sending heartbeat …");
-                send_heartbeat_requests(config, socket, &peers).await?;
-                if !check_heartbeat_responses(&heartbeat_responses, config, &peers) {
+                send_heartbeat_requests(config, socket, peers).await?;
+                if !check_heartbeat_responses(&heartbeat_responses, config, peers) {
                     break;
                 }
             },

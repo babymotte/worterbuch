@@ -175,7 +175,7 @@ impl<'a> Election<'a> {
                                 if vote.priority >= prio {
                                     log::info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, prio);
                                     self.votes_in_my_favor = self.votes_in_my_favor.saturating_sub(1);
-                                    support_vote(vote.clone(), self.config, self.socket, &self.peers).await?;
+                                    support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
                                     if let Some(result) = self.wait_for_heartbeat(&vote).await? {
                                         return Ok(result)
                                     } else {
@@ -212,7 +212,7 @@ impl<'a> Election<'a> {
                         PeerMessage::Vote(Vote::Request(vote)) => {
                             if vote.priority >= prio {
                                 log::info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, prio);
-                                support_vote(vote.clone(), self.config, self.socket, &self.peers).await?;
+                                support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
                                 return self.wait_for_heartbeat(&vote).await;
                             } else {
                                 log::info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, prio);

@@ -247,7 +247,7 @@ impl Config {
 
     pub fn update_quorum(&mut self, peers: &Peers) -> Result<()> {
         let (quorum, quorum_too_low) =
-            quorum_sanity_check(self.quorum_configured.clone(), peers.peer_nodes())?;
+            quorum_sanity_check(self.quorum_configured, peers.peer_nodes())?;
 
         self.quorum = quorum;
         self.quorum_too_low = quorum_too_low;
@@ -293,7 +293,7 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
     let data_dir = args.data_dir;
     let priority = args.priority;
 
-    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum.clone(), &peers)?;
+    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum, &peers)?;
 
     let peers = Peers(peers);
 
@@ -363,12 +363,7 @@ async fn reload_config(
             .map(PeerInfo::try_from)
             .collect::<Result<Vec<PeerInfo>>>()?;
 
-        if nodes
-            .iter()
-            .filter(|n| n.node_id == node_id)
-            .next()
-            .is_none()
-        {
+        if !nodes.iter().any(|n| n.node_id == node_id) {
             log::error!("This node is no longer part of the cluster config, shutting down …");
             subsys.request_shutdown();
         }

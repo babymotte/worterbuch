@@ -63,7 +63,7 @@ pub struct Priority(i64);
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.0.partial_cmp(&self.0)
+        Some(self.cmp(other))
     }
 }
 
