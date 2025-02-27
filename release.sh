@@ -58,7 +58,6 @@ ENV WBCLUSTER_HEARTBEAT_MIN_TIMEOUT=500
 ENV WBCLUSTER_RAFT_PORT=8181
 ENV WBCLUSTER_SYNC_PORT=8282
 ENV WBCLUSTER_WB_EXECUTABLE=/usr/local/bin/worterbuch
-RUN apt update && apt install -y netcat-traditional
 VOLUME [ \"/cfg\" ]
 ENTRYPOINT [\"/usr/local/bin/worterbuch-cluster-orchestrator\"]"
 
