@@ -1,8 +1,8 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "worterbuch-cluster.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- define "worterbuch.name" -}}
+{{- default  $.Chart.Name $.Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
@@ -10,15 +10,15 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "worterbuch-cluster.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- define "worterbuch.fullname" -}}
+{{- if $.Values.fullnameOverride }}
+{{- $.Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- $name := default  $.Chart.Name $.Values.nameOverride }}
+{{- if contains $name $.Release.Name }}
+{{- $.Release.Name | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- printf "%s-%s" $.Release.Name $name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -26,37 +26,30 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "worterbuch-cluster.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- define "worterbuch.chart" -}}
+{{- printf "%s-%s"  $.Chart.Name  $.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "worterbuch-cluster.labels" -}}
-helm.sh/chart: {{ include "worterbuch-cluster.chart" . }}
-{{ include "worterbuch-cluster.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- define "worterbuch.labels" -}}
+helm.sh/chart: {{ include "worterbuch.chart" . }}
+app.kubernetes.io/name: {{ include "worterbuch.name" . }}
+app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- if  $.Chart.AppVersion }}
+app.kubernetes.io/version: {{  $.Chart.AppVersion | quote }}
 {{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
-
-{{/*
-Selector labels
-*/}}
-{{- define "worterbuch-cluster.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "worterbuch-cluster.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ $.Release.Service }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "worterbuch-cluster.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "worterbuch-cluster.fullname" .) .Values.serviceAccount.name }}
+{{- define "worterbuch.serviceAccountName" -}}
+{{- if $.Values.serviceAccount.create }}
+{{- default (include "worterbuch.fullname" .) $.Values.serviceAccount.name }}
 {{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- default "default" $.Values.serviceAccount.name }}
 {{- end }}
 {{- end }}

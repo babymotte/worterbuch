@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "worterbuch-cluster.serviceAccountName" . }}
+  name: {{ include "worterbuch.serviceAccountName" . }}
   labels:
-    {{- include "worterbuch-cluster.labels" . | nindent 4 }}
+    {{- include "worterbuch.labels" . | nindent 4 }}
   {{- with .Values.serviceAccount.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
