@@ -1,5 +1,7 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
 WORKDIR /app
+RUN rustup component add rustfmt
+RUN rustup component add clippy
 
 FROM wbco-chef AS wbco-planner
 COPY . .
