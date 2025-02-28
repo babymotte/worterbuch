@@ -35,10 +35,10 @@ use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, GraveGoods, Key,
-    KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs,
-    PState, PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish,
-    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent,
-    Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs, PState,
+    PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment,
+    RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,
+    TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -745,7 +745,7 @@ async fn pget(
     client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
     let values = match worterbuch.pget(msg.request_pattern.clone()).await {
-        Ok(values) => values.into_iter().map(KeyValuePair::from).collect(),
+        Ok(values) => values.into_iter().collect(),
         Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;
             return Ok(());
