@@ -36,18 +36,17 @@ pub mod store;
 mod subscribers;
 mod worterbuch;
 
-use std::error::Error;
-
 use crate::stats::track_stats;
 pub use crate::worterbuch::*;
 pub use config::*;
 use leader_follower::{
     process_leader_message, run_cluster_sync_port, shutdown_on_stdin_close, ClientWriteCommand,
-    StateSync,
+    Mode, StateSync,
 };
 use miette::{miette, IntoDiagnostic, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 use server::common::{CloneableWbApi, WbFunction};
+use std::error::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
@@ -58,9 +57,9 @@ use tokio::{
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use uuid::Uuid;
 use worterbuch_common::{
-    tcp::receive_msg, topic, KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
+    error::WorterbuchError, tcp::receive_msg, topic, KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
 };
 
 type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
@@ -80,8 +79,35 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         Worterbuch::with_config(config.clone())
     };
 
+    let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
+    let api = CloneableWbApi::new(api_tx);
+
+    let web_server = if let Some(WsEndpoint {
+        endpoint: Endpoint {
+            tls,
+            bind_addr,
+            port,
+        },
+        public_addr,
+    }) = &config.ws_endpoint
+    {
+        let sapi = api.clone();
+        let tls = tls.to_owned();
+        let bind_addr = bind_addr.to_owned();
+        let port = port.to_owned();
+        let public_addr = public_addr.to_owned();
+        let ws_enabled = !config.follower;
+        Some(
+            subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
+                server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
+            })),
+        )
+    } else {
+        None
+    };
+
     if config.follower {
-        run_in_follower_mode(subsys, &mut worterbuch, config).await?;
+        run_in_follower_mode(subsys, &mut worterbuch, api_rx, config, web_server).await?;
     } else {
         worterbuch
             .set(
@@ -91,9 +117,6 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
                 INTERNAL_CLIENT_ID,
             )
             .await?;
-
-        let (api_tx, mut api_rx) = mpsc::channel(channel_buffer_size);
-        let api = CloneableWbApi::new(api_tx);
 
         if use_persistence {
             let worterbuch_pers = api.clone();
@@ -106,30 +129,6 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         subsys.start(SubsystemBuilder::new("stats", |subsys| {
             track_stats(worterbuch_uptime, subsys)
         }));
-
-        let web_server = if let Some(WsEndpoint {
-            endpoint:
-                Endpoint {
-                    tls,
-                    bind_addr,
-                    port,
-                },
-            public_addr,
-        }) = &config.ws_endpoint
-        {
-            let sapi = api.clone();
-            let tls = tls.to_owned();
-            let bind_addr = bind_addr.to_owned();
-            let port = port.to_owned();
-            let public_addr = public_addr.to_owned();
-            Some(
-                subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
-                    server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys)
-                })),
-            )
-        } else {
-            None
-        };
 
         let tcp_server = if let Some(Endpoint {
             tls: _,
@@ -168,8 +167,8 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         if config.leader {
             run_in_leader_mode(
                 subsys,
-                &mut worterbuch,
-                &mut api_rx,
+                worterbuch,
+                api_rx,
                 config,
                 web_server,
                 tcp_server,
@@ -179,8 +178,8 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         } else {
             run_in_regular_mode(
                 subsys,
-                &mut worterbuch,
-                &mut api_rx,
+                worterbuch,
+                api_rx,
                 config,
                 web_server,
                 tcp_server,
@@ -284,10 +283,97 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     }
 }
 
+async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbFunction) {
+    match function {
+        WbFunction::Get(key, tx) => {
+            tx.send(worterbuch.get(&key)).ok();
+        }
+        WbFunction::Set(_, _, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::SPubInit(_, _, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::SPub(_, _, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::Publish(_, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::Ls(parent, tx) => {
+            tx.send(worterbuch.ls(&parent)).ok();
+        }
+        WbFunction::PLs(parent, tx) => {
+            tx.send(worterbuch.pls(&parent)).ok();
+        }
+        WbFunction::PGet(pattern, tx) => {
+            tx.send(worterbuch.pget(&pattern)).ok();
+        }
+        WbFunction::Subscribe(client_id, transaction_id, key, unique, live_only, tx) => {
+            tx.send(
+                worterbuch
+                    .subscribe(client_id, transaction_id, key, unique, live_only)
+                    .await,
+            )
+            .ok();
+        }
+        WbFunction::PSubscribe(client_id, transaction_id, pattern, unique, live_only, tx) => {
+            tx.send(
+                worterbuch
+                    .psubscribe(client_id, transaction_id, pattern, unique, live_only)
+                    .await,
+            )
+            .ok();
+        }
+        WbFunction::SubscribeLs(client_id, transaction_id, parent, tx) => {
+            tx.send(
+                worterbuch
+                    .subscribe_ls(client_id, transaction_id, parent)
+                    .await,
+            )
+            .ok();
+        }
+        WbFunction::Unsubscribe(client_id, transaction_id, tx) => {
+            tx.send(worterbuch.unsubscribe(client_id, transaction_id).await)
+                .ok();
+        }
+        WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
+            tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id))
+                .ok();
+        }
+        WbFunction::Delete(_, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::PDelete(_, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::Connected(client_id, remote_addr, protocol) => {
+            worterbuch
+                .connected(client_id, remote_addr, &protocol)
+                .await;
+        }
+        WbFunction::Disconnected(client_id, remote_addr) => {
+            worterbuch.disconnected(client_id, remote_addr).await.ok();
+        }
+        WbFunction::Config(tx) => {
+            tx.send(worterbuch.config().clone()).ok();
+        }
+        WbFunction::Export(tx) => {
+            worterbuch.export_for_persistence(tx);
+        }
+        WbFunction::Len(tx) => {
+            tx.send(worterbuch.len()).ok();
+        }
+        WbFunction::SupportedProtocolVersion(tx) => {
+            tx.send(worterbuch.supported_protocol_version()).ok();
+        }
+    }
+}
+
 async fn run_in_regular_mode(
     subsys: SubsystemHandle,
-    worterbuch: &mut Worterbuch,
-    api_rx: &mut mpsc::Receiver<WbFunction>,
+    mut worterbuch: Worterbuch,
+    mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
@@ -296,20 +382,28 @@ async fn run_in_regular_mode(
     loop {
         select! {
             recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call(worterbuch, function).await,
+                Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
             _ = subsys.on_shutdown_requested() => break,
         }
     }
 
-    shutdown(worterbuch, config, web_server, tcp_server, unix_socket).await
+    shutdown(
+        subsys,
+        &mut worterbuch,
+        config,
+        web_server,
+        tcp_server,
+        unix_socket,
+    )
+    .await
 }
 
 async fn run_in_leader_mode(
     subsys: SubsystemHandle,
-    worterbuch: &mut Worterbuch,
-    api_rx: &mut mpsc::Receiver<WbFunction>,
+    mut worterbuch: Worterbuch,
+    mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
@@ -318,6 +412,14 @@ async fn run_in_leader_mode(
     log::info!("Running in LEADER mode.");
 
     shutdown_on_stdin_close(&subsys);
+
+    worterbuch
+        .set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+            json!(Mode::Leader),
+            INTERNAL_CLIENT_ID,
+        )
+        .await?;
 
     let mut client_write_txs: Vec<(usize, mpsc::Sender<ClientWriteCommand>)> = vec![];
     let (follower_connected_tx, mut follower_connected_rx) = mpsc::channel::<
@@ -396,7 +498,7 @@ async fn run_in_leader_mode(
             recv = api_rx.recv() => match recv {
                 Some(function) => {
                     forward_api_call(&mut client_write_txs, &mut dead, &function, true).await;
-                    process_api_call(worterbuch, function).await;
+                    process_api_call(&mut worterbuch, function).await;
                 },
                 None => break,
             },
@@ -415,13 +517,23 @@ async fn run_in_leader_mode(
         }
     }
 
-    shutdown(worterbuch, config, web_server, tcp_server, unix_socket).await
+    shutdown(
+        subsys,
+        &mut worterbuch,
+        config,
+        web_server,
+        tcp_server,
+        unix_socket,
+    )
+    .await
 }
 
 async fn run_in_follower_mode(
     subsys: SubsystemHandle,
     worterbuch: &mut Worterbuch,
+    mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
+    web_server: Option<ServerSubsystem>,
 ) -> Result<()> {
     let leader_addr = if let Some(it) = &config.leader_address {
         it
@@ -431,6 +543,14 @@ async fn run_in_follower_mode(
     log::info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
 
     shutdown_on_stdin_close(&subsys);
+
+    worterbuch
+        .set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+            json!(Mode::Follower),
+            INTERNAL_CLIENT_ID,
+        )
+        .await?;
 
     // TODO configure lower persistence interval for follower
     let mut persistence_interval = interval(config.persistence_interval);
@@ -449,6 +569,10 @@ async fn run_in_follower_mode(
                     break;
                 }
             },
+            recv = api_rx.recv() => match recv {
+                Some(function) => process_api_call_as_follower(worterbuch, function).await,
+                None => break,
+            },
             _ = persistence_interval.tick() => if let Err(e) = persistence::synchronous(worterbuch, &config).await {
                 log::warn!("Could not persist state: {e}");
             },
@@ -456,10 +580,11 @@ async fn run_in_follower_mode(
         }
     }
 
-    shutdown(worterbuch, config, None, None, None).await
+    shutdown(subsys, worterbuch, config, web_server, None, None).await
 }
 
 async fn shutdown(
+    subsys: SubsystemHandle,
     worterbuch: &mut Worterbuch,
     config: Config,
     web_server: Option<ServerSubsystem>,
@@ -467,6 +592,8 @@ async fn shutdown(
     unix_socket: Option<ServerSubsystem>,
 ) -> Result<()> {
     log::info!("Shutdown sequence triggered");
+
+    subsys.request_shutdown();
 
     shutdown_servers(web_server, tcp_server, unix_socket).await;
 

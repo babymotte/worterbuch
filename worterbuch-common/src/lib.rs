@@ -48,6 +48,7 @@ pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
 pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
 pub const SYSTEM_TOPIC_CLIENT_NAME: &str = "clientName";
 pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "protocolVersion";
+pub const SYSTEM_TOPIC_MODE: &str = "mode";
 
 pub type TransactionId = u64;
 pub type RequestPattern = String;
@@ -103,6 +104,7 @@ pub enum ErrorCode {
     MissingValue = 0b00001101,
     Unauthorized = 0b00001110,
     NoPubStream = 0b00001111,
+    NotLeader = 0b00010000,
     Other = 0b11111111,
 }
 

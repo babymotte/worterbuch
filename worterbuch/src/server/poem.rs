@@ -89,6 +89,8 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
         | WorterbuchError::ProtocolNegotiationFailed => {
             Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR))
         }
+
+        WorterbuchError::NotLeader => Err(poem::Error::new(e, StatusCode::NO_CONTENT)),
     }
 }
 
@@ -568,22 +570,26 @@ pub async fn start(
     port: u16,
     public_addr: String,
     subsys: SubsystemHandle,
+    ws_enabled: bool,
 ) -> miette::Result<()> {
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
 
     let addr = format!("{bind_addr}:{port}");
 
-    let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
-    let wb = worterbuch.clone();
-    let wsserver = subsys.start(SubsystemBuilder::new("wsserver", |s| {
-        run_ws_server(s, ws_stream_rx, wb)
-    }));
-
-    log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
     let mut app = Route::new();
 
-    app = app.at("/ws", get(ws.with(AddData::new(ws_stream_tx))));
+    let mut wsserver = None;
+
+    if ws_enabled {
+        let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
+        let wb = worterbuch.clone();
+        wsserver = Some(subsys.start(SubsystemBuilder::new("wsserver", |s| {
+            run_ws_server(s, ws_stream_rx, wb)
+        })));
+        log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
+        app = app.at("/ws", get(ws.with(AddData::new(ws_stream_tx))));
+    }
 
     let config = worterbuch.config().await?;
     let rest_api_version = 1;
@@ -696,9 +702,11 @@ pub async fn start(
         .await
         .into_diagnostic()?;
 
-    wsserver.initiate_shutdown();
-    if let Err(e) = wsserver.join().await {
-        log::error!("Error waiting for ws server to shut down: {e}");
+    if let Some(wsserver) = wsserver {
+        wsserver.initiate_shutdown();
+        if let Err(e) = wsserver.join().await {
+            log::error!("Error waiting for ws server to shut down: {e}");
+        }
     }
 
     log::debug!("webserver subsystem completed.");

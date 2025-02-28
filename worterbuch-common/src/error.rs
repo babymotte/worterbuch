@@ -131,6 +131,7 @@ pub enum WorterbuchError {
     AlreadyAuthorized,
     Unauthorized(AuthorizationError),
     NoPubStream(TransactionId),
+    NotLeader,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -176,6 +177,12 @@ impl fmt::Display for WorterbuchError {
                 write!(
                     f,
                     "There is no active publish stream for transaction ID {tid}"
+                )
+            }
+            WorterbuchError::NotLeader => {
+                write!(
+                    f,
+                    "Node cannot process the request since it is not the current cluster leader"
                 )
             }
         }
@@ -340,6 +347,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::AlreadyAuthorized => ErrorCode::AlreadyAuthorized,
             WorterbuchError::Unauthorized(_) => ErrorCode::Unauthorized,
             WorterbuchError::NoPubStream(_) => ErrorCode::NoPubStream,
+            WorterbuchError::NotLeader => ErrorCode::NotLeader,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

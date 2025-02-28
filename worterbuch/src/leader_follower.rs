@@ -20,6 +20,7 @@
 use crate::{store::Node, Config, Worterbuch, INTERNAL_CLIENT_ID};
 use miette::{Error, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
     io::{self, BufRead, ErrorKind},
     net::{IpAddr, SocketAddr},
@@ -32,8 +33,16 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use worterbuch_common::{
-    tcp::write_line_and_flush, GraveGoods, Key, LastWill, RequestPattern, Value,
+    tcp::write_line_and_flush, topic, GraveGoods, Key, LastWill, RequestPattern, Value,
+    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
 };
+
+#[derive(Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Mode {
+    Leader,
+    Follower,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,7 +207,16 @@ pub async fn process_leader_message(
     log::trace!("Received leader sync message: {msg:?}");
 
     match msg {
-        LeaderSyncMessage::Init(state_sync) => worterbuch.reset_store(state_sync.0),
+        LeaderSyncMessage::Init(state_sync) => {
+            worterbuch.reset_store(state_sync.0);
+            worterbuch
+                .set(
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+                    json!(Mode::Follower),
+                    INTERNAL_CLIENT_ID,
+                )
+                .await?;
+        }
         LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
             ClientWriteCommand::Set(key, value) => {
                 worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
@@ -236,7 +254,7 @@ pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
 
         for line in handle {
             // ignore
-            log::info!("{line:?}");
+            log::debug!("{line:?}");
         }
 
         log::info!("stdin closed.");

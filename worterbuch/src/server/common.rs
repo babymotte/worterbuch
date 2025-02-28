@@ -1469,6 +1469,14 @@ async fn handle_store_error(
             ))
             .expect("failed to serialize error message"),
         },
+        WorterbuchError::NotLeader => Err {
+            error_code,
+            transaction_id,
+            metadata: serde_json::to_string(
+                "cannot process request, node is not the cluster leader",
+            )
+            .expect("failed to serialize error message"),
+        },
     };
     log::trace!("Error in store, queuing error message for client …");
     let res = client
