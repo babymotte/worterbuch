@@ -136,6 +136,13 @@ leaderElection:
     timeout: 500
 
 livenessProbe:
+  httpGet:
+    path: /api/v1/get/%24SYS/mode
+    port: http
+  periodSeconds: 1
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 30
 
 readinessProbe:
   httpGet:
