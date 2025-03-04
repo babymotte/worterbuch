@@ -1,7 +1,7 @@
 #!/bin/bash
 
 cargo fmt --check &&
-    cargo clippy &&
-    cargo clippy --features=commercial &&
+    cargo clippy -- --deny warnings &&
+    cargo clippy --features=commercial -- --deny warnings &&
     cargo test &&
     cargo test --features=commercial

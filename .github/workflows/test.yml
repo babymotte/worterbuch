@@ -27,11 +27,11 @@ jobs:
       - name: Run linter FOSS
         env:
           WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
-        run: cargo clippy
+        run: cargo clippy -- --deny warnings
       - name: Run linter commercial
         env:
           WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
-        run: cargo clippy --features=commercial
+        run: cargo clippy --features=commercial -- --deny warnings
       - name: Run tests FOSS
         run: cargo test
       - name: Run tests commercial
