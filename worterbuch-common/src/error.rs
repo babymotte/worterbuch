@@ -132,6 +132,7 @@ pub enum WorterbuchError {
     Unauthorized(AuthorizationError),
     NoPubStream(TransactionId),
     NotLeader,
+    Cas,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -183,6 +184,12 @@ impl fmt::Display for WorterbuchError {
                 write!(
                     f,
                     "Node cannot process the request since it is not the current cluster leader"
+                )
+            }
+            WorterbuchError::Cas => {
+                write!(
+                    f,
+                    "Tried to modify a compare-and-swap value without providing a version number"
                 )
             }
         }
@@ -348,6 +355,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::Unauthorized(_) => ErrorCode::Unauthorized,
             WorterbuchError::NoPubStream(_) => ErrorCode::NoPubStream,
             WorterbuchError::NotLeader => ErrorCode::NotLeader,
+            WorterbuchError::Cas => ErrorCode::Cas,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

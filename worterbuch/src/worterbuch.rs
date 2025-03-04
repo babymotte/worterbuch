@@ -311,10 +311,7 @@ impl Worterbuch {
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        let (changed, ls_subscribers) = self
-            .store
-            .insert(&path, value.clone())
-            .map_err(|e| e.for_pattern(key.clone()))?;
+        let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone());
 
         log::trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
@@ -796,7 +793,7 @@ impl Worterbuch {
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        match self.store.delete(&path) {
+        match self.store.delete(&path)? {
             Some((value, ls_subscribers)) => {
                 self.notify_ls_subscribers(ls_subscribers).await;
                 self.notify_subscribers(&path, &key, &value, true, true)

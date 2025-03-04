@@ -27,7 +27,7 @@ fn main() -> Result<(), StoreError> {
     let start = Instant::now();
     let mut lap = Instant::now();
     while let Ok((path, value)) = rx.recv() {
-        store.insert(&path, value)?;
+        store.insert_plain(&path, value);
         counter += 1;
         if counter % 100_000 == 0 {
             let elapsed = lap.elapsed();

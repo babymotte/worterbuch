@@ -27,12 +27,43 @@ use worterbuch_common::{
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 
-type NodeValue = Option<Value>;
+type NodeValue = Option<ValueEntry>;
 type Tree = HashMap<RegularKeySegment, Node>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 type CanDelete = bool;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+enum ValueEntry {
+    Plain(Value),
+    Cas(Value, u64),
+}
+
+impl AsRef<Value> for ValueEntry {
+    fn as_ref(&self) -> &Value {
+        match self {
+            ValueEntry::Plain(value) => value,
+            ValueEntry::Cas(value, _) => value,
+        }
+    }
+}
+
+impl From<ValueEntry> for Value {
+    fn from(value: ValueEntry) -> Self {
+        match value {
+            ValueEntry::Plain(value) => value,
+            ValueEntry::Cas(value, _) => value,
+        }
+    }
+}
+
+impl From<Value> for ValueEntry {
+    fn from(value: Value) -> Self {
+        ValueEntry::Plain(value)
+    }
+}
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -52,9 +83,9 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub v: NodeValue,
+    v: NodeValue,
     #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
-    pub t: Tree,
+    t: Tree,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -127,8 +158,11 @@ impl Store {
 
     /// retrieve a value for a non-wildcard key
     pub fn get(&self, path: &[RegularKeySegment]) -> Option<&Value> {
-        let node = self.get_node(path);
-        node.and_then(|n| n.v.as_ref())
+        let node = self.get_node(path)?;
+        match node.v.as_ref()? {
+            ValueEntry::Plain(value) => Some(value),
+            ValueEntry::Cas(value, _) => Some(value),
+        }
     }
 
     fn get_node(&self, path: &[RegularKeySegment]) -> Option<&Node> {
@@ -148,20 +182,20 @@ impl Store {
     pub fn delete(
         &mut self,
         path: &[RegularKeySegment],
-    ) -> Option<(Value, Vec<AffectedLsSubscribers>)> {
+    ) -> WorterbuchResult<Option<(Value, Vec<AffectedLsSubscribers>)>> {
         let mut ls_subscribers = Vec::new();
         let removed = Store::ndelete(
             &mut self.data,
             path,
             Some(&self.subscribers),
             &mut ls_subscribers,
-        )
+        )?
         .0;
         if removed.is_some() {
             self.len -= 1;
             self.unsaved_changes = true;
         }
-        removed.map(|it| (it, ls_subscribers))
+        Ok(removed.map(|it| (it, ls_subscribers)))
     }
 
     /// retrieve values for a key containing at least one single-level wildcard and possibly a multi-level wildcard
@@ -211,9 +245,18 @@ impl Store {
         relative_path: &[RegularKeySegment],
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
-    ) -> (NodeValue, CanDelete) {
+    ) -> WorterbuchResult<(Option<Value>, CanDelete)> {
         if relative_path.is_empty() {
-            return (node.v.take(), node.t.is_empty());
+            match node.v.take() {
+                Some(v) => match v {
+                    ValueEntry::Plain(value) => return Ok((Some(value), node.t.is_empty())),
+                    cas => {
+                        node.v = Some(cas);
+                        return Err(WorterbuchError::Cas);
+                    }
+                },
+                None => return Ok((None, node.t.is_empty())),
+            }
         }
 
         let head = &relative_path[0];
@@ -226,7 +269,7 @@ impl Store {
                 tail,
                 subscribers.and_then(|s| s.tree.get(head)),
                 ls_subscribers,
-            );
+            )?;
             if can_delete {
                 e.remove();
                 let new_children: Vec<String> = node.t.keys().map(ToOwned::to_owned).collect();
@@ -237,9 +280,9 @@ impl Store {
                     }
                 }
             }
-            (val, node.v.is_none() && node.t.is_empty())
+            Ok((val, node.v.is_none() && node.t.is_empty()))
         } else {
-            (None, node.v.is_none() && node.t.is_empty())
+            Ok((None, node.v.is_none() && node.t.is_empty()))
         }
     }
 
@@ -499,11 +542,28 @@ impl Store {
         Ok(())
     }
 
-    pub fn insert(
+    pub fn insert_plain(
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
-    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> (bool, Vec<AffectedLsSubscribers>) {
+        self.insert(path, ValueEntry::Plain(value))
+    }
+
+    pub fn insert_cas(
+        &mut self,
+        path: &[RegularKeySegment],
+        value: Value,
+        version: u64,
+    ) -> (bool, Vec<AffectedLsSubscribers>) {
+        self.insert(path, ValueEntry::Cas(value, version))
+    }
+
+    fn insert(
+        &mut self,
+        path: &[RegularKeySegment],
+        value: ValueEntry,
+    ) -> (bool, Vec<AffectedLsSubscribers>) {
         let mut ls_subscribers = Vec::new();
         let changed = {
             let mut current_node = &mut self.data;
@@ -559,7 +619,7 @@ impl Store {
             self.unsaved_changes = true;
         }
 
-        Ok((changed, ls_subscribers))
+        (changed, ls_subscribers)
     }
 
     pub fn ls(&self, path: &[impl AsRef<str>]) -> Option<Vec<RegularKeySegment>> {
@@ -623,8 +683,8 @@ impl Store {
         if let Some(v) = other.v {
             node.v = Some(v.clone());
             let key = concat_key(path, key);
-            log::debug!("Imported {} = {}", key, v);
-            insertions.push((key, v));
+            log::debug!("Imported {} = {:?}", key, v);
+            insertions.push((key, v.into()));
         }
 
         let mut path = path.to_owned();
@@ -748,9 +808,9 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!")).unwrap();
+        store.insert(&path, json!("Hello, World!").into());
 
-        assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
+        assert_eq!(store.get(&path), Some(&json!("Hello, World!").into()));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
         assert_eq!(store.get(&reg_key_segs("test/a/b/c")), None);
     }
@@ -760,11 +820,11 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!")).unwrap();
+        store.insert(&path, json!("Hello, World!").into());
 
         // assert_eq!(store.len)
 
-        assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
+        assert_eq!(store.get(&path), Some(&json!("Hello, World!").into()));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
         assert_eq!(store.get(&reg_key_segs("test/a/b/c")), None);
 
@@ -782,12 +842,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0")).unwrap();
-        store.insert(&path1, json!("1")).unwrap();
-        store.insert(&path2, json!("2")).unwrap();
-        store.insert(&path3, json!("3")).unwrap();
-        store.insert(&path4, json!("4")).unwrap();
-        store.insert(&path5, json!("5")).unwrap();
+        store.insert(&path0, json!("0").into());
+        store.insert(&path1, json!("1").into());
+        store.insert(&path2, json!("2").into());
+        store.insert(&path3, json!("3").into());
+        store.insert(&path4, json!("4").into());
+        store.insert(&path5, json!("5").into());
 
         let res = store.get_matches(&key_segs("test/a/?")).unwrap();
         assert_eq!(res.len(), 2);
@@ -848,12 +908,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0")).unwrap();
-        store.insert(&path1, json!("1")).unwrap();
-        store.insert(&path2, json!("2")).unwrap();
-        store.insert(&path3, json!("3")).unwrap();
-        store.insert(&path4, json!("4")).unwrap();
-        store.insert(&path5, json!("5")).unwrap();
+        store.insert(&path0, json!("0").into());
+        store.insert(&path1, json!("1").into());
+        store.insert(&path2, json!("2").into());
+        store.insert(&path3, json!("3").into());
+        store.insert(&path4, json!("4").into());
+        store.insert(&path5, json!("5").into());
 
         let res = store.get_matches(&key_segs("test/a/#")).unwrap();
         assert_eq!(res.len(), 2);
@@ -919,7 +979,7 @@ mod test {
         let parent = ["hello".to_owned(), "there".to_owned()];
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
 
-        let (_, subscribers) = store.insert(&path, json!("Hello!")).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into());
         assert!(subscribers.is_empty());
 
         let (tx, _) = mpsc::channel(1);
@@ -929,7 +989,7 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!")).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello There!").into());
         assert!(subscribers.is_empty());
     }
 
@@ -946,7 +1006,7 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!")).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello There!").into());
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].1, vec!["world".to_owned()]);
     }

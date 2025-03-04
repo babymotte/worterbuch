@@ -105,6 +105,7 @@ pub enum ErrorCode {
     Unauthorized = 0b00001110,
     NoPubStream = 0b00001111,
     NotLeader = 0b00010000,
+    Cas = 0b00010001,
     Other = 0b11111111,
 }
 

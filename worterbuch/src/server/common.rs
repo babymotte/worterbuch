@@ -23,6 +23,7 @@ use crate::{
     Config, PStateAggregator, INTERNAL_CLIENT_ID,
 };
 use serde::Serialize;
+use serde_json::json;
 use std::{net::SocketAddr, time::Duration};
 use tokio::{
     spawn,
@@ -1377,110 +1378,15 @@ async fn handle_store_error(
     transaction_id: u64,
 ) -> WorterbuchResult<()> {
     let error_code = ErrorCode::from(&e);
-    let err_msg = match e {
-        WorterbuchError::IllegalWildcard(pattern) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
-        },
-        WorterbuchError::IllegalMultiWildcard(pattern) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
-        },
-        WorterbuchError::MultiWildcardAtIllegalPosition(pattern) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&pattern).expect("failed to serialize metadata"),
-        },
-        WorterbuchError::NoSuchValue(key) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!("no value for key '{key}'"))
-                .expect("failed to serialize error message"),
-        },
-        WorterbuchError::NotSubscribed => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!(
-                "no subscription found for transaction id '{transaction_id}'"
-            ))
-            .expect("failed to serialize error message"),
-        },
-        WorterbuchError::IoError(e, meta) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
-                .expect("failed to serialize metadata"),
-        },
-        WorterbuchError::SerDeError(e, meta) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string::<Meta>(&(&e.into(), meta).into())
-                .expect("failed to serialize metadata"),
-        },
-        WorterbuchError::ProtocolNegotiationFailed => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(
-                "server does not implement any of the protocl versions supported by this client",
-            )
-            .expect("failed to serialize metadata"),
-        },
-        WorterbuchError::Other(e, meta) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string::<Meta>(&(&e, meta).into())
-                .expect("failed to serialize metadata"),
-        },
-        WorterbuchError::ServerResponse(_) | WorterbuchError::InvalidServerResponse(_) => {
-            panic!("store must not produce this error")
-        }
-        WorterbuchError::ReadOnlyKey(key) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!("tried to delete read only key '{key}'"))
-                .expect("failed to serialize error message"),
-        },
-        WorterbuchError::AuthorizationRequired(privilege) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!("{privilege} requires authorization"))
-                .expect("failed to serialize error message"),
-        },
-        WorterbuchError::AlreadyAuthorized => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(
-                "handshake has already been completed, cannot do it again",
-            )
-            .expect("failed to serialize error message"),
-        },
-        WorterbuchError::Unauthorized(auth_err) => Err {
-            error_code,
-            transaction_id,
-            metadata: auth_err.to_string(),
-        },
-        WorterbuchError::NoPubStream(tid) => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(&format!(
-                "no active pub stream for transaction id '{tid}'"
-            ))
-            .expect("failed to serialize error message"),
-        },
-        WorterbuchError::NotLeader => Err {
-            error_code,
-            transaction_id,
-            metadata: serde_json::to_string(
-                "cannot process request, node is not the cluster leader",
-            )
-            .expect("failed to serialize error message"),
-        },
+    let err_msg = format!("{e}");
+    let err = Err {
+        error_code,
+        transaction_id,
+        metadata: json!(err_msg).to_string(),
     };
     log::trace!("Error in store, queuing error message for client …");
     let res = client
-        .send(ServerMessage::Err(err_msg))
+        .send(ServerMessage::Err(err))
         .await
         .context(|| "Error sending ERR message to client".to_owned());
     log::trace!("Error in store, queuing error message for client done");

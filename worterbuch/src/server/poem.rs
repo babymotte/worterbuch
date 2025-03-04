@@ -61,9 +61,8 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match &e {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
-        | WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
-            Err(poem::Error::new(e, StatusCode::BAD_REQUEST))
-        }
+        | WorterbuchError::MultiWildcardAtIllegalPosition(_)
+        | WorterbuchError::Cas => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
 
         WorterbuchError::AlreadyAuthorized
         | WorterbuchError::NotSubscribed
