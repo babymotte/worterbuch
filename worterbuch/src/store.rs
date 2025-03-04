@@ -546,7 +546,7 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
-    ) -> (bool, Vec<AffectedLsSubscribers>) {
+    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
         self.insert(path, ValueEntry::Plain(value))
     }
 
@@ -555,7 +555,7 @@ impl Store {
         path: &[RegularKeySegment],
         value: Value,
         version: u64,
-    ) -> (bool, Vec<AffectedLsSubscribers>) {
+    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
         self.insert(path, ValueEntry::Cas(value, version))
     }
 
@@ -563,7 +563,7 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: ValueEntry,
-    ) -> (bool, Vec<AffectedLsSubscribers>) {
+    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
         let changed = {
             let mut current_node = &mut self.data;
@@ -586,9 +586,29 @@ impl Store {
                 current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
             }
 
+            let mut value = value;
+
             let (inserted, changed) = if let Some(val) = &current_node.v {
+                if let ValueEntry::Cas(new_val, prev_version) = value {
+                    if let ValueEntry::Cas(_, version) = val {
+                        if prev_version != *version {
+                            return Err(WorterbuchError::CasVersionMismatch);
+                        }
+                    } else if prev_version != 0 {
+                        return Err(WorterbuchError::CasVersionMismatch);
+                    }
+                    value = ValueEntry::Cas(new_val, prev_version + 1);
+                }
+
                 (false, val != &value)
             } else {
+                if let ValueEntry::Cas(new_val, prev_version) = value {
+                    if prev_version != 0 {
+                        return Err(WorterbuchError::CasVersionMismatch);
+                    }
+                    value = ValueEntry::Cas(new_val, prev_version + 1);
+                }
+
                 (true, true)
             };
 
@@ -619,7 +639,7 @@ impl Store {
             self.unsaved_changes = true;
         }
 
-        (changed, ls_subscribers)
+        Ok((changed, ls_subscribers))
     }
 
     pub fn ls(&self, path: &[impl AsRef<str>]) -> Option<Vec<RegularKeySegment>> {
@@ -808,7 +828,7 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!").into());
+        store.insert(&path, json!("Hello, World!").into()).unwrap();
 
         assert_eq!(store.get(&path), Some(&json!("Hello, World!").into()));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
@@ -820,7 +840,7 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!").into());
+        store.insert(&path, json!("Hello, World!").into()).unwrap();
 
         // assert_eq!(store.len)
 
@@ -842,12 +862,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0").into());
-        store.insert(&path1, json!("1").into());
-        store.insert(&path2, json!("2").into());
-        store.insert(&path3, json!("3").into());
-        store.insert(&path4, json!("4").into());
-        store.insert(&path5, json!("5").into());
+        store.insert(&path0, json!("0").into()).unwrap();
+        store.insert(&path1, json!("1").into()).unwrap();
+        store.insert(&path2, json!("2").into()).unwrap();
+        store.insert(&path3, json!("3").into()).unwrap();
+        store.insert(&path4, json!("4").into()).unwrap();
+        store.insert(&path5, json!("5").into()).unwrap();
 
         let res = store.get_matches(&key_segs("test/a/?")).unwrap();
         assert_eq!(res.len(), 2);
@@ -908,12 +928,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0").into());
-        store.insert(&path1, json!("1").into());
-        store.insert(&path2, json!("2").into());
-        store.insert(&path3, json!("3").into());
-        store.insert(&path4, json!("4").into());
-        store.insert(&path5, json!("5").into());
+        store.insert(&path0, json!("0").into()).unwrap();
+        store.insert(&path1, json!("1").into()).unwrap();
+        store.insert(&path2, json!("2").into()).unwrap();
+        store.insert(&path3, json!("3").into()).unwrap();
+        store.insert(&path4, json!("4").into()).unwrap();
+        store.insert(&path5, json!("5").into()).unwrap();
 
         let res = store.get_matches(&key_segs("test/a/#")).unwrap();
         assert_eq!(res.len(), 2);
@@ -979,7 +999,7 @@ mod test {
         let parent = ["hello".to_owned(), "there".to_owned()];
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
 
-        let (_, subscribers) = store.insert(&path, json!("Hello!").into());
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
         assert!(subscribers.is_empty());
 
         let (tx, _) = mpsc::channel(1);
@@ -989,7 +1009,7 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!").into());
+        let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
         assert!(subscribers.is_empty());
     }
 
@@ -1006,8 +1026,114 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!").into());
+        let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].1, vec!["world".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn initial_cas_insert_with_version_0_succeeds() {
+        let mut store = Store::default();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!("hello"), 0)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plain_to_cas_upgrade_with_version_0_succeeds() {
+        let mut store = Store::default();
+        store
+            .insert_plain(&reg_key_segs("hello/cas"), json!(1))
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 0)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn initial_cas_insert_with_version_1_fails() {
+        let mut store = Store::default();
+        assert!(store
+            .insert_cas(&reg_key_segs("hello/cas"), json!("hello"), 1)
+            .is_err())
+    }
+
+    #[tokio::test]
+    async fn plain_to_cas_upgrade_with_version_1_fails() {
+        let mut store = Store::default();
+        store
+            .insert_plain(&reg_key_segs("hello/cas"), json!(1))
+            .unwrap();
+        assert!(store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 1)
+            .is_err())
+    }
+
+    #[tokio::test]
+    async fn cas_set_with_previous_version_number_fails() {
+        let mut store = Store::default();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(0), 0)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(1), 1)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 2)
+            .unwrap();
+        assert!(store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(3), 1)
+            .is_err())
+    }
+
+    #[tokio::test]
+    async fn cas_set_with_same_version_number_fails() {
+        let mut store = Store::default();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(0), 0)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(1), 1)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 2)
+            .unwrap();
+        assert!(store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(3), 2)
+            .is_err())
+    }
+
+    #[tokio::test]
+    async fn cas_set_with_next_version_number_succeeds() {
+        let mut store = Store::default();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(0), 0)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(1), 1)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 2)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(3), 3)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cas_set_with_future_version_number_fails() {
+        let mut store = Store::default();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(0), 0)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(1), 1)
+            .unwrap();
+        store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(2), 2)
+            .unwrap();
+        assert!(store
+            .insert_cas(&reg_key_segs("hello/cas"), json!(3), 4)
+            .is_err())
     }
 }

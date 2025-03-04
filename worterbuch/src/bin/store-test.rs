@@ -1,8 +1,8 @@
 use std::{env, sync::mpsc, thread::spawn, time::Instant};
-use worterbuch::store::{Store, StoreError};
-use worterbuch_common::benchmark::generate_dummy_data;
+use worterbuch::store::Store;
+use worterbuch_common::{benchmark::generate_dummy_data, error::WorterbuchError};
 
-fn main() -> Result<(), StoreError> {
+fn main() -> Result<(), WorterbuchError> {
     let mut args = env::args().skip(1);
 
     let n_ary = args.next().and_then(|n| n.parse().ok()).unwrap_or(3);
@@ -27,7 +27,7 @@ fn main() -> Result<(), StoreError> {
     let start = Instant::now();
     let mut lap = Instant::now();
     while let Ok((path, value)) = rx.recv() {
-        store.insert_plain(&path, value);
+        store.insert_plain(&path, value)?;
         counter += 1;
         if counter % 100_000 == 0 {
             let elapsed = lap.elapsed();

@@ -46,12 +46,12 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments, topic, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill,
-    PState, PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern,
-    ServerMessage, StateEvent, TransactionId, PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUBSCRIPTIONS,
+    parse_segments, topic, CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs,
+    LastWill, PState, PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment,
+    RequestPattern, ServerMessage, StateEvent, TransactionId, PROTOCOL_VERSION,
+    SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
+    SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT,
+    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -311,7 +311,31 @@ impl Worterbuch {
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone());
+        let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone())?;
+
+        log::trace!("Notifying ls subscribers …");
+        self.notify_ls_subscribers(ls_subscribers).await;
+        log::trace!("Notifying ls subscribers done.");
+        log::trace!("Notifying subscribers …");
+        self.notify_subscribers(&path, &key, &value, changed, false)
+            .await;
+        log::trace!("Notifying subscribers done.");
+
+        Ok(())
+    }
+
+    pub async fn cset(
+        &mut self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+        client_id: Uuid,
+    ) -> WorterbuchResult<()> {
+        check_for_read_only_key(&key, client_id)?;
+
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+
+        let (changed, ls_subscribers) = self.store.insert_cas(&path, value.clone(), version)?;
 
         log::trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
@@ -1149,7 +1173,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    fn store_key(&mut self, client_id: Uuid, transaction_id: u64, key: Key) {
+    fn store_key(&mut self, client_id: Uuid, transaction_id: TransactionId, key: Key) {
         let keys = match self.spub_keys.entry(client_id) {
             Entry::Occupied(it) => it.into_mut(),
             Entry::Vacant(it) => it.insert(HashMap::new()),
@@ -1157,7 +1181,7 @@ impl Worterbuch {
         keys.insert(transaction_id, key);
     }
 
-    fn lookup_key(&self, client_id: Uuid, transaction_id: u64) -> Option<Key> {
+    fn lookup_key(&self, client_id: Uuid, transaction_id: TransactionId) -> Option<Key> {
         self.spub_keys
             .get(&client_id)
             .and_then(|keys| keys.get(&transaction_id))

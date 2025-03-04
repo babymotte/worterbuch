@@ -73,6 +73,26 @@ properties:
       - transactionId
       - key
       - value
+  cSet:
+    description: A message sent by a client to set a new value for a key using compare and swap
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        description: The key for which to set the value
+        type: string
+      value:
+        description: The new value for the key
+      version:
+        description: The current value version or 0 if the value does not exist yet
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+      - value
   sPubInit:
     description: A message sent by a client to initiate a new publish stream
     type: object

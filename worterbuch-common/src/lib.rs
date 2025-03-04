@@ -66,6 +66,7 @@ pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = bool;
 pub type LiveOnlyFlag = bool;
 pub type AuthToken = String;
+pub type CasVersion = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +107,7 @@ pub enum ErrorCode {
     NoPubStream = 0b00001111,
     NotLeader = 0b00010000,
     Cas = 0b00010001,
+    CasVersionMismatch = 0b00010010,
     Other = 0b11111111,
 }
 

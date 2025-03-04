@@ -27,6 +27,7 @@ pub enum ClientMessage {
     Get(Get),
     PGet(PGet),
     Set(Set),
+    CSet(CSet),
     SPubInit(SPubInit),
     SPub(SPub),
     Publish(Publish),
@@ -49,6 +50,7 @@ impl ClientMessage {
             ClientMessage::Get(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
+            ClientMessage::CSet(m) => Some(m.transaction_id),
             ClientMessage::SPubInit(m) => Some(m.transaction_id),
             ClientMessage::SPub(m) => Some(m.transaction_id),
             ClientMessage::Publish(m) => Some(m.transaction_id),
@@ -92,6 +94,15 @@ pub struct Set {
     pub transaction_id: TransactionId,
     pub key: Key,
     pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CSet {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+    pub value: Value,
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

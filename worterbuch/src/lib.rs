@@ -202,6 +202,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Set(key, value, client_id, tx) => {
             tx.send(worterbuch.set(key, value, client_id).await).ok();
         }
+        WbFunction::CSet(key, value, version, client_id, tx) => {
+            tx.send(worterbuch.cset(key, value, version, client_id).await)
+                .ok();
+        }
         WbFunction::SPubInit(transaction_id, key, client_id, tx) => {
             tx.send(worterbuch.spub_init(transaction_id, key, client_id).await)
                 .ok();
@@ -289,6 +293,9 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
             tx.send(worterbuch.get(&key)).ok();
         }
         WbFunction::Set(_, _, _, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
+        }
+        WbFunction::CSet(_, _, _, _, tx) => {
             tx.send(Err(WorterbuchError::NotLeader)).ok();
         }
         WbFunction::SPubInit(_, _, _, tx) => {
@@ -668,6 +675,17 @@ async fn forward_api_call(
         WbFunction::Set(key, value, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Set(key.to_owned(), value.to_owned()))
+            } else {
+                None
+            }
+        }
+        WbFunction::CSet(key, value, version, _, _) => {
+            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+                Some(ClientWriteCommand::CSet(
+                    key.to_owned(),
+                    value.to_owned(),
+                    version.to_owned(),
+                ))
             } else {
                 None
             }

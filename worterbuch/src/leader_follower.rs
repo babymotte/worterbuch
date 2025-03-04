@@ -33,7 +33,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use worterbuch_common::{
-    tcp::write_line_and_flush, topic, GraveGoods, Key, LastWill, RequestPattern, Value,
+    tcp::write_line_and_flush, topic, CasVersion, GraveGoods, Key, LastWill, RequestPattern, Value,
     SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
 };
 
@@ -55,6 +55,7 @@ pub enum LeaderSyncMessage {
 #[serde(rename_all = "camelCase")]
 pub enum ClientWriteCommand {
     Set(Key, Value),
+    CSet(Key, Value, CasVersion),
     Delete(Key),
     PDelete(RequestPattern),
 }
@@ -220,6 +221,11 @@ pub async fn process_leader_message(
         LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
             ClientWriteCommand::Set(key, value) => {
                 worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
+            }
+            ClientWriteCommand::CSet(key, value, versions) => {
+                worterbuch
+                    .cset(key, value, versions, INTERNAL_CLIENT_ID)
+                    .await?;
             }
             ClientWriteCommand::Delete(key) => {
                 worterbuch.delete(key, INTERNAL_CLIENT_ID).await?;

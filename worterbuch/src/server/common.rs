@@ -35,11 +35,11 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, GraveGoods, Key,
-    KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet, PLs, PState,
-    PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish, RegularKeySegment,
-    RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,
-    TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    Ack, AuthorizationRequest, CSet, CasVersion, ClientMessage as CM, Delete, Err, ErrorCode, Get,
+    GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet,
+    PLs, PState, PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish,
+    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent,
+    Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,7 +57,7 @@ async fn check_auth(
     pattern: &str,
     auth: &Option<JwtClaims>,
     client: &mpsc::Sender<ServerMessage>,
-    transaction_id: u64,
+    transaction_id: TransactionId,
 ) -> WorterbuchResult<bool> {
     if auth_required {
         match auth {
@@ -147,6 +147,22 @@ pub async fn process_incoming_message(
                     log::trace!("Setting value for client {} …", client_id);
                     set(msg, worterbuch, tx, client_id).await?;
                     log::trace!("Setting value for client {} done.", client_id);
+                }
+            }
+            CM::CSet(msg) => {
+                if check_auth(
+                    auth_required,
+                    Privilege::Write,
+                    &msg.key,
+                    &authorized,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?
+                {
+                    log::trace!("Setting cas value for client {} …", client_id);
+                    cset(msg, worterbuch, tx, client_id).await?;
+                    log::trace!("Setting cas value for client {} done.", client_id);
                 }
             }
             CM::SPubInit(msg) => {
@@ -347,6 +363,13 @@ pub async fn process_incoming_message(
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
     Set(Key, Value, Uuid, oneshot::Sender<WorterbuchResult<()>>),
+    CSet(
+        Key,
+        Value,
+        CasVersion,
+        Uuid,
+        oneshot::Sender<WorterbuchResult<()>>,
+    ),
     SPubInit(
         TransactionId,
         Key,
@@ -452,6 +475,36 @@ impl CloneableWbApi {
         let res = rx.await;
         if trace {
             log::trace!("Waiting for response to set request done.");
+        }
+        res?
+    }
+
+    pub async fn cset(
+        &self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+        client_id: Uuid,
+    ) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let trace = client_id != INTERNAL_CLIENT_ID;
+        if trace {
+            log::trace!("Sending set request to core system …");
+        }
+        let res = self
+            .tx
+            .send(WbFunction::CSet(key, value, version, client_id, tx))
+            .await;
+        if trace {
+            log::trace!("Sending set request to core system done.");
+        }
+        res?;
+        if trace {
+            log::trace!("Waiting for response to cset request …");
+        }
+        let res = rx.await;
+        if trace {
+            log::trace!("Waiting for response to cset request done.");
         }
         res?
     }
@@ -800,6 +853,37 @@ async fn set(
     Ok(())
 }
 
+async fn cset(
+    msg: CSet,
+    worterbuch: &CloneableWbApi,
+    client: &mpsc::Sender<ServerMessage>,
+    client_id: Uuid,
+) -> WorterbuchResult<()> {
+    if let Err(e) = worterbuch
+        .cset(msg.key, msg.value, msg.version, client_id)
+        .await
+    {
+        handle_store_error(e, client, msg.transaction_id).await?;
+        return Ok(());
+    }
+
+    let response = Ack {
+        transaction_id: msg.transaction_id,
+    };
+
+    log::trace!("Value set, queuing Ack …");
+    let res = client.send(ServerMessage::Ack(response)).await;
+    log::trace!("Value set, queuing Ack done.");
+    res.context(|| {
+        format!(
+            "Error sending ACK message for transaction ID {}",
+            msg.transaction_id
+        )
+    })?;
+
+    Ok(())
+}
+
 async fn spub_init(
     msg: SPubInit,
     worterbuch: &CloneableWbApi,
@@ -1055,7 +1139,7 @@ async fn psubscribe(
 
 async fn forward_loop(
     mut rx: Receiver<PStateEvent>,
-    transaction_id: u64,
+    transaction_id: TransactionId,
     request_pattern: String,
     client_sub: mpsc::Sender<ServerMessage>,
     subscription: SubscriptionId,
@@ -1375,7 +1459,7 @@ async fn unsubscribe_ls(
 async fn handle_store_error(
     e: WorterbuchError,
     client: &mpsc::Sender<ServerMessage>,
-    transaction_id: u64,
+    transaction_id: TransactionId,
 ) -> WorterbuchResult<()> {
     let error_code = ErrorCode::from(&e);
     let err_msg = format!("{e}");

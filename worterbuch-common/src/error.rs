@@ -133,6 +133,7 @@ pub enum WorterbuchError {
     NoPubStream(TransactionId),
     NotLeader,
     Cas,
+    CasVersionMismatch,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -190,6 +191,12 @@ impl fmt::Display for WorterbuchError {
                 write!(
                     f,
                     "Tried to modify a compare-and-swap value without providing a version number"
+                )
+            }
+            WorterbuchError::CasVersionMismatch => {
+                write!(
+                    f,
+                    "Tried to modify a compare-and-swap value with an out-of-sync version number"
                 )
             }
         }
@@ -356,6 +363,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NoPubStream(_) => ErrorCode::NoPubStream,
             WorterbuchError::NotLeader => ErrorCode::NotLeader,
             WorterbuchError::Cas => ErrorCode::Cas,
+            WorterbuchError::CasVersionMismatch => ErrorCode::CasVersionMismatch,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }
