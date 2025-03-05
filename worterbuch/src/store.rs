@@ -571,61 +571,72 @@ impl Store {
         value: ValueEntry,
     ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
-        let changed = {
-            let mut current_node = &mut self.data;
-            let mut current_subscribers = Some(&self.subscribers);
+        let mut current_node = &mut self.data;
+        let mut current_subscribers = Some(&self.subscribers);
 
-            for (i, elem) in path.iter().enumerate() {
-                current_node = match current_node.t.entry(elem.to_owned()) {
-                    Entry::Occupied(e) => e.into_mut(),
-                    Entry::Vacant(e) => {
-                        if let Some(subscribers) = current_subscribers {
-                            if !subscribers.ls_subscribers.is_empty() {
-                                let subscribers = subscribers.ls_subscribers.clone();
-                                ls_subscribers.push((subscribers, &path[0..i]));
-                            }
+        for (i, elem) in path.iter().enumerate() {
+            current_node = match current_node.t.entry(elem.to_owned()) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => {
+                    if let Some(subscribers) = current_subscribers {
+                        if !subscribers.ls_subscribers.is_empty() {
+                            let subscribers = subscribers.ls_subscribers.clone();
+                            ls_subscribers.push((subscribers, &path[0..i]));
                         }
-                        e.insert(Node::default())
                     }
-                };
+                    e.insert(Node::default())
+                }
+            };
 
-                current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
-            }
+            current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
+        }
 
-            let mut value = value;
+        let mut value = value;
 
-            let (inserted, changed) = if let Some(val) = &current_node.v {
+        let (inserted, changed) = if let Some(val) = &current_node.v {
+            // value already exists
+
+            if let ValueEntry::Cas(_, version) = val {
+                // existing value is cas
+
                 if let ValueEntry::Cas(new_val, prev_version) = value {
-                    if let ValueEntry::Cas(_, version) = val {
-                        if prev_version != *version {
-                            return Err(WorterbuchError::CasVersionMismatch);
-                        }
-                    } else if prev_version != 0 {
+                    if prev_version != *version {
                         return Err(WorterbuchError::CasVersionMismatch);
                     }
                     value = ValueEntry::Cas(new_val, prev_version + 1);
+                } else {
+                    return Err(WorterbuchError::Cas);
                 }
-
-                (false, val != &value)
             } else {
+                // existing value is plain
+
                 if let ValueEntry::Cas(new_val, prev_version) = value {
                     if prev_version != 0 {
                         return Err(WorterbuchError::CasVersionMismatch);
                     }
-                    value = ValueEntry::Cas(new_val, prev_version + 1);
+                    value = ValueEntry::Cas(new_val, 1);
                 }
-
-                (true, true)
-            };
-
-            current_node.v = Some(value);
-
-            if inserted {
-                self.len += 1;
             }
 
-            changed
+            (false, val != &value)
+        } else {
+            // value doesn't exist yet
+
+            if let ValueEntry::Cas(new_val, prev_version) = value {
+                if prev_version != 0 {
+                    return Err(WorterbuchError::CasVersionMismatch);
+                }
+                value = ValueEntry::Cas(new_val, 1);
+            }
+
+            (true, true)
         };
+
+        current_node.v = Some(value);
+
+        if inserted {
+            self.len += 1;
+        }
 
         let ls_subscribers = ls_subscribers
             .into_iter()
@@ -1115,5 +1126,14 @@ mod test {
         assert_eq!(store.cget(&path), Some((&json!(0), &1)));
         store.insert_cas(&path, json!(1), 1).unwrap();
         assert_eq!(store.cget(&path), Some((&json!(1), &2)));
+    }
+
+    #[test]
+    fn regular_set_cannot_overwrite_cas_value() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        store.insert_cas(&path, json!(0), 0).unwrap();
+        assert_eq!(store.cget(&path), Some((&json!(0), &1)));
+        assert!(store.insert_plain(&path, json!(1)).is_err());
     }
 }
