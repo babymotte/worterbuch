@@ -879,40 +879,40 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
+            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
+            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
 
         let res = store.get_matches(&key_segs("trolo/?/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
+            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
+            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
 
         let res = store.get_matches(&key_segs("?/a/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
+            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
+            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
 
         let res = store.get_matches(&key_segs("?/?/b")).unwrap();
         assert_eq!(res.len(), 3);
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
+            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
+            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
+            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
     }
 
     #[test]
@@ -936,46 +936,46 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
+            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
+            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
 
         let res = store.get_matches(&key_segs("trolo/#")).unwrap();
         assert_eq!(res.len(), 4);
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a".to_owned(), json!("0")).into()));
+            .any(|e| e == &("trolo/a".to_owned(), json!("0")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
+            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
+            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b/d".to_owned(), json!("5")).into()));
+            .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into()));
 
         let res = store.get_matches(&key_segs("#")).unwrap();
         assert_eq!(res.len(), 6);
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a".to_owned(), json!("0")).into()));
+            .any(|e| e == &("trolo/a".to_owned(), json!("0")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
+            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
+            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
+            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
+            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
         assert!(res
             .iter()
-            .any(|e| &e == &&("trolo/c/b/d".to_owned(), json!("5")).into()));
+            .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into()));
     }
 
     #[test]

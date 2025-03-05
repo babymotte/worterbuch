@@ -187,7 +187,13 @@ async fn serve_loop(
         .await
         .into_diagnostic()?;
 
-    let mut proto = Proto::default();
+    let mut proto = Proto::new(
+        client_id,
+        tcp_send_tx,
+        authorization_required,
+        config,
+        worterbuch,
+    );
 
     loop {
         select! {
@@ -195,13 +201,8 @@ async fn serve_loop(
                 Ok(Some(json)) => {
                     log::trace!("Processing incoming message …");
                     let msg_processed = proto.process_incoming_message(
-                        client_id,
                         &json,
-                        &worterbuch,
-                        &tcp_send_tx,
-                        authorization_required,
                         &mut authorized,
-                        &config
                     ).await?;
                     if !msg_processed {
                         break;

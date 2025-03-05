@@ -1,3 +1,5 @@
+use super::CloneableWbApi;
+use crate::{auth::JwtClaims, Config};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use v0::V0;
@@ -7,39 +9,48 @@ use worterbuch_common::{
     Ack, ClientMessage, ProtocolVersionSegment, ServerMessage,
 };
 
-use crate::{auth::JwtClaims, Config};
-
-use super::CloneableWbApi;
-
 mod v0;
 mod v1;
 
-#[derive(Debug, Clone)]
 enum ProtocolHandler {
     V0(V0),
     V1(V1),
 }
 
-impl Default for ProtocolHandler {
-    fn default() -> Self {
-        ProtocolHandler::V1(V1::default())
-    }
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct Proto {
+    latest: V1,
     handler: ProtocolHandler,
 }
 
 impl Proto {
+    pub fn new(
+        client_id: Uuid,
+        tx: mpsc::Sender<ServerMessage>,
+        auth_required: bool,
+        config: Config,
+        worterbuch: CloneableWbApi,
+    ) -> Self {
+        let latest = V1::new(V0 {
+            auth_required,
+            client_id,
+            config,
+            tx,
+            worterbuch,
+        });
+        Self {
+            handler: ProtocolHandler::V1(latest.clone()),
+            latest,
+        }
+    }
+
     pub fn switch_protocol(&mut self, version: ProtocolVersionSegment) -> bool {
         match version {
             0 => {
-                self.handler = ProtocolHandler::V0(V0::default());
+                self.handler = ProtocolHandler::V0(self.latest.v0.clone());
                 true
             }
             1 => {
-                self.handler = ProtocolHandler::V1(V1::default());
+                self.handler = ProtocolHandler::V1(self.latest.clone());
                 true
             }
             _ => false,
@@ -48,15 +59,10 @@ impl Proto {
 
     pub async fn process_incoming_message(
         &mut self,
-        client_id: Uuid,
         msg: &str,
-        worterbuch: &CloneableWbApi,
-        tx: &mpsc::Sender<ServerMessage>,
-        auth_required: bool,
         authorized: &mut Option<JwtClaims>,
-        config: &Config,
     ) -> WorterbuchResult<bool> {
-        log::debug!("Received message from client {client_id}: {msg}");
+        log::debug!("Received message from client {}: {}", self.client_id(), msg);
         match serde_json::from_str(msg) {
             Ok(Some(msg)) => {
                 if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
@@ -64,7 +70,7 @@ impl Proto {
                     if self.switch_protocol(protocol_switch_request.version) {
                         let response = Ack { transaction_id: 0 };
                         log::trace!("Protocol switched, queuing Ack …");
-                        let res = tx.send(ServerMessage::Ack(response)).await;
+                        let res = self.tx().send(ServerMessage::Ack(response)).await;
                         log::trace!("Protocol switched, queuing Ack done.");
                         res.context(|| {
                             "Error sending ACK message for transaction ID 0".to_owned()
@@ -79,28 +85,10 @@ impl Proto {
 
                 match &self.handler {
                     ProtocolHandler::V0(v0) => {
-                        v0.process_incoming_message(
-                            client_id,
-                            msg,
-                            worterbuch,
-                            tx,
-                            auth_required,
-                            authorized,
-                            config,
-                        )
-                        .await?;
+                        v0.process_incoming_message(msg, authorized).await?;
                     }
                     ProtocolHandler::V1(v1) => {
-                        v1.process_incoming_message(
-                            client_id,
-                            msg,
-                            worterbuch,
-                            tx,
-                            auth_required,
-                            authorized,
-                            config,
-                        )
-                        .await?;
+                        v1.process_incoming_message(msg, authorized).await?;
                     }
                 }
 
@@ -115,5 +103,13 @@ impl Proto {
                 Ok(false)
             }
         }
+    }
+
+    fn client_id(&self) -> Uuid {
+        self.latest.v0.client_id
+    }
+
+    fn tx(&self) -> &mpsc::Sender<ServerMessage> {
+        &self.latest.v0.tx
     }
 }
