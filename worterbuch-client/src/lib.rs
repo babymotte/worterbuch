@@ -157,6 +157,7 @@ impl ClientSocket {
         match self {
             ClientSocket::Tcp(tcp_client_socket) => tcp_client_socket.close().await?,
             ClientSocket::Ws(ws_client_socket) => ws_client_socket.close().await?,
+            #[cfg(target_family = "unix")]
             ClientSocket::Unix(unix_client_socket) => unix_client_socket.close().await?,
         }
         Ok(())
@@ -783,11 +784,10 @@ pub async fn try_connect(
     let wb = if tcp {
         connect_tcp(host_addr, disco_tx, config).await?
     } else if unix {
-        #[cfg(target_family = "unix")]
-        let wb = connect_unix(url, disco_tx, config).await?;
         #[cfg(not(target_family = "unix"))]
-        let wb = panic!("not supported on non-unix operating systems");
-        wb
+        panic!("not supported on non-unix operating systems");
+        #[cfg(target_family = "unix")]
+        connect_unix(url, disco_tx, config).await?
     } else {
         connect_ws(url, disco_tx, config).await?
     };

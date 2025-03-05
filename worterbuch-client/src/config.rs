@@ -17,11 +17,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(target_family = "unix")]
+use std::path::PathBuf;
 use std::{
     env,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     ops::Deref,
-    path::PathBuf,
     time::Duration,
 };
 
