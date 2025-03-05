@@ -215,7 +215,12 @@ impl V0 {
                 );
             }
 
-            CM::ProtocolSwitchRequest(_) | CM::CGet(_) | CM::CSet(_) | CM::Transform(_) => {
+            CM::ProtocolSwitchRequest(_)
+            | CM::CGet(_)
+            | CM::CSet(_)
+            | CM::Transform(_)
+            | CM::Lock(_)
+            | CM::ReleaseLock(_) => {
                 return Err(WorterbuchError::NotImplemented);
             }
         };

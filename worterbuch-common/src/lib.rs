@@ -107,6 +107,8 @@ pub enum ErrorCode {
     Cas = 0b00010001,
     CasVersionMismatch = 0b00010010,
     NotImplemented = 0b00010011,
+    KeyIsLocked = 0b00010100,
+    KeyIsNotLocked = 0b00010101,
     Other = 0b11111111,
 }
 

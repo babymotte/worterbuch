@@ -2,7 +2,7 @@ use super::v0::V0;
 use crate::auth::JwtClaims;
 use tracing::trace;
 use worterbuch_common::{
-    Ack, CSet, CState, CStateEvent, ClientMessage as CM, Get, Privilege, ServerMessage,
+    Ack, CSet, CState, CStateEvent, ClientMessage as CM, Get, Lock, Privilege, ServerMessage,
     error::{Context, WorterbuchResult},
 };
 
@@ -42,6 +42,28 @@ impl V1 {
                     trace!("Setting cas value for client {} …", self.v0.client_id);
                     self.cset(msg).await?;
                     trace!("Setting cas value for client {} done.", self.v0.client_id);
+                }
+            }
+            CM::Lock(msg) => {
+                if self
+                    .v0
+                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                    .await?
+                {
+                    trace!("Locking key for client {} …", self.v0.client_id);
+                    self.lock(msg).await?;
+                    trace!("Locking key for client {} done.", self.v0.client_id);
+                }
+            }
+            CM::ReleaseLock(msg) => {
+                if self
+                    .v0
+                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                    .await?
+                {
+                    trace!("Unlocking key for client {} …", self.v0.client_id);
+                    self.release_lock(msg).await?;
+                    trace!("Unlocking key for client {} done.", self.v0.client_id);
                 }
             }
             msg => {
@@ -97,6 +119,57 @@ impl V1 {
         trace!("Value set, queuing Ack …");
         let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
         trace!("Value set, queuing Ack done.");
+        res.context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn lock(&self, msg: Lock) -> WorterbuchResult<()> {
+        if let Err(e) = self.v0.worterbuch.lock(msg.key, self.v0.client_id).await {
+            self.v0.handle_store_error(e, msg.transaction_id).await?;
+            return Ok(());
+        }
+
+        let response = Ack {
+            transaction_id: msg.transaction_id,
+        };
+
+        trace!("Key locked, queuing Ack …");
+        let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        trace!("Key locked, queuing Ack done.");
+        res.context(|| {
+            format!(
+                "Error sending ACK message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn release_lock(&self, msg: Lock) -> WorterbuchResult<()> {
+        if let Err(e) = self
+            .v0
+            .worterbuch
+            .release_lock(msg.key, self.v0.client_id)
+            .await
+        {
+            self.v0.handle_store_error(e, msg.transaction_id).await?;
+            return Ok(());
+        }
+
+        let response = Ack {
+            transaction_id: msg.transaction_id,
+        };
+
+        trace!("Key unlocked, queuing Ack …");
+        let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        trace!("Key unlocked, queuing Ack done.");
         res.context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",

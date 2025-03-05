@@ -109,6 +109,8 @@ pub enum WbFunction {
         Uuid,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
+    Lock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
+    ReleaseLock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
     Connected(Uuid, Option<SocketAddr>, Protocol),
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
@@ -194,6 +196,51 @@ impl CloneableWbApi {
         let res = rx.await;
         if trace {
             trace!("Waiting for response to cset request done.");
+        }
+        res?
+    }
+
+    pub async fn lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let trace = client_id != INTERNAL_CLIENT_ID;
+        if trace {
+            trace!("Sending lock request to core system …");
+        }
+        let res = self.tx.send(WbFunction::Lock(key, client_id, tx)).await;
+        if trace {
+            trace!("Sending lock request to core system done.");
+        }
+        res?;
+        if trace {
+            trace!("Waiting for response to lock request …");
+        }
+        let res = rx.await;
+        if trace {
+            trace!("Waiting for response to lock request done.");
+        }
+        res?
+    }
+
+    pub async fn release_lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let trace = client_id != INTERNAL_CLIENT_ID;
+        if trace {
+            trace!("Sending release lock request to core system …");
+        }
+        let res = self
+            .tx
+            .send(WbFunction::ReleaseLock(key, client_id, tx))
+            .await;
+        if trace {
+            trace!("Sending release lock request to core system done.");
+        }
+        res?;
+        if trace {
+            trace!("Waiting for response to release lock request …");
+        }
+        let res = rx.await;
+        if trace {
+            trace!("Waiting for response to release lock request done.");
         }
         res?
     }

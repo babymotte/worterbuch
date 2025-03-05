@@ -45,6 +45,8 @@ pub enum ClientMessage {
     PLs(PLs),
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
+    Lock(Lock),
+    ReleaseLock(Lock),
     Transform(Transform),
 }
 
@@ -70,6 +72,8 @@ impl ClientMessage {
             ClientMessage::PLs(m) => Some(m.transaction_id),
             ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
+            ClientMessage::Lock(m) => Some(m.transaction_id),
+            ClientMessage::ReleaseLock(m) => Some(m.transaction_id),
             ClientMessage::Transform(m) => Some(m.transaction_id),
         }
     }
@@ -206,6 +210,13 @@ pub struct SubscribeLs {
 #[serde(rename_all = "camelCase")]
 pub struct UnsubscribeLs {
     pub transaction_id: TransactionId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lock {
+    pub transaction_id: TransactionId,
+    pub key: Key,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

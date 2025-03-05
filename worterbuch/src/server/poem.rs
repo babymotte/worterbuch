@@ -63,13 +63,18 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
         | WorterbuchError::MultiWildcardAtIllegalPosition(_)
-        | WorterbuchError::NotImplemented => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
+        | WorterbuchError::NotImplemented
+        | WorterbuchError::KeyIsNotLocked(_) => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
 
         WorterbuchError::AlreadyAuthorized
         | WorterbuchError::NotSubscribed
         | WorterbuchError::NoPubStream(_) => {
             Err(poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY))
         }
+
+        WorterbuchError::KeyIsLocked(_, _)
+        | WorterbuchError::Cas
+        | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::CONFLICT)),
 
         WorterbuchError::ReadOnlyKey(_) => Err(poem::Error::new(e, StatusCode::METHOD_NOT_ALLOWED)),
 
@@ -79,9 +84,7 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 
         WorterbuchError::NoSuchValue(_) => Err(poem::Error::new(e, StatusCode::NOT_FOUND)),
 
-        WorterbuchError::Unauthorized(_)
-        | WorterbuchError::Cas
-        | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::FORBIDDEN)),
+        WorterbuchError::Unauthorized(_) => Err(poem::Error::new(e, StatusCode::FORBIDDEN)),
 
         WorterbuchError::IoError(_, _)
         | WorterbuchError::SerDeError(_, _)

@@ -874,6 +874,26 @@ impl Worterbuch {
         }
     }
 
+    pub fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+        check_for_read_only_key(&key, client_id)?;
+
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+
+        self.store.lock(client_id, path)?;
+
+        Ok(())
+    }
+
+    pub fn release_lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+        check_for_read_only_key(&key, client_id)?;
+
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+
+        self.store.unlock(client_id, path)?;
+
+        Ok(())
+    }
+
     pub fn ls(&self, parent: &Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let path = parent
             .as_deref()
@@ -1033,6 +1053,9 @@ impl Worterbuch {
                 client_id
             );
         }
+
+        info!("Dropping locks of client {}.", client_id);
+        self.store.unlock_all(client_id);
 
         let grave_goods = self.grave_goods_for_client(&client_id);
         let last_wills = self.last_will_for_client(&client_id);

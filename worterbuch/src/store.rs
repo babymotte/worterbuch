@@ -21,6 +21,7 @@ use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use tracing::{debug, warn};
+use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
     Value,
@@ -83,10 +84,14 @@ pub type StoreResult<T> = Result<T, StoreError>;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Node {
+    #[serde(rename = "v")]
     #[serde(skip_serializing_if = "Option::is_none")]
     v: NodeValue,
+    #[serde(rename = "t")]
     #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
     t: Tree,
+    #[serde(skip_serializing, default = "Option::default")]
+    lock: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -114,6 +119,7 @@ pub struct Store {
     subscribers: SubscribersNode,
     #[serde(skip_serializing, default = "bool::default")]
     unsaved_changes: bool,
+    locks: HashMap<Uuid, Vec<Vec<RegularKeySegment>>>,
 }
 
 impl Store {
@@ -125,6 +131,7 @@ impl Store {
         Node {
             v: self.data.v.clone(),
             t: self.slim_copy_top_level_children(),
+            lock: None,
         }
     }
 
@@ -187,6 +194,19 @@ impl Store {
         }
 
         Some(current)
+    }
+
+    fn get_or_create_node(&mut self, path: Vec<RegularKeySegment>) -> &mut Node {
+        let mut current = &mut self.data;
+
+        for elem in path {
+            current = match current.t.entry(elem) {
+                Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
+                Entry::Vacant(vacant_entry) => vacant_entry.insert(Node::default()),
+            }
+        }
+
+        current
     }
 
     pub fn delete(
@@ -262,7 +282,7 @@ impl Store {
                     ValueEntry::Plain(value) => return Ok((Some(value), node.t.is_empty())),
                     ValueEntry::Cas(value, _) => return Ok((Some(value), node.t.is_empty())),
                 },
-                None => return Ok((None, node.t.is_empty())),
+                None => return Ok((None, node.t.is_empty() && node.lock.is_none())),
             }
         }
 
@@ -287,9 +307,15 @@ impl Store {
                     }
                 }
             }
-            Ok((val, node.v.is_none() && node.t.is_empty()))
+            Ok((
+                val,
+                node.v.is_none() && node.t.is_empty() && node.lock.is_none(),
+            ))
         } else {
-            Ok((None, node.v.is_none() && node.t.is_empty()))
+            Ok((
+                None,
+                node.v.is_none() && node.t.is_empty() && node.lock.is_none(),
+            ))
         }
     }
 
@@ -306,7 +332,7 @@ impl Store {
                 let key = traversed_path.join("/");
                 matches.push((key, value).into());
             }
-            return Ok(node.t.is_empty());
+            return Ok(node.t.is_empty() && node.lock.is_none());
         }
 
         let head = &relative_path[0];
@@ -359,7 +385,7 @@ impl Store {
             }
         }
 
-        Ok(node.v.is_none() && node.t.is_empty())
+        Ok(node.v.is_none() && node.t.is_empty() && node.lock.is_none())
     }
 
     fn ndelete_child_matches<'a>(
@@ -806,6 +832,61 @@ impl Store {
         removed
     }
 
+    pub fn lock(&mut self, client_id: Uuid, path: Vec<RegularKeySegment>) -> WorterbuchResult<()> {
+        let node = self.get_or_create_node(path.clone());
+        match node.lock {
+            Some(id) => {
+                if client_id == id {
+                    debug!("Client {client_id} already holds the lock on {path:?}");
+                } else {
+                    return Err(WorterbuchError::KeyIsLocked(path.join("/"), client_id));
+                }
+            }
+            None => {
+                node.lock = Some(client_id);
+                let paths = match self.locks.entry(client_id) {
+                    Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
+                    Entry::Vacant(vacant_entry) => vacant_entry.insert(Vec::new()),
+                };
+                paths.push(path);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn unlock_all(&mut self, client_id: Uuid) {
+        if let Some(paths) = self.locks.remove(&client_id) {
+            for path in paths {
+                self.unlock(client_id, path).ok();
+            }
+        }
+    }
+
+    pub fn unlock(
+        &mut self,
+        client_id: Uuid,
+        path: Vec<RegularKeySegment>,
+    ) -> WorterbuchResult<()> {
+        let node = self.get_or_create_node(path.clone());
+        if let Some(lock) = node.lock.take() {
+            if lock == client_id {
+                if node.t.is_empty() && node.v.is_none() {
+                    self.delete(&path).ok();
+                }
+            } else {
+                debug!("Node {path:?} locked by client {lock}, not {client_id}.");
+                node.lock = Some(lock);
+                return Err(WorterbuchError::KeyIsLocked(path.join("/"), lock));
+            }
+        } else {
+            warn!("Node {path:?} is not locked.");
+            return Err(WorterbuchError::KeyIsNotLocked(path.join("/")));
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn reset(&mut self, data: Node) {
         self.data = data;
         self.count_entries();
@@ -1053,15 +1134,15 @@ mod test {
     fn initial_cas_insert_with_version_0_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!("hello"), 0).unwrap();
+        assert!(store.insert_cas(&path, json!("hello"), 0).is_ok());
     }
 
     #[test]
     fn plain_to_cas_upgrade_with_version_0_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_plain(&path, json!(1)).unwrap();
-        store.insert_cas(&path, json!(2), 0).unwrap();
+        assert!(store.insert_plain(&path, json!(1)).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 0).is_ok());
     }
 
     #[test]
@@ -1075,57 +1156,57 @@ mod test {
     fn plain_to_cas_upgrade_with_version_1_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_plain(&path, json!(1)).unwrap();
-        assert!(store.insert_cas(&path, json!(2), 1).is_err())
+        assert!(store.insert_plain(&path, json!(1)).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 1).is_err());
     }
 
     #[test]
     fn cas_set_with_previous_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
-        store.insert_cas(&path, json!(1), 1).unwrap();
-        store.insert_cas(&path, json!(2), 2).unwrap();
-        assert!(store.insert_cas(&path, json!(3), 1).is_err())
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 1).is_err());
     }
 
     #[test]
     fn cas_set_with_same_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
-        store.insert_cas(&path, json!(1), 1).unwrap();
-        store.insert_cas(&path, json!(2), 2).unwrap();
-        assert!(store.insert_cas(&path, json!(3), 2).is_err())
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 2).is_err());
     }
 
     #[test]
     fn cas_set_with_next_version_number_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
-        store.insert_cas(&path, json!(1), 1).unwrap();
-        store.insert_cas(&path, json!(2), 2).unwrap();
-        store.insert_cas(&path, json!(3), 3).unwrap();
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 3).is_ok());
     }
 
     #[test]
     fn cas_set_with_future_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
-        store.insert_cas(&path, json!(1), 1).unwrap();
-        store.insert_cas(&path, json!(2), 2).unwrap();
-        assert!(store.insert_cas(&path, json!(3), 4).is_err())
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 4).is_err());
     }
 
     #[test]
     fn cas_value_can_be_deleted() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
         assert_eq!(store.get(&path), Some(&json!(0)));
-        store.delete(&path).unwrap();
+        assert!(store.delete(&path,).is_ok());
         assert_eq!(store.get(&path), None);
     }
 
@@ -1134,9 +1215,9 @@ mod test {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let pattern = key_segs("hello/#");
-        store.insert_cas(&path, json!(0), 0).unwrap();
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
         assert_eq!(store.get(&path), Some(&json!(0)));
-        store.delete_matches(&pattern).unwrap();
+        assert!(store.delete_matches(&pattern).is_ok());
         assert_eq!(store.get(&path), None);
     }
 
@@ -1144,9 +1225,9 @@ mod test {
     fn cas_set_increments_version() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(0), &1)));
-        store.insert_cas(&path, json!(1), 1).unwrap();
+        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(1), &2)));
     }
 
@@ -1154,8 +1235,102 @@ mod test {
     fn regular_set_cannot_overwrite_cas_value() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        store.insert_cas(&path, json!(0), 0).unwrap();
+        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(0), &1)));
         assert!(store.insert_plain(&path, json!(1)).is_err());
+    }
+
+    #[test]
+    fn lock_can_be_acquired() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client = Uuid::new_v4();
+        assert!(store.lock(client, path).is_ok());
+    }
+
+    #[test]
+    fn lock_can_be_acquired_by_only_one_client() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client_1 = Uuid::new_v4();
+        let client_2 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.lock(client_2, path).is_err());
+    }
+
+    #[test]
+    fn lock_can_be_re_acquired_after_unlock() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client_1 = Uuid::new_v4();
+        let client_2 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.lock(client_2, path.clone()).is_err());
+        store.unlock(client_1, path.clone());
+        assert!(store.lock(client_2, path).is_ok());
+    }
+
+    #[test]
+    fn locked_value_can_be_written() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client_1 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        assert_eq!(store.get(&path), Some(&json!("hello")));
+    }
+
+    #[test]
+    fn locked_value_can_be_deleted() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client_1 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        assert_eq!(store.get(&path), Some(&json!("hello")));
+        assert!(store.delete(&path,).is_ok());
+        assert_eq!(store.get(&path), None);
+    }
+
+    #[test]
+    fn unlocking_a_key_does_not_delete_its_value() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let client_1 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        store.unlock(client_1, path.clone());
+        assert_eq!(store.get(&path), Some(&json!("hello")));
+    }
+
+    #[test]
+    fn unlocking_a_key_does_not_delete_its_sub_tree() {
+        let mut store = Store::default();
+        let path = reg_key_segs("hello/cas");
+        let path2 = reg_key_segs("hello/cas/test");
+        let client_1 = Uuid::new_v4();
+        assert!(store.lock(client_1, path.clone()).is_ok());
+        assert!(store.insert_plain(&path2, json!("hello")).is_ok());
+        store.unlock(client_1, path.clone());
+        assert_eq!(store.get(&path2), Some(&json!("hello")));
+    }
+
+    #[test]
+    fn locked_key_is_deleted_by_pdelete() {
+        let mut store = Store::default();
+
+        let del = key_segs("hello/#");
+        let path = reg_key_segs("hello/cas");
+        let path2 = reg_key_segs("hello/cas/test");
+        let path3 = reg_key_segs("hello/cas/test2");
+        let client_1 = Uuid::new_v4();
+        store.insert_plain(&path, json!("hello1")).unwrap();
+        store.insert_plain(&path2, json!("hello2")).unwrap();
+        store.insert_plain(&path3, json!("hello3")).unwrap();
+        store.lock(client_1, path2.clone()).unwrap();
+        assert!(store.delete_matches(&del).is_ok());
+        assert_eq!(store.get(&path), None);
+        assert_eq!(store.get(&path2), None);
+        assert_eq!(store.get(&path3), None);
     }
 }

@@ -20,6 +20,7 @@ random_word = { version = "0.5.0", features = ["en"] }
 sha2 = "0.10.8"
 miette = "7.5.0"
 tracing = "0.1.41"
+uuid = "1.15.1"
 
 [lints.rust]
 unsafe_code = "forbid"

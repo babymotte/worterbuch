@@ -268,6 +268,12 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::PDelete(pattern, client_id, tx) => {
             tx.send(worterbuch.pdelete(pattern, client_id).await).ok();
         }
+        WbFunction::Lock(key, client_id, tx) => {
+            tx.send(worterbuch.lock(key, client_id)).ok();
+        }
+        WbFunction::ReleaseLock(key, client_id, tx) => {
+            tx.send(worterbuch.release_lock(key, client_id)).ok();
+        }
         WbFunction::Connected(client_id, remote_addr, protocol) => {
             worterbuch
                 .connected(client_id, remote_addr, &protocol)
@@ -351,6 +357,12 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
             tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id))
                 .ok();
+        }
+        WbFunction::Lock(key, client_id, tx) => {
+            tx.send(worterbuch.lock(key, client_id)).ok();
+        }
+        WbFunction::ReleaseLock(key, client_id, tx) => {
+            tx.send(worterbuch.release_lock(key, client_id)).ok();
         }
         WbFunction::Delete(_, _, tx) => {
             tx.send(Err(WorterbuchError::NotLeader)).ok();
@@ -672,7 +684,9 @@ async fn forward_api_call(
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)
         | WbFunction::Export(_)
-        | WbFunction::Len(_) => None,
+        | WbFunction::Len(_)
+        | WbFunction::Lock(_, _, _)
+        | WbFunction::ReleaseLock(_, _, _) => None,
         WbFunction::Set(key, value, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Set(key.to_owned(), value.to_owned()))

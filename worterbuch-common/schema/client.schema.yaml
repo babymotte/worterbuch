@@ -335,6 +335,34 @@ properties:
     additionalProperties: false
     required:
       - transactionId
+  lock:
+    description: A message sent by a client to request a lock on the specified key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
+  releaseLock:
+    description: A message sent by a client to request releasing a lock on the specified key
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
   # transform:
   #   description: A message sent by the client to set up a server-internal state transformer
   #   type: object
