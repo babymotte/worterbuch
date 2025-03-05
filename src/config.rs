@@ -16,9 +16,9 @@
  */
 
 use super::PeerInfo;
-use crate::{load_millis_since_active, Priority};
+use crate::{Priority, load_millis_since_active};
 use clap::Parser;
-use miette::{miette, Context, IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::Deserialize;
 use std::{
     collections::HashSet,
@@ -157,17 +157,25 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usi
             "You have not configured any nodes for your cluster."
         ));
     } else if quorum > node_count {
-        return Err(miette!("The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). Your cluster will not be able to elect a leader."));
+        return Err(miette!(
+            "The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). Your cluster will not be able to elect a leader."
+        ));
     } else if node_count == 1 {
         error!(
             "You have configured only one node, your cluster is NOT redundant! If this is what you want, you should use worterbuch in standalone mode, not as a cluster.",
         );
     } else if quorum == node_count {
-        error!("The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). If a single node fails your cluster will not be able to elect a new leader, your cluster is NOT redundant!");
+        error!(
+            "The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). If a single node fails your cluster will not be able to elect a new leader, your cluster is NOT redundant!"
+        );
     } else if quorum < recommended_min_quorum {
-        warn!("The leader election quorum ({quorum}) is TOO LOW for the number of nodes ({node_count}). This makes your cluster susceptible to split brain scenarios (i.e. two leaders may be elected at the same time). THIS IS HIGHLY DISCOURAGED!");
+        warn!(
+            "The leader election quorum ({quorum}) is TOO LOW for the number of nodes ({node_count}). This makes your cluster susceptible to split brain scenarios (i.e. two leaders may be elected at the same time). THIS IS HIGHLY DISCOURAGED!"
+        );
     } else if node_count % 2 == 0 {
-        warn!("An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node.");
+        warn!(
+            "An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node."
+        );
     }
 
     Ok((quorum, quorum < recommended_min_quorum))

@@ -16,15 +16,15 @@
  */
 
 use super::{
+    PeerMessage,
     config::Config,
     process_manager::{ChildProcessManager, CommandDefinition},
-    PeerMessage,
 };
 use crate::{
+    Heartbeat, HeartbeatRequest, Vote,
     config::Peers,
     persist_active_timestamp,
     utils::{listen, send_heartbeat_response},
-    Heartbeat, HeartbeatRequest, Vote,
 };
 use miette::Result;
 use std::{net::SocketAddr, ops::ControlFlow, pin::pin, time::Duration};

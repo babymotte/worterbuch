@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::{config::Config, HeartbeatRequest, PeerMessage, VoteRequest, VoteResponse};
+use super::{HeartbeatRequest, PeerMessage, VoteRequest, VoteResponse, config::Config};
 use crate::config::Peers;
 use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};

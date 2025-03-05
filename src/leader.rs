@@ -20,10 +20,10 @@ use super::{
     process_manager::{ChildProcessManager, CommandDefinition},
 };
 use crate::{
+    Heartbeat, PeerMessage, Vote,
     config::Peers,
     persist_active_timestamp,
     utils::{listen, send_heartbeat_requests},
-    Heartbeat, PeerMessage, Vote,
 };
 use miette::Result;
 use std::{
@@ -140,14 +140,16 @@ fn check_heartbeat_responses(
         } else {
             debug!(
                 "Heartbeat response of node '{}' is overdue ({}/{} node(s) responsive; quorum: {}).",
-                peer,
-                responsive_nodes, number_of_nodes, config.quorum
+                peer, responsive_nodes, number_of_nodes, config.quorum
             );
         }
     }
 
     if responsive_nodes < config.quorum {
-        warn!("Quorum of {} is no longer met, too many unresponsive peers. Cluster is no longer able to build a consensus, dropping to follower state to allow re-election.", config.quorum);
+        warn!(
+            "Quorum of {} is no longer met, too many unresponsive peers. Cluster is no longer able to build a consensus, dropping to follower state to allow re-election.",
+            config.quorum
+        );
         false
     } else {
         true

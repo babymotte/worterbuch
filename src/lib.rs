@@ -25,10 +25,10 @@ mod stats;
 mod utils;
 
 use config::load_config;
-use election::{elect_leader, ElectionOutcome};
+use election::{ElectionOutcome, elect_leader};
 use follower::follow;
 use leader::lead;
-use miette::{miette, IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;

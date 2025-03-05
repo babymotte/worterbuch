@@ -17,8 +17,8 @@
 
 use super::config::Config;
 use crate::{
-    config::Peers, utils::support_vote, Heartbeat, HeartbeatRequest, PeerMessage, Priority, Vote,
-    VoteRequest,
+    Heartbeat, HeartbeatRequest, PeerMessage, Priority, Vote, VoteRequest, config::Peers,
+    utils::support_vote,
 };
 use miette::{Context, IntoDiagnostic, Result};
 use std::pin::pin;

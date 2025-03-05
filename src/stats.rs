@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use miette::{Context, IntoDiagnostic, Result};
 use serde_json::json;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
