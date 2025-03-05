@@ -47,17 +47,13 @@ use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern,
-    SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
-    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage,
-    StateEvent, TransactionId,
+    PStateEvent, Path, Protocol, RegularKeySegment, RequestPattern, SYSTEM_TOPIC_CLIENT_NAME,
+    SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, TransactionId,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, topic,
 };
-
-pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
-    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 0)];
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;

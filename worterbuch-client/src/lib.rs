@@ -62,7 +62,7 @@ pub use worterbuch_common::{
     error::{ConnectionError, ConnectionResult},
 };
 
-const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
 
 #[derive(Debug)]
 pub(crate) enum Command {

@@ -58,14 +58,17 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use worterbuch_common::{
-    KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+    KeySegment, PStateEvent, ProtocolVersion, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
     SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
     SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, error::WorterbuchError, tcp::receive_msg, topic,
 };
 
-type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
+pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
+    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 1)];
 
 pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
+
+type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
 
 pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<()> {
     let config_pers = config.clone();

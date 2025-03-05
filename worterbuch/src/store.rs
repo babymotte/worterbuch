@@ -1266,7 +1266,7 @@ mod test {
         let client_2 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path.clone()).is_err());
-        store.unlock(client_1, path.clone());
+        store.unlock(client_1, path.clone()).unwrap();
         assert!(store.lock(client_2, path).is_ok());
     }
 
@@ -1299,7 +1299,7 @@ mod test {
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone());
+        store.unlock(client_1, path.clone()).unwrap();
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
 
@@ -1311,7 +1311,7 @@ mod test {
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path2, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone());
+        store.unlock(client_1, path.clone()).unwrap();
         assert_eq!(store.get(&path2), Some(&json!("hello")));
     }
 
