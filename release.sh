@@ -33,6 +33,9 @@ WB_TAG=$(curl -L \
     exit 1
 }
 
+echo "Using worterbuch version $WB_VERSION. If this is correct, press enter, otherwise press Ctrl + C"
+read
+
 DOCKERFILE="FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
 WORKDIR /app
 RUN rustup component add rustfmt
