@@ -818,16 +818,7 @@ async fn connect_ws(
     let (mut websocket, _) = connect_async_with_config(request, None, true).await?;
     log::debug!("Connected to server.");
 
-    let Welcome {
-        client_id,
-        info:
-            ServerInfo {
-                version: _,
-                supported_protocol_versions,
-                authorization_required,
-                protocol_version: _,
-            },
-    } = match websocket.next().await {
+    let Welcome { client_id, info } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
             Ok(data) => match json::from_str::<SM>(data) {
                 Ok(SM::Welcome(welcome)) => {
@@ -863,7 +854,8 @@ async fn connect_ws(
         }
     };
 
-    let proto_version = if let Some(v) = supported_protocol_versions
+    let proto_version = if let Some(v) = info
+        .supported_protocol_versions
         .iter()
         .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
     {
@@ -924,7 +916,7 @@ async fn connect_ws(
         }
     }
 
-    if authorization_required {
+    if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
             let msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
@@ -1005,16 +997,7 @@ async fn connect_tcp(
 
     log::debug!("Connected to server.");
 
-    let Welcome {
-        client_id,
-        info:
-            ServerInfo {
-                version: _,
-                supported_protocol_versions,
-                authorization_required,
-                protocol_version: _,
-            },
-    } = select! {
+    let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
             Ok(None) => {
                 return Err(ConnectionError::IoError(io::Error::new(
@@ -1050,7 +1033,8 @@ async fn connect_tcp(
         },
     };
 
-    let proto_version = if let Some(v) = supported_protocol_versions
+    let proto_version = if let Some(v) = info
+        .supported_protocol_versions
         .iter()
         .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
     {
@@ -1107,7 +1091,7 @@ async fn connect_tcp(
         }
     }
 
-    if authorization_required {
+    if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
@@ -1205,16 +1189,7 @@ async fn connect_unix(
 
     log::debug!("Connected to server.");
 
-    let Welcome {
-        client_id,
-        info:
-            ServerInfo {
-                version: _,
-                supported_protocol_versions,
-                authorization_required,
-                protocol_version: _,
-            },
-    } = select! {
+    let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
             Ok(None) => {
                 return Err(ConnectionError::IoError(io::Error::new(
@@ -1250,7 +1225,8 @@ async fn connect_unix(
         },
     };
 
-    let proto_version = if let Some(v) = supported_protocol_versions
+    let proto_version = if let Some(v) = info
+        .supported_protocol_versions
         .iter()
         .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
     {
@@ -1307,7 +1283,7 @@ async fn connect_unix(
         }
     }
 
-    if authorization_required {
+    if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;

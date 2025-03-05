@@ -122,12 +122,11 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
         Ok(it) => it,
         Err(e) => return to_error_response(e),
     };
-    let info = ServerInfo {
-        version: VERSION.to_owned(),
-        authorization_required: config.auth_token.is_some(),
+    let info = ServerInfo::new(
+        VERSION.to_owned(),
         supported_protocol_versions,
-        protocol_version: "0.11".to_owned(),
-    };
+        config.auth_token.is_some(),
+    );
 
     Ok(Json(info))
 }

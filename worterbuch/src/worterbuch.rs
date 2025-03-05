@@ -1148,35 +1148,29 @@ impl Worterbuch {
             }
         }
 
-        if let Err(e) = self
-            .delete(
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_CLIENTS_PROTOCOL
-                ),
-                INTERNAL_CLIENT_ID,
-            )
-            .await
-        {
-            log::debug!("Error updating client protocol: {e}");
-        }
+        self.delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_PROTOCOL
+            ),
+            INTERNAL_CLIENT_ID,
+        )
+        .await
+        .ok();
 
-        if let Err(e) = self
-            .delete(
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_CLIENTS_ADDRESS
-                ),
-                INTERNAL_CLIENT_ID,
-            )
-            .await
-        {
-            log::debug!("Error updating client address: {e}");
-        }
+        self.delete(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_ADDRESS
+            ),
+            INTERNAL_CLIENT_ID,
+        )
+        .await
+        .ok();
 
         Ok(())
     }

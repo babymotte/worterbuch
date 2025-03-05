@@ -324,8 +324,24 @@ pub struct ServerInfo {
     pub version: Version,
     pub supported_protocol_versions: Box<[ProtocolVersion]>,
     #[deprecated(since = "1.1.0", note = "replaced by `supported_protocol_versions`")]
-    pub protocol_version: String,
+    protocol_version: String,
     pub authorization_required: bool,
+}
+
+#[allow(deprecated)]
+impl ServerInfo {
+    pub fn new(
+        version: Version,
+        supported_protocol_versions: Box<[ProtocolVersion]>,
+        authorization_required: bool,
+    ) -> Self {
+        Self {
+            version,
+            supported_protocol_versions,
+            protocol_version: "0.11".to_owned(),
+            authorization_required,
+        }
+    }
 }
 
 #[cfg(test)]

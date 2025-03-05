@@ -178,12 +178,11 @@ async fn serve_loop(
     tcp_send_tx
         .send(ServerMessage::Welcome(Welcome {
             client_id: client_id.to_string(),
-            info: ServerInfo {
-                version: VERSION.to_owned(),
-                authorization_required,
+            info: ServerInfo::new(
+                VERSION.to_owned(),
                 supported_protocol_versions,
-                protocol_version: "0.11".to_owned(),
-            },
+                authorization_required,
+            ),
         }))
         .await
         .into_diagnostic()?;
