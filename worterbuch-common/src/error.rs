@@ -18,7 +18,8 @@
  */
 
 use crate::{
-    server::Err, ClientMessage, ErrorCode, Key, MetaData, Privilege, RequestPattern, TransactionId,
+    server::Err, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
+    RequestPattern, TransactionId,
 };
 use miette::Diagnostic;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
@@ -125,7 +126,7 @@ pub enum WorterbuchError {
     InvalidServerResponse(MetaData),
     Other(Box<dyn std::error::Error + Send + Sync>, MetaData),
     ServerResponse(Err),
-    ProtocolNegotiationFailed,
+    ProtocolNegotiationFailed(ProtocolVersionSegment),
     ReadOnlyKey(Key),
     AuthorizationRequired(Privilege),
     AlreadyAuthorized,
@@ -134,7 +135,7 @@ pub enum WorterbuchError {
     NotLeader,
     Cas,
     CasVersionMismatch,
-    Disconnected,
+    CannotSwitchProtocol,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -159,8 +160,8 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::ServerResponse(e) => {
                 write!(f, "error {}: {}", e.error_code, e.metadata)
             }
-            WorterbuchError::ProtocolNegotiationFailed => {
-                write!(f, "The server does not implement any of the protocol versions supported by this client")
+            WorterbuchError::ProtocolNegotiationFailed(v) => {
+                write!(f, "The server does not implement protocol version {v}")
             }
             WorterbuchError::InvalidServerResponse(meta) => write!(
                 f,
@@ -200,8 +201,11 @@ impl fmt::Display for WorterbuchError {
                     "Tried to modify a compare-and-swap value with an out-of-sync version number"
                 )
             }
-            WorterbuchError::Disconnected => {
-                write!(f, "The connection was closed unexpectedly")
+            WorterbuchError::CannotSwitchProtocol => {
+                write!(
+                    f,
+                    "Cannot switch protocol, the client has already been assigned to a protocol specific handler",
+                )
             }
         }
     }
@@ -358,7 +362,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotSubscribed => ErrorCode::NotSubscribed,
             WorterbuchError::IoError(_, _) => ErrorCode::IoError,
             WorterbuchError::SerDeError(_, _) => ErrorCode::SerdeError,
-            WorterbuchError::ProtocolNegotiationFailed => ErrorCode::ProtocolNegotiationFailed,
+            WorterbuchError::ProtocolNegotiationFailed(_) => ErrorCode::ProtocolNegotiationFailed,
             WorterbuchError::InvalidServerResponse(_) => ErrorCode::InvalidServerResponse,
             WorterbuchError::ReadOnlyKey(_) => ErrorCode::ReadOnlyKey,
             WorterbuchError::AuthorizationRequired(_) => ErrorCode::AuthorizationRequired,
@@ -368,7 +372,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotLeader => ErrorCode::NotLeader,
             WorterbuchError::Cas => ErrorCode::Cas,
             WorterbuchError::CasVersionMismatch => ErrorCode::CasVersionMismatch,
-            WorterbuchError::Disconnected => ErrorCode::Disconnected,
+            WorterbuchError::CannotSwitchProtocol => ErrorCode::CannotSwitchProtocol,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

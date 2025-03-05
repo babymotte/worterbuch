@@ -869,7 +869,7 @@ async fn connect_ws(
         v
     } else {
         return Err(ConnectionError::WorterbuchError(
-            WorterbuchError::ProtocolNegotiationFailed,
+            WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
         ));
     };
 
@@ -883,12 +883,42 @@ async fn connect_ws(
     websocket.send(Message::Text(msg.into())).await?;
 
     match websocket.next().await {
-        Some(_) => todo!(),
+        Some(msg) => match msg? {
+            Message::Text(msg) => match serde_json::from_str(&msg) {
+                Ok(SM::Ack(_)) => {
+                    log::debug!("Protocol switched to v{}.", proto_version.major());
+                }
+                Ok(SM::Err(e)) => {
+                    log::error!("Protocol switch failed: {e}");
+                    return Err(ConnectionError::WorterbuchError(
+                        WorterbuchError::ServerResponse(e),
+                    ));
+                }
+                Ok(msg) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("server sent invalid protocol switch response: {msg:?}"),
+                    )))
+                }
+                Err(e) => {
+                    return Err(ConnectionError::IoError(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("error receiving protocol switch response: {e}"),
+                    )))
+                }
+            },
+            msg => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("received unexpected message from server: {msg:?}"),
+                )));
+            }
+        },
         None => {
             log::warn!("Server closed the connection");
-            return Err(ConnectionError::WorterbuchError(WorterbuchError::IoError(
-                (),
-                (),
+            return Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "connection closed before welcome message",
             )));
         }
     }
@@ -928,7 +958,7 @@ async fn connect_ws(
                     ))),
                 },
                 Some(Ok(msg)) => Err(ConnectionError::IoError(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
+                    io::ErrorKind::InvalidData,
                     format!("received unexpected message from server: {msg:?}"),
                 ))),
                 None => Err(ConnectionError::IoError(io::Error::new(
@@ -1017,6 +1047,62 @@ async fn connect_tcp(
             return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
+
+    let proto_version = if let Some(v) = supported_protocol_versions
+        .iter()
+        .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
+    {
+        v
+    } else {
+        return Err(ConnectionError::WorterbuchError(
+            WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
+        ));
+    };
+
+    log::debug!("Found compatible protocol version {proto_version}.");
+
+    let proto_switch = ProtocolSwitchRequest {
+        version: proto_version.major(),
+    };
+    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    log::debug!("Sending protocol switch message: {msg}");
+    tcp_tx.write_all(msg.as_bytes()).await?;
+
+    match tcp_rx.next_line().await {
+        Ok(None) => {
+            return Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "connection closed before handshake",
+            )));
+        }
+        Ok(Some(line)) => match serde_json::from_str(&line) {
+            Ok(SM::Ack(_)) => {
+                log::debug!("Protocol switched to v{}.", proto_version.major());
+            }
+            Ok(SM::Err(e)) => {
+                log::error!("Protocol switch failed: {e}");
+                return Err(ConnectionError::WorterbuchError(
+                    WorterbuchError::ServerResponse(e),
+                ));
+            }
+            Ok(msg) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid protocol switch response: {msg:?}"),
+                )))
+            }
+            Err(e) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("error receiving protocol switch response: {e}"),
+                )))
+            }
+        },
+        Err(e) => {
+            log::warn!("Server closed the connection");
+            return Err(ConnectionError::IoError(e));
+        }
+    }
 
     if authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
@@ -1159,6 +1245,62 @@ async fn connect_unix(
             return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
+
+    let proto_version = if let Some(v) = supported_protocol_versions
+        .iter()
+        .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
+    {
+        v
+    } else {
+        return Err(ConnectionError::WorterbuchError(
+            WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
+        ));
+    };
+
+    log::debug!("Found compatible protocol version {proto_version}.");
+
+    let proto_switch = ProtocolSwitchRequest {
+        version: proto_version.major(),
+    };
+    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    log::debug!("Sending protocol switch message: {msg}");
+    tcp_tx.write_all(msg.as_bytes()).await?;
+
+    match tcp_rx.next_line().await {
+        Ok(None) => {
+            return Err(ConnectionError::IoError(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "connection closed before handshake",
+            )));
+        }
+        Ok(Some(line)) => match serde_json::from_str(&line) {
+            Ok(SM::Ack(_)) => {
+                log::debug!("Protocol switched to v{}.", proto_version.major());
+            }
+            Ok(SM::Err(e)) => {
+                log::error!("Protocol switch failed: {e}");
+                return Err(ConnectionError::WorterbuchError(
+                    WorterbuchError::ServerResponse(e),
+                ));
+            }
+            Ok(msg) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid protocol switch response: {msg:?}"),
+                )))
+            }
+            Err(e) => {
+                return Err(ConnectionError::IoError(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("error receiving protocol switch response: {e}"),
+                )))
+            }
+        },
+        Err(e) => {
+            log::warn!("Server closed the connection");
+            return Err(ConnectionError::IoError(e));
+        }
+    }
 
     if authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {

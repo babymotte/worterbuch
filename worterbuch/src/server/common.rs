@@ -37,10 +37,9 @@ use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthorizationRequest, CSet, CState, CStateEvent, CasVersion, ClientMessage as CM, Delete,
     Err, ErrorCode, Get, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState,
-    MetaData, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Protocol,
-    ProtocolVersion, Publish, RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage,
-    Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe,
-    UnsubscribeLs, Value,
+    MetaData, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Protocol, Publish,
+    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent,
+    Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +93,9 @@ pub async fn process_incoming_message(
     let mut authorized = auth;
     match serde_json::from_str(msg) {
         Ok(Some(msg)) => match msg {
+            CM::ProtocolSwitchRequest(_) => {
+                handle_store_error(WorterbuchError::CannotSwitchProtocol, tx, 0).await?;
+            }
             CM::AuthorizationRequest(msg) => {
                 if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);

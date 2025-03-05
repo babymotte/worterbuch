@@ -48,10 +48,10 @@ use worterbuch_common::{
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, topic, CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs,
     LastWill, PState, PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment,
-    RequestPattern, ServerMessage, StateEvent, TransactionId, PROTOCOL_VERSION,
-    SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
-    SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT,
-    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
+    RequestPattern, ServerMessage, StateEvent, TransactionId, SYSTEM_TOPIC_CLIENTS,
+    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
 pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =

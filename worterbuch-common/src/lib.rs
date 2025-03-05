@@ -106,7 +106,7 @@ pub enum ErrorCode {
     NotLeader = 0b00010000,
     Cas = 0b00010001,
     CasVersionMismatch = 0b00010010,
-    Disconnected = 0b00010011,
+    CannotSwitchProtocol = 0b00010011,
     Other = 0b11111111,
 }
 

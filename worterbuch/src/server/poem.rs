@@ -62,11 +62,12 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match &e {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
-        | WorterbuchError::MultiWildcardAtIllegalPosition(_)
-        | WorterbuchError::Cas
-        | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
+        | WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
+            Err(poem::Error::new(e, StatusCode::BAD_REQUEST))
+        }
 
-        WorterbuchError::AlreadyAuthorized
+        WorterbuchError::CannotSwitchProtocol
+        | WorterbuchError::AlreadyAuthorized
         | WorterbuchError::NotSubscribed
         | WorterbuchError::NoPubStream(_) => {
             Err(poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY))
@@ -80,14 +81,16 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
 
         WorterbuchError::NoSuchValue(_) => Err(poem::Error::new(e, StatusCode::NOT_FOUND)),
 
-        WorterbuchError::Unauthorized(_) => Err(poem::Error::new(e, StatusCode::FORBIDDEN)),
+        WorterbuchError::Unauthorized(_)
+        | WorterbuchError::Cas
+        | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::FORBIDDEN)),
 
         WorterbuchError::IoError(_, _)
         | WorterbuchError::SerDeError(_, _)
         | WorterbuchError::InvalidServerResponse(_)
         | WorterbuchError::Other(_, _)
         | WorterbuchError::ServerResponse(_)
-        | WorterbuchError::ProtocolNegotiationFailed => {
+        | WorterbuchError::ProtocolNegotiationFailed(_) => {
             Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR))
         }
 
