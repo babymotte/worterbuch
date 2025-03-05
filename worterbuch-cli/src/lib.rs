@@ -19,13 +19,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{ops::ControlFlow, time::Duration};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    select, spawn,
-    sync::mpsc,
-    time::sleep,
+use std::{
+    io::{BufRead, BufReader},
+    ops::ControlFlow,
+    thread,
+    time::Duration,
 };
+use tokio::{select, spawn, sync::mpsc, time::sleep};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use worterbuch_client::{
     Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
@@ -53,11 +53,19 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
         });
     } else {
         subsys.start(SubsystemBuilder::new("read-stdin", |s| async move {
-            let mut lines = BufReader::new(tokio::io::stdin()).lines();
+            let (lines_tx, mut lines_rx) = mpsc::channel(1);
+            thread::spawn(move || {
+                let mut lines = BufReader::new(std::io::stdin()).lines();
+                while let Some(Ok(line)) = lines.next() {
+                    if let Err(e) = lines_tx.blocking_send(line) {
+                        log::error!("Could not forward line from stdin: {e}");
+                    }
+                }
+            });
             loop {
                 select! {
                     _ = s.on_shutdown_requested() => break,
-                    recv = lines.next_line() => if let Ok(Some(key)) = recv {
+                    recv = lines_rx.recv() => if let Some(key) = recv {
                         if tx.send(key).await.is_err() {
                             break;
                         }
@@ -73,11 +81,19 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
 
 pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Value>) {
     subsys.start(SubsystemBuilder::new("read-stdin", move |s| async move {
-        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        let (lines_tx, mut lines_rx) = mpsc::channel(1);
+        thread::spawn(move || {
+            let mut lines = BufReader::new(std::io::stdin()).lines();
+            while let Some(Ok(line)) = lines.next() {
+                if let Err(e) = lines_tx.blocking_send(line) {
+                    log::error!("Could not forward line from stdin: {e}");
+                }
+            }
+        });
         loop {
             select! {
                 _ = s.on_shutdown_requested() => break,
-                recv = lines.next_line() => if let Ok(Some(line)) = recv {
+                recv = lines_rx.recv() => if let Some(line) = recv {
                     if json {
                         match serde_json::from_str::<Value>(&line) {
                             Ok(value) => {
@@ -116,12 +132,20 @@ pub fn provide_key_value_pairs(
             }
         });
     } else {
+        let (lines_tx, mut lines_rx) = mpsc::channel(1);
+        thread::spawn(move || {
+            let mut lines = BufReader::new(std::io::stdin()).lines();
+            while let Some(Ok(line)) = lines.next() {
+                if let Err(e) = lines_tx.blocking_send(line) {
+                    log::error!("Could not forward line from stdin: {e}");
+                }
+            }
+        });
         subsys.start(SubsystemBuilder::new("read-stdin", move|s| async move {
-            let mut lines = BufReader::new(tokio::io::stdin()).lines();
             loop {
                 select! {
                     _ = s.on_shutdown_requested() => break,
-                    recv = lines.next_line() => if let Ok(Some(line)) = recv {
+                    recv = lines_rx.recv() => if let Some(line) = recv {
                         if let ControlFlow::Break(_) = provide_key_value_pair(json, line, &tx).await {
                             break;
                         }

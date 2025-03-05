@@ -25,7 +25,7 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing_subscriber::EnvFilter;
-use worterbuch_cli::{next_item, print_message, provide_key_value_pairs};
+use worterbuch_cli::{next_item, print_message, provide_values};
 use worterbuch_client::config::Config;
 use worterbuch_client::{connect, AuthToken};
 
@@ -38,12 +38,11 @@ struct Args {
     /// The address of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_HOST_ADDRESS will be used. If that is not set, 127.0.0.1 will be used.
     #[arg(short, long)]
     addr: Option<String>,
-    /// The port of the Wörterbuch server. When omitted, the value of the env var WORTERBUCH_PORT will be used. If that is not set, 4242 will be used.
-    #[arg(short, long)]
-    port: Option<u16>,
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
+    /// Wörterbuch key to send values to.
+    key: String,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
@@ -60,7 +59,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new("wbpub", run));
+        s.start(SubsystemBuilder::new("wbspub", run));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_millis(1000))
@@ -80,44 +79,45 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     } else {
         config.proto
     };
-    config.host_addr = args.addr.unwrap_or(config.host_addr);
-    config.port = args.port.or(config.port);
+    config.servers = args
+        .addr
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter_map(|s| s.parse().ok())
+                .collect()
+        })
+        .unwrap_or(config.servers);
     let json = args.json;
-    let key_value_pairs = args.key_value_pairs;
+    let key = args.key;
 
-    let (disco_tx, mut disco_rx) = mpsc::channel(1);
-    let on_disconnect = async move {
-        disco_tx.send(()).await.ok();
-    };
-
-    let wb = connect(config, on_disconnect).await?;
+    let (wb, mut on_disconnect) = connect(config).await?;
     if let Some(name) = args.name {
         wb.set_client_name(name).await?;
     }
     let mut responses = wb.all_messages().await?;
 
-    wb.
+    let tid = wb.spub_init(key).await?;
 
-    let mut trans_id = 0;
     let mut acked = 0;
 
     let (tx, mut rx) = mpsc::channel(1);
     subsys.start(SubsystemBuilder::new(
-        "provide_key_value_pairs",
+        "provide_values",
         move |s| async move {
-            provide_key_value_pairs(key_value_pairs, json, s, tx);
+            provide_values(json, s, tx);
             Ok(()) as Result<()>
         },
     ));
     let mut done = false;
 
     loop {
-        if done && acked >= trans_id {
+        if done {
             break;
         }
         select! {
             _ = subsys.on_shutdown_requested() => break,
-            _ = disco_rx.recv() => {
+            _ = &mut on_disconnect => {
                 log::warn!("Connection to server lost.");
                 subsys.request_shutdown();
             }
@@ -130,11 +130,13 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some((key, value)) => trans_id = wb.publish(key, &value).await?,
+                Some(value) => wb.spub(tid, value) .await?,
                 None => done = true,
             },
         }
     }
+
+    wb.close().await?;
 
     Ok(())
 }

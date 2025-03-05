@@ -150,17 +150,30 @@ impl ClientSocket {
             ClientSocket::Unix(sock) => sock.receive_msg().await,
         }
     }
+
+    pub async fn close(self) -> ConnectionResult<()> {
+        match self {
+            ClientSocket::Tcp(tcp_client_socket) => tcp_client_socket.close().await?,
+            ClientSocket::Ws(ws_client_socket) => ws_client_socket.close().await?,
+            ClientSocket::Unix(unix_client_socket) => unix_client_socket.close().await?,
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
 pub struct Worterbuch {
     commands: mpsc::Sender<Command>,
-    stop: mpsc::Sender<()>,
+    stop: mpsc::Sender<oneshot::Sender<()>>,
     client_id: String,
 }
 
 impl Worterbuch {
-    fn new(commands: mpsc::Sender<Command>, stop: mpsc::Sender<()>, client_id: String) -> Self {
+    fn new(
+        commands: mpsc::Sender<Command>,
+        stop: mpsc::Sender<oneshot::Sender<()>>,
+        client_id: String,
+    ) -> Self {
         Self {
             commands,
             stop,
@@ -228,7 +241,25 @@ impl Worterbuch {
         self.set_generic(key, value).await
     }
 
-    pub async fn spub_init(&self)
+    pub async fn spub_init(&self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::SPubInit(key, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        let transaction_id = rx.await?;
+        Ok(transaction_id)
+    }
+
+    pub async fn spub(&self, transaction_id: TransactionId, value: Value) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::SPub(transaction_id, value, tx);
+        log::debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        log::debug!("Command queued.");
+        rx.await?;
+        Ok(())
+    }
 
     pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
@@ -570,7 +601,9 @@ impl Worterbuch {
     }
 
     pub async fn close(&self) -> ConnectionResult<()> {
-        self.stop.send(()).await?;
+        let (tx, rx) = oneshot::channel();
+        self.stop.send(tx).await?;
+        rx.await.ok();
         Ok(())
     }
 
@@ -1181,8 +1214,11 @@ fn connected(
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 
     spawn(async move {
-        run(cmd_rx, client_socket, stop_rx, config).await;
-        log::debug!("Connection closed.");
+        if let Err(e) = run(cmd_rx, client_socket, stop_rx, config).await {
+            log::error!("Connection closed with error: {e}");
+        } else {
+            log::debug!("Connection closed.");
+        }
         on_disconnect.send(()).ok();
     });
 
@@ -1192,17 +1228,20 @@ fn connected(
 async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
     mut client_socket: ClientSocket,
-    mut stop_rx: mpsc::Receiver<()>,
+    mut stop_rx: mpsc::Receiver<oneshot::Sender<()>>,
     config: Config,
-) {
+) -> ConnectionResult<()> {
     let mut callbacks = Callbacks::default();
     let mut transaction_ids = TransactionIds::default();
+
+    let mut stop_tx = None;
 
     loop {
         log::trace!("loop: wait for command / ws message / shutdown request");
         select! {
-            _ = stop_rx.recv() => {
+            recv = stop_rx.recv() => {
                 log::debug!("Shutdown request received.");
+                stop_tx = recv;
                 break;
             },
             ws_msg = client_socket.receive_msg() => {
@@ -1232,6 +1271,13 @@ async fn run(
             }
         }
     }
+
+    client_socket.close().await?;
+    if let Some(tx) = stop_tx {
+        tx.send(()).ok();
+    }
+
+    Ok(())
 }
 
 async fn process_incoming_command(

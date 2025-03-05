@@ -19,7 +19,13 @@
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    tungstenite::{
+        protocol::{frame::coding::CloseCode, CloseFrame},
+        Message,
+    },
+    MaybeTlsStream, WebSocketStream,
+};
 use worterbuch_common::{error::ConnectionResult, ClientMessage, ServerMessage};
 
 pub struct WsClientSocket {
@@ -49,5 +55,16 @@ impl WsClientSocket {
             Some(Err(e)) => Err(e.into()),
             Some(Ok(_)) | None => Ok(None),
         }
+    }
+
+    pub async fn close(mut self) -> ConnectionResult<()> {
+        self.websocket
+            .close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "client closed".into(),
+            }))
+            .await?;
+
+        Ok(())
     }
 }

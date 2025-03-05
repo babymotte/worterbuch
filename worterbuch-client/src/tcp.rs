@@ -22,7 +22,7 @@ use tokio::{
     io::{BufReader, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     spawn,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use worterbuch_common::{
     error::ConnectionResult,
@@ -35,6 +35,7 @@ const SERVER_ID: &str = "worterbuch server";
 pub struct TcpClientSocket {
     tx: mpsc::Sender<ClientMessage>,
     rx: Lines<BufReader<OwnedReadHalf>>,
+    closed: oneshot::Receiver<()>,
 }
 
 impl TcpClientSocket {
@@ -45,8 +46,13 @@ impl TcpClientSocket {
         buffer_size: usize,
     ) -> Self {
         let (send_tx, send_rx) = mpsc::channel(buffer_size);
-        spawn(forward_tcp_messages(tx, send_rx, send_timeout));
-        Self { tx: send_tx, rx }
+        let (closed_tx, closed_rx) = oneshot::channel();
+        spawn(forward_tcp_messages(tx, send_rx, send_timeout, closed_tx));
+        Self {
+            tx: send_tx,
+            rx,
+            closed: closed_rx,
+        }
     }
 
     pub async fn send_msg(&self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
@@ -62,12 +68,20 @@ impl TcpClientSocket {
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
         tcp::receive_msg(&mut self.rx).await
     }
+
+    pub async fn close(self) -> ConnectionResult<()> {
+        drop(self.tx);
+        drop(self.rx);
+        self.closed.await.ok();
+        Ok(())
+    }
 }
 
 async fn forward_tcp_messages(
     mut tx: OwnedWriteHalf,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     timeout: Duration,
+    closed_tx: oneshot::Sender<()>,
 ) {
     while let Some(msg) = send_rx.recv().await {
         if let Err(e) = write_line_and_flush(msg, &mut tx, timeout, SERVER_ID).await {
@@ -75,4 +89,8 @@ async fn forward_tcp_messages(
             break;
         }
     }
+
+    drop(tx);
+
+    closed_tx.send(()).ok();
 }
