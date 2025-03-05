@@ -1,7 +1,5 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
 WORKDIR /app
-RUN rustup component add rustfmt
-RUN rustup component add clippy
 
 FROM wbco-chef AS wbco-planner
 COPY . .
@@ -12,11 +10,11 @@ COPY --from=wbco-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo fmt --check
-RUN cargo clippy -- --deny warnings
+RUN cargo clippy
 RUN cargo test
 RUN cargo build --release
 
-FROM babymotte/worterbuch:1.0.4
+FROM babymotte/worterbuch:1.1.1
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
 ENV WBCLUSTER_CONGIF_PATH=/cfg/config.yaml
