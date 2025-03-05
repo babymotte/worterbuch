@@ -836,7 +836,7 @@ mod test {
         let mut store = Store::default();
         store.insert(&path, json!("Hello, World!").into()).unwrap();
 
-        assert_eq!(store.get(&path), Some(&json!("Hello, World!").into()));
+        assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
         assert_eq!(store.get(&reg_key_segs("test/a/b/c")), None);
     }
@@ -850,7 +850,7 @@ mod test {
 
         // assert_eq!(store.len)
 
-        assert_eq!(store.get(&path), Some(&json!("Hello, World!").into()));
+        assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
         assert_eq!(store.get(&reg_key_segs("test/a/b/c")), None);
 
@@ -879,49 +879,40 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
 
         let res = store.get_matches(&key_segs("trolo/?/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
 
         let res = store.get_matches(&key_segs("?/a/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
 
         let res = store.get_matches(&key_segs("?/?/b")).unwrap();
         assert_eq!(res.len(), 3);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
     }
 
     #[test]
@@ -945,58 +936,46 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
 
         let res = store.get_matches(&key_segs("trolo/#")).unwrap();
         assert_eq!(res.len(), 4);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), json!("0")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a".to_owned(), json!("0")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), json!("5")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b/d".to_owned(), json!("5")).into()));
 
         let res = store.get_matches(&key_segs("#")).unwrap();
         assert_eq!(res.len(), 6);
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a".to_owned(), json!("0")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a".to_owned(), json!("0")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/b".to_owned(), json!("1")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/b".to_owned(), json!("1")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("test/a/c".to_owned(), json!("2")).into())
-            .is_some());
+            .any(|e| &e == &&("test/a/c".to_owned(), json!("2")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/a/b".to_owned(), json!("3")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/a/b".to_owned(), json!("3")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b".to_owned(), json!("4")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b".to_owned(), json!("4")).into()));
         assert!(res
             .iter()
-            .find(|e| e == &&("trolo/c/b/d".to_owned(), json!("5")).into())
-            .is_some());
+            .any(|e| &e == &&("trolo/c/b/d".to_owned(), json!("5")).into()));
     }
 
     #[test]

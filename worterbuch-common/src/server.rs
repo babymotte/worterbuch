@@ -362,7 +362,7 @@ mod test {
 
         let json = r#"{"transactionId":1,"value":2}"#;
 
-        assert_eq!(state, serde_json::from_str(&json).unwrap());
+        assert_eq!(state, serde_json::from_str(json).unwrap());
 
         let state = State {
             transaction_id: 1,
@@ -371,7 +371,7 @@ mod test {
 
         let json = r#"{"transactionId":1,"deleted":2}"#;
 
-        assert_eq!(state, serde_json::from_str(&json).unwrap());
+        assert_eq!(state, serde_json::from_str(json).unwrap());
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod test {
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","keyValuePairs":[{"key":"$SYS/clients","value":2}]}"#;
 
-        assert_eq!(pstate, serde_json::from_str(&json).unwrap());
+        assert_eq!(pstate, serde_json::from_str(json).unwrap());
 
         let pstate = PState {
             transaction_id: 1,
@@ -417,6 +417,6 @@ mod test {
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;
 
-        assert_eq!(pstate, serde_json::from_str(&json).unwrap());
+        assert_eq!(pstate, serde_json::from_str(json).unwrap());
     }
 }

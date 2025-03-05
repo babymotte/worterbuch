@@ -148,11 +148,11 @@ impl ProtocolVersion {
     }
 
     pub fn is_compatible_with_server(&self, server_version: &ProtocolVersion) -> bool {
-        return self.major() == server_version.major() && self.minor() <= server_version.minor();
+        self.major() == server_version.major() && self.minor() <= server_version.minor()
     }
 
     pub fn is_compatible_with_client_version(&self, client_version: &ProtocolVersion) -> bool {
-        return self.major() == client_version.major() && self.minor() >= client_version.minor();
+        self.major() == client_version.major() && self.minor() >= client_version.minor()
     }
 }
 
@@ -343,39 +343,31 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
 
 #[cfg(test)]
 mod test {
-    use serde_json::json;
-
     use crate::{ErrorCode, ProtocolVersion};
-    use std::cmp::Ordering;
+    use serde_json::json;
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {
-        assert_eq!("0.1".cmp("0.2"), Ordering::Less);
-        assert_eq!("0.9".cmp("1.0"), Ordering::Less);
-        assert_eq!("1.2".cmp("1.3"), Ordering::Less);
-        assert_eq!("1.234".cmp("1.3"), Ordering::Less);
+        assert!(ProtocolVersion::new(1, 2) < ProtocolVersion::new(3, 2));
+        assert!(ProtocolVersion::new(1, 2) == ProtocolVersion::new(1, 2));
+        assert!(ProtocolVersion::new(2, 1) > ProtocolVersion::new(1, 9));
 
-        assert_eq!("0.1".cmp("0.1"), Ordering::Equal);
-        assert_eq!("0.9".cmp("0.9"), Ordering::Equal);
-        assert_eq!("1.2".cmp("1.2"), Ordering::Equal);
-
-        assert_eq!("0.2".cmp("0.1"), Ordering::Greater);
-        assert_eq!("1.0".cmp("0.9"), Ordering::Greater);
-        assert_eq!("1.3".cmp("1.2"), Ordering::Greater);
-        assert_eq!("1.3".cmp("1.234"), Ordering::Greater);
-        assert_eq!("13.45".cmp("1.345"), Ordering::Greater);
-
-        assert_eq!("0.3", "0.3".min("0.5"));
-        assert_eq!("0.8", "0.8".min("1.2"));
-        assert_eq!("2.3", "2.3".min("3.1"));
-
-        assert_eq!("0.3", "0.5".min("0.3"));
-        assert_eq!("0.8", "1.2".min("0.8"));
-        assert_eq!("2.34", "3.1".min("2.34"));
-
-        let mut versions = vec!["1.2", "0.456", "9.0", "3.15"];
+        let mut versions = vec![
+            ProtocolVersion::new(1, 2),
+            ProtocolVersion::new(0, 456),
+            ProtocolVersion::new(9, 0),
+            ProtocolVersion::new(3, 15),
+        ];
         versions.sort();
-        assert_eq!(vec!["0.456", "1.2", "3.15", "9.0"], versions);
+        assert_eq!(
+            vec![
+                ProtocolVersion::new(0, 456),
+                ProtocolVersion::new(1, 2),
+                ProtocolVersion::new(3, 15),
+                ProtocolVersion::new(9, 0)
+            ],
+            versions
+        );
     }
 
     #[test]
@@ -403,13 +395,6 @@ mod test {
     }
 
     #[test]
-    fn versions_get_sorted_correctly() {
-        assert!(ProtocolVersion::new(1, 2) < ProtocolVersion::new(3, 2));
-        assert!(ProtocolVersion::new(1, 2) == ProtocolVersion::new(1, 2));
-        assert!(ProtocolVersion::new(2, 1) > ProtocolVersion::new(1, 9));
-    }
-
-    #[test]
     fn protocol_version_get_serialized_correctly() {
         assert_eq!(&json!(ProtocolVersion::new(2, 1)).to_string(), "[2,1]")
     }
@@ -422,7 +407,7 @@ mod test {
     #[test]
     fn compatible_version_is_selected_correctly() {
         let client_version = ProtocolVersion::new(1, 2);
-        let server_versions = vec![
+        let server_versions = [
             ProtocolVersion::new(0, 11),
             ProtocolVersion::new(1, 6),
             ProtocolVersion::new(2, 0),

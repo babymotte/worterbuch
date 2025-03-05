@@ -245,13 +245,13 @@ mod test {
             }
           }"#;
 
-        assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), msg);
+        assert_eq!(serde_json::from_str::<ClientMessage>(json).unwrap(), msg);
     }
 
     #[test]
     fn set_is_deserialized_correctly() {
         let json = r#"{"set": {"transactionId": 2, "key": "hello/world", "value": { "this value": "is a ", "complex": "JSON object"}}}"#;
-        let msg = serde_json::from_str::<ClientMessage>(&json).unwrap();
+        let msg = serde_json::from_str::<ClientMessage>(json).unwrap();
         assert_eq!(
             msg,
             ClientMessage::Set(Set {
