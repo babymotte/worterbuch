@@ -27,7 +27,7 @@ properties:
       clientId:
         description: A unique client ID that is valid for the duration of the connection
         type: string
-    additionalProperties: false
+    additionalProperties: true
     required:
       - info
       - clientId
@@ -162,16 +162,24 @@ components:
         version:
           description: The server's software version
           type: string
-        protocolVersion:
-          description: The protocol version implemented by the server
-          type: string
+        supportedProtocolVersions:
+          description: The protocol versions implemented by the server
+          type: array
+          items:
+            type: array
+            prefixItems:
+              - type: number
+                format: u32
+              - type: number
+                format: u32
+            unevaluatedItems: false
         authorizationRequired:
           description: Whether or not the client need to be authorized before sending requests to the server
           type: boolean
-      additionalProperties: false
+      additionalProperties: true
       required:
         - version
-        - protocolVersion
+        - supportedProtocolVersions
         - authorizationRequired
     Value:
       description: A value on worterbuch

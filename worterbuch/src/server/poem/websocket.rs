@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    server::common::{process_incoming_message, CloneableWbApi},
+    server::common::{protocol::Proto, CloneableWbApi},
     stats::VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
 };
@@ -96,10 +96,13 @@ async fn serve_loop(
                 version: VERSION.to_owned(),
                 authorization_required,
                 supported_protocol_versions,
+                protocol_version: "0.11".to_owned(),
             },
         }))
         .await
         .into_diagnostic()?;
+
+    let mut proto = Proto::default();
 
     loop {
         select! {
@@ -108,17 +111,16 @@ async fn serve_loop(
                     Ok(incoming_msg) => {
                         log::trace!("Processing incoming message …");
                         if let Message::Text(text) = incoming_msg {
-                            let (msg_processed, auth) = process_incoming_message(
+                            let msg_processed = proto.process_incoming_message(
                                 client_id,
                                 &text,
                                 &worterbuch,
                                 &ws_send_tx,
                                 authorization_required,
-                                authorized,
+                                &mut authorized,
                                 &config
                             )
                             .await?;
-                            authorized = auth;
                             if !msg_processed {
                                 break;
                             }

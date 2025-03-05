@@ -17,11 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    server::common::{process_incoming_message, CloneableWbApi},
-    stats::VERSION,
-    SUPPORTED_PROTOCOL_VERSIONS,
-};
+use super::common::protocol::Proto;
+use crate::{server::common::CloneableWbApi, stats::VERSION, SUPPORTED_PROTOCOL_VERSIONS};
 use miette::{IntoDiagnostic, Result};
 use std::{
     collections::HashMap,
@@ -185,26 +182,28 @@ async fn serve_loop(
                 version: VERSION.to_owned(),
                 authorization_required,
                 supported_protocol_versions,
+                protocol_version: "0.11".to_owned(),
             },
         }))
         .await
         .into_diagnostic()?;
+
+    let mut proto = Proto::default();
 
     loop {
         select! {
             recv = tcp_rx.next_line() => match recv {
                 Ok(Some(json)) => {
                     log::trace!("Processing incoming message …");
-                    let (msg_processed, auth) = process_incoming_message(
+                    let msg_processed = proto.process_incoming_message(
                         client_id,
                         &json,
                         &worterbuch,
                         &tcp_send_tx,
                         authorization_required,
-                        authorized,
+                        &mut authorized,
                         &config
                     ).await?;
-                    authorized = auth;
                     if !msg_processed {
                         break;
                     }

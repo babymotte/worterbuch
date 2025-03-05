@@ -135,7 +135,7 @@ pub enum WorterbuchError {
     NotLeader,
     Cas,
     CasVersionMismatch,
-    CannotSwitchProtocol,
+    NotImplemented,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -201,10 +201,10 @@ impl fmt::Display for WorterbuchError {
                     "Tried to modify a compare-and-swap value with an out-of-sync version number"
                 )
             }
-            WorterbuchError::CannotSwitchProtocol => {
+            WorterbuchError::NotImplemented => {
                 write!(
                     f,
-                    "Cannot switch protocol, the client has already been assigned to a protocol specific handler",
+                    "This function is not implemented in the negotiated protocol version",
                 )
             }
         }
@@ -372,7 +372,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotLeader => ErrorCode::NotLeader,
             WorterbuchError::Cas => ErrorCode::Cas,
             WorterbuchError::CasVersionMismatch => ErrorCode::CasVersionMismatch,
-            WorterbuchError::CannotSwitchProtocol => ErrorCode::CannotSwitchProtocol,
+            WorterbuchError::NotImplemented => ErrorCode::NotImplemented,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

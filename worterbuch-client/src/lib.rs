@@ -825,6 +825,7 @@ async fn connect_ws(
                 version: _,
                 supported_protocol_versions,
                 authorization_required,
+                protocol_version: _,
             },
     } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
@@ -1011,6 +1012,7 @@ async fn connect_tcp(
                 version: _,
                 supported_protocol_versions,
                 authorization_required,
+                protocol_version: _,
             },
     } = select! {
         line = tcp_rx.next_line() => match line {
@@ -1064,7 +1066,8 @@ async fn connect_tcp(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    msg.push('\n');
     log::debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
 
@@ -1209,6 +1212,7 @@ async fn connect_unix(
                 version: _,
                 supported_protocol_versions,
                 authorization_required,
+                protocol_version: _,
             },
     } = select! {
         line = tcp_rx.next_line() => match line {
@@ -1262,7 +1266,8 @@ async fn connect_unix(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    msg.push('\n');
     log::debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
 

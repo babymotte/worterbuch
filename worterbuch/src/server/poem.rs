@@ -62,12 +62,10 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
     match &e {
         WorterbuchError::IllegalMultiWildcard(_)
         | WorterbuchError::IllegalWildcard(_)
-        | WorterbuchError::MultiWildcardAtIllegalPosition(_) => {
-            Err(poem::Error::new(e, StatusCode::BAD_REQUEST))
-        }
+        | WorterbuchError::MultiWildcardAtIllegalPosition(_)
+        | WorterbuchError::NotImplemented => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
 
-        WorterbuchError::CannotSwitchProtocol
-        | WorterbuchError::AlreadyAuthorized
+        WorterbuchError::AlreadyAuthorized
         | WorterbuchError::NotSubscribed
         | WorterbuchError::NoPubStream(_) => {
             Err(poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY))
@@ -128,6 +126,7 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
         version: VERSION.to_owned(),
         authorization_required: config.auth_token.is_some(),
         supported_protocol_versions,
+        protocol_version: "0.11".to_owned(),
     };
 
     Ok(Json(info))

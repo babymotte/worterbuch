@@ -323,6 +323,8 @@ fn escape_path_segment(str: impl AsRef<str>) -> String {
 pub struct ServerInfo {
     pub version: Version,
     pub supported_protocol_versions: Box<[ProtocolVersion]>,
+    #[deprecated(since = "1.1.0", note = "replaced by `supported_protocol_versions`")]
+    pub protocol_version: String,
     pub authorization_required: bool,
 }
 
