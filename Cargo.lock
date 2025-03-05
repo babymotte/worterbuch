@@ -2155,7 +2155,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.0.4"
+version = "1.1.0"
 dependencies = [
  "clap",
  "dotenv",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.0.3"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2198,7 +2198,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.0.3"
+version = "1.1.0"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.0.4"
+version = "1.1.0"
 dependencies = [
  "log",
  "miette",
