@@ -17,12 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{AuthToken, Key, LiveOnlyFlag, RequestPattern, TransactionId, UniqueFlag, Value};
+use crate::{
+    AuthToken, Key, LiveOnlyFlag, ProtocolVersionSegment, RequestPattern, TransactionId,
+    UniqueFlag, Value,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientMessage {
+    ProtocolSwitchRequest(ProtocolSwitchRequest),
     AuthorizationRequest(AuthorizationRequest),
     Get(Get),
     CGet(Get),
@@ -47,7 +51,9 @@ pub enum ClientMessage {
 impl ClientMessage {
     pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
-            ClientMessage::AuthorizationRequest(_) => Some(0),
+            ClientMessage::ProtocolSwitchRequest(_) | ClientMessage::AuthorizationRequest(_) => {
+                Some(0)
+            }
             ClientMessage::Get(m) | ClientMessage::CGet(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
@@ -67,6 +73,11 @@ impl ClientMessage {
             ClientMessage::Transform(m) => Some(m.transaction_id),
         }
     }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolSwitchRequest {
+    pub version: ProtocolVersionSegment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

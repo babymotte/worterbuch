@@ -20,6 +20,7 @@
 use crate::{
     server::common::{process_incoming_message, CloneableWbApi},
     stats::VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
 };
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, path::PathBuf, time::Duration};
@@ -165,7 +166,7 @@ async fn serve_loop(
     let unix_rx = BufReader::new(unix_rx);
     let mut unix_rx = unix_rx.lines();
 
-    let protocol_version = worterbuch.supported_protocol_version().await?;
+    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
     unix_send_tx
         .send(ServerMessage::Welcome(Welcome {
@@ -173,7 +174,7 @@ async fn serve_loop(
             info: ServerInfo {
                 version: VERSION.to_owned(),
                 authorization_required,
-                protocol_version,
+                supported_protocol_versions,
             },
         }))
         .await

@@ -33,8 +33,6 @@ use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
 
-pub const PROTOCOL_VERSION: &str = "0.11";
-
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
@@ -59,7 +57,7 @@ pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type MetaData = String;
 pub type Path = String;
-pub type ProtocolVersionSegment = u16;
+pub type ProtocolVersionSegment = u32;
 pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
@@ -108,6 +106,7 @@ pub enum ErrorCode {
     NotLeader = 0b00010000,
     Cas = 0b00010001,
     CasVersionMismatch = 0b00010010,
+    Disconnected = 0b00010011,
     Other = 0b11111111,
 }
 
@@ -131,7 +130,37 @@ macro_rules! topic {
 }
 
 pub type Version = String;
-pub type ProtocolVersion = String;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProtocolVersion(ProtocolVersionSegment, ProtocolVersionSegment);
+
+impl ProtocolVersion {
+    pub const fn new(major: ProtocolVersionSegment, minor: ProtocolVersionSegment) -> Self {
+        Self(major, minor)
+    }
+
+    pub const fn major(&self) -> ProtocolVersionSegment {
+        self.0
+    }
+
+    pub const fn minor(&self) -> ProtocolVersionSegment {
+        self.1
+    }
+
+    pub fn is_compatible_with_server(&self, server_version: &ProtocolVersion) -> bool {
+        return self.major() == server_version.major() && self.minor() <= server_version.minor();
+    }
+
+    pub fn is_compatible_with_client_version(&self, client_version: &ProtocolVersion) -> bool {
+        return self.major() == client_version.major() && self.minor() >= client_version.minor();
+    }
+}
+
+impl fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.0, self.1)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
 pub enum Protocol {
@@ -314,7 +343,9 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
 
 #[cfg(test)]
 mod test {
-    use crate::ErrorCode;
+    use serde_json::json;
+
+    use crate::{ErrorCode, ProtocolVersion};
     use std::cmp::Ordering;
 
     #[test]
@@ -369,5 +400,36 @@ mod test {
             ErrorCode::ProtocolNegotiationFailed,
             serde_json::from_str("7").unwrap()
         )
+    }
+
+    #[test]
+    fn versions_get_sorted_correctly() {
+        assert!(ProtocolVersion::new(1, 2) < ProtocolVersion::new(3, 2));
+        assert!(ProtocolVersion::new(1, 2) == ProtocolVersion::new(1, 2));
+        assert!(ProtocolVersion::new(2, 1) > ProtocolVersion::new(1, 9));
+    }
+
+    #[test]
+    fn protocol_version_get_serialized_correctly() {
+        assert_eq!(&json!(ProtocolVersion::new(2, 1)).to_string(), "[2,1]")
+    }
+
+    #[test]
+    fn protocol_version_get_formatted_correctly() {
+        assert_eq!(&ProtocolVersion::new(2, 1).to_string(), "2.1")
+    }
+
+    #[test]
+    fn compatible_version_is_selected_correctly() {
+        let client_version = ProtocolVersion::new(1, 2);
+        let server_versions = vec![
+            ProtocolVersion::new(0, 11),
+            ProtocolVersion::new(1, 6),
+            ProtocolVersion::new(2, 0),
+        ];
+        let compatible_version = server_versions
+            .iter()
+            .find(|v| client_version.is_compatible_with_server(v));
+        assert_eq!(compatible_version, Some(&server_versions[1]))
     }
 }

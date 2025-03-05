@@ -134,6 +134,7 @@ pub enum WorterbuchError {
     NotLeader,
     Cas,
     CasVersionMismatch,
+    Disconnected,
 }
 
 impl std::error::Error for WorterbuchError {}
@@ -198,6 +199,9 @@ impl fmt::Display for WorterbuchError {
                     f,
                     "Tried to modify a compare-and-swap value with an out-of-sync version number"
                 )
+            }
+            WorterbuchError::Disconnected => {
+                write!(f, "The connection was closed unexpectedly")
             }
         }
     }
@@ -364,6 +368,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotLeader => ErrorCode::NotLeader,
             WorterbuchError::Cas => ErrorCode::Cas,
             WorterbuchError::CasVersionMismatch => ErrorCode::CasVersionMismatch,
+            WorterbuchError::Disconnected => ErrorCode::Disconnected,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }

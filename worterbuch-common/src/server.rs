@@ -322,7 +322,7 @@ fn escape_path_segment(str: impl AsRef<str>) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     pub version: Version,
-    pub protocol_version: ProtocolVersion,
+    pub supported_protocol_versions: Box<[ProtocolVersion]>,
     pub authorization_required: bool,
 }
 

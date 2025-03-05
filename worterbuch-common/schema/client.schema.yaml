@@ -18,6 +18,16 @@
 title: ClientMessage
 type: object
 properties:
+  protocolSwitchRequest:
+    description: A message sent by a client to request switching to the specified protocol major version
+    type: object
+    properties:
+      version:
+        type: integer
+        format: u32
+    additionalProperties: false
+    required:
+      - version
   authorizationRequest:
     description: A message sent by a client to acquire authorization from the server
     type: object

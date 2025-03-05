@@ -112,7 +112,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         worterbuch
             .set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
-                serde_json::to_value(worterbuch.supported_protocol_version())
+                serde_json::to_value(SUPPORTED_PROTOCOL_VERSIONS)
                     .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
                 INTERNAL_CLIENT_ID,
             )
@@ -284,9 +284,6 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
         }
-        WbFunction::SupportedProtocolVersion(tx) => {
-            tx.send(worterbuch.supported_protocol_version()).ok();
-        }
     }
 }
 
@@ -376,9 +373,6 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
-        }
-        WbFunction::SupportedProtocolVersion(tx) => {
-            tx.send(worterbuch.supported_protocol_version()).ok();
         }
     }
 }
@@ -677,8 +671,7 @@ async fn forward_api_call(
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)
         | WbFunction::Export(_)
-        | WbFunction::Len(_)
-        | WbFunction::SupportedProtocolVersion(_) => None,
+        | WbFunction::Len(_) => None,
         WbFunction::Set(key, value, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Set(key.to_owned(), value.to_owned()))

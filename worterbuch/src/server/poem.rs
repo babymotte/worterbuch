@@ -24,6 +24,7 @@ use crate::{
     auth::JwtClaims,
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
 };
 use miette::IntoDiagnostic;
 use poem::{
@@ -115,10 +116,7 @@ fn ws(
 
 #[handler]
 async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
-    let proto = match wb.supported_protocol_version().await {
-        Ok(it) => it,
-        Err(e) => return to_error_response(e),
-    };
+    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
     let config = match wb.config().await {
         Ok(it) => it,
         Err(e) => return to_error_response(e),
@@ -126,7 +124,7 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
     let info = ServerInfo {
         version: VERSION.to_owned(),
         authorization_required: config.auth_token.is_some(),
-        protocol_version: proto,
+        supported_protocol_versions,
     };
 
     Ok(Json(info))

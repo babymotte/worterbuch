@@ -62,6 +62,8 @@ pub use worterbuch_common::{
     ServerMessage as SM, Set, State, StateEvent, TransactionId,
 };
 
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+
 #[derive(Debug)]
 pub(crate) enum Command {
     Set(Key, Value, oneshot::Sender<TransactionId>),
@@ -821,7 +823,7 @@ async fn connect_ws(
         info:
             ServerInfo {
                 version: _,
-                protocol_version,
+                supported_protocol_versions,
                 authorization_required,
             },
     } = match websocket.next().await {
@@ -860,6 +862,37 @@ async fn connect_ws(
         }
     };
 
+    let proto_version = if let Some(v) = supported_protocol_versions
+        .iter()
+        .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
+    {
+        v
+    } else {
+        return Err(ConnectionError::WorterbuchError(
+            WorterbuchError::ProtocolNegotiationFailed,
+        ));
+    };
+
+    log::debug!("Found compatible protocol version {proto_version}.");
+
+    let proto_switch = ProtocolSwitchRequest {
+        version: proto_version.major(),
+    };
+    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    log::debug!("Sending protocol switch message: {msg}");
+    websocket.send(Message::Text(msg.into())).await?;
+
+    match websocket.next().await {
+        Some(_) => todo!(),
+        None => {
+            log::warn!("Server closed the connection");
+            return Err(ConnectionError::WorterbuchError(WorterbuchError::IoError(
+                (),
+                (),
+            )));
+        }
+    }
+
     if authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
@@ -877,7 +910,6 @@ async fn connect_ws(
                             on_disconnect,
                             config,
                             client_id,
-                            protocol_version,
                         )
                     }
                     Ok(SM::Err(e)) => {
@@ -915,7 +947,6 @@ async fn connect_ws(
             on_disconnect,
             config,
             client_id,
-            protocol_version,
         )
     }
 }
@@ -948,7 +979,7 @@ async fn connect_tcp(
         info:
             ServerInfo {
                 version: _,
-                protocol_version,
+                supported_protocol_versions,
                 authorization_required,
             },
     } = select! {
@@ -1018,7 +1049,6 @@ async fn connect_tcp(
                                 on_disconnect,
                                 config,
                                 client_id,
-                                protocol_version,
                             )
                         }
                         Ok(SM::Err(e)) => {
@@ -1058,7 +1088,6 @@ async fn connect_tcp(
             on_disconnect,
             config,
             client_id,
-            protocol_version,
         )
     }
 }
@@ -1092,7 +1121,7 @@ async fn connect_unix(
         info:
             ServerInfo {
                 version: _,
-                protocol_version,
+                supported_protocol_versions,
                 authorization_required,
             },
     } = select! {
@@ -1162,7 +1191,6 @@ async fn connect_unix(
                                 on_disconnect,
                                 config,
                                 client_id,
-                                protocol_version,
                             )
                         }
                         Ok(SM::Err(e)) => {
@@ -1202,7 +1230,6 @@ async fn connect_unix(
             on_disconnect,
             config,
             client_id,
-            protocol_version,
         )
     }
 }
@@ -1212,17 +1239,7 @@ fn connected(
     on_disconnect: oneshot::Sender<()>,
     config: Config,
     client_id: String,
-    protocol_version: ProtocolVersion,
 ) -> Result<Worterbuch, ConnectionError> {
-    // TODO properly implement different protocol versions
-    let supported_protocol_versions = [PROTOCOL_VERSION.to_owned()];
-
-    if !supported_protocol_versions.contains(&protocol_version) {
-        return Err(ConnectionError::WorterbuchError(
-            WorterbuchError::ProtocolNegotiationFailed,
-        ));
-    }
-
     let (stop_tx, stop_rx) = mpsc::channel(1);
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 

@@ -54,6 +54,9 @@ use worterbuch_common::{
     SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
 };
 
+pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
+    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 0)];
+
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
 
@@ -291,10 +294,6 @@ impl Worterbuch {
 
     pub fn is_empty(&self) -> bool {
         self.store.is_empty()
-    }
-
-    pub fn supported_protocol_version(&self) -> ProtocolVersion {
-        PROTOCOL_VERSION.to_owned()
     }
 
     pub fn get(&self, key: &Key) -> WorterbuchResult<Value> {

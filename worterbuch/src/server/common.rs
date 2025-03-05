@@ -448,7 +448,6 @@ pub enum WbFunction {
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<Option<(Value, GraveGoods, LastWill)>>),
     Len(oneshot::Sender<usize>),
-    SupportedProtocolVersion(oneshot::Sender<ProtocolVersion>),
 }
 
 #[derive(Clone)]
@@ -754,14 +753,6 @@ impl CloneableWbApi {
     pub async fn len(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Len(tx)).await?;
-        Ok(rx.await?)
-    }
-
-    pub async fn supported_protocol_version(&self) -> WorterbuchResult<ProtocolVersion> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(WbFunction::SupportedProtocolVersion(tx))
-            .await?;
         Ok(rx.await?)
     }
 }
