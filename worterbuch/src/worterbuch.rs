@@ -306,6 +306,15 @@ impl Worterbuch {
         }
     }
 
+    pub fn cget(&self, key: &Key) -> WorterbuchResult<(Value, CasVersion)> {
+        let path: Vec<RegularKeySegment> = parse_segments(key)?;
+
+        match self.store.cget(&path) {
+            Some((value, version)) => Ok((value.to_owned(), *version)),
+            None => Err(WorterbuchError::NoSuchValue(key.to_owned())),
+        }
+    }
+
     pub async fn set(&mut self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
 

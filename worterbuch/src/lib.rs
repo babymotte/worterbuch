@@ -199,6 +199,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
         }
+        WbFunction::CGet(key, tx) => {
+            tx.send(worterbuch.cget(&key)).ok();
+        }
         WbFunction::Set(key, value, client_id, tx) => {
             tx.send(worterbuch.set(key, value, client_id).await).ok();
         }
@@ -291,6 +294,9 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
     match function {
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
+        }
+        WbFunction::CGet(key, tx) => {
+            tx.send(worterbuch.cget(&key)).ok();
         }
         WbFunction::Set(_, _, _, tx) => {
             tx.send(Err(WorterbuchError::NotLeader)).ok();
@@ -655,6 +661,7 @@ async fn forward_api_call(
 ) {
     if let Some(cmd) = match function {
         WbFunction::Get(_, _)
+        | WbFunction::CGet(_, _)
         | WbFunction::SPubInit(_, _, _, _)
         | WbFunction::SPub(_, _, _, _)
         | WbFunction::Publish(_, _, _)

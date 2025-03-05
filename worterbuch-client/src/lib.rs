@@ -663,17 +663,30 @@ async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
     }
 }
 
+type AllCallbacks = Vec<mpsc::UnboundedSender<ServerMessage>>;
+type GetCallbacks = HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>;
+type CGetCallbacks =
+    HashMap<TransactionId, oneshot::Sender<(Option<(Value, CasVersion)>, TransactionId)>>;
+type PGetCallbacks = HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>;
+type DelCallbacks = HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>;
+type PDelCallbacks = HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>;
+type LsCallbacks = HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>;
+type SubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>;
+type PSubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>;
+type SubLsCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>;
+
 #[derive(Default)]
 struct Callbacks {
-    all: Vec<mpsc::UnboundedSender<ServerMessage>>,
-    get: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
-    pget: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
-    del: HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>,
-    pdel: HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>,
-    ls: HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>,
-    sub: HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>,
-    psub: HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>,
-    subls: HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>,
+    all: AllCallbacks,
+    get: GetCallbacks,
+    cget: CGetCallbacks,
+    pget: PGetCallbacks,
+    del: DelCallbacks,
+    pdel: PDelCallbacks,
+    ls: LsCallbacks,
+    sub: SubCallbacks,
+    psub: PSubCallbacks,
+    subls: SubLsCallbacks,
 }
 
 struct TransactionIds {
@@ -1509,6 +1522,7 @@ async fn process_incoming_server_message(
             deliver_generic(&msg, callbacks);
             match msg {
                 SM::State(state) => deliver_state(state, callbacks).await?,
+                SM::CState(state) => deliver_cstate(state, callbacks).await?,
                 SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
                 SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 SM::Err(err) => deliver_err(err, callbacks).await,
@@ -1556,6 +1570,17 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
             StateEvent::Deleted(_) => None,
         };
         cb.send(value)?;
+    }
+    Ok(())
+}
+
+async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
+    if let Some(cb) = callbacks.cget.remove(&state.transaction_id) {
+        cb.send((
+            Some((state.event.value, state.event.version)),
+            state.transaction_id,
+        ))
+        .expect("error in callback");
     }
     Ok(())
 }

@@ -35,11 +35,12 @@ use tokio::{
 use uuid::Uuid;
 use worterbuch_common::{
     error::{Context, WorterbuchError, WorterbuchResult},
-    Ack, AuthorizationRequest, CSet, CasVersion, ClientMessage as CM, Delete, Err, ErrorCode, Get,
-    GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState, MetaData, PDelete, PGet,
-    PLs, PState, PStateEvent, PSubscribe, Privilege, Protocol, ProtocolVersion, Publish,
-    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent,
-    Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe, UnsubscribeLs, Value,
+    Ack, AuthorizationRequest, CSet, CState, CStateEvent, CasVersion, ClientMessage as CM, Delete,
+    Err, ErrorCode, Get, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, Ls, LsState,
+    MetaData, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Protocol,
+    ProtocolVersion, Publish, RegularKeySegment, RequestPattern, SPub, SPubInit, ServerMessage,
+    Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, UniqueFlag, Unsubscribe,
+    UnsubscribeLs, Value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +116,22 @@ pub async fn process_incoming_message(
                     log::trace!("Getting value for client {} …", client_id);
                     get(msg, worterbuch, tx).await?;
                     log::trace!("Getting value for client {} done.", client_id);
+                }
+            }
+            CM::CGet(msg) => {
+                if check_auth(
+                    auth_required,
+                    Privilege::Read,
+                    &msg.key,
+                    &authorized,
+                    tx,
+                    msg.transaction_id,
+                )
+                .await?
+                {
+                    log::trace!("Getting CAS value for client {} …", client_id);
+                    cget(msg, worterbuch, tx).await?;
+                    log::trace!("Getting CAS value for client {} done.", client_id);
                 }
             }
             CM::PGet(msg) => {
@@ -362,6 +379,7 @@ pub async fn process_incoming_message(
 
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
+    CGet(Key, oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>),
     Set(Key, Value, Uuid, oneshot::Sender<WorterbuchResult<()>>),
     CSet(
         Key,
@@ -446,6 +464,12 @@ impl CloneableWbApi {
     pub async fn get(&self, key: Key) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Get(key, tx)).await?;
+        rx.await?
+    }
+
+    pub async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(WbFunction::CGet(key, tx)).await?;
         rx.await?
     }
 
@@ -767,7 +791,7 @@ async fn get(
     worterbuch: &CloneableWbApi,
     client: &mpsc::Sender<ServerMessage>,
 ) -> WorterbuchResult<()> {
-    let value: Value = match worterbuch.get(msg.key).await {
+    let value = match worterbuch.get(msg.key).await {
         Ok(it) => it,
         Err(e) => {
             handle_store_error(e, client, msg.transaction_id).await?;
@@ -786,6 +810,37 @@ async fn get(
         .context(|| {
             format!(
                 "Error sending STATE message for transaction ID {}",
+                msg.transaction_id
+            )
+        })?;
+
+    Ok(())
+}
+
+async fn cget(
+    msg: Get,
+    worterbuch: &CloneableWbApi,
+    client: &mpsc::Sender<ServerMessage>,
+) -> WorterbuchResult<()> {
+    let (value, version) = match worterbuch.cget(msg.key).await {
+        Ok(it) => it,
+        Err(e) => {
+            handle_store_error(e, client, msg.transaction_id).await?;
+            return Ok(());
+        }
+    };
+
+    let response = CState {
+        transaction_id: msg.transaction_id,
+        event: CStateEvent { value, version },
+    };
+
+    client
+        .send(ServerMessage::CState(response))
+        .await
+        .context(|| {
+            format!(
+                "Error sending CSTATE message for transaction ID {}",
                 msg.transaction_id
             )
         })?;

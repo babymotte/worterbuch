@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
+    CasVersion, ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
     TransactionId, TypedKeyValuePair, TypedKeyValuePairs, Value, Version,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -31,6 +31,7 @@ pub enum ServerMessage {
     PState(PState),
     Ack(Ack),
     State(State),
+    CState(CState),
     Err(Err),
     Authorized(Ack),
     LsState(LsState),
@@ -43,6 +44,7 @@ impl ServerMessage {
             ServerMessage::PState(msg) => Some(msg.transaction_id),
             ServerMessage::Ack(msg) => Some(msg.transaction_id),
             ServerMessage::State(msg) => Some(msg.transaction_id),
+            ServerMessage::CState(msg) => Some(msg.transaction_id),
             ServerMessage::Err(msg) => Some(msg.transaction_id),
             ServerMessage::LsState(msg) => Some(msg.transaction_id),
             ServerMessage::Authorized(_) => Some(0),
@@ -171,6 +173,21 @@ pub struct State {
 pub enum StateEvent {
     Value(Value),
     Deleted(Value),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CState {
+    pub transaction_id: TransactionId,
+    #[serde(flatten)]
+    pub event: CStateEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CStateEvent {
+    pub value: Value,
+    pub version: CasVersion,
 }
 
 impl From<StateEvent> for Option<Value> {

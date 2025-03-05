@@ -41,6 +41,20 @@ properties:
     required:
       - transactionId
       - key
+  cGet:
+    description: A message sent by a client to request the value and the value's version number of the provided key from the server
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
   pGet:
     description: A message sent by a client to request the values of all keys matching the provided pattern from the server
     type: object

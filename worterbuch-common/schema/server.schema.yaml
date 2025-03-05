@@ -56,6 +56,24 @@ properties:
           - value
       - required:
           - deleted
+  cState:
+    description: A message sent by the server in response to a CGet message
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      value:
+        $ref: "#/components/schemas/Value"
+      version:
+        description: The version number of a compare-and-swap protected value
+        type: integer
+        format: u64
+    additionalProperties: false
+    required:
+      - transactionId
+      - value
+      - version
   pState:
     description: A message sent by the server in response to a PGet, PDelete or
       Subscribe/PSubscribe message

@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMessage {
     AuthorizationRequest(AuthorizationRequest),
     Get(Get),
+    CGet(Get),
     PGet(PGet),
     Set(Set),
     CSet(CSet),
@@ -47,7 +48,7 @@ impl ClientMessage {
     pub fn transaction_id(&self) -> Option<TransactionId> {
         match self {
             ClientMessage::AuthorizationRequest(_) => Some(0),
-            ClientMessage::Get(m) => Some(m.transaction_id),
+            ClientMessage::Get(m) | ClientMessage::CGet(m) => Some(m.transaction_id),
             ClientMessage::PGet(m) => Some(m.transaction_id),
             ClientMessage::Set(m) => Some(m.transaction_id),
             ClientMessage::CSet(m) => Some(m.transaction_id),
