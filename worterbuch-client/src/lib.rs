@@ -65,6 +65,8 @@ pub use worterbuch_common::{
 #[derive(Debug)]
 pub(crate) enum Command {
     Set(Key, Value, oneshot::Sender<TransactionId>),
+    SPubInit(Key, oneshot::Sender<TransactionId>),
+    SPub(TransactionId, Value, oneshot::Sender<()>),
     Publish(Key, Value, oneshot::Sender<TransactionId>),
     Get(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
     GetAsync(Key, oneshot::Sender<TransactionId>),
@@ -225,6 +227,8 @@ impl Worterbuch {
         let value = json::to_value(value)?;
         self.set_generic(key, value).await
     }
+
+    pub async fn spub_init(&self)
 
     pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
@@ -1244,6 +1248,20 @@ async fn process_incoming_command(
                 Some(CM::Set(Set {
                     transaction_id,
                     key,
+                    value,
+                }))
+            }
+            Command::SPubInit(key, callback) => {
+                callback.send(transaction_id).expect("error in callback");
+                Some(CM::SPubInit(SPubInit {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::SPub(transaction_id, value, callback) => {
+                callback.send(()).expect("error in callback");
+                Some(CM::SPub(SPub {
+                    transaction_id,
                     value,
                 }))
             }
