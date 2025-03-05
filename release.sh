@@ -35,6 +35,8 @@ WB_TAG=$(curl -L \
 
 DOCKERFILE="FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
 WORKDIR /app
+RUN rustup component add rustfmt
+RUN rustup component add clippy
 
 FROM wbco-chef AS wbco-planner
 COPY . .
@@ -45,7 +47,7 @@ COPY --from=wbco-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo fmt --check
-RUN cargo clippy
+RUN cargo clippy -- --deny warnings
 RUN cargo test
 RUN cargo build --release
 
