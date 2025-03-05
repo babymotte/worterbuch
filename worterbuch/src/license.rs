@@ -97,7 +97,7 @@ pub async fn load_license() -> miette::Result<License> {
 pub mod commercial {
 
     use super::License;
-    use jsonwebtoken::{decode, DecodingKey, Validation};
+    use jsonwebtoken::{DecodingKey, Validation, decode};
     use miette::{Context, IntoDiagnostic};
     use std::{env, str};
     use tokio::fs;

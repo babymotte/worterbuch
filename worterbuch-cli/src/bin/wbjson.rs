@@ -25,7 +25,7 @@ use std::{
     io::{self, Read},
 };
 use tracing_subscriber::EnvFilter;
-use worterbuch_client::{config::Config, AuthToken, KeyValuePair};
+use worterbuch_client::{AuthToken, KeyValuePair, config::Config};
 
 #[derive(Parser)]
 #[command(author, version, about = "Convert JSON into Wörterbuch key/value pairs.", long_about = None)]

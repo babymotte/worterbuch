@@ -28,7 +28,7 @@ use serde_json::json;
 pub use server::*;
 
 use error::WorterbuchResult;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
@@ -250,12 +250,12 @@ pub fn parse_segments(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>>
         match ks {
             KeySegment::Regular(reg) => segments.push(reg),
             KeySegment::Wildcard => {
-                return Err(error::WorterbuchError::IllegalWildcard(pattern.to_owned()))
+                return Err(error::WorterbuchError::IllegalWildcard(pattern.to_owned()));
             }
             KeySegment::MultiWildcard => {
                 return Err(error::WorterbuchError::IllegalMultiWildcard(
                     pattern.to_owned(),
-                ))
+                ));
             }
         }
     }

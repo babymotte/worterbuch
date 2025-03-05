@@ -18,14 +18,14 @@
  */
 
 use crate::{
-    auth::{get_claims, JwtClaims},
     Config,
+    auth::{JwtClaims, get_claims},
 };
 use poem::{
+    Endpoint, EndpointExt, Middleware, Request, Result,
     http::StatusCode,
     middleware::AddData,
-    web::headers::{self, authorization::Bearer, HeaderMapExt},
-    Endpoint, EndpointExt, Middleware, Request, Result,
+    web::headers::{self, HeaderMapExt, authorization::Bearer},
 };
 
 pub struct BearerAuth {

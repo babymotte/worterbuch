@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::mpsc};
 
 use random_word::Lang;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub trait KeyValueConsumer {
     type Error;

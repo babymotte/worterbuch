@@ -18,8 +18,8 @@
  */
 
 use crate::{
-    server::Err, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
-    RequestPattern, TransactionId,
+    ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment, RequestPattern,
+    TransactionId, server::Err,
 };
 use miette::Diagnostic;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};

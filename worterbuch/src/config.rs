@@ -17,12 +17,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::license::{load_license, License};
+use crate::license::{License, load_license};
 use clap::Parser;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use worterbuch_common::{
-    error::{ConfigError, ConfigIntContext, ConfigResult},
     AuthToken, Path,
+    error::{ConfigError, ConfigIntContext, ConfigResult},
 };
 
 #[derive(Parser)]

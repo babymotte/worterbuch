@@ -18,12 +18,12 @@
  */
 
 use crate::Config;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use worterbuch_common::{
-    error::{AuthorizationError, AuthorizationResult},
     KeySegment, Privilege, RequestPattern,
+    error::{AuthorizationError, AuthorizationResult},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
