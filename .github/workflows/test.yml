@@ -26,6 +26,6 @@ jobs:
       - name: Run format check
         run: cargo fmt --check
       - name: Run linter
-        run: cargo clippy
+        run: cargo clippy --deny warnings
       - name: Run tests
         run: cargo test

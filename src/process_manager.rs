@@ -25,6 +25,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
 use tokio_process_terminate::TerminateExt;
+use tracing::{info, warn};
 
 pub struct CommandDefinition {
     cmd: String,
@@ -94,11 +95,11 @@ impl ChildProcessManagerActor {
                         },
                         exit_code = proc.wait() => {
                             match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {}", cmd))?.code() {
-                                Some(exit_code) => log::warn!("Child process {} terminated with exit code {exit_code}.", cmd),
-                                None => log::warn!("Child process {} terminated with unknown exit code", cmd)
+                                Some(exit_code) => warn!("Child process {} terminated with exit code {exit_code}.", cmd),
+                                None => warn!("Child process {} terminated with unknown exit code", cmd)
                             }
                             if self.restart {
-                                log::info!("Restarting …");
+                                info!("Restarting …");
                                 crash_counter += 1;
                                 wait = Some(delay(crash_counter));
                             } else {
@@ -115,7 +116,7 @@ impl ChildProcessManagerActor {
                         },
                     }
                 } else {
-                    log::info!("(Re-)starting child daemon process {} …", command.cmd);
+                    info!("(Re-)starting child daemon process {} …", command.cmd);
                     let cmd = command.cmd.to_owned();
                     let mut command = Command::from(command);
                     let mut proc = command
@@ -144,10 +145,10 @@ impl ChildProcessManagerActor {
             }
         }
 
-        log::info!("Child process manager actor stopped.");
+        info!("Child process manager actor stopped.");
 
         if !self.restart && self.started {
-            log::info!("Automatic restart disabled, shutting down …");
+            info!("Automatic restart disabled, shutting down …");
             self.subsys.request_shutdown();
         }
 
@@ -170,7 +171,7 @@ impl ChildProcessManagerActor {
     }
 
     async fn stop(&mut self) -> Result<()> {
-        log::info!("Stopping child daemon process …");
+        info!("Stopping child daemon process …");
         self.stopped = true;
         if let Some((mut proc, cmd)) = self.process.take() {
             terminate(&mut proc, &cmd).await?;
@@ -179,7 +180,7 @@ impl ChildProcessManagerActor {
                 .into_diagnostic()
                 .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?;
         } else {
-            log::warn!("Process was not running, nothing to stop.");
+            warn!("Process was not running, nothing to stop.");
         }
         Ok(())
     }
@@ -225,7 +226,7 @@ impl ChildProcessManager {
 }
 
 async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
-    log::info!("Terminating child process {cmd} …");
+    info!("Terminating child process {cmd} …");
     match proc
         .terminate_wait()
         .await
@@ -233,8 +234,8 @@ async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
         .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?
         .code()
     {
-        Some(exit_code) => log::info!("Child process terminated with exit code {exit_code}."),
-        None => log::warn!("Child process did not terminate cleanly."),
+        Some(exit_code) => info!("Child process terminated with exit code {exit_code}."),
+        None => warn!("Child process did not terminate cleanly."),
     }
     Ok(())
 }

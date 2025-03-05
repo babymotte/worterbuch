@@ -39,6 +39,7 @@ use std::{
 };
 use tokio::{fs::File, select};
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,10 +175,10 @@ pub async fn persist_active_timestamp(path: &Path) -> Result<()> {
 
 pub async fn load_millis_since_active(path: &Path) -> Option<i64> {
     let path = path.join(TIMESTAMP_FILE_NAME);
-    log::debug!("getting metadata of file {path:?}");
+    debug!("getting metadata of file {path:?}");
     let file = File::open(&path).await.ok()?;
     let last_modified = file.metadata().await.ok()?.modified().ok()?;
-    log::debug!("{path:?} last modified: {last_modified:?}");
+    debug!("{path:?} last modified: {last_modified:?}");
     let elapsed = last_modified.elapsed().ok()?;
     Some(elapsed.as_millis() as i64)
 }

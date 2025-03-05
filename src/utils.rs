@@ -15,12 +15,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::config::Peers;
-
 use super::{config::Config, HeartbeatRequest, PeerMessage, VoteRequest, VoteResponse};
+use crate::config::Peers;
 use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
+use tracing::{debug, error, warn};
 
 pub async fn send_heartbeat_requests(
     config: &Config,
@@ -101,7 +101,7 @@ pub async fn support_vote(
             .into_diagnostic()
             .wrap_err_with(|| format!("error sending peer message to {}@{}", vote.node_id, addr))?;
     } else {
-        log::warn!(
+        warn!(
             "Cannot support vote request of noe '{}', no socket address is configured for it!",
             vote.node_id
         );
@@ -131,8 +131,8 @@ where
     match serde_json::from_slice(&buf[..received]) {
         Ok(msg) => op(msg).await,
         Err(e) => {
-            log::error!("Could not parse peer message: {e}");
-            log::debug!("Message: {}", String::from_utf8_lossy(&buf[..received]));
+            error!("Could not parse peer message: {e}");
+            debug!("Message: {}", String::from_utf8_lossy(&buf[..received]));
             Ok(ControlFlow::Continue(()))
         }
     }

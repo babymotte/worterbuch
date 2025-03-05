@@ -15,16 +15,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::pin::pin;
-
 use super::config::Config;
 use crate::{
     config::Peers, utils::support_vote, Heartbeat, HeartbeatRequest, PeerMessage, Priority, Vote,
     VoteRequest,
 };
 use miette::{Context, IntoDiagnostic, Result};
+use std::pin::pin;
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{debug, info, warn};
 
 pub enum ElectionOutcome {
     Leader,
@@ -87,11 +87,11 @@ impl<'a> Election<'a> {
             if let Ok(peers) = peers_rx.try_recv() {
                 *self.peers = peers;
                 self.config.update_quorum(self.peers)?;
-                log::info!("Config changed, restarting election round.");
+                info!("Config changed, restarting election round.");
                 continue 'election;
             }
 
-            log::info!("Waiting for other candidates or existing leader …");
+            info!("Waiting for other candidates or existing leader …");
             let timeout = sleep(self.config.election_timeout());
 
             select! {
@@ -101,25 +101,25 @@ impl<'a> Election<'a> {
                 recv = peers_rx.recv() => if let Some(peers) = recv {
                     *self.peers = peers;
                     self.config.update_quorum(self.peers)?;
-                    log::info!("Config changed, restarting election round.");
+                    info!("Config changed, restarting election round.");
                     continue 'election;
                 } else {
                     return Ok(ElectionOutcome::Cancelled);
                 },
-                _ = timeout => log::info!("No other candidate asked for votes with high enough priority or sent a heartbeat in time. Trying to become leader myself …"),
+                _ = timeout => info!("No other candidate asked for votes with high enough priority or sent a heartbeat in time. Trying to become leader myself …"),
             }
 
             if let Ok(peers) = peers_rx.try_recv() {
                 *self.peers = peers;
                 self.config.update_quorum(self.peers)?;
-                log::info!("Config changed, restarting election round.");
+                info!("Config changed, restarting election round.");
                 continue 'election;
             }
 
-            log::info!("Requesting peers to vote for me …");
+            info!("Requesting peers to vote for me …");
 
             self.votes_in_my_favor = 1;
-            log::info!(
+            info!(
                 "I voted for myself ({}/{}, quorum: {}/{})",
                 self.votes_in_my_favor,
                 self.peers.peer_nodes().len() + 1,
@@ -129,7 +129,7 @@ impl<'a> Election<'a> {
 
             // this will allow self-election, which is usually an antipattern. We allow it here to be able to support not fully redundant two-node clusters.
             if self.votes_in_my_favor >= self.config.quorum {
-                log::info!("Quorum met, I am now leader.");
+                info!("Quorum met, I am now leader.");
                 return Ok(ElectionOutcome::Leader);
             }
 
@@ -147,13 +147,13 @@ impl<'a> Election<'a> {
             'receive_votes: loop {
                 select! {
                     _ = &mut timeout => {
-                        log::warn!("Could not get enough supporting votes in time, starting over …");
+                        warn!("Could not get enough supporting votes in time, starting over …");
                         break 'receive_votes;
                     },
                     recv = peers_rx.recv() => if let Some(peers) = recv {
                         *self.peers = peers;
                         self.config.update_quorum(self.peers)?;
-                        log::info!("Config changed, restarting election round.");
+                        info!("Config changed, restarting election round.");
                         continue 'election;
                     } else {
                         return Ok(ElectionOutcome::Cancelled);
@@ -167,15 +167,15 @@ impl<'a> Election<'a> {
                                 }
                                 peers.retain(|it| it != &vote.node_id);
                                 self.votes_in_my_favor += 1;
-                                log::info!("Node '{}' voted for me ({}/{}, quorum: {}/{})", vote.node_id, self.votes_in_my_favor, self.peers.peer_nodes().len() + 1, self.config.quorum, self.peers.peer_nodes().len() + 1);
+                                info!("Node '{}' voted for me ({}/{}, quorum: {}/{})", vote.node_id, self.votes_in_my_favor, self.peers.peer_nodes().len() + 1, self.config.quorum, self.peers.peer_nodes().len() + 1);
                                 if self.votes_in_my_favor >= self.config.quorum {
-                                    log::info!("This instance is now the leader.");
+                                    info!("This instance is now the leader.");
                                     return Ok(ElectionOutcome::Leader);
                                 }
                             },
                             PeerMessage::Vote(Vote::Request(vote)) => {
                                 if vote.priority >= self.prio {
-                                    log::info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, self.prio);
+                                    info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, self.prio);
                                     self.votes_in_my_favor = self.votes_in_my_favor.saturating_sub(1);
                                     support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
                                     if let Some(result) = self.wait_for_heartbeat(&vote).await? {
@@ -184,14 +184,14 @@ impl<'a> Election<'a> {
                                         continue 'election;
                                     }
                                 } else {
-                                    log::info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, self.prio);
+                                    info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, self.prio);
                                 }
                             },
                             PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                                log::info!("Node '{}' seems to think it's the new leader. Let's see …", heartbeat.node_id);
+                                info!("Node '{}' seems to think it's the new leader. Let's see …", heartbeat.node_id);
                             },
                             PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                                log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
+                                warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
                             },
                         }
                     },
@@ -208,23 +208,23 @@ impl<'a> Election<'a> {
                 msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
                     match msg {
                         PeerMessage::Vote(Vote::Response(vote)) => {
-                            log::info!("Node '{}' is voting for me, but I haven't requested any votes yet. Weird.", vote.node_id);
+                            info!("Node '{}' is voting for me, but I haven't requested any votes yet. Weird.", vote.node_id);
                         },
                         PeerMessage::Vote(Vote::Request(vote)) => {
                             if vote.priority >= self.prio {
-                                log::info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, self.prio);
+                                info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, self.prio);
                                 support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
                                 return self.wait_for_heartbeat(&vote).await;
                             } else {
-                                log::info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, self.prio);
+                                info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, self.prio);
                             }
                         },
                         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                            log::info!("Node '{}' seems to be leader. Let's follow it.", heartbeat.node_id);
+                            info!("Node '{}' seems to be leader. Let's follow it.", heartbeat.node_id);
                             return Ok(Some(ElectionOutcome::Follower(heartbeat)));
                         },
                         PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                            log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
+                            warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
                         },
                     }
                 },
@@ -244,25 +244,25 @@ impl<'a> Election<'a> {
                 msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
                     match msg {
                         PeerMessage::Vote(Vote::Response(vote)) => {
-                            log::info!("Node '{}' is voting for us, be haven't requested any votes yet. Weird.", vote.node_id);
+                            info!("Node '{}' is voting for us, be haven't requested any votes yet. Weird.", vote.node_id);
                         },
                         PeerMessage::Vote(Vote::Request(vote)) => {
                             if &vote != supported_vote {
-                                log::info!("Looks like node '{}' is also trying to become leader, but we already voted for '{}'. Ignoring it …", vote.node_id, supported_vote.node_id);
+                                info!("Looks like node '{}' is also trying to become leader, but we already voted for '{}'. Ignoring it …", vote.node_id, supported_vote.node_id);
                             }
                         },
                         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                            log::info!("Node '{}' seems to have won the election. Let's follow it.", heartbeat.node_id);
+                            info!("Node '{}' seems to have won the election. Let's follow it.", heartbeat.node_id);
                             return Ok(Some(ElectionOutcome::Follower(heartbeat)));
                         },
                         PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                            log::warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
+                            warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
                         },
                     }
                 },
                 _ = self.subsys.on_shutdown_requested() => return Ok(Some(ElectionOutcome::Cancelled)),
                 _ = &mut timeout => {
-                    log::warn!("Didn't get a heartbeat from node '{}' in time, looks like it did not become leader after all.", supported_vote.node_id);
+                    warn!("Didn't get a heartbeat from node '{}' in time, looks like it did not become leader after all.", supported_vote.node_id);
                     return Ok(None);
                 }
             }
@@ -277,10 +277,9 @@ impl<'a> Election<'a> {
         let buf = serde_json::to_vec(&msg).expect("PeerMessage not serializeable");
 
         for peer in self.peers.peer_nodes() {
-            log::debug!(
+            debug!(
                 "Sending vote request to {}@{} …",
-                peer.node_id,
-                peer.address
+                peer.node_id, peer.address
             );
             self.socket
                 .send_to(&buf, peer.raft_addr())

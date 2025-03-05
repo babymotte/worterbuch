@@ -34,6 +34,7 @@ use tokio::{
     time::{interval, sleep},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{info, warn};
 
 pub async fn follow(
     subsys: &SubsystemHandle,
@@ -60,7 +61,7 @@ pub async fn follow(
         'inner: loop {
             select! {
                 _ = &mut timeout => {
-                    log::info!("Leader heartbeat timed out. Leaving follower mode …");
+                    info!("Leader heartbeat timed out. Leaving follower mode …");
                     break 'outer;
                 },
                 _ = follower_timestamp_interval.tick() => {
@@ -69,21 +70,21 @@ pub async fn follow(
                 flow = listen(socket, &mut buf, |msg| async {
                     match msg {
                         PeerMessage::Vote(Vote::Request(vote)) => {
-                            log::info!("Node '{}' has started a leader election and requested our support, but we are still following '{}'. Ignoring it …", vote.node_id, leader_heartbeat.node_id);
+                            info!("Node '{}' has started a leader election and requested our support, but we are still following '{}'. Ignoring it …", vote.node_id, leader_heartbeat.node_id);
                         },
                         PeerMessage::Vote(Vote::Response(vote)) => {
-                            log::warn!("Node '{}' is sending us vote responses, but we did not start an election. Weird.", vote.node_id);
+                            warn!("Node '{}' is sending us vote responses, but we did not start an election. Weird.", vote.node_id);
                         },
                         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
                             if heartbeat == leader_heartbeat {
                                 send_heartbeat_response(&heartbeat, config, peers, socket).await?;
                                 return Ok(ControlFlow::Break(()));
                             } else {
-                                log::info!("Node '{}' seems to think its the new leader, but we are still following '{}'. Ignoring it …", heartbeat.node_id, leader_heartbeat.node_id);
+                                info!("Node '{}' seems to think its the new leader, but we are still following '{}'. Ignoring it …", heartbeat.node_id, leader_heartbeat.node_id);
                             }
                         },
                         PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                            log::warn!("Node '{}' is sending us heartbeat responses but we are not the leader. Weird.", heartbeat.node_id);
+                            warn!("Node '{}' is sending us heartbeat responses but we are not the leader. Weird.", heartbeat.node_id);
                         }
                     }
                     Ok(ControlFlow::Continue::<()>(()))
@@ -99,7 +100,7 @@ pub async fn follow(
 
     proc_manager.stop().await?;
 
-    log::info!("Worterbuch server follower instance stopped.");
+    info!("Worterbuch server follower instance stopped.");
 
     Ok(())
 }

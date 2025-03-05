@@ -8,6 +8,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::info;
 
 pub struct StatsSender(mpsc::Sender<StatsEvent>);
 
@@ -103,7 +104,7 @@ async fn run_server(
     let ip = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
     let addr = SocketAddr::new(ip, port);
 
-    log::info!("Starting stats endpoint at {addr} …");
+    info!("Starting stats endpoint at {addr} …");
 
     let listener = TcpListener::bind(addr)
         .await

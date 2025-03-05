@@ -33,6 +33,7 @@ use std::{
 };
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{debug, error, info, trace, warn};
 
 pub async fn lead(
     subsys: &SubsystemHandle,
@@ -43,7 +44,7 @@ pub async fn lead(
 ) -> Result<()> {
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-leader", false);
 
-    log::info!("Starting worterbuch server in leader mode …");
+    info!("Starting worterbuch server in leader mode …");
 
     proc_manager.restart(cmd(config)).await;
 
@@ -73,7 +74,7 @@ pub async fn lead(
 
         select! {
             _ = heartbeat_interval.tick() => {
-                log::trace!("Sending heartbeat …");
+                trace!("Sending heartbeat …");
                 send_heartbeat_requests(config, socket, peers).await?;
                 if !check_heartbeat_responses(&heartbeat_responses, config, peers) {
                     break;
@@ -83,7 +84,7 @@ pub async fn lead(
                 persist_active_timestamp(&config.data_dir).await?;
             },
             recv = peers_rx.recv() => if let Some(p) = recv {
-                log::info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
+                info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
                 *peers = p;
                 peers_changed = Some(Instant::now());
             } else {
@@ -92,19 +93,19 @@ pub async fn lead(
             flow = listen(socket, &mut buf, |msg| async {
                 match msg {
                     PeerMessage::Vote(Vote::Request(vote)) => {
-                        log::info!("Node '{}' wants to take the lead. Over my cold, dead body …", vote.node_id);
+                        info!("Node '{}' wants to take the lead. Over my cold, dead body …", vote.node_id);
                     },
                     PeerMessage::Vote(Vote::Response(_)) => {
                         // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
                     },
                     PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
                         if config.quorum_too_low {
-                            log::error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.node_id);
+                            error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.node_id);
                             return Ok(ControlFlow::Break(()));
                         }
                     },
                     PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                        log::trace!("Received heartbeat response from node '{}'.", heartbeat.node_id);
+                        trace!("Received heartbeat response from node '{}'.", heartbeat.node_id);
                         heartbeat_responses.insert(heartbeat.node_id, Instant::now());
                     },
                 }
@@ -137,7 +138,7 @@ fn check_heartbeat_responses(
             responsive_nodes += 1;
             unresponsive_nodes = unresponsive_nodes.saturating_sub(1);
         } else {
-            log::debug!(
+            debug!(
                 "Heartbeat response of node '{}' is overdue ({}/{} node(s) responsive; quorum: {}).",
                 peer,
                 responsive_nodes, number_of_nodes, config.quorum
@@ -146,7 +147,7 @@ fn check_heartbeat_responses(
     }
 
     if responsive_nodes < config.quorum {
-        log::warn!("Quorum of {} is no longer met, too many unresponsive peers. Cluster is no longer able to build a consensus, dropping to follower state to allow re-election.", config.quorum);
+        warn!("Quorum of {} is no longer met, too many unresponsive peers. Cluster is no longer able to build a consensus, dropping to follower state to allow re-election.", config.quorum);
         false
     } else {
         true

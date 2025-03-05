@@ -28,6 +28,7 @@ use std::{
 };
 use tokio::{fs, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,11 +54,9 @@ impl TryFrom<&RawPeerInfo> for PeerInfo {
             })?
             .collect();
 
-        log::debug!(
+        debug!(
             "Resolved socket addresses for node {}@{}: {:?}",
-            value.node_id,
-            value.address,
-            addrs
+            value.node_id, value.address, addrs
         );
 
         // TODO use a better selection mechanism than just using the first one
@@ -160,15 +159,15 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usi
     } else if quorum > node_count {
         return Err(miette!("The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). Your cluster will not be able to elect a leader."));
     } else if node_count == 1 {
-        log::error!(
+        error!(
             "You have configured only one node, your cluster is NOT redundant! If this is what you want, you should use worterbuch in standalone mode, not as a cluster.",
         );
     } else if quorum == node_count {
-        log::error!("The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). If a single node fails your cluster will not be able to elect a new leader, your cluster is NOT redundant!");
+        error!("The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). If a single node fails your cluster will not be able to elect a new leader, your cluster is NOT redundant!");
     } else if quorum < recommended_min_quorum {
-        log::warn!("The leader election quorum ({quorum}) is TOO LOW for the number of nodes ({node_count}). This makes your cluster susceptible to split brain scenarios (i.e. two leaders may be elected at the same time). THIS IS HIGHLY DISCOURAGED!");
+        warn!("The leader election quorum ({quorum}) is TOO LOW for the number of nodes ({node_count}). This makes your cluster susceptible to split brain scenarios (i.e. two leaders may be elected at the same time). THIS IS HIGHLY DISCOURAGED!");
     } else if node_count % 2 == 0 {
-        log::warn!("An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node.");
+        warn!("An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node.");
     }
 
     Ok((quorum, quorum < recommended_min_quorum))
@@ -241,16 +240,16 @@ impl Config {
 
     pub async fn priority(&self) -> Priority {
         if let Some(prio) = self.priority {
-            log::debug!("Configured priority: {prio}");
+            debug!("Configured priority: {prio}");
             return Priority(prio);
         }
 
         if let Some(prio) = load_millis_since_active(&self.data_dir).await {
-            log::debug!("Prio from time since last active: {prio}");
+            debug!("Prio from time since last active: {prio}");
             return Priority(prio);
         }
 
-        log::debug!("No prio configured and never been leader or follower.");
+        debug!("No prio configured and never been leader or follower.");
         Priority(i64::MAX)
     }
 
@@ -268,7 +267,7 @@ impl Config {
 pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Receiver<Peers>)> {
     let (tx, rx) = mpsc::channel(1);
 
-    log::info!("Loading orchestrator config …");
+    info!("Loading orchestrator config …");
 
     let mut peer_addresses = HashSet::new();
 
@@ -299,8 +298,8 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
         })
         .collect();
 
-    log::debug!("Configured nodes: {nodes:?}");
-    log::debug!("Configured peers: {peers:?}");
+    debug!("Configured nodes: {nodes:?}");
+    debug!("Configured peers: {peers:?}");
 
     let data_dir = args.data_dir;
     let priority = args.priority;
@@ -375,7 +374,7 @@ async fn reload_config(
             .collect::<Result<Vec<PeerInfo>>>()?;
 
         if !nodes.iter().any(|n| n.node_id == node_id) {
-            log::error!("This node is no longer part of the cluster config, shutting down …");
+            error!("This node is no longer part of the cluster config, shutting down …");
             subsys.request_shutdown();
         }
 
@@ -393,8 +392,8 @@ async fn reload_config(
         let peers = Peers(peers);
 
         if tx.try_send(peers).is_ok() {
-            log::info!("Change in cluster config detected.");
-            log::debug!("Configured nodes changed: {nodes:?}");
+            info!("Change in cluster config detected.");
+            debug!("Configured nodes changed: {nodes:?}");
         }
 
         Ok(cf)
