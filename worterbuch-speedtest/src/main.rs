@@ -32,7 +32,7 @@ use web_ui::run_web_ui;
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())

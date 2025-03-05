@@ -26,6 +26,8 @@ use std::{
     time::Duration,
 };
 
+use tracing::error;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
@@ -75,7 +77,7 @@ impl Config {
             if let Ok(secs) = val.parse() {
                 self.send_timeout = Duration::from_secs(secs);
             } else {
-                log::error!("invalid timeout: {val}");
+                error!("invalid timeout: {val}");
             }
         }
 
@@ -83,7 +85,7 @@ impl Config {
             if let Ok(secs) = val.parse() {
                 self.connection_timeout = Duration::from_secs(secs);
             } else {
-                log::error!("invalid timeout: {val}");
+                error!("invalid timeout: {val}");
             }
         }
 
@@ -95,7 +97,7 @@ impl Config {
             if let Ok(size) = val.parse() {
                 self.channel_buffer_size = size;
             } else {
-                log::error!("invalid buffer size: {val}");
+                error!("invalid buffer size: {val}");
             }
         }
 

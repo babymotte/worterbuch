@@ -18,18 +18,19 @@
  */
 
 use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
-use miette::{miette, Context, IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::{
-    fs::{self, remove_file, File},
+    fs::{self, File, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
     select,
     time::interval,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{debug, info, warn};
 use worterbuch_common::{GraveGoods, LastWill};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,7 +53,7 @@ pub(crate) async fn periodic(
         }
     }
 
-    log::debug!("persistence subsystem completed.");
+    debug!("persistence subsystem completed.");
 
     Ok(())
 }
@@ -62,10 +63,10 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result
 
     // TODO persist grave goods and last wills to disk
 
-    log::debug!("Exporting database state …");
+    debug!("Exporting database state …");
     match worterbuch.export().await? {
         Some((json, grave_goods, last_will)) => {
-            log::debug!("Exporting database state done.");
+            debug!("Exporting database state done.");
 
             let json = json.to_string();
             write_and_check(json.as_bytes(), &store_path).await?;
@@ -78,7 +79,7 @@ pub(crate) async fn once(worterbuch: &CloneableWbApi, config: &Config) -> Result
             write_and_check(json.as_bytes(), &grave_goods_last_will_path).await?;
         }
         None => {
-            log::debug!("No unsaved changes, skipping export.");
+            debug!("No unsaved changes, skipping export.");
         }
     }
 
@@ -90,9 +91,9 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
 
     // TODO persist grave goods and last wills to disk
 
-    log::debug!("Exporting database state …");
+    debug!("Exporting database state …");
     let (data, grave_goods, last_will) = worterbuch.export();
-    log::debug!("Exporting database state done.");
+    debug!("Exporting database state done.");
 
     let json = json!({ "data": data }).to_string();
     write_and_check(json.as_bytes(), &store_path).await?;
@@ -132,27 +133,27 @@ async fn file_paths(config: &Config, write: bool) -> Result<(PathBuf, PathBuf)> 
 async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
     if write {
         if remove_file(path).await.is_ok() {
-            log::debug!(
+            debug!(
                 "toggle file {} removed, writing to backup",
                 path.to_string_lossy()
             );
             Ok(false)
         } else {
             File::create(path).await.into_diagnostic()?;
-            log::debug!(
+            debug!(
                 "toggle file {} created, writing to main",
                 path.to_string_lossy()
             );
             Ok(true)
         }
     } else if File::open(path).await.is_ok() {
-        log::debug!(
+        debug!(
             "toggle file {} exists, reading from main",
             path.to_string_lossy()
         );
         Ok(true)
     } else {
-        log::debug!(
+        debug!(
             "toggle file {} does not exists, reading from backup",
             path.to_string_lossy()
         );
@@ -170,7 +171,7 @@ async fn write_and_check(data: &[u8], path: impl AsRef<Path>) -> Result<()> {
 }
 
 async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
-    log::debug!("Writing file {} …", path.to_string_lossy());
+    debug!("Writing file {} …", path.to_string_lossy());
     let mut file = File::create(path)
         .await
         .into_diagnostic()
@@ -183,13 +184,13 @@ async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
         .await
         .into_diagnostic()
         .wrap_err("failed to flush file")?;
-    log::debug!("Writing file {} done.", path.to_string_lossy());
+    debug!("Writing file {} done.", path.to_string_lossy());
 
     Ok(())
 }
 
 async fn validate_file_content(path: &Path, data: &[u8]) -> Result<()> {
-    log::debug!("Validating content of file {} …", path.to_string_lossy());
+    debug!("Validating content of file {} …", path.to_string_lossy());
     let mut written_data = vec![];
     let mut file = File::open(path).await.into_diagnostic()?;
     file.read_to_end(&mut written_data)
@@ -204,7 +205,7 @@ async fn validate_file_content(path: &Path, data: &[u8]) -> Result<()> {
         ))?;
     }
 
-    log::debug!("Content of file {} is OK.", path.to_string_lossy());
+    debug!("Content of file {} is OK.", path.to_string_lossy());
 
     Ok(())
 }
@@ -213,26 +214,26 @@ pub(crate) async fn load(config: Config) -> Result<Worterbuch> {
     match load_v2(&config).await {
         Ok(wb) => Ok(wb),
         Err(e) => {
-            log::warn!("Could not load persistence file: {e}");
-            log::info!("Trying to load legacy persistence file …");
+            warn!("Could not load persistence file: {e}");
+            info!("Trying to load legacy persistence file …");
             legacy::load(config).await
         }
     }
 }
 
 async fn load_v2(config: &Config) -> Result<Worterbuch> {
-    log::info!("Restoring Wörterbuch form persistence …");
+    info!("Restoring Wörterbuch form persistence …");
     let (store_path, grave_goods_last_will_path) = file_paths(config, false).await?;
 
     let mut wb = match try_load(&store_path, config).await {
         Ok(worterbuch) => Ok(worterbuch),
         Err(e) => {
-            log::warn!(
+            warn!(
                 "Could not load persistence file {}: {e}",
                 store_path.to_string_lossy()
             );
             let (store_path, _) = file_paths(config, true).await?;
-            log::info!(
+            info!(
                 "Trying to load persistence file {} …",
                 store_path.to_string_lossy()
             );
@@ -244,12 +245,12 @@ async fn load_v2(config: &Config) -> Result<Worterbuch> {
         match try_load_grave_goods_last_will(&grave_goods_last_will_path).await {
             Ok(gglw) => Ok(gglw),
             Err(e) => {
-                log::warn!(
+                warn!(
                     "Could not load persistence file {}: {e}",
                     grave_goods_last_will_path.to_string_lossy()
                 );
                 let (_, grave_goods_last_will_path) = file_paths(config, true).await?;
-                log::info!(
+                info!(
                     "Trying to load persistence file {} …",
                     grave_goods_last_will_path.to_string_lossy()
                 );
@@ -268,14 +269,14 @@ async fn load_v2(config: &Config) -> Result<Worterbuch> {
 async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch> {
     let json = fs::read_to_string(path).await.into_diagnostic()?;
     let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
-    log::info!("Wörterbuch successfully restored form persistence.");
+    info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }
 
 async fn try_load_grave_goods_last_will(path: &Path) -> Result<GraveGoodsLastWill> {
     let json = fs::read_to_string(path).await.into_diagnostic()?;
     let grave_goods_last_will = serde_json::from_str(&json).into_diagnostic()?;
-    log::info!("Grave goods and last will successfully restored form persistence.");
+    info!("Grave goods and last will successfully restored form persistence.");
     Ok(grave_goods_last_will)
 }
 
@@ -287,20 +288,20 @@ mod legacy {
         let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(&config);
 
         if !json_path.exists() && !json_temp_path.exists() {
-            log::info!("No persistence file found, starting empty instance.");
+            info!("No persistence file found, starting empty instance.");
             return Ok(Worterbuch::with_config(config));
         }
 
         match try_load(&json_path, &sha_path, &config).await {
             Ok(worterbuch) => {
-                log::info!("Wörterbuch successfully restored form persistence.");
+                info!("Wörterbuch successfully restored form persistence.");
                 Ok(worterbuch)
             }
             Err(e) => {
-                log::warn!("Default persistence file could not be loaded: {e}");
-                log::info!("Restoring Wörterbuch form backup file …");
+                warn!("Default persistence file could not be loaded: {e}");
+                info!("Restoring Wörterbuch form backup file …");
                 let worterbuch = try_load(&json_temp_path, &sha_temp_path, &config).await?;
-                log::info!("Wörterbuch successfully restored form backup file.");
+                info!("Wörterbuch successfully restored form backup file.");
                 Ok(worterbuch)
             }
         }

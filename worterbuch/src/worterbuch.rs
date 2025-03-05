@@ -18,16 +18,16 @@
  */
 
 use crate::{
+    INTERNAL_CLIENT_ID,
     config::Config,
     store::{Node, Store, StoreStats},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
-    INTERNAL_CLIENT_ID,
 };
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_str, json, Value};
+use serde_json::{Value, from_str, json};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt::Display,
     net::SocketAddr,
     ops::Deref,
@@ -38,20 +38,22 @@ use tokio::{
     io::AsyncReadExt,
     select, spawn,
     sync::{
-        mpsc::{self, channel, Receiver},
+        mpsc::{self, Receiver, channel},
         oneshot,
     },
     time::sleep,
 };
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
+    CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
+    PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment, RequestPattern,
+    SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
+    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
+    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage,
+    StateEvent, TransactionId,
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments, topic, CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs,
-    LastWill, PState, PStateEvent, Path, Protocol, ProtocolVersion, RegularKeySegment,
-    RequestPattern, ServerMessage, StateEvent, TransactionId, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENT_NAME,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUBSCRIPTIONS,
+    parse_segments, topic,
 };
 
 pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
@@ -92,7 +94,7 @@ impl PStateAggregatorState {
             select! {
                 event = aggregate_rx.recv() => if let Some(event) = event {
                     if let Err(e) = self.aggregate(event, &send_trigger_tx, client_id).await {
-                        log::error!("Error aggregating PState event for client {client_id}: {e}");
+                        error!("Error aggregating PState event for client {client_id}: {e}");
                         break;
                     }
                 } else {
@@ -100,7 +102,7 @@ impl PStateAggregatorState {
                 },
                 tick = send_trigger_rx.recv() => if tick.is_some() {
                     if let Err(e) = self.send_current_state().await {
-                        log::error!("Error sending PState event to client {client_id}: {e}");
+                        error!("Error sending PState event to client {client_id}: {e}");
                         break;
                     }
                 } else {
@@ -200,9 +202,7 @@ impl PStateAggregatorState {
         spawn(async move {
             sleep(aggregate_duration).await;
             if let Err(e) = send_trigger.send(()).await {
-                log::error!(
-                    "Error triggering send of aggregated PState to client {client_id}: {e}"
-                );
+                error!("Error triggering send of aggregated PState to client {client_id}: {e}");
             }
         });
     }
@@ -321,13 +321,13 @@ impl Worterbuch {
 
         let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone())?;
 
-        log::trace!("Notifying ls subscribers …");
+        trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
-        log::trace!("Notifying ls subscribers done.");
-        log::trace!("Notifying subscribers …");
+        trace!("Notifying ls subscribers done.");
+        trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false)
             .await;
-        log::trace!("Notifying subscribers done.");
+        trace!("Notifying subscribers done.");
 
         Ok(())
     }
@@ -345,13 +345,13 @@ impl Worterbuch {
 
         let (changed, ls_subscribers) = self.store.insert_cas(&path, value.clone(), version)?;
 
-        log::trace!("Notifying ls subscribers …");
+        trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
-        log::trace!("Notifying ls subscribers done.");
-        log::trace!("Notifying subscribers …");
+        trace!("Notifying ls subscribers done.");
+        trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false)
             .await;
-        log::trace!("Notifying subscribers done.");
+        trace!("Notifying subscribers done.");
 
         Ok(())
     }
@@ -429,7 +429,7 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
-        log::debug!("Total subscriptions: {}", self.subscriptions.len());
+        debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
             && key != SYSTEM_TOPIC_ROOT
@@ -443,7 +443,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
 
             let subs_key = topic!(
@@ -460,7 +460,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
 
             let subs = self.ls(&Some(subs_key))?.len();
@@ -506,7 +506,7 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
-        log::debug!("Total subscriptions: {}", self.subscriptions.len());
+        debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
             && pattern != "#"
@@ -521,7 +521,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
             let subs_key = topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -537,10 +537,10 @@ impl Worterbuch {
                 )
                 .await
             {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
             if let Err(e) = self.update_subscription_count(client_id, &subs_key).await {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
         }
 
@@ -585,7 +585,7 @@ impl Worterbuch {
             .expect("rx is neither closed nor dropped");
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.ls_subscriptions.insert(subscription_id, path);
-        log::debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
+        debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
         Ok((rx, subscription))
     }
 
@@ -616,11 +616,11 @@ impl Worterbuch {
     }
 
     pub async fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
-        log::debug!("Parsing store data …");
+        debug!("Parsing store data …");
         let store: Store = from_str(json).map_err(|e| {
             WorterbuchError::SerDeError(e, "Error parsing JSON during import".to_owned())
         })?;
-        log::debug!("Done. Merging nodes …");
+        debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store);
 
         for (key, val) in &imported_values {
@@ -636,7 +636,7 @@ impl Worterbuch {
     }
 
     // pub async fn export_to_file(&mut self, file: &mut File) -> WorterbuchResult<()> {
-    //     log::debug!("Exporting to {file:?} …");
+    //     debug!("Exporting to {file:?} …");
 
     //     let (tx, rx) = oneshot::channel();
     //     self.export(tx);
@@ -646,12 +646,12 @@ impl Worterbuch {
     //     file.write_all(json_bytes)
     //         .await
     //         .context(|| format!("Error writing to file {file:?}"))?;
-    //     log::debug!("Done.");
+    //     debug!("Done.");
     //     Ok(())
     // }
 
     pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {
-        log::info!("Importing from {path} …");
+        info!("Importing from {path} …");
         let mut file = File::open(path)
             .await
             .map_err(|e| WorterbuchError::IoError(e, format!("Error opening file {path:?}")))?;
@@ -661,7 +661,7 @@ impl Worterbuch {
             .map_err(|e| WorterbuchError::IoError(e, format!("Error reading file {path:?}")))?;
         let json = String::from_utf8_lossy(&contents).to_string();
         self.import(&json).await?;
-        log::info!("Done.");
+        info!("Done.");
         Ok(())
     }
 
@@ -705,11 +705,11 @@ impl Worterbuch {
                 {
                     match e {
                         WorterbuchError::NoSuchValue(_) => (/* will happen on disconnect */),
-                        _ => log::warn!("Error in subscription monitoring: {e}"),
+                        _ => warn!("Error in subscription monitoring: {e}"),
                     }
                 }
             }
-            log::debug!("Remaining subscriptions: {}", self.subscriptions.len());
+            debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
             if self.config.extended_monitoring {
                 if let Err(e) = self
@@ -720,7 +720,7 @@ impl Worterbuch {
                     )
                     .await
                 {
-                    log::warn!("Error in subscription monitoring: {e}");
+                    warn!("Error in subscription monitoring: {e}");
                 }
             }
             if self.subscribers.unsubscribe(&path, subscription) {
@@ -744,7 +744,7 @@ impl Worterbuch {
 
     fn do_unsubscribe_ls(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
         if let Some(path) = self.ls_subscriptions.remove(subscription) {
-            log::debug!(
+            debug!(
                 "Remaining ls subscriptions: {}",
                 self.ls_subscriptions.len()
             );
@@ -774,7 +774,7 @@ impl Worterbuch {
             .collect();
 
         let len = filtered_subscribers.len();
-        log::trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
+        trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
         for subscriber in filtered_subscribers {
             if subscriber.is_pstate_subscriber() {
                 let kvps = vec![(key.clone(), value.clone()).into()];
@@ -785,7 +785,7 @@ impl Worterbuch {
                         .send_pstate(PStateEvent::KeyValuePairs(kvps))
                         .await
                 } {
-                    log::debug!("Error calling subscriber: {e}");
+                    debug!("Error calling subscriber: {e}");
                     self.subscribers.remove_subscriber(subscriber);
                 }
             } else {
@@ -795,12 +795,12 @@ impl Worterbuch {
                 } else {
                     subscriber.send_state(StateEvent::Value(value)).await
                 } {
-                    log::debug!("Error calling subscriber: {e}");
+                    debug!("Error calling subscriber: {e}");
                     self.subscribers.remove_subscriber(subscriber);
                 }
             }
         }
-        log::trace!("Calling {} subscribers: {} = {:?} done.", len, key, value);
+        trace!("Calling {} subscribers: {} = {:?} done.", len, key, value);
     }
 
     async fn notify_ls_subscribers(
@@ -808,16 +808,16 @@ impl Worterbuch {
         ls_subscribers: Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) {
         let len = ls_subscribers.len();
-        log::trace!("Calling {} ls subscribers …", len);
+        trace!("Calling {} ls subscribers …", len);
         for (subscribers, new_children) in ls_subscribers {
             for subscriber in subscribers {
                 if let Err(e) = subscriber.send(new_children.clone()).await {
-                    log::debug!("Error calling subscriber: {e}");
+                    debug!("Error calling subscriber: {e}");
                     self.store.remove_ls_subscriber(subscriber);
                 }
             }
         }
-        log::trace!("Calling {} ls subscribers done.", len);
+        trace!("Calling {} ls subscribers done.", len);
     }
 
     pub async fn delete(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
@@ -946,14 +946,14 @@ impl Worterbuch {
             )
             .await
         {
-            log::error!("Error updating client count: {e}");
+            error!("Error updating client count: {e}");
         }
         if let Err(e) = self.set_client_protocol(&client_id, protocol).await {
-            log::error!("Error updating client protocol: {e}");
+            error!("Error updating client protocol: {e}");
         };
 
         if let Err(e) = self.set_client_address(&client_id, remote_addr).await {
-            log::error!("Error updating client address: {e}");
+            error!("Error updating client address: {e}");
         }
     }
 
@@ -1027,7 +1027,7 @@ impl Worterbuch {
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         if let Some(spubs) = self.spub_keys.remove(&client_id) {
-            log::info!(
+            info!(
                 "Dropping {} pub stream(s) of client {}.",
                 spubs.len(),
                 client_id
@@ -1039,9 +1039,9 @@ impl Worterbuch {
 
         let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         if self.config.extended_monitoring {
-            log::debug!("Deleting {pattern}");
+            debug!("Deleting {pattern}");
             if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
         }
         self.clients.remove(&client_id);
@@ -1054,7 +1054,7 @@ impl Worterbuch {
             )
             .await
         {
-            log::error!("Error updating client count: {e}");
+            error!("Error updating client count: {e}");
         }
 
         let subscription_keys: Vec<SubscriptionId> = self
@@ -1063,7 +1063,7 @@ impl Worterbuch {
             .filter(|k| k.client_id == client_id)
             .map(ToOwned::to_owned)
             .collect();
-        log::info!(
+        info!(
             "Removing {} subscription(s) of client {client_id} ({}).",
             subscription_keys.len(),
             remote_addr
@@ -1072,12 +1072,12 @@ impl Worterbuch {
         );
         for subscription in subscription_keys {
             if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
-                log::error!("Inconsistent subscription state: {e}");
+                error!("Inconsistent subscription state: {e}");
             }
         }
 
         if let Some(grave_goods) = grave_goods {
-            log::info!(
+            info!(
                 "Burying grave goods of client {client_id} ({}).",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1085,7 +1085,7 @@ impl Worterbuch {
             );
 
             for grave_good in grave_goods {
-                log::debug!(
+                debug!(
                     "Deleting grave good key of client {client_id} ({}): {} ",
                     remote_addr
                         .map(|it| it.to_string())
@@ -1093,11 +1093,11 @@ impl Worterbuch {
                     grave_good
                 );
                 if let Err(e) = self.pdelete(grave_good, client_id).await {
-                    log::error!("Error burying grave goods for client {client_id}: {e}");
+                    error!("Error burying grave goods for client {client_id}: {e}");
                 }
             }
         } else {
-            log::info!(
+            info!(
                 "Client {client_id} ({}) has no grave goods.",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1106,7 +1106,7 @@ impl Worterbuch {
         }
 
         if let Some(last_wills) = last_wills {
-            log::info!(
+            info!(
                 "Publishing last will of client {client_id} ({}).",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1114,7 +1114,7 @@ impl Worterbuch {
             );
 
             for last_will in last_wills {
-                log::debug!(
+                debug!(
                     "Setting last will of client {client_id} ({}): {} = {}",
                     remote_addr
                         .map(|it| it.to_string())
@@ -1123,11 +1123,11 @@ impl Worterbuch {
                     last_will.value
                 );
                 if let Err(e) = self.set(last_will.key, last_will.value, client_id).await {
-                    log::error!("Error setting last will of client {client_id}: {e}");
+                    error!("Error setting last will of client {client_id}: {e}");
                 }
             }
         } else {
-            log::info!(
+            info!(
                 "Client {client_id} ({}) has no last will.",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1144,7 +1144,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                log::warn!("Error in subscription monitoring: {e}");
+                warn!("Error in subscription monitoring: {e}");
             }
         }
 
@@ -1299,7 +1299,7 @@ mod test {
 
     #[tokio::test]
     async fn export_removes_system_keys() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let mut wb = Worterbuch::with_config(Config::new().await.unwrap());
         wb.set("hello/world".to_owned(), json!("test"), INTERNAL_CLIENT_ID)
             .await

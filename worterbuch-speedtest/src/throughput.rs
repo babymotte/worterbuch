@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::web_ui::Settings;
 use miette::{Context, IntoDiagnostic};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -25,9 +26,8 @@ use std::{
 };
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, warn};
 use worterbuch_client::topic;
-
-use crate::web_ui::Settings;
 
 #[derive(Debug)]
 struct Status {
@@ -156,11 +156,9 @@ impl Stats {
     fn log_stats(&self) {
         let summary = self.summarize();
 
-        log::debug!(
+        debug!(
             "Send rate: {} msg/s, receive rate: {} msg/s, lag: {} msgs",
-            summary.send_rate,
-            summary.receive_rate,
-            summary.lag
+            summary.send_rate, summary.receive_rate, summary.lag
         )
     }
 }
@@ -219,24 +217,24 @@ pub async fn start_throughput_test(
                             let (agent_tx, agent_rx) = mpsc::channel(1);
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
-                            log::debug!("Spawning agent {i}");
+                            debug!("Spawning agent {i}");
                             subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
                                     conn = conn_rx.recv() => {
                                         if conn.is_none() {
-                                            log::error!("Connection result channel closed.");
+                                            error!("Connection result channel closed.");
                                             break 'outer;
                                         }
                                         break 'inner;
                                     },
                                     _ = status_rx.recv() => {
-                                        log::debug!("Dropping status update ...");
+                                        debug!("Dropping status update ...");
                                     },
                                 }
                             }
-                            log::debug!("Agent {i} spawned.");
+                            debug!("Agent {i} spawned.");
                             ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
                         }
 
@@ -268,24 +266,24 @@ pub async fn start_throughput_test(
                             let (agent_tx, agent_rx) = mpsc::channel(1);
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
-                            log::debug!("Spawning agent {i}");
+                            debug!("Spawning agent {i}");
                             subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
                                     conn = conn_rx.recv() => {
                                         if conn.is_none() {
-                                            log::error!("Connection result channel closed.");
+                                            error!("Connection result channel closed.");
                                             break 'outer;
                                         }
                                         break 'inner;
                                     },
                                     _ = status_rx.recv() => {
-                                        log::debug!("Dropping status update ...");
+                                        debug!("Dropping status update ...");
                                     },
                                 }
                             }
-                            log::debug!("Agent {i} spawned.");
+                            debug!("Agent {i} spawned.");
                             ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
                         }
 
@@ -395,13 +393,13 @@ async fn client(
                     }
                 }
             } else {
-                log::warn!("Agent API channel closed.");
+                warn!("Agent API channel closed.");
                 break;
             },
             recv = rx.recv() => if let Some(offset) = recv {
                 if let Some(offset) = offset { received_offset = offset; }
             } else {
-                log::warn!("Worterbuch subscription channel closed.");
+                warn!("Worterbuch subscription channel closed.");
                 break;
             },
             _ = status_timer.tick() => {
@@ -413,7 +411,7 @@ async fn client(
                     .context("Failed to set value on worterbuch.")?;
             },
             _ = subsys.on_shutdown_requested() => {
-                log::warn!("Shutdown requested.");
+                warn!("Shutdown requested.");
                 break;
             },
         }

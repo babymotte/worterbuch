@@ -19,18 +19,19 @@
 
 pub mod protocol;
 
-use crate::{subscribers::SubscriptionId, Config, INTERNAL_CLIENT_ID};
+use crate::{Config, INTERNAL_CLIENT_ID, subscribers::SubscriptionId};
 use serde::Serialize;
 use std::{net::SocketAddr, time::Duration};
 use tokio::sync::{
     mpsc::{self, Receiver},
     oneshot,
 };
+use tracing::trace;
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchResult, CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
-    MetaData, PStateEvent, Protocol, RegularKeySegment, RequestPattern, StateEvent, TransactionId,
-    UniqueFlag, Value,
+    CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, MetaData, PStateEvent,
+    Protocol, RegularKeySegment, RequestPattern, StateEvent, TransactionId, UniqueFlag, Value,
+    error::WorterbuchResult,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,22 +148,22 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
-            log::trace!("Sending set request to core system …");
+            trace!("Sending set request to core system …");
         }
         let res = self
             .tx
             .send(WbFunction::Set(key, value, client_id, tx))
             .await;
         if trace {
-            log::trace!("Sending set request to core system done.");
+            trace!("Sending set request to core system done.");
         }
         res?;
         if trace {
-            log::trace!("Waiting for response to set request …");
+            trace!("Waiting for response to set request …");
         }
         let res = rx.await;
         if trace {
-            log::trace!("Waiting for response to set request done.");
+            trace!("Waiting for response to set request done.");
         }
         res?
     }
@@ -177,22 +178,22 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
-            log::trace!("Sending set request to core system …");
+            trace!("Sending set request to core system …");
         }
         let res = self
             .tx
             .send(WbFunction::CSet(key, value, version, client_id, tx))
             .await;
         if trace {
-            log::trace!("Sending set request to core system done.");
+            trace!("Sending set request to core system done.");
         }
         res?;
         if trace {
-            log::trace!("Waiting for response to cset request …");
+            trace!("Waiting for response to cset request …");
         }
         let res = rx.await;
         if trace {
-            log::trace!("Waiting for response to cset request done.");
+            trace!("Waiting for response to cset request done.");
         }
         res?
     }
@@ -206,22 +207,22 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
-            log::trace!("Sending set request to core system …");
+            trace!("Sending set request to core system …");
         }
         let res = self
             .tx
             .send(WbFunction::SPubInit(transaction_id, key, client_id, tx))
             .await;
         if trace {
-            log::trace!("Sending set request to core system done.");
+            trace!("Sending set request to core system done.");
         }
         res?;
         if trace {
-            log::trace!("Waiting for response to set request …");
+            trace!("Waiting for response to set request …");
         }
         let res = rx.await;
         if trace {
-            log::trace!("Waiting for response to set request done.");
+            trace!("Waiting for response to set request done.");
         }
         res?
     }
@@ -235,22 +236,22 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
-            log::trace!("Sending set request to core system …");
+            trace!("Sending set request to core system …");
         }
         let res = self
             .tx
             .send(WbFunction::SPub(transaction_id, value, client_id, tx))
             .await;
         if trace {
-            log::trace!("Sending set request to core system done.");
+            trace!("Sending set request to core system done.");
         }
         res?;
         if trace {
-            log::trace!("Waiting for response to set request …");
+            trace!("Waiting for response to set request …");
         }
         let res = rx.await;
         if trace {
-            log::trace!("Waiting for response to set request done.");
+            trace!("Waiting for response to set request done.");
         }
         res?
     }

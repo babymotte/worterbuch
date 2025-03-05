@@ -23,7 +23,7 @@ use std::io;
 use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use tracing_subscriber::EnvFilter;
-use worterbuch::{run_worterbuch, Config};
+use worterbuch::{Config, run_worterbuch};
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 #[global_allocator]
@@ -31,10 +31,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main()]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-    if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "info");
-    }
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())

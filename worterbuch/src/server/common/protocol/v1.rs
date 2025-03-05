@@ -1,8 +1,9 @@
 use super::v0::V0;
 use crate::auth::JwtClaims;
+use tracing::trace;
 use worterbuch_common::{
-    error::{Context, WorterbuchResult},
     Ack, CSet, CState, CStateEvent, ClientMessage as CM, Get, Privilege, ServerMessage,
+    error::{Context, WorterbuchResult},
 };
 
 #[derive(Clone)]
@@ -27,9 +28,9 @@ impl V1 {
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Getting CAS value for client {} …", self.v0.client_id);
+                    trace!("Getting CAS value for client {} …", self.v0.client_id);
                     self.cget(msg).await?;
-                    log::trace!("Getting CAS value for client {} done.", self.v0.client_id);
+                    trace!("Getting CAS value for client {} done.", self.v0.client_id);
                 }
             }
             CM::CSet(msg) => {
@@ -38,9 +39,9 @@ impl V1 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Setting cas value for client {} …", self.v0.client_id);
+                    trace!("Setting cas value for client {} …", self.v0.client_id);
                     self.cset(msg).await?;
-                    log::trace!("Setting cas value for client {} done.", self.v0.client_id);
+                    trace!("Setting cas value for client {} done.", self.v0.client_id);
                 }
             }
             msg => {
@@ -93,9 +94,9 @@ impl V1 {
             transaction_id: msg.transaction_id,
         };
 
-        log::trace!("Value set, queuing Ack …");
+        trace!("Value set, queuing Ack …");
         let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
-        log::trace!("Value set, queuing Ack done.");
+        trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",

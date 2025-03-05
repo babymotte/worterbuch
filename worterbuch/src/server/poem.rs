@@ -21,14 +21,14 @@ mod auth;
 mod websocket;
 
 use crate::{
+    SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
-    SUPPORTED_PROTOCOL_VERSIONS,
 };
 use miette::IntoDiagnostic;
 use poem::{
-    delete,
+    Addr, EndpointExt, IntoResponse, Request, Response, Result, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
     http::StatusCode,
@@ -36,11 +36,10 @@ use poem::{
     middleware::AddData,
     post,
     web::{
+        Data, Json, Path, Query, RemoteAddr,
         sse::{Event, SSE},
         websocket::{WebSocket, WebSocketStream},
-        Data, Json, Path, Query, RemoteAddr,
     },
-    Addr, EndpointExt, IntoResponse, Request, Response, Result, Route,
 };
 use serde_json::Value;
 use std::{
@@ -51,11 +50,12 @@ use std::{
 };
 use tokio::{select, spawn, sync::mpsc};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
-    error::WorterbuchError, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo,
-    StateEvent,
+    Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
+    error::WorterbuchError,
 };
 
 fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
@@ -102,7 +102,7 @@ fn ws(
     Data(ws_tx): Data<&mpsc::Sender<(WebSocketStream, SocketAddr)>>,
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<impl IntoResponse> {
-    log::info!("Client connected");
+    info!("Client connected");
     let remote = to_socket_addr(addr)?;
 
     let ws_tx = ws_tx.clone();
@@ -340,19 +340,19 @@ async fn subscribe(
                                     match serde_json::to_string(&value) {
                                         Ok(json) => {
                                             if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                                log::error!("Error forwarding state event: {e}");
+                                                error!("Error forwarding state event: {e}");
                                                 break 'recv_loop;
                                             }
                                         }
                                         Err(e) => {
-                                            log::error!("Error serializiing state event: {e}");
+                                            error!("Error serializiing state event: {e}");
                                             break 'recv_loop;
                                         }
                                     }
                                 },
                                 StateEvent::Deleted(_) => {
                                     if let Err(e) = sse_tx.send(Event::message("null")).await {
-                                        log::error!("Error forwarding state event: {e}");
+                                        error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
                                 },
@@ -363,10 +363,10 @@ async fn subscribe(
                     }
                 }
                 if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
-                    log::error!("Error stopping subscription: {e}");
+                    error!("Error stopping subscription: {e}");
                 }
                 if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    log::error!("Error disconnecting client: {e}");
+                    error!("Error disconnecting client: {e}");
                 }
             });
             Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -417,12 +417,12 @@ async fn psubscribe(
                             match serde_json::to_string(&pstate) {
                                 Ok(json) => {
                                     if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        log::error!("Error forwarding state event: {e}");
+                                        error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
                                 }
                                 Err(e) => {
-                                    log::error!("Error serializiing state event: {e}");
+                                    error!("Error serializiing state event: {e}");
                                     break 'recv_loop;
                                 }
                             }
@@ -432,10 +432,10 @@ async fn psubscribe(
                     }
                 }
                 if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
-                    log::error!("Error stopping subscription: {e}");
+                    error!("Error stopping subscription: {e}");
                 }
                 if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    log::error!("Error disconnecting client: {e}");
+                    error!("Error disconnecting client: {e}");
                 }
             });
             Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -473,12 +473,12 @@ async fn subscribels_root(
                             match serde_json::to_string(&children) {
                                 Ok(json) => {
                                     if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        log::error!("Error forwarding state event: {e}");
+                                        error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
                                 }
                                 Err(e) => {
-                                    log::error!("Error serializiing state event: {e}");
+                                    error!("Error serializiing state event: {e}");
                                     break 'recv_loop;
                                 }
                             }
@@ -488,10 +488,10 @@ async fn subscribels_root(
                     }
                 }
                 if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
-                    log::error!("Error stopping subscription: {e}");
+                    error!("Error stopping subscription: {e}");
                 }
                 if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    log::error!("Error disconnecting client: {e}");
+                    error!("Error disconnecting client: {e}");
                 }
             });
             Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -533,12 +533,12 @@ async fn subscribels(
                             match serde_json::to_string(&children) {
                                 Ok(json) => {
                                     if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        log::error!("Error forwarding state event: {e}");
+                                        error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
                                 }
                                 Err(e) => {
-                                    log::error!("Error serializiing state event: {e}");
+                                    error!("Error serializiing state event: {e}");
                                     break 'recv_loop;
                                 }
                             }
@@ -548,10 +548,10 @@ async fn subscribels(
                     }
                 }
                 if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
-                    log::error!("Error stopping subscription: {e}");
+                    error!("Error stopping subscription: {e}");
                 }
                 if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    log::error!("Error disconnecting client: {e}");
+                    error!("Error disconnecting client: {e}");
                 }
             });
             Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -586,14 +586,14 @@ pub async fn start(
         wsserver = Some(subsys.start(SubsystemBuilder::new("wsserver", |s| {
             run_ws_server(s, ws_stream_rx, wb)
         })));
-        log::info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
+        info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
         app = app.at("/ws", get(ws.with(AddData::new(ws_stream_tx))));
     }
 
     let config = worterbuch.config().await?;
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
-    log::info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
+    info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
     app = app
         .at(
             format!("{rest_root}/get/*"),
@@ -675,11 +675,11 @@ pub async fn start(
                 .with(AddData::new(worterbuch.clone()))),
         );
 
-    log::info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
+    info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
     app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
 
     if let Some(web_root_path) = config.web_root_path {
-        log::info!(
+        info!(
             "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"
         );
 
@@ -704,11 +704,11 @@ pub async fn start(
     if let Some(wsserver) = wsserver {
         wsserver.initiate_shutdown();
         if let Err(e) = wsserver.join().await {
-            log::error!("Error waiting for ws server to shut down: {e}");
+            error!("Error waiting for ws server to shut down: {e}");
         }
     }
 
-    log::debug!("webserver subsystem completed.");
+    debug!("webserver subsystem completed.");
 
     Ok(())
 }
@@ -730,23 +730,23 @@ async fn run_ws_server(
                 while let Ok(id) = conn_closed_rx.try_recv() {
                     clients.remove(&id);
                 }
-                log::debug!("{} WS connection(s) open.", clients.len());
+                debug!("{} WS connection(s) open.", clients.len());
                 waiting_for_free_connections = false;
             } else {
                 break;
             },
             con = listener.recv(), if !waiting_for_free_connections => {
-                log::debug!("Trying to accept new client connection.");
+                debug!("Trying to accept new client connection.");
                 if let Some((socket, remote_addr)) = con {
                     let id = Uuid::new_v4();
-                    log::debug!("{} WS connection(s) open.",clients.len());
+                    debug!("{} WS connection(s) open.",clients.len());
                     let worterbuch = worterbuch.clone();
                     let conn_closed_tx = conn_closed_tx.clone();
 
                     let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
                         select! {
                             s = serve(id, remote_addr, worterbuch, socket) => if let Err(e) = s {
-                                log::error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
+                                error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                             },
                             _ = s.on_shutdown_requested() => (),
                         }
@@ -757,7 +757,7 @@ async fn run_ws_server(
                 } else {
                     break;
                 }
-                log::debug!("Ready to accept new connections.");
+                debug!("Ready to accept new connections.");
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -765,16 +765,16 @@ async fn run_ws_server(
 
     for (cid, subsys) in clients {
         subsys.initiate_shutdown();
-        log::debug!("Waiting for connection to client {cid} to close …");
+        debug!("Waiting for connection to client {cid} to close …");
         if let Err(e) = subsys.join().await {
-            log::error!("Error waiting for client {cid} to disconnect: {e}");
+            error!("Error waiting for client {cid} to disconnect: {e}");
         }
     }
-    log::debug!("All clients disconnected.");
+    debug!("All clients disconnected.");
 
     drop(listener);
 
-    log::debug!("wsserver subsystem completed.");
+    debug!("wsserver subsystem completed.");
 
     Ok(())
 }
@@ -798,7 +798,7 @@ async fn connected(wb: &CloneableWbApi, client_id: Uuid, remote_addr: SocketAddr
         .connected(client_id, Some(remote_addr), Protocol::HTTP)
         .await
     {
-        log::error!("Error adding client {client_id} ({remote_addr}): {e}");
+        error!("Error adding client {client_id} ({remote_addr}): {e}");
         to_error_response(e)
     } else {
         Ok(())

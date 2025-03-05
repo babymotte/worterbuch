@@ -17,8 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use anyhow::Result;
 use clap::Parser;
+use miette::{IntoDiagnostic, Result};
 use serde_json::Value;
 use std::{
     fs,
@@ -45,7 +45,7 @@ struct Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
@@ -56,12 +56,12 @@ async fn main() -> Result<()> {
     config.auth_token = args.auth.or(config.auth_token);
 
     let json = if let Some(file) = args.file {
-        fs::read_to_string(file)?
+        fs::read_to_string(file).into_diagnostic()?
     } else {
         let mut json = String::new();
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
-        handle.read_to_string(&mut json)?;
+        handle.read_to_string(&mut json).into_diagnostic()?;
         json
     };
 
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
 
     if args.json {
         for kvp in kvps {
-            let json = serde_json::to_string(&kvp)?;
+            let json = serde_json::to_string(&kvp).into_diagnostic()?;
             println!("{json}");
         }
     } else {
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
 }
 
 fn convert(json: &str, prefix: Option<String>) -> Result<Vec<KeyValuePair>> {
-    let parsed: Value = serde_json::from_str(json)?;
+    let parsed: Value = serde_json::from_str(json).into_diagnostic()?;
 
     let mut kvps = Vec::new();
 

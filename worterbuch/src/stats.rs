@@ -17,18 +17,19 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{server::common::CloneableWbApi, INTERNAL_CLIENT_ID};
+use crate::{INTERNAL_CLIENT_ID, server::common::CloneableWbApi};
 use serde_json::json;
 use std::time::Duration;
 use tokio::{
     select,
-    time::{interval, Instant},
+    time::{Instant, interval},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
-    error::WorterbuchResult, topic, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION,
+    SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION, error::WorterbuchResult, topic,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -81,7 +82,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
         }
     }
 
-    log::debug!("stats subsystem completed.");
+    debug!("stats subsystem completed.");
 
     Ok(())
 }

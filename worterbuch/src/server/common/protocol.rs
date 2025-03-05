@@ -1,12 +1,13 @@
 use super::CloneableWbApi;
-use crate::{auth::JwtClaims, Config};
+use crate::{Config, auth::JwtClaims};
 use tokio::sync::mpsc;
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    error::{Context, WorterbuchError, WorterbuchResult},
     Ack, ClientMessage, ProtocolVersionSegment, ServerMessage,
+    error::{Context, WorterbuchError, WorterbuchResult},
 };
 
 mod v0;
@@ -62,16 +63,16 @@ impl Proto {
         msg: &str,
         authorized: &mut Option<JwtClaims>,
     ) -> WorterbuchResult<bool> {
-        log::debug!("Received message from client {}: {}", self.client_id(), msg);
+        debug!("Received message from client {}: {}", self.client_id(), msg);
         match serde_json::from_str(msg) {
             Ok(Some(msg)) => {
                 if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
-                    log::info!("Switching protocol to v{}", protocol_switch_request.version);
+                    info!("Switching protocol to v{}", protocol_switch_request.version);
                     if self.switch_protocol(protocol_switch_request.version) {
                         let response = Ack { transaction_id: 0 };
-                        log::trace!("Protocol switched, queuing Ack …");
+                        trace!("Protocol switched, queuing Ack …");
                         let res = self.tx().send(ServerMessage::Ack(response)).await;
-                        log::trace!("Protocol switched, queuing Ack done.");
+                        trace!("Protocol switched, queuing Ack done.");
                         res.context(|| {
                             "Error sending ACK message for transaction ID 0".to_owned()
                         })?;
@@ -99,7 +100,7 @@ impl Proto {
                 Ok(false)
             }
             Err(e) => {
-                log::error!("Error decoding message: {e}");
+                error!("Error decoding message: {e}");
                 Ok(false)
             }
         }

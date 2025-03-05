@@ -24,10 +24,11 @@ use tokio::{
     spawn,
     sync::{mpsc, oneshot},
 };
+use tracing::error;
 use worterbuch_common::{
+    ClientMessage, ServerMessage,
     error::ConnectionResult,
     tcp::{self, write_line_and_flush},
-    ClientMessage, ServerMessage,
 };
 
 const SERVER_ID: &str = "worterbuch server";
@@ -85,7 +86,7 @@ async fn forward_tcp_messages(
 ) {
     while let Some(msg) = send_rx.recv().await {
         if let Err(e) = write_line_and_flush(msg, &mut tx, timeout, SERVER_ID).await {
-            log::error!("Error sending TCP message: {e}");
+            error!("Error sending TCP message: {e}");
             break;
         }
     }

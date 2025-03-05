@@ -25,8 +25,9 @@ use tokio::{
     spawn,
     sync::{mpsc, oneshot},
 };
+use tracing::{debug, error};
 use worterbuch_common::{
-    error::ConnectionResult, tcp::write_line_and_flush, ClientMessage, ServerMessage,
+    ClientMessage, ServerMessage, error::ConnectionResult, tcp::write_line_and_flush,
 };
 
 const SERVER_ID: &str = "worterbuch server";
@@ -64,10 +65,10 @@ impl UnixClientSocket {
         match read {
             Ok(None) => Ok(None),
             Ok(Some(json)) => {
-                log::debug!("Received message: {json}");
+                debug!("Received message: {json}");
                 let sm = serde_json::from_str(&json);
                 if let Err(e) = &sm {
-                    log::error!("Error deserializing message '{json}': {e}")
+                    error!("Error deserializing message '{json}': {e}")
                 }
                 Ok(sm?)
             }
@@ -91,7 +92,7 @@ async fn forward_unix_messages(
 ) {
     while let Some(msg) = send_rx.recv().await {
         if let Err(e) = write_line_and_flush(msg, &mut tx, timeout, SERVER_ID).await {
-            log::error!("Error sending TCP message: {e}");
+            error!("Error sending TCP message: {e}");
             break;
         }
     }

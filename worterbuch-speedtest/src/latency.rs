@@ -25,8 +25,9 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{error, info};
 use worterbuch_client::{
-    benchmark::generate_dummy_data, connect_with_default_config, ServerMessage,
+    ServerMessage, benchmark::generate_dummy_data, connect_with_default_config,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,7 +108,7 @@ async fn run_latency_test(
     ui_tx: mpsc::Sender<UiApi>,
     mut stop_rx: oneshot::Receiver<()>,
 ) -> miette::Result<()> {
-    log::info!("Starting latency test.");
+    info!("Starting latency test.");
 
     let mut stop_txs = vec![];
     let mut handles = vec![];
@@ -136,7 +137,7 @@ async fn run_latency_test(
 
     let duration = start.elapsed();
 
-    log::info!(
+    info!(
         "Test stopped after {} s ({} msg/s)",
         duration.as_secs_f32(),
         counter as f32 / duration.as_secs_f32()
@@ -155,12 +156,12 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
     let values_per_key = settings.messages_per_key;
     let data = generate_dummy_data(n_ary_keys, key_length, values_per_key);
 
-    log::info!("Dummy data generated.");
+    info!("Dummy data generated.");
 
     thread::spawn(move || {
         for (key, value) in data {
             if let Err(e) = dummy_tx.blocking_send((key.join("/"), value)) {
-                log::error!("Error sending dummy data: {e}");
+                error!("Error sending dummy data: {e}");
                 break;
             }
         }
@@ -169,7 +170,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
     let (wb, mut on_disconnect) = match connect_with_default_config().await {
         Ok((wb, on_disconnect, _)) => (wb, on_disconnect),
         Err(e) => {
-            log::error!("Could not start worterbuch client: {e}");
+            error!("Could not start worterbuch client: {e}");
             return 0;
         }
     };
@@ -181,7 +182,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
     let mut wb_rx = match wb.all_messages().await.into_diagnostic() {
         Ok(it) => it,
         Err(e) => {
-            log::error!("Could not subscribe to all wb messages: {e}");
+            error!("Could not subscribe to all wb messages: {e}");
             return counter;
         }
     };
@@ -194,13 +195,13 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
                 match wb.set(key, &value).await.into_diagnostic()  {
                     Ok(t) => tid_sent = t,
                     Err(e) => {
-                        log::error!("Error setting value: {e}");
+                        error!("Error setting value: {e}");
                         return counter;
                     }
                 }
                 counter += 1;
             } else {
-                log::info!("All values set.");
+                info!("All values set.");
                 break;
             },
             msg = wb_rx.recv() => if let Some(msg) = msg {
@@ -215,7 +216,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
         }
     }
 
-    log::info!("Waiting for acks.");
+    info!("Waiting for acks.");
 
     while tid_recieved < tid_sent {
         if let Some(msg) = wb_rx.recv().await {

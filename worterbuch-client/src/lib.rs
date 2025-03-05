@@ -29,7 +29,7 @@ use crate::config::Config;
 use buffer::SendBuffer;
 use error::SubscriptionError;
 use futures_util::{FutureExt, SinkExt, StreamExt};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{self as json};
 use std::{
     collections::HashMap, future::Future, io, net::SocketAddr, ops::ControlFlow, time::Duration,
@@ -46,8 +46,9 @@ use tokio::{
 };
 use tokio_tungstenite::{
     connect_async_with_config,
-    tungstenite::{handshake::client::generate_key, http::Request, Message},
+    tungstenite::{Message, handshake::client::generate_key, http::Request},
 };
+use tracing::{debug, error, info, trace, warn};
 #[cfg(target_family = "unix")]
 use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
@@ -55,11 +56,10 @@ use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
 pub use worterbuch_common::{
-    self,
-    error::{ConnectionError, ConnectionResult},
-    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
+    self, Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
     KeyValuePairs, LastWill, LsState, PState, PStateEvent, ProtocolVersion, RegularKeySegment,
     ServerMessage as SM, Set, State, StateEvent, TransactionId,
+    error::{ConnectionError, ConnectionResult},
 };
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
@@ -232,9 +232,9 @@ impl Worterbuch {
     pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let transaction_id = rx.await?;
         Ok(transaction_id)
     }
@@ -247,9 +247,9 @@ impl Worterbuch {
     pub async fn spub_init(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPubInit(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let transaction_id = rx.await?;
         Ok(transaction_id)
     }
@@ -257,9 +257,9 @@ impl Worterbuch {
     pub async fn spub(&self, transaction_id: TransactionId, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPub(transaction_id, value, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         rx.await?;
         Ok(())
     }
@@ -267,9 +267,9 @@ impl Worterbuch {
     pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Publish(key, value, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let transaction_id = rx.await?;
         Ok(transaction_id)
     }
@@ -286,9 +286,9 @@ impl Worterbuch {
     pub async fn get_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::GetAsync(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let res = rx.await?;
         Ok(res)
     }
@@ -296,9 +296,9 @@ impl Worterbuch {
     pub async fn get_generic(&self, key: Key) -> ConnectionResult<(Option<Value>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Get(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let res = rx.await?;
         Ok(res)
     }
@@ -316,9 +316,9 @@ impl Worterbuch {
     pub async fn pget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGetAsync(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let tid = rx.await?;
         Ok(tid)
     }
@@ -326,9 +326,9 @@ impl Worterbuch {
     pub async fn pget_generic(&self, key: Key) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGet(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let (kvps, tid) = rx.await?;
         Ok((kvps, tid))
     }
@@ -345,9 +345,9 @@ impl Worterbuch {
     pub async fn delete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::DeleteAsync(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let tid = rx.await?;
         Ok(tid)
     }
@@ -358,9 +358,9 @@ impl Worterbuch {
     ) -> ConnectionResult<(Option<Value>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Delete(key, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         match rx.await? {
             (Some(value), tid) => Ok((Some(value), tid)),
             (None, tid) => Ok((None, tid)),
@@ -380,9 +380,9 @@ impl Worterbuch {
     pub async fn pdelete_async(&self, key: Key, quiet: bool) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDeleteAsync(key, quiet, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let tid = rx.await?;
         Ok(tid)
     }
@@ -394,9 +394,9 @@ impl Worterbuch {
     ) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDelete(key, quiet, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let (kvps, tid) = rx.await?;
         Ok((kvps, tid))
     }
@@ -414,9 +414,9 @@ impl Worterbuch {
     pub async fn ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::LsAsync(parent, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let tid = rx.await?;
         Ok(tid)
     }
@@ -427,9 +427,9 @@ impl Worterbuch {
     ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Ls(parent, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let children = rx.await?;
         Ok(children)
     }
@@ -440,9 +440,9 @@ impl Worterbuch {
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PLsAsync(parent, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let tid = rx.await?;
         Ok(tid)
     }
@@ -453,9 +453,9 @@ impl Worterbuch {
     ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PLs(parent, tx);
-        log::debug!("Queuing command {cmd:?}");
+        debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
-        log::debug!("Command queued.");
+        debug!("Command queued.");
         let children = rx.await?;
         Ok(children)
     }
@@ -634,7 +634,7 @@ async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
                     }
                 }
                 Err(e) => {
-                    log::error!("could not deserialize json value to requested type: {e}");
+                    error!("could not deserialize json value to requested type: {e}");
                     break;
                 }
             },
@@ -659,7 +659,7 @@ async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
                 }
             }
             Result::Err(e) => {
-                log::error!("could not deserialize json to requested type: {e}");
+                error!("could not deserialize json to requested type: {e}");
                 break;
             }
         }
@@ -736,14 +736,14 @@ pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDi
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let mut err = None;
     for addr in &config.servers {
-        log::info!("Trying to connect to server {addr} …");
+        info!("Trying to connect to server {addr} …");
         match try_connect(config.clone(), *addr).await {
             Ok(con) => {
-                log::info!("Successfully connected to server {addr}");
+                info!("Successfully connected to server {addr}");
                 return Ok(con);
             }
             Err(e) => {
-                log::warn!("Could not connect to server {addr}: {e}");
+                warn!("Could not connect to server {addr}: {e}");
                 err = Some(e);
             }
         }
@@ -777,7 +777,7 @@ pub async fn try_connect(
     #[cfg(not(target_family = "unix"))]
     let url = format!("{proto}://{host_addr}{path}");
 
-    log::debug!("Got server url from config: {url}");
+    debug!("Got server url from config: {url}");
 
     let (disco_tx, disco_rx) = oneshot::channel();
 
@@ -802,7 +802,7 @@ async fn connect_ws(
     on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
-    log::debug!("Connecting to server {url} over websocket …");
+    debug!("Connecting to server {url} over websocket …");
 
     let auth_token = config.auth_token.clone();
     let mut request = Request::builder()
@@ -816,33 +816,33 @@ async fn connect_ws(
     let request: Request<()> = request.body(())?;
 
     let (mut websocket, _) = connect_async_with_config(request, None, true).await?;
-    log::debug!("Connected to server.");
+    debug!("Connected to server.");
 
     let Welcome { client_id, info } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
             Ok(data) => match json::from_str::<SM>(data) {
                 Ok(SM::Welcome(welcome)) => {
-                    log::debug!("Welcome message received: {welcome:?}");
+                    debug!("Welcome message received: {welcome:?}");
                     welcome
                 }
                 Ok(msg) => {
                     return Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("server sent invalid welcome message: {msg:?}"),
-                    )))
+                    )));
                 }
                 Err(e) => {
                     return Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("error parsing welcome message '{data}': {e}"),
-                    )))
+                    )));
                 }
             },
             Err(e) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("invalid welcome message '{msg:?}': {e}"),
-                )))
+                )));
             }
         },
         Some(Err(e)) => return Err(e.into()),
@@ -850,7 +850,7 @@ async fn connect_ws(
             return Err(ConnectionError::IoError(io::Error::new(
                 io::ErrorKind::ConnectionAborted,
                 "connection closed before welcome message",
-            )))
+            )));
         }
     };
 
@@ -866,23 +866,23 @@ async fn connect_ws(
         ));
     };
 
-    log::debug!("Found compatible protocol version {proto_version}.");
+    debug!("Found compatible protocol version {proto_version}.");
 
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
     let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
-    log::debug!("Sending protocol switch message: {msg}");
+    debug!("Sending protocol switch message: {msg}");
     websocket.send(Message::Text(msg.into())).await?;
 
     match websocket.next().await {
         Some(msg) => match msg? {
             Message::Text(msg) => match serde_json::from_str(&msg) {
                 Ok(SM::Ack(_)) => {
-                    log::debug!("Protocol switched to v{}.", proto_version.major());
+                    debug!("Protocol switched to v{}.", proto_version.major());
                 }
                 Ok(SM::Err(e)) => {
-                    log::error!("Protocol switch failed: {e}");
+                    error!("Protocol switch failed: {e}");
                     return Err(ConnectionError::WorterbuchError(
                         WorterbuchError::ServerResponse(e),
                     ));
@@ -891,13 +891,13 @@ async fn connect_ws(
                     return Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("server sent invalid protocol switch response: {msg:?}"),
-                    )))
+                    )));
                 }
                 Err(e) => {
                     return Err(ConnectionError::IoError(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("error receiving protocol switch response: {e}"),
-                    )))
+                    )));
                 }
             },
             msg => {
@@ -908,7 +908,7 @@ async fn connect_ws(
             }
         },
         None => {
-            log::warn!("Server closed the connection");
+            warn!("Server closed the connection");
             return Err(ConnectionError::IoError(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "connection closed before welcome message",
@@ -920,14 +920,14 @@ async fn connect_ws(
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
             let msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
-            log::debug!("Sending authorization message: {msg}");
+            debug!("Sending authorization message: {msg}");
             websocket.send(Message::Text(msg.into())).await?;
 
             match websocket.next().await {
                 Some(Err(e)) => Err(e.into()),
                 Some(Ok(Message::Text(msg))) => match serde_json::from_str(&msg) {
                     Ok(SM::Authorized(_)) => {
-                        log::debug!("Authorization accepted.");
+                        debug!("Authorization accepted.");
                         connected(
                             ClientSocket::Ws(WsClientSocket::new(websocket)),
                             on_disconnect,
@@ -936,7 +936,7 @@ async fn connect_ws(
                         )
                     }
                     Ok(SM::Err(e)) => {
-                        log::error!("Authorization failed: {e}");
+                        error!("Authorization failed: {e}");
                         Err(ConnectionError::WorterbuchError(
                             WorterbuchError::ServerResponse(e),
                         ))
@@ -980,7 +980,7 @@ async fn connect_tcp(
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let timeout = config.connection_timeout;
-    log::debug!(
+    debug!(
         "Connecting to server tcp://{host_addr} (timeout: {} ms) …",
         timeout.as_millis()
     );
@@ -991,11 +991,11 @@ async fn connect_tcp(
             return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
         },
     }?;
-    log::debug!("Connected to tcp://{host_addr}.");
+    debug!("Connected to tcp://{host_addr}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
     let mut tcp_rx = BufReader::new(tcp_rx).lines();
 
-    log::debug!("Connected to server.");
+    debug!("Connected to server.");
 
     let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
@@ -1009,7 +1009,7 @@ async fn connect_tcp(
                 let msg = json::from_str::<SM>(&line);
                 match msg {
                     Ok(SM::Welcome(welcome)) => {
-                        log::debug!("Welcome message received: {welcome:?}");
+                        debug!("Welcome message received: {welcome:?}");
                         welcome
                     }
                     Ok(msg) => {
@@ -1045,14 +1045,14 @@ async fn connect_tcp(
         ));
     };
 
-    log::debug!("Found compatible protocol version {proto_version}.");
+    debug!("Found compatible protocol version {proto_version}.");
 
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
     let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
     msg.push('\n');
-    log::debug!("Sending protocol switch message: {msg}");
+    debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
 
     match tcp_rx.next_line().await {
@@ -1064,10 +1064,10 @@ async fn connect_tcp(
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
             Ok(SM::Ack(_)) => {
-                log::debug!("Protocol switched to v{}.", proto_version.major());
+                debug!("Protocol switched to v{}.", proto_version.major());
             }
             Ok(SM::Err(e)) => {
-                log::error!("Protocol switch failed: {e}");
+                error!("Protocol switch failed: {e}");
                 return Err(ConnectionError::WorterbuchError(
                     WorterbuchError::ServerResponse(e),
                 ));
@@ -1076,17 +1076,17 @@ async fn connect_tcp(
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid protocol switch response: {msg:?}"),
-                )))
+                )));
             }
             Err(e) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("error receiving protocol switch response: {e}"),
-                )))
+                )));
             }
         },
         Err(e) => {
-            log::warn!("Server closed the connection");
+            warn!("Server closed the connection");
             return Err(ConnectionError::IoError(e));
         }
     }
@@ -1096,7 +1096,7 @@ async fn connect_tcp(
             let handshake = AuthorizationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
             msg.push('\n');
-            log::debug!("Sending authorization message: {msg}");
+            debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.next_line().await {
@@ -1108,7 +1108,7 @@ async fn connect_tcp(
                     let msg = json::from_str::<SM>(&line);
                     match msg {
                         Ok(SM::Authorized(_)) => {
-                            log::debug!("Authorization accepted.");
+                            debug!("Authorization accepted.");
                             connected(
                                 ClientSocket::Tcp(
                                     TcpClientSocket::new(
@@ -1125,7 +1125,7 @@ async fn connect_tcp(
                             )
                         }
                         Ok(SM::Err(e)) => {
-                            log::error!("Authorization failed: {e}");
+                            error!("Authorization failed: {e}");
                             Err(ConnectionError::WorterbuchError(
                                 WorterbuchError::ServerResponse(e),
                             ))
@@ -1172,7 +1172,7 @@ async fn connect_unix(
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
     let timeout = config.connection_timeout;
-    log::debug!(
+    debug!(
         "Connecting to server socket {path} (timeout: {} ms) …",
         timeout.as_millis()
     );
@@ -1183,11 +1183,11 @@ async fn connect_unix(
             return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
         },
     }?;
-    log::debug!("Connected to {path}.");
+    debug!("Connected to {path}.");
     let (tcp_rx, mut tcp_tx) = stream.into_split();
     let mut tcp_rx = BufReader::new(tcp_rx).lines();
 
-    log::debug!("Connected to server.");
+    debug!("Connected to server.");
 
     let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
@@ -1201,7 +1201,7 @@ async fn connect_unix(
                 let msg = json::from_str::<SM>(&line);
                 match msg {
                     Ok(SM::Welcome(welcome)) => {
-                        log::debug!("Welcome message received: {welcome:?}");
+                        debug!("Welcome message received: {welcome:?}");
                         welcome
                     }
                     Ok(msg) => {
@@ -1237,14 +1237,14 @@ async fn connect_unix(
         ));
     };
 
-    log::debug!("Found compatible protocol version {proto_version}.");
+    debug!("Found compatible protocol version {proto_version}.");
 
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
     let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
     msg.push('\n');
-    log::debug!("Sending protocol switch message: {msg}");
+    debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
 
     match tcp_rx.next_line().await {
@@ -1256,10 +1256,10 @@ async fn connect_unix(
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
             Ok(SM::Ack(_)) => {
-                log::debug!("Protocol switched to v{}.", proto_version.major());
+                debug!("Protocol switched to v{}.", proto_version.major());
             }
             Ok(SM::Err(e)) => {
-                log::error!("Protocol switch failed: {e}");
+                error!("Protocol switch failed: {e}");
                 return Err(ConnectionError::WorterbuchError(
                     WorterbuchError::ServerResponse(e),
                 ));
@@ -1268,17 +1268,17 @@ async fn connect_unix(
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid protocol switch response: {msg:?}"),
-                )))
+                )));
             }
             Err(e) => {
                 return Err(ConnectionError::IoError(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("error receiving protocol switch response: {e}"),
-                )))
+                )));
             }
         },
         Err(e) => {
-            log::warn!("Server closed the connection");
+            warn!("Server closed the connection");
             return Err(ConnectionError::IoError(e));
         }
     }
@@ -1288,7 +1288,7 @@ async fn connect_unix(
             let handshake = AuthorizationRequest { auth_token };
             let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
             msg.push('\n');
-            log::debug!("Sending authorization message: {msg}");
+            debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.next_line().await {
@@ -1300,7 +1300,7 @@ async fn connect_unix(
                     let msg = json::from_str::<SM>(&line);
                     match msg {
                         Ok(SM::Authorized(_)) => {
-                            log::debug!("Authorization accepted.");
+                            debug!("Authorization accepted.");
                             connected(
                                 ClientSocket::Unix(
                                     UnixClientSocket::new(
@@ -1317,7 +1317,7 @@ async fn connect_unix(
                             )
                         }
                         Ok(SM::Err(e)) => {
-                            log::error!("Authorization failed: {e}");
+                            error!("Authorization failed: {e}");
                             Err(ConnectionError::WorterbuchError(
                                 WorterbuchError::ServerResponse(e),
                             ))
@@ -1368,9 +1368,9 @@ fn connected(
 
     spawn(async move {
         if let Err(e) = run(cmd_rx, client_socket, stop_rx, config).await {
-            log::error!("Connection closed with error: {e}");
+            error!("Connection closed with error: {e}");
         } else {
-            log::debug!("Connection closed.");
+            debug!("Connection closed.");
         }
         on_disconnect.send(()).ok();
     });
@@ -1390,10 +1390,10 @@ async fn run(
     let mut stop_tx = None;
 
     loop {
-        log::trace!("loop: wait for command / ws message / shutdown request");
+        trace!("loop: wait for command / ws message / shutdown request");
         select! {
             recv = stop_rx.recv() => {
-                log::debug!("Shutdown request received.");
+                debug!("Shutdown request received.");
                 stop_tx = recv;
                 break;
             },
@@ -1401,23 +1401,23 @@ async fn run(
                 match process_incoming_server_message(ws_msg, &mut callbacks).await {
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {
-                        log::error!("Error processing server message: {e}");
+                        error!("Error processing server message: {e}");
                         break;
                     },
-                    _ => log::trace!("websocket message processing done")
+                    _ => trace!("websocket message processing done")
                 }
             },
             cmd = cmd_rx.recv() => {
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         if let Err(e) = client_socket.send_msg(msg, config.use_backpressure).await {
-                            log::error!("Error sending message to server: {e}");
+                            error!("Error sending message to server: {e}");
                             break;
                         }
                     },
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {
-                        log::error!("Error processing command: {e}");
+                        error!("Error processing command: {e}");
                         break;
                     },
                 }
@@ -1439,7 +1439,7 @@ async fn process_incoming_command(
     transaction_ids: &mut TransactionIds,
 ) -> ConnectionResult<ControlFlow<(), Option<CM>>> {
     if let Some(command) = cmd {
-        log::debug!("Processing command: {command:?}");
+        debug!("Processing command: {command:?}");
         let transaction_id = transaction_ids.next();
         let cm = match command {
             Command::Set(key, value, callback) => {
@@ -1648,7 +1648,7 @@ async fn process_incoming_command(
         };
         Ok(ControlFlow::Continue(cm))
     } else {
-        log::debug!("No more commands");
+        debug!("No more commands");
         Ok(ControlFlow::Break(()))
     }
 }
@@ -1671,11 +1671,11 @@ async fn process_incoming_server_message(
             Ok(ControlFlow::Continue(()))
         }
         Ok(None) => {
-            log::warn!("Connection closed.");
+            warn!("Connection closed.");
             Ok(ControlFlow::Break(()))
         }
         Err(e) => {
-            log::error!("Error receiving message: {e}");
+            error!("Error receiving message: {e}");
             Ok(ControlFlow::Break(()))
         }
     }
@@ -1685,7 +1685,7 @@ fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
     callbacks.all.retain(|tx| match tx.send(msg.clone()) {
         Ok(_) => true,
         Err(e) => {
-            log::error!("Removing callback due to failure to deliver message to receiver: {e}");
+            error!("Removing callback due to failure to deliver message to receiver: {e}");
             false
         }
     });

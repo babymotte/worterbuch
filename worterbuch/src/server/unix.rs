@@ -18,26 +18,27 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{server::common::CloneableWbApi, stats::VERSION, SUPPORTED_PROTOCOL_VERSIONS};
+use crate::{SUPPORTED_PROTOCOL_VERSIONS, server::common::CloneableWbApi, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::{unix::SocketAddr, UnixListener, UnixStream},
+    net::{UnixListener, UnixStream, unix::SocketAddr},
     select, spawn,
     sync::mpsc,
     time::MissedTickBehavior,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use worterbuch_common::{tcp::write_line_and_flush, Protocol, ServerInfo, ServerMessage, Welcome};
+use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, tcp::write_line_and_flush};
 
 pub async fn start(
     worterbuch: CloneableWbApi,
     bind_addr: PathBuf,
     subsys: SubsystemHandle,
 ) -> Result<()> {
-    log::info!(
+    info!(
         "Serving Unix Socket endpoint at {}",
         bind_addr.to_string_lossy()
     );
@@ -56,24 +57,24 @@ pub async fn start(
                 while let Ok(id) = conn_closed_rx.try_recv() {
                     clients.remove(&id);
                 }
-                log::debug!("{} UNIX connection(s) open.", clients.len());
+                debug!("{} UNIX connection(s) open.", clients.len());
                 waiting_for_free_connections = false;
             } else {
                 break;
             },
             con = listener.accept(), if !waiting_for_free_connections => {
-                log::debug!("Trying to accept new client connection.");
+                debug!("Trying to accept new client connection.");
                 match con {
                     Ok((socket, remote_addr)) => {
                         let id = Uuid::new_v4();
-                        log::debug!("{} UNIX connection(s) open.", clients.len());
+                        debug!("{} UNIX connection(s) open.", clients.len());
                         let worterbuch = worterbuch.clone();
                         let conn_closed_tx = conn_closed_tx.clone();
 
                         let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
                             select! {
                                 s = serve(id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
-                                    log::error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
+                                    error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
                                 _ = s.on_shutdown_requested() => (),
                             }
@@ -83,12 +84,12 @@ pub async fn start(
                         clients.insert(id, client);
                     },
                     Err(e) => {
-                        log::error!("Error while trying to accept client connection: {e}");
-                        log::warn!("{} UNIX connections open, waiting for connections to close.", clients.len());
+                        error!("Error while trying to accept client connection: {e}");
+                        warn!("{} UNIX connections open, waiting for connections to close.", clients.len());
                         waiting_for_free_connections = true;
                     }
                 }
-                log::debug!("Ready to accept new connections.");
+                debug!("Ready to accept new connections.");
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -96,17 +97,17 @@ pub async fn start(
 
     for (cid, subsys) in clients {
         subsys.initiate_shutdown();
-        log::debug!("Waiting for connection to client {cid} to close …");
+        debug!("Waiting for connection to client {cid} to close …");
         if let Err(e) = subsys.join().await {
-            log::error!("Error waiting for client {cid} to disconnect: {e}");
+            error!("Error waiting for client {cid} to disconnect: {e}");
         }
     }
-    log::debug!("All clients disconnected.");
+    debug!("All clients disconnected.");
 
     drop(listener);
     tokio::fs::remove_file(&bind_addr).await.ok();
 
-    log::debug!("unixsocket subsystem completed.");
+    debug!("unixsocket subsystem completed.");
 
     Ok(())
 }
@@ -117,15 +118,15 @@ async fn serve(
     worterbuch: CloneableWbApi,
     socket: UnixStream,
 ) -> Result<()> {
-    log::info!("New client connected: {client_id} ({remote_addr:?})");
+    info!("New client connected: {client_id} ({remote_addr:?})");
 
     if let Err(e) = worterbuch.connected(client_id, None, Protocol::UNIX).await {
-        log::error!("Error while adding new client: {e}");
+        error!("Error while adding new client: {e}");
     } else {
-        log::debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
+        debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
         if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
-            log::error!("Error in serve loop: {e}");
+            error!("Error in serve loop: {e}");
         }
     }
 
@@ -154,7 +155,7 @@ async fn serve_loop(
     spawn(async move {
         while let Some(msg) = unix_send_rx.recv().await {
             if let Err(e) = write_line_and_flush(msg, &mut unix_tx, send_timeout, client_id).await {
-                log::error!("Error sending unix socket message: {e}");
+                error!("Error sending unix socket message: {e}");
                 break;
             }
         }
@@ -189,7 +190,7 @@ async fn serve_loop(
         select! {
             recv = unix_rx.next_line() => match recv {
                 Ok(Some(json)) => {
-                    log::trace!("Processing incoming message …");
+                    trace!("Processing incoming message …");
                     let msg_processed = proto.process_incoming_message(
                         &json,
                         &mut authorized,
@@ -197,11 +198,11 @@ async fn serve_loop(
                     if !msg_processed {
                         break;
                     }
-                    log::trace!("Processing incoming message done.");
+                    trace!("Processing incoming message done.");
                 },
                 Ok(None) =>  break,
                 Err(e) => {
-                    log::warn!("UNIX stream of client {client_id} ({remote_addr:?}) closed with error:, {e}");
+                    warn!("UNIX stream of client {client_id} ({remote_addr:?}) closed with error:, {e}");
                     break;
                 }
             },

@@ -18,12 +18,13 @@
  */
 
 use crate::error::{ConnectionError, ConnectionResult};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Display, io, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
     time::timeout,
 };
+use tracing::{debug, error, trace};
 
 pub async fn write_line_and_flush(
     msg: impl Serialize,
@@ -48,8 +49,8 @@ pub async fn write_line_and_flush(
     json.push('\n');
     let bytes = json.as_bytes();
 
-    log::debug!("Sending message: {json}");
-    log::trace!("Writing line …");
+    debug!("Sending message: {json}");
+    trace!("Writing line …");
     for chunk in bytes.chunks(1024) {
         let mut written = 0;
         while written < chunk.len() {
@@ -62,10 +63,10 @@ pub async fn write_line_and_flush(
                 })??;
         }
     }
-    log::trace!("Writing line done.");
-    log::trace!("Flushing channel …");
+    trace!("Writing line done.");
+    trace!("Flushing channel …");
     tx.flush().await?;
-    log::trace!("Flushing channel done.");
+    trace!("Flushing channel done.");
 
     Ok(())
 }
@@ -77,10 +78,10 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
     match read {
         Ok(None) => Ok(None),
         Ok(Some(json)) => {
-            log::debug!("Received message: {json}");
+            debug!("Received message: {json}");
             let sm = serde_json::from_str(&json);
             if let Err(e) = &sm {
-                log::error!("Error deserializing message '{json}': {e}")
+                error!("Error deserializing message '{json}': {e}")
             }
             Ok(sm?)
         }

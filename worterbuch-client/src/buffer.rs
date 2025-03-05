@@ -28,7 +28,8 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::sleep,
 };
-use worterbuch_common::{error::ConnectionResult, Key, KeyValuePair, Value};
+use tracing::error;
+use worterbuch_common::{Key, KeyValuePair, Value, error::ConnectionResult};
 
 type Buffer = Arc<Mutex<HashMap<Key, Value>>>;
 
@@ -108,7 +109,7 @@ impl SendBuffer {
         let value = self.set_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value {
             if let Err(e) = self.do_set_value(key, value).await {
-                log::error!("Error sending set message: {e}");
+                error!("Error sending set message: {e}");
             }
         }
     }
@@ -125,7 +126,7 @@ impl SendBuffer {
         let value = self.publish_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value {
             if let Err(e) = self.do_publish_value(key, value).await {
-                log::error!("Error sending publish message: {e}");
+                error!("Error sending publish message: {e}");
             }
         }
     }

@@ -17,9 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use miette::{miette, IntoDiagnostic, Result};
-use std::collections::{hash_map::Entry, HashMap};
+use miette::{IntoDiagnostic, Result, miette};
+use std::collections::{HashMap, hash_map::Entry};
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, warn};
 use uuid::Uuid;
 use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, TransactionId};
 
@@ -147,7 +148,7 @@ impl Subscribers {
     }
 
     pub fn add_subscriber(&mut self, pattern: &[KeySegment], subscriber: Subscriber) {
-        log::debug!("Adding subscriber for pattern {:?}", pattern);
+        debug!("Adding subscriber for pattern {:?}", pattern);
         let mut current = &mut self.data;
 
         for elem in pattern {
@@ -167,7 +168,7 @@ impl Subscribers {
             if let Some(node) = current.tree.get_mut(elem) {
                 current = node;
             } else {
-                log::warn!("No subscriber found for pattern {:?}", pattern);
+                warn!("No subscriber found for pattern {:?}", pattern);
                 return false;
             }
         }
@@ -176,12 +177,12 @@ impl Subscribers {
             let retain = &s.id != subscription;
             removed = removed || !retain;
             if !retain {
-                log::debug!("Removing subscription {subscription:?} to pattern {pattern:?}");
+                debug!("Removing subscription {subscription:?} to pattern {pattern:?}");
             }
             retain
         });
         if !removed {
-            log::debug!("no matching subscription found")
+            debug!("no matching subscription found")
         }
         removed
     }
@@ -193,7 +194,7 @@ impl Subscribers {
             if let Some(node) = current.tree.get_mut(elem) {
                 current = node;
             } else {
-                log::warn!("No subscriber found for pattern {:?}", subscriber.pattern);
+                warn!("No subscriber found for pattern {:?}", subscriber.pattern);
                 return;
             }
         }

@@ -32,13 +32,13 @@ pub fn generate_dummy_data(
     let mut prefix = Vec::new();
     'outer: while n[prefix.len()] < n_ary_keys {
         while prefix.len() < key_length as usize {
-            let segment = random_word::gen(Lang::En);
+            let segment = random_word::get(Lang::En);
             prefix.push(segment);
         }
 
         let path: Vec<String> = prefix.iter().map(ToString::to_string).collect();
         for _ in 0..values_per_key {
-            data.insert(path.clone(), json!(random_word::gen(Lang::En)));
+            data.insert(path.clone(), json!(random_word::get(Lang::En)));
         }
 
         prefix.pop();

@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{store::Node, Config, Worterbuch, INTERNAL_CLIENT_ID};
+use crate::{Config, INTERNAL_CLIENT_ID, Worterbuch, store::Node};
 use miette::{Error, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -32,9 +32,10 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, info, trace};
 use worterbuch_common::{
-    tcp::write_line_and_flush, topic, CasVersion, GraveGoods, Key, LastWill, RequestPattern, Value,
-    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    Value, tcp::write_line_and_flush, topic,
 };
 
 #[derive(Serialize)]
@@ -78,7 +79,7 @@ pub async fn run_cluster_sync_port(
         .expect("no tcp bind address configured")
         .bind_addr;
 
-    log::info!("Starting cluster sync endpoint at {}:{} …", ip, port);
+    info!("Starting cluster sync endpoint at {}:{} …", ip, port);
 
     let socket = match ip {
         IpAddr::V4(_) => TcpSocket::new_v4().into_diagnostic()?,
@@ -98,7 +99,7 @@ pub async fn run_cluster_sync_port(
                 // TODO reject connections from clients that are not cluster peers
                 Ok(client) => serve(&subsys, client, &on_follower_connected, config.clone()).await,
                 Err(e) => {
-                    log::error!("Error accepting follower connections: {e}");
+                    error!("Error accepting follower connections: {e}");
                     break;
                 },
             },
@@ -108,7 +109,7 @@ pub async fn run_cluster_sync_port(
 
     drop(listener);
 
-    log::info!("Cluster sync port closed.");
+    info!("Cluster sync port closed.");
 
     Ok(())
 }
@@ -121,7 +122,7 @@ async fn serve(
     >,
     config: Config,
 ) {
-    log::info!("Follower {} connected.", client.1);
+    info!("Follower {} connected.", client.1);
     let (sync_tx, sync_rx) = oneshot::channel();
     if on_follower_connected.send(sync_tx).await.is_err() {
         return;
@@ -156,7 +157,7 @@ async fn forward_events_to_follower(
     )
     .await
     {
-        log::error!("Could not send current state to follower: {e}");
+        error!("Could not send current state to follower: {e}");
         return;
     }
 
@@ -166,24 +167,24 @@ async fn forward_events_to_follower(
         select! {
             recv = commands.recv() => match recv {
                 Some(cmd) => if let Err(e) = write_line_and_flush(LeaderSyncMessage::Mut(cmd), &mut tcp_stream, config.send_timeout, follower).await {
-                    log::error!("Could not write command to follower: {e}");
+                    error!("Could not write command to follower: {e}");
                     break;
                 },
                 None => break,
             },
             read = tcp_stream.readable() => {
                 if let Err(e) = read {
-                    log::error!("Follower {follower} closed the connection: {e}");
+                    error!("Follower {follower} closed the connection: {e}");
                     break;
                 }
                 match tcp_stream.try_read(&mut buf) {
                     Ok(0) => {
-                        log::info!("Follower {follower} closed the connection.");
+                        info!("Follower {follower} closed the connection.");
                         break;
                     }
                     Err(e) => {
                         if e.kind() != ErrorKind::WouldBlock {
-                            log::error!("Follower {follower} closed the connection: {e}");
+                            error!("Follower {follower} closed the connection: {e}");
                             break;
                         }
                     }
@@ -198,14 +199,14 @@ async fn forward_events_to_follower(
 
     drop(tcp_stream);
 
-    log::info!("TCP connection to follower {} closed.", follower);
+    info!("TCP connection to follower {} closed.", follower);
 }
 
 pub async fn process_leader_message(
     msg: LeaderSyncMessage,
     worterbuch: &mut Worterbuch,
 ) -> Result<()> {
-    log::trace!("Received leader sync message: {msg:?}");
+    trace!("Received leader sync message: {msg:?}");
 
     match msg {
         LeaderSyncMessage::Init(state_sync) => {
@@ -240,7 +241,7 @@ pub async fn process_leader_message(
 }
 
 pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
-    log::info!("Registring stdin close handler …");
+    info!("Registring stdin close handler …");
 
     let (tx, rx) = oneshot::channel();
 
@@ -249,7 +250,7 @@ pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
             _ = rx => (),
             _ = s.on_shutdown_requested() => (),
         }
-        log::info!("Shutting down …");
+        info!("Shutting down …");
         s.request_shutdown();
         Ok::<(), miette::Error>(())
     }));
@@ -260,10 +261,10 @@ pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
 
         for line in handle {
             // ignore
-            log::debug!("{line:?}");
+            debug!("{line:?}");
         }
 
-        log::info!("stdin closed.");
+        info!("stdin closed.");
         tx.send(()).ok();
     });
 }

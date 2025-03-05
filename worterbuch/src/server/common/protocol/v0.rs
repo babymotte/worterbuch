@@ -1,20 +1,20 @@
-use std::time::Duration;
-
 use crate::{
-    auth::{get_claims, JwtClaims},
+    Config, PStateAggregator,
+    auth::{JwtClaims, get_claims},
     server::common::{CloneableWbApi, SubscriptionInfo},
     subscribers::SubscriptionId,
-    Config, PStateAggregator,
 };
 use serde_json::json;
+use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
+use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
-    error::{Context, WorterbuchError, WorterbuchResult},
     Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls, LsState,
     PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub, SPubInit,
     ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
     UnsubscribeLs,
+    error::{Context, WorterbuchError, WorterbuchResult},
 };
 
 #[derive(Clone)]
@@ -37,18 +37,18 @@ impl V0 {
                 if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);
                 }
-                log::trace!("Authorizing client {} …", self.client_id);
+                trace!("Authorizing client {} …", self.client_id);
                 *authorized = Some(self.authorize(msg).await?);
-                log::trace!("Authorizing client {} done.", self.client_id);
+                trace!("Authorizing client {} done.", self.client_id);
             }
             CM::Get(msg) => {
                 if self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Getting value for client {} …", self.client_id);
+                    trace!("Getting value for client {} …", self.client_id);
                     self.get(msg).await?;
-                    log::trace!("Getting value for client {} done.", self.client_id);
+                    trace!("Getting value for client {} done.", self.client_id);
                 }
             }
             CM::PGet(msg) => {
@@ -61,9 +61,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    log::trace!("PGetting values for client {} …", self.client_id);
+                    trace!("PGetting values for client {} …", self.client_id);
                     self.pget(msg).await?;
-                    log::trace!("PGetting values for client {} done.", self.client_id);
+                    trace!("PGetting values for client {} done.", self.client_id);
                 }
             }
             CM::Set(msg) => {
@@ -71,9 +71,9 @@ impl V0 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Setting value for client {} …", self.client_id);
+                    trace!("Setting value for client {} …", self.client_id);
                     self.set(msg).await?;
-                    log::trace!("Setting value for client {} done.", self.client_id);
+                    trace!("Setting value for client {} done.", self.client_id);
                 }
             }
             CM::SPubInit(msg) => {
@@ -81,30 +81,30 @@ impl V0 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!(
+                    trace!(
                         "Mapping key to transaction ID for for client {} …",
                         self.client_id
                     );
                     self.spub_init(msg).await?;
-                    log::trace!(
+                    trace!(
                         "Mapping key to transaction ID for client {} done.",
                         self.client_id
                     );
                 }
             }
             CM::SPub(msg) => {
-                log::trace!("Setting value for client {} …", self.client_id);
+                trace!("Setting value for client {} …", self.client_id);
                 self.spub(msg).await?;
-                log::trace!("Setting value for client {} done.", self.client_id);
+                trace!("Setting value for client {} done.", self.client_id);
             }
             CM::Publish(msg) => {
                 if self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Publishing value for client {} …", self.client_id);
+                    trace!("Publishing value for client {} …", self.client_id);
                     self.publish(msg).await?;
-                    log::trace!("Publishing value for client {} done.", self.client_id);
+                    trace!("Publishing value for client {} done.", self.client_id);
                 }
             }
             CM::Subscribe(msg) => {
@@ -112,9 +112,9 @@ impl V0 {
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Making subscription for client {} …", self.client_id);
+                    trace!("Making subscription for client {} …", self.client_id);
                     self.subscribe(msg).await?;
-                    log::trace!("Making subscription for client {} done.", self.client_id);
+                    trace!("Making subscription for client {} done.", self.client_id);
                 }
             }
             CM::PSubscribe(msg) => {
@@ -127,9 +127,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    log::trace!("Making psubscription for client {} …", self.client_id);
+                    trace!("Making psubscription for client {} …", self.client_id);
                     self.psubscribe(msg).await?;
-                    log::trace!("Making psubscription for client {} done.", self.client_id);
+                    trace!("Making psubscription for client {} done.", self.client_id);
                 }
             }
             CM::Unsubscribe(msg) => self.unsubscribe(msg).await?,
@@ -138,9 +138,9 @@ impl V0 {
                     .check_auth(Privilege::Delete, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Deleting value for client {} …", self.client_id);
+                    trace!("Deleting value for client {} …", self.client_id);
                     self.delete(msg).await?;
-                    log::trace!("Deleting value for client {} done.", self.client_id);
+                    trace!("Deleting value for client {} done.", self.client_id);
                 }
             }
             CM::PDelete(msg) => {
@@ -153,9 +153,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    log::trace!("DPeleting value for client {} …", self.client_id);
+                    trace!("DPeleting value for client {} …", self.client_id);
                     self.pdelete(msg).await?;
-                    log::trace!("DPeleting value for client {} done.", self.client_id);
+                    trace!("DPeleting value for client {} done.", self.client_id);
                 }
             }
             CM::Ls(msg) => {
@@ -168,9 +168,9 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Listing subkeys for client {} …", self.client_id);
+                    trace!("Listing subkeys for client {} …", self.client_id);
                     self.ls(msg).await?;
-                    log::trace!("Listing subkeys for client {} done.", self.client_id);
+                    trace!("Listing subkeys for client {} done.", self.client_id);
                 }
             }
             CM::PLs(msg) => {
@@ -183,9 +183,9 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Listing matching subkeys for client {} …", self.client_id);
+                    trace!("Listing matching subkeys for client {} …", self.client_id);
                     self.pls(msg).await?;
-                    log::trace!(
+                    trace!(
                         "Listing matching subkeys for client {} done.",
                         self.client_id
                     );
@@ -201,22 +201,22 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    log::trace!("Subscribing to subkeys for client {} …", self.client_id);
+                    trace!("Subscribing to subkeys for client {} …", self.client_id);
                     self.subscribe_ls(msg).await?;
-                    log::trace!("Subscribing to subkeys for client {} done.", self.client_id);
+                    trace!("Subscribing to subkeys for client {} done.", self.client_id);
                 }
             }
             CM::UnsubscribeLs(msg) => {
-                log::trace!("Unsubscribing from subkeys for client {} …", self.client_id);
+                trace!("Unsubscribing from subkeys for client {} …", self.client_id);
                 self.unsubscribe_ls(msg).await?;
-                log::trace!(
+                trace!(
                     "Unsubscribing from subkeys for client {} done.",
                     self.client_id
                 );
             }
 
             CM::ProtocolSwitchRequest(_) | CM::CGet(_) | CM::CSet(_) | CM::Transform(_) => {
-                return Err(WorterbuchError::NotImplemented)
+                return Err(WorterbuchError::NotImplemented);
             }
         };
         Ok(())
@@ -233,13 +233,13 @@ impl V0 {
             match authorized {
                 Some(claims) => {
                     if let Err(e) = claims.authorize(&privilege, pattern) {
-                        log::trace!("Client is not authorized, sending error …");
+                        trace!("Client is not authorized, sending error …");
                         self.handle_store_error(
                             WorterbuchError::Unauthorized(e.clone()),
                             transaction_id,
                         )
                         .await?;
-                        log::trace!("Client is not authorized, sending error done.");
+                        trace!("Client is not authorized, sending error done.");
                         return Ok(false);
                     }
                 }
@@ -261,13 +261,13 @@ impl V0 {
             transaction_id,
             metadata: json!(err_msg).to_string(),
         };
-        log::trace!("Error in store, queuing error message for client …");
+        trace!("Error in store, queuing error message for client …");
         let res = self
             .tx
             .send(ServerMessage::Err(err))
             .await
             .context(|| "Error sending ERR message to client".to_owned());
-        log::trace!("Error in store, queuing error message for client done");
+        trace!("Error in store, queuing error message for client done");
         res
     }
 
@@ -357,9 +357,9 @@ impl V0 {
             transaction_id: msg.transaction_id,
         };
 
-        log::trace!("Value set, queuing Ack …");
+        trace!("Value set, queuing Ack …");
         let res = self.tx.send(ServerMessage::Ack(response)).await;
-        log::trace!("Value set, queuing Ack done.");
+        trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -384,9 +384,9 @@ impl V0 {
             transaction_id: msg.transaction_id,
         };
 
-        log::trace!("Value set, queuing Ack …");
+        trace!("Value set, queuing Ack …");
         let res = self.tx.send(ServerMessage::Ack(response)).await;
-        log::trace!("Value set, queuing Ack done.");
+        trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -411,9 +411,9 @@ impl V0 {
             transaction_id: msg.transaction_id,
         };
 
-        log::trace!("Value set, queuing Ack …");
+        trace!("Value set, queuing Ack …");
         let res = self.tx.send(ServerMessage::Ack(response)).await;
-        log::trace!("Value set, queuing Ack done.");
+        trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
                 "Error sending ACK message for transaction ID {}",
@@ -486,25 +486,25 @@ impl V0 {
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
         spawn(async move {
-            log::debug!("Receiving events for subscription {subscription:?} …");
+            debug!("Receiving events for subscription {subscription:?} …");
             while let Some(event) = rx.recv().await {
                 let state = State {
                     transaction_id,
                     event,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
-                    log::error!("Error sending STATE message to client: {e}");
+                    error!("Error sending STATE message to client: {e}");
                     break;
                 };
             }
 
             match wb_unsub.unsubscribe(client_id, transaction_id).await {
                 Ok(()) => {
-                    log::warn!("Subscription was not cleaned up properly!");
+                    warn!("Subscription was not cleaned up properly!");
                 }
                 Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                 Err(e) => {
-                    log::warn!("Error while unsubscribing: {e}");
+                    warn!("Error while unsubscribing: {e}");
                 }
             }
         });
@@ -570,11 +570,11 @@ impl V0 {
 
                 match wb_unsub.unsubscribe(client_id, transaction_id).await {
                     Ok(()) => {
-                        log::warn!("Subscription was not cleaned up properly!");
+                        warn!("Subscription was not cleaned up properly!");
                     }
                     Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                     Err(e) => {
-                        log::warn!("Error while unsubscribing: {e}");
+                        warn!("Error while unsubscribing: {e}");
                     }
                 }
             });
@@ -591,11 +591,11 @@ impl V0 {
 
                 match wb_unsub.unsubscribe(client_id, transaction_id).await {
                     Ok(()) => {
-                        log::warn!("Subscription was not cleaned up properly!");
+                        warn!("Subscription was not cleaned up properly!");
                     }
                     Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                     Err(e) => {
-                        log::warn!("Error while unsubscribing: {e}");
+                        warn!("Error while unsubscribing: {e}");
                     }
                 }
             });
@@ -781,25 +781,25 @@ impl V0 {
         let client_id = self.client_id;
 
         spawn(async move {
-            log::debug!("Receiving events for ls subscription {subscription:?} …");
+            debug!("Receiving events for ls subscription {subscription:?} …");
             while let Some(children) = rx.recv().await {
                 let state = LsState {
                     transaction_id,
                     children,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
-                    log::error!("Error sending STATE message to client: {e}");
+                    error!("Error sending STATE message to client: {e}");
                     break;
                 };
             }
 
             match wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
                 Ok(()) => {
-                    log::warn!("Ls Subscription was not cleaned up properly!");
+                    warn!("Ls Subscription was not cleaned up properly!");
                 }
                 Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                 Err(e) => {
-                    log::warn!("Error while unsubscribing ls: {e}");
+                    warn!("Error while unsubscribing ls: {e}");
                 }
             }
         });
@@ -841,7 +841,7 @@ async fn forward_loop(
     subscription: SubscriptionId,
     client_sub: mpsc::Sender<ServerMessage>,
 ) {
-    log::debug!("Receiving events for subscription {subscription:?} …");
+    debug!("Receiving events for subscription {subscription:?} …");
     while let Some(event) = rx.recv().await {
         let event = PState {
             transaction_id,
@@ -849,7 +849,7 @@ async fn forward_loop(
             event,
         };
         if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
-            log::error!("Error sending STATE message to client: {e}");
+            error!("Error sending STATE message to client: {e}");
             break;
         }
     }
@@ -862,7 +862,7 @@ async fn aggregate_loop(
     client_id: Uuid,
 ) {
     if !subscription.live_only {
-        log::debug!("Immediately forwarding current state to new subscription {subscription:?} …");
+        debug!("Immediately forwarding current state to new subscription {subscription:?} …");
 
         if let Some(event) = rx.recv().await {
             let event = PState {
@@ -872,7 +872,7 @@ async fn aggregate_loop(
             };
 
             if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
-                log::error!("Error sending STATE message to client: {e}");
+                error!("Error sending STATE message to client: {e}");
                 return;
             }
         } else {
@@ -880,7 +880,7 @@ async fn aggregate_loop(
         }
     }
 
-    log::debug!("Aggregating events for subscription {subscription:?} …");
+    debug!("Aggregating events for subscription {subscription:?} …");
 
     let aggregator = PStateAggregator::new(
         client_sub,
@@ -893,7 +893,7 @@ async fn aggregate_loop(
 
     while let Some(event) = rx.recv().await {
         if let Err(e) = aggregator.aggregate(event).await {
-            log::error!("Error sending STATE message to client: {e}");
+            error!("Error sending STATE message to client: {e}");
             break;
         }
     }

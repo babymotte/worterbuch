@@ -17,8 +17,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use miette::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader},
     ops::ControlFlow,
@@ -27,6 +28,7 @@ use std::{
 };
 use tokio::{select, spawn, sync::mpsc, time::sleep};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::error;
 use worterbuch_client::{
     Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
     State, StateEvent,
@@ -58,7 +60,7 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
                 let mut lines = BufReader::new(std::io::stdin()).lines();
                 while let Some(Ok(line)) = lines.next() {
                     if let Err(e) = lines_tx.blocking_send(line) {
-                        log::error!("Could not forward line from stdin: {e}");
+                        error!("Could not forward line from stdin: {e}");
                     }
                 }
             });
@@ -74,7 +76,7 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
                     }
                 }
             }
-            Ok(()) as anyhow::Result<()>
+            Ok(()) as Result<()>
         }));
     }
 }
@@ -86,7 +88,7 @@ pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Valu
             let mut lines = BufReader::new(std::io::stdin()).lines();
             while let Some(Ok(line)) = lines.next() {
                 if let Err(e) = lines_tx.blocking_send(line) {
-                    log::error!("Could not forward line from stdin: {e}");
+                    error!("Could not forward line from stdin: {e}");
                 }
             }
         });
@@ -113,7 +115,7 @@ pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Valu
                 }
             }
         }
-        Ok(()) as anyhow::Result<()>
+        Ok(()) as Result<()>
     }));
 }
 
@@ -137,7 +139,7 @@ pub fn provide_key_value_pairs(
             let mut lines = BufReader::new(std::io::stdin()).lines();
             while let Some(Ok(line)) = lines.next() {
                 if let Err(e) = lines_tx.blocking_send(line) {
-                    log::error!("Could not forward line from stdin: {e}");
+                    error!("Could not forward line from stdin: {e}");
                 }
             }
         });
@@ -154,7 +156,7 @@ pub fn provide_key_value_pairs(
                     }
                 }
             }
-            Ok(()) as anyhow::Result<()>
+            Ok(()) as Result<()>
         }));
     }
 }

@@ -18,18 +18,19 @@
  */
 
 use crate::{
-    server::common::{protocol::Proto, CloneableWbApi},
-    stats::VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    server::common::{CloneableWbApi, protocol::Proto},
+    stats::VERSION,
 };
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, StreamExt},
 };
-use miette::{miette, IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, miette};
 use poem::web::websocket::{Message, WebSocketStream};
 use std::{net::SocketAddr, time::Duration};
 use tokio::{select, spawn, sync::mpsc, time::sleep};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
 
@@ -39,18 +40,18 @@ pub(crate) async fn serve(
     worterbuch: CloneableWbApi,
     websocket: WebSocketStream,
 ) -> Result<()> {
-    log::info!("New client connected: {client_id} ({remote_addr})");
+    info!("New client connected: {client_id} ({remote_addr})");
 
     if let Err(e) = worterbuch
         .connected(client_id, Some(remote_addr), Protocol::WS)
         .await
     {
-        log::error!("Error while adding new client: {e}");
+        error!("Error while adding new client: {e}");
     } else {
-        log::debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+        debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
         if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), websocket).await {
-            log::error!("Error in serve loop: {e}");
+            error!("Error in serve loop: {e}");
         }
     }
 
@@ -81,7 +82,7 @@ async fn serve_loop(
     spawn(async move {
         while let Some(msg) = ws_send_rx.recv().await {
             if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, client_id).await {
-                log::error!("Error sending WS message: {e}");
+                error!("Error sending WS message: {e}");
                 break;
             }
         }
@@ -114,7 +115,7 @@ async fn serve_loop(
             recv = ws_rx.next() => if let Some(msg) = recv {
                 match msg {
                     Ok(incoming_msg) => {
-                        log::trace!("Processing incoming message …");
+                        trace!("Processing incoming message …");
                         if let Message::Text(text) = incoming_msg {
                             let msg_processed = proto.process_incoming_message(
                                 &text,
@@ -127,12 +128,12 @@ async fn serve_loop(
                         }
                     },
                     Err(e) => {
-                        log::error!("Error in WebSocket connection: {e}");
+                        error!("Error in WebSocket connection: {e}");
                         break;
                     }
                 }
             } else {
-                log::info!("WS stream of client {client_id} ({remote_addr}) closed.");
+                info!("WS stream of client {client_id} ({remote_addr}) closed.");
                 break;
             },
         }
@@ -147,7 +148,7 @@ async fn send_with_timeout(
     send_timeout: Duration,
     client_id: Uuid,
 ) -> Result<()> {
-    log::trace!("Sending with timeout {}s …", send_timeout.as_secs());
+    trace!("Sending with timeout {}s …", send_timeout.as_secs());
     let json = serde_json::to_string(&msg).into_diagnostic()?;
     let msg = Message::Text(json);
     select! {
@@ -155,11 +156,11 @@ async fn send_with_timeout(
             r.into_diagnostic()?;
         },
         _ = sleep(send_timeout) => {
-            log::error!("Send timeout for client {client_id}");
+            error!("Send timeout for client {client_id}");
             return Err(miette!("Send timeout for client {client_id}"));
         },
     }
-    log::trace!("Sending with timeout {}s done.", send_timeout.as_secs());
+    trace!("Sending with timeout {}s done.", send_timeout.as_secs());
 
     Ok(())
 }

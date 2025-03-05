@@ -40,11 +40,11 @@ use crate::stats::track_stats;
 pub use crate::worterbuch::*;
 pub use config::*;
 use leader_follower::{
-    process_leader_message, run_cluster_sync_port, shutdown_on_stdin_close, ClientWriteCommand,
-    Mode, StateSync,
+    ClientWriteCommand, Mode, StateSync, process_leader_message, run_cluster_sync_port,
+    shutdown_on_stdin_close,
 };
-use miette::{miette, IntoDiagnostic, Result};
-use serde_json::{json, Value};
+use miette::{IntoDiagnostic, Result, miette};
+use serde_json::{Value, json};
 use server::common::{CloneableWbApi, WbFunction};
 use std::error::Error;
 use tokio::{
@@ -55,11 +55,12 @@ use tokio::{
     time::interval,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use worterbuch_common::{
-    error::WorterbuchError, tcp::receive_msg, topic, KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION,
+    KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, error::WorterbuchError, tcp::receive_msg, topic,
 };
 
 type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
@@ -189,7 +190,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         }
     }
 
-    log::debug!("worterbuch subsystem completed.");
+    debug!("worterbuch subsystem completed.");
 
     Ok(())
 }
@@ -416,7 +417,7 @@ async fn run_in_leader_mode(
     tcp_server: Option<ServerSubsystem>,
     unix_socket: Option<ServerSubsystem>,
 ) -> Result<()> {
-    log::info!("Running in LEADER mode.");
+    info!("Running in LEADER mode.");
 
     shutdown_on_stdin_close(&subsys);
 
@@ -473,7 +474,7 @@ async fn run_in_leader_mode(
     loop {
         select! {
             recv = grave_goods_rx.recv() => if let Some(e) = recv {
-                log::debug!("Forwarding grave goods change: {e:?}");
+                debug!("Forwarding grave goods change: {e:?}");
                 match e {
                     PStateEvent::KeyValuePairs(kvps) => {
                         for kvp in kvps {
@@ -488,7 +489,7 @@ async fn run_in_leader_mode(
                 }
             },
             recv = last_will_rx.recv() => if let Some(e) = recv {
-                log::debug!("Forwarding last will change: {e:?}");
+                debug!("Forwarding last will change: {e:?}");
                 match e {
                     PStateEvent::KeyValuePairs(kvps) => {
                         for kvp in kvps {
@@ -547,7 +548,7 @@ async fn run_in_follower_mode(
     } else {
         return Err(miette!("No valid leader address configured."));
     };
-    log::info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
+    info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
 
     shutdown_on_stdin_close(&subsys);
 
@@ -572,7 +573,7 @@ async fn run_in_follower_mode(
                 Ok(Some(msg)) => process_leader_message(msg, worterbuch).await?,
                 Ok(None) => break,
                 Err(e) => {
-                    log::error!("Error receiving update from leader: {e}");
+                    error!("Error receiving update from leader: {e}");
                     break;
                 }
             },
@@ -581,7 +582,7 @@ async fn run_in_follower_mode(
                 None => break,
             },
             _ = persistence_interval.tick() => if let Err(e) = persistence::synchronous(worterbuch, &config).await {
-                log::warn!("Could not persist state: {e}");
+                warn!("Could not persist state: {e}");
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -598,20 +599,20 @@ async fn shutdown(
     tcp_server: Option<ServerSubsystem>,
     unix_socket: Option<ServerSubsystem>,
 ) -> Result<()> {
-    log::info!("Shutdown sequence triggered");
+    info!("Shutdown sequence triggered");
 
     subsys.request_shutdown();
 
     shutdown_servers(web_server, tcp_server, unix_socket).await;
 
-    log::info!("Applying grave goods and last wills …");
+    info!("Applying grave goods and last wills …");
 
     worterbuch.apply_all_grave_goods_and_last_wills().await;
 
     if config.use_persistence {
-        log::info!("Waiting for persistence hook to complete …");
+        info!("Waiting for persistence hook to complete …");
         persistence::synchronous(worterbuch, &config).await?;
-        log::info!("Shutdown persistence hook complete.");
+        info!("Shutdown persistence hook complete.");
     }
 
     Ok(())
@@ -623,26 +624,26 @@ async fn shutdown_servers(
     unix_socket: Option<ServerSubsystem>,
 ) {
     if let Some(it) = web_server {
-        log::info!("Shutting down web server …");
+        info!("Shutting down web server …");
         it.initiate_shutdown();
         if let Err(e) = it.join().await {
-            log::error!("Error waiting for web server to shut down: {e}");
+            error!("Error waiting for web server to shut down: {e}");
         }
     }
 
     if let Some(it) = tcp_server {
-        log::info!("Shutting down tcp server …");
+        info!("Shutting down tcp server …");
         it.initiate_shutdown();
         if let Err(e) = it.join().await {
-            log::error!("Error waiting for tcp server to shut down: {e}");
+            error!("Error waiting for tcp server to shut down: {e}");
         }
     }
 
     if let Some(it) = unix_socket {
-        log::info!("Shutting down unix socket …");
+        info!("Shutting down unix socket …");
         it.initiate_shutdown();
         if let Err(e) = it.join().await {
-            log::error!("Error waiting for unix socket to shut down: {e}");
+            error!("Error waiting for unix socket to shut down: {e}");
         }
     }
 }

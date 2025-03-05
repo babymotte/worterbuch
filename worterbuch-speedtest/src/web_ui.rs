@@ -20,14 +20,15 @@
 use std::{
     env, io,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use miette::IntoDiagnostic;
 use poem::{
+    EndpointExt, Error, IntoResponse, Result, Route, Server,
     endpoint::StaticFilesEndpoint,
     get, handler,
     http::StatusCode,
@@ -35,19 +36,19 @@ use poem::{
     middleware::{AddData, Tracing},
     post,
     web::{
-        sse::{Event, SSE},
         Data, Json,
+        sse::{Event, SSE},
     },
-    EndpointExt, Error, IntoResponse, Result, Route, Server,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::{
     spawn,
     sync::{broadcast, mpsc},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tracing::{error, info};
 
 use crate::{
     latency::{self, LatencySettings},
@@ -256,7 +257,7 @@ pub async fn run_web_ui(
                 throughput_running.store(false, Ordering::Release);
             }
             if let Err(e) = throughput_tx.send(s) {
-                log::error!("Error forwarding stats: {e}");
+                error!("Error forwarding stats: {e}");
                 break;
             }
         }
@@ -272,7 +273,7 @@ pub async fn run_web_ui(
                 latency_running.store(false, Ordering::Release);
             }
             if let Err(e) = latency_tx.send(s) {
-                log::error!("Error forwarding stats: {e}");
+                error!("Error forwarding stats: {e}");
                 break;
             }
         }
@@ -280,7 +281,7 @@ pub async fn run_web_ui(
 
     let host = hostname::get().into_diagnostic()?;
     let host = host.to_str().unwrap_or("localhost");
-    log::info!("Starting speedtest server at http://{host}:{port}");
+    info!("Starting speedtest server at http://{host}:{port}");
 
     Server::new(TcpListener::bind(format!("0.0.0.0:{port}")))
         .name("worterbuch-speedtest-server")

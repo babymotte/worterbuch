@@ -17,17 +17,18 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use anyhow::Result;
 use clap::Parser;
+use miette::Result;
 use std::io;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_change_event, print_message, provide_keys};
 use worterbuch_client::config::Config;
-use worterbuch_client::{connect, AuthToken};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Get values for patterns from a Wörterbuch.", long_about = None)]
@@ -56,7 +57,7 @@ struct Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
@@ -118,7 +119,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         select! {
             _ = subsys.on_shutdown_requested() => break,
             _ = &mut on_disconnect => {
-                log::warn!("Connection to server lost.");
+                warn!("Connection to server lost.");
                 subsys.request_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {

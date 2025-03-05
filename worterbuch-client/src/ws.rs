@@ -20,13 +20,14 @@
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    tungstenite::{
-        protocol::{frame::coding::CloseCode, CloseFrame},
-        Message,
-    },
     MaybeTlsStream, WebSocketStream,
+    tungstenite::{
+        Message,
+        protocol::{CloseFrame, frame::coding::CloseCode},
+    },
 };
-use worterbuch_common::{error::ConnectionResult, ClientMessage, ServerMessage};
+use tracing::debug;
+use worterbuch_common::{ClientMessage, ServerMessage, error::ConnectionResult};
 
 pub struct WsClientSocket {
     websocket: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -39,7 +40,7 @@ impl WsClientSocket {
 
     pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {
         let json = serde_json::to_string(msg)?;
-        log::debug!("Sending message: {json}");
+        debug!("Sending message: {json}");
         let msg = Message::Text(json.into());
         self.websocket.send(msg).await?;
         Ok(())
@@ -48,7 +49,7 @@ impl WsClientSocket {
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
         match self.websocket.next().await {
             Some(Ok(Message::Text(json))) => {
-                log::debug!("Received message: {json}");
+                debug!("Received message: {json}");
                 let msg = serde_json::from_str(&json)?;
                 Ok(Some(msg))
             }

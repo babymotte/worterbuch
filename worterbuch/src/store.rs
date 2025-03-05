@@ -17,15 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use serde::{Deserialize, Serialize};
-use std::collections::{hash_map::Entry, HashMap, HashSet};
-use worterbuch_common::{
-    error::{WorterbuchError, WorterbuchResult},
-    parse_segments, CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
-    SYSTEM_TOPIC_ROOT,
-};
-
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
+use tracing::{debug, warn};
+use worterbuch_common::{
+    CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
+    Value,
+    error::{WorterbuchError, WorterbuchResult},
+    parse_segments,
+};
 
 type NodeValue = Option<ValueEntry>;
 type Tree = HashMap<RegularKeySegment, Node>;
@@ -720,7 +721,7 @@ impl Store {
         if let Some(v) = other.v {
             node.v = Some(v.clone());
             let key = concat_key(path, key);
-            log::debug!("Imported {} = {:?}", key, v);
+            debug!("Imported {} = {:?}", key, v);
             insertions.push((key, v.into()));
         }
 
@@ -747,7 +748,7 @@ impl Store {
     }
 
     pub fn add_ls_subscriber(&mut self, parent: &[RegularKeySegment], subscriber: LsSubscriber) {
-        log::debug!("Adding ls subscriber for parent {:?}", parent);
+        debug!("Adding ls subscriber for parent {:?}", parent);
         let mut current = &mut self.subscribers;
 
         for elem in parent {
@@ -767,7 +768,7 @@ impl Store {
             if let Some(node) = current.tree.get_mut(elem) {
                 current = node;
             } else {
-                log::warn!("No ls subscriber found for parent {:?}", subscriber.parent);
+                warn!("No ls subscriber found for parent {:?}", subscriber.parent);
                 return;
             }
         }
@@ -786,7 +787,7 @@ impl Store {
             if let Some(node) = current.tree.get_mut(elem) {
                 current = node;
             } else {
-                log::warn!("No ls subscriber found for pattern {:?}", parent);
+                warn!("No ls subscriber found for pattern {:?}", parent);
                 return false;
             }
         }
@@ -795,12 +796,12 @@ impl Store {
             let retain = &s.id != subscription;
             removed = removed || !retain;
             if !retain {
-                log::debug!("Removing subscription {subscription:?} to parent {parent:?}");
+                debug!("Removing subscription {subscription:?} to parent {parent:?}");
             }
             retain
         });
         if !removed {
-            log::debug!("no matching subscription found")
+            debug!("no matching subscription found")
         }
         removed
     }
@@ -888,42 +889,51 @@ mod test {
 
         let res = store.get_matches(&key_segs("test/a/?")).unwrap();
         assert_eq!(res.len(), 2);
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+        );
 
         let res = store.get_matches(&key_segs("trolo/?/b")).unwrap();
         assert_eq!(res.len(), 2);
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+        );
 
         let res = store.get_matches(&key_segs("?/a/b")).unwrap();
         assert_eq!(res.len(), 2);
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+        );
 
         let res = store.get_matches(&key_segs("?/?/b")).unwrap();
         assert_eq!(res.len(), 3);
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+        );
     }
 
     #[test]
@@ -945,48 +955,60 @@ mod test {
 
         let res = store.get_matches(&key_segs("test/a/#")).unwrap();
         assert_eq!(res.len(), 2);
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+        );
 
         let res = store.get_matches(&key_segs("trolo/#")).unwrap();
         assert_eq!(res.len(), 4);
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a".to_owned(), json!("0")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a".to_owned(), json!("0")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into())
+        );
 
         let res = store.get_matches(&key_segs("#")).unwrap();
         assert_eq!(res.len(), 6);
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a".to_owned(), json!("0")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/b".to_owned(), json!("1")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("test/a/c".to_owned(), json!("2")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into()));
-        assert!(res
-            .iter()
-            .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into()));
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a".to_owned(), json!("0")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+        );
+        assert!(
+            res.iter()
+                .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into())
+        );
     }
 
     #[test]
