@@ -98,10 +98,14 @@ impl ChildProcessManagerActor {
                                 Some(exit_code) => warn!("Child process {} terminated with exit code {exit_code}.", cmd),
                                 None => warn!("Child process {} terminated with unknown exit code", cmd)
                             }
+                            if crash_counter >= 10 {
+                                self.restart = false;
+                            }
                             if self.restart {
-                                info!("Restarting …");
                                 crash_counter += 1;
-                                wait = Some(delay(crash_counter));
+                                let del = delay(crash_counter);
+                                wait = Some(del);
+                                info!("Restarting (crashed {crash_counter} time(s), restart delay {del}ms) …");
                             } else {
                                 self.stop().await?;
                             }
@@ -241,5 +245,5 @@ async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
 }
 
 fn delay(crash_counter: usize) -> u64 {
-    (((crash_counter as f32).ln() * 500.0 + 1.0).round()) as u64
+    ((crash_counter as f32).powi(2) * 50.0) as u64
 }
