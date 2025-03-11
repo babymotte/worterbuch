@@ -80,71 +80,62 @@ const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    Set(Key, Value, oneshot::Sender<TransactionId>),
-    CSet(Key, Value, CasVersion, oneshot::Sender<TransactionId>),
-    SPubInit(Key, oneshot::Sender<TransactionId>),
-    SPub(TransactionId, Value, oneshot::Sender<()>),
-    Publish(Key, Value, oneshot::Sender<TransactionId>),
-    Get(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
-    GetAsync(Key, oneshot::Sender<TransactionId>),
-    CGet(
-        Key,
-        oneshot::Sender<(Option<(Value, CasVersion)>, TransactionId)>,
-    ),
-    CGetAsync(Key, oneshot::Sender<TransactionId>),
-    PGet(Key, oneshot::Sender<(KeyValuePairs, TransactionId)>),
-    PGetAsync(Key, oneshot::Sender<TransactionId>),
-    Delete(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
-    DeleteAsync(Key, oneshot::Sender<TransactionId>),
-    PDelete(Key, bool, oneshot::Sender<(KeyValuePairs, TransactionId)>),
-    PDeleteAsync(Key, bool, oneshot::Sender<TransactionId>),
-    Ls(
-        Option<Key>,
-        oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
-    ),
-    LsAsync(Option<Key>, oneshot::Sender<TransactionId>),
-    PLs(
-        Option<RequestPattern>,
-        oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>,
-    ),
-    PLsAsync(Option<RequestPattern>, oneshot::Sender<TransactionId>),
+    Set(Key, Value, AckCallback),
+    SetAsync(Key, Value, AsyncTicket),
+    CSet(Key, Value, CasVersion, AckCallback),
+    CSetAsync(Key, Value, CasVersion, AsyncTicket),
+    SPubInit(Key, AckCallback),
+    SPubInitAsync(Key, AsyncTicket),
+    SPub(TransactionId, Value, AckCallback),
+    SPubAsync(TransactionId, Value, AsyncTicket),
+    Publish(Key, Value, AckCallback),
+    PublishAsync(Key, Value, AsyncTicket),
+    Get(Key, StateCallback),
+    GetAsync(Key, AsyncTicket),
+    CGet(Key, CStateCallback),
+    CGetAsync(Key, AsyncTicket),
+    PGet(Key, PStateCallback),
+    PGetAsync(Key, AsyncTicket),
+    Delete(Key, StateCallback),
+    DeleteAsync(Key, AsyncTicket),
+    PDelete(Key, bool, PStateCallback),
+    PDeleteAsync(Key, bool, AsyncTicket),
+    Ls(Option<Key>, LsStateCallback),
+    LsAsync(Option<Key>, AsyncTicket),
+    PLs(Option<RequestPattern>, LsStateCallback),
+    PLsAsync(Option<RequestPattern>, AsyncTicket),
     Subscribe(
         Key,
         UniqueFlag,
-        oneshot::Sender<TransactionId>,
+        AckCallback,
         mpsc::UnboundedSender<Option<Value>>,
         LiveOnlyFlag,
     ),
-    SubscribeAsync(
-        Key,
-        UniqueFlag,
-        oneshot::Sender<TransactionId>,
-        LiveOnlyFlag,
-    ),
+    SubscribeAsync(Key, UniqueFlag, AsyncTicket, LiveOnlyFlag),
     PSubscribe(
         Key,
         UniqueFlag,
-        oneshot::Sender<TransactionId>,
+        AckCallback,
         mpsc::UnboundedSender<PStateEvent>,
         Option<u64>,
         LiveOnlyFlag,
     ),
-    PSubscribeAsync(
-        Key,
-        UniqueFlag,
-        oneshot::Sender<TransactionId>,
-        Option<u64>,
-        LiveOnlyFlag,
-    ),
-    Unsubscribe(TransactionId),
+    PSubscribeAsync(Key, UniqueFlag, AsyncTicket, Option<u64>, LiveOnlyFlag),
+    Unsubscribe(TransactionId, AckCallback),
+    UnsubscribeAsync(TransactionId, AsyncTicket),
     SubscribeLs(
         Option<Key>,
-        oneshot::Sender<TransactionId>,
+        AckCallback,
         mpsc::UnboundedSender<Vec<RegularKeySegment>>,
     ),
-    SubscribeLsAsync(Option<Key>, oneshot::Sender<TransactionId>),
-    UnsubscribeLs(TransactionId),
-    AllMessages(mpsc::UnboundedSender<ServerMessage>),
+    SubscribeLsAsync(Option<Key>, AsyncTicket),
+    UnsubscribeLs(TransactionId, AckCallback),
+    UnsubscribeLsAsync(TransactionId, AsyncTicket),
+    Lock(Key, AckCallback),
+    LockAsync(Key, AsyncTicket),
+    ReleaseLock(Key, AckCallback),
+    ReleaseLockAsync(Key, AsyncTicket),
+    AllMessages(GenericCallback),
 }
 
 enum ClientSocket {
@@ -212,10 +203,7 @@ impl Worterbuch {
         }
     }
 
-    pub async fn set_last_will(
-        &self,
-        last_will: &[KeyValuePair],
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn set_last_will(&self, last_will: &[KeyValuePair]) -> ConnectionResult<()> {
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -228,7 +216,7 @@ impl Worterbuch {
         .await
     }
 
-    pub async fn set_grave_goods(&self, grave_goods: &[&str]) -> ConnectionResult<TransactionId> {
+    pub async fn set_grave_goods(&self, grave_goods: &[&str]) -> ConnectionResult<()> {
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -241,10 +229,7 @@ impl Worterbuch {
         .await
     }
 
-    pub async fn set_client_name<T: Serialize>(
-        &self,
-        client_name: T,
-    ) -> ConnectionResult<TransactionId> {
+    pub async fn set_client_name<T: Serialize>(&self, client_name: T) -> ConnectionResult<()> {
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -257,19 +242,42 @@ impl Worterbuch {
         .await
     }
 
-    pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
+    pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let transaction_id = rx.await?;
-        Ok(transaction_id)
+        rx.await??;
+        Ok(())
     }
 
-    pub async fn set<T: Serialize>(&self, key: Key, value: T) -> ConnectionResult<TransactionId> {
+    pub async fn set<T: Serialize>(&self, key: Key, value: T) -> ConnectionResult<()> {
         let value = json::to_value(value)?;
         self.set_generic(key, value).await
+    }
+
+    pub async fn set_generic_async(
+        &self,
+        key: Key,
+        value: Value,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::SetAsync(key, value, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn set_async<T: Serialize>(
+        &self,
+        key: Key,
+        value: T,
+    ) -> ConnectionResult<TransactionId> {
+        let value = json::to_value(value)?;
+        self.set_generic_async(key, value).await
     }
 
     pub async fn cset_generic(
@@ -277,14 +285,14 @@ impl Worterbuch {
         key: Key,
         value: Value,
         version: CasVersion,
-    ) -> ConnectionResult<TransactionId> {
+    ) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::CSet(key, value, version, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let transaction_id = rx.await?;
-        Ok(transaction_id)
+        rx.await??;
+        Ok(())
     }
 
     pub async fn cset<T: Serialize>(
@@ -292,9 +300,34 @@ impl Worterbuch {
         key: Key,
         value: T,
         version: CasVersion,
-    ) -> ConnectionResult<TransactionId> {
+    ) -> ConnectionResult<()> {
         let value = json::to_value(value)?;
         self.cset_generic(key, value, version).await
+    }
+
+    pub async fn cset_generic_async(
+        &self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::CSetAsync(key, value, version, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn cset_async<T: Serialize>(
+        &self,
+        key: Key,
+        value: &T,
+        version: CasVersion,
+    ) -> ConnectionResult<TransactionId> {
+        let value = serde_json::to_value(value)?;
+        self.cset_generic_async(key, value, version).await
     }
 
     pub async fn spub_init(&self, key: Key) -> ConnectionResult<TransactionId> {
@@ -303,37 +336,102 @@ impl Worterbuch {
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
+        let res = rx.await??;
+        Ok(res.transaction_id)
+    }
+
+    pub async fn spub_init_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::SPubInitAsync(key, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
         let transaction_id = rx.await?;
         Ok(transaction_id)
     }
 
-    pub async fn spub(&self, transaction_id: TransactionId, value: Value) -> ConnectionResult<()> {
+    pub async fn spub_generic(
+        &self,
+        transaction_id: TransactionId,
+        value: Value,
+    ) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPub(transaction_id, value, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        rx.await?;
+        rx.await??;
         Ok(())
     }
 
-    pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<TransactionId> {
+    pub async fn spub<T: Serialize>(
+        &self,
+        transaction_id: TransactionId,
+        value: &T,
+    ) -> ConnectionResult<()> {
+        let value = serde_json::to_value(value)?;
+        self.spub_generic(transaction_id, value).await
+    }
+
+    pub async fn spub_generic_async(
+        &self,
+        transaction_id: TransactionId,
+        value: Value,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::SPubAsync(transaction_id, value, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn spub_async<T: Serialize>(
+        &self,
+        transaction_id: TransactionId,
+        value: &T,
+    ) -> ConnectionResult<TransactionId> {
+        let value = serde_json::to_value(value)?;
+        self.spub_generic_async(transaction_id, value).await
+    }
+
+    pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Publish(key, value, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let transaction_id = rx.await?;
-        Ok(transaction_id)
+        rx.await??;
+        Ok(())
     }
 
-    pub async fn publish<T: Serialize>(
+    pub async fn publish<T: Serialize>(&self, key: Key, value: &T) -> ConnectionResult<()> {
+        let value = json::to_value(value)?;
+        self.publish_generic(key, value).await
+    }
+
+    pub async fn publish_generic_async(
+        &self,
+        key: Key,
+        value: Value,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::PublishAsync(key, value, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn publish_async<T: Serialize>(
         &self,
         key: Key,
         value: &T,
     ) -> ConnectionResult<TransactionId> {
         let value = json::to_value(value)?;
-        self.publish_generic(key, value).await
+        self.publish_generic_async(key, value).await
     }
 
     pub async fn get_async(&self, key: Key) -> ConnectionResult<TransactionId> {
@@ -346,24 +444,36 @@ impl Worterbuch {
         Ok(res)
     }
 
-    pub async fn get_generic(&self, key: Key) -> ConnectionResult<(Option<Value>, TransactionId)> {
+    pub async fn get_generic(&self, key: Key) -> ConnectionResult<Option<Value>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Get(key, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let res = rx.await?;
-        Ok(res)
+        match rx.await? {
+            Ok(state) => {
+                if let StateEvent::Value(val) = state.event {
+                    Ok(Some(val))
+                } else {
+                    Ok(None)
+                }
+            }
+            Result::Err(e) => {
+                if e.error_code == ErrorCode::NoSuchValue {
+                    Ok(None)
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
-    pub async fn get<T: DeserializeOwned>(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(Option<T>, TransactionId)> {
-        Ok(match self.get_generic(key).await? {
-            (Some(val), tid) => (Some(json::from_value(val)?), tid),
-            (None, tid) => (None, tid),
-        })
+    pub async fn get<T: DeserializeOwned>(&self, key: Key) -> ConnectionResult<Option<T>> {
+        if let Some(val) = self.get_generic(key).await? {
+            Ok(Some(json::from_value(val)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn cget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
@@ -376,27 +486,33 @@ impl Worterbuch {
         Ok(res)
     }
 
-    pub async fn cget_generic(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(Option<(Value, CasVersion)>, TransactionId)> {
+    pub async fn cget_generic(&self, key: Key) -> ConnectionResult<Option<(Value, CasVersion)>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::CGet(key, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let res = rx.await?;
-        Ok(res)
+        match rx.await? {
+            Ok(state) => Ok(Some((state.event.value, state.event.version))),
+            Result::Err(e) => {
+                if e.error_code == ErrorCode::NoSuchValue {
+                    Ok(None)
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
     pub async fn cget<T: DeserializeOwned>(
         &self,
         key: Key,
-    ) -> ConnectionResult<(Option<(T, CasVersion)>, TransactionId)> {
-        Ok(match self.cget_generic(key).await? {
-            (Some((val, version)), tid) => (Some((json::from_value(val)?, version)), tid),
-            (None, tid) => (None, tid),
-        })
+    ) -> ConnectionResult<Option<(T, CasVersion)>> {
+        if let Some((val, version)) = self.cget_generic(key).await? {
+            Ok(Some((json::from_value(val)?, version)))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn pget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
@@ -409,23 +525,25 @@ impl Worterbuch {
         Ok(tid)
     }
 
-    pub async fn pget_generic(&self, key: Key) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
+    pub async fn pget_generic(&self, key: Key) -> ConnectionResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGet(key, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let (kvps, tid) = rx.await?;
-        Ok((kvps, tid))
+        match rx.await??.event {
+            PStateEvent::KeyValuePairs(kvps) => Ok(kvps),
+            PStateEvent::Deleted(_) => Ok(vec![]),
+        }
     }
 
     pub async fn pget<T: DeserializeOwned>(
         &self,
         key: Key,
-    ) -> ConnectionResult<(TypedKeyValuePairs<T>, TransactionId)> {
-        let (kvps, tid) = self.pget_generic(key).await?;
+    ) -> ConnectionResult<TypedKeyValuePairs<T>> {
+        let kvps = self.pget_generic(key).await?;
         let typed_kvps = deserialize_key_value_pairs(kvps)?;
-        Ok((typed_kvps, tid))
+        Ok(typed_kvps)
     }
 
     pub async fn delete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
@@ -438,29 +556,33 @@ impl Worterbuch {
         Ok(tid)
     }
 
-    pub async fn delete_generic(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(Option<Value>, TransactionId)> {
+    pub async fn delete_generic(&self, key: Key) -> ConnectionResult<Option<Value>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Delete(key, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
         match rx.await? {
-            (Some(value), tid) => Ok((Some(value), tid)),
-            (None, tid) => Ok((None, tid)),
+            Ok(state) => match state.event {
+                StateEvent::Value(_) => Ok(None),
+                StateEvent::Deleted(value) => Ok(Some(value)),
+            },
+            Result::Err(e) => {
+                if e.error_code == ErrorCode::NoSuchValue {
+                    Ok(None)
+                } else {
+                    Err(e.into())
+                }
+            }
         }
     }
 
-    pub async fn delete<T: DeserializeOwned>(
-        &self,
-        key: Key,
-    ) -> ConnectionResult<(Option<T>, TransactionId)> {
-        Ok(match self.delete_generic(key).await? {
-            (Some(val), tid) => (Some(json::from_value(val)?), tid),
-            (None, tid) => (None, tid),
-        })
+    pub async fn delete<T: DeserializeOwned>(&self, key: Key) -> ConnectionResult<Option<T>> {
+        if let Some(val) = self.delete_generic(key).await? {
+            Ok(Some(json::from_value(val)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn pdelete_async(&self, key: Key, quiet: bool) -> ConnectionResult<TransactionId> {
@@ -473,28 +595,26 @@ impl Worterbuch {
         Ok(tid)
     }
 
-    pub async fn pdelete_generic(
-        &self,
-        key: Key,
-        quiet: bool,
-    ) -> ConnectionResult<(KeyValuePairs, TransactionId)> {
+    pub async fn pdelete_generic(&self, key: Key, quiet: bool) -> ConnectionResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDelete(key, quiet, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let (kvps, tid) = rx.await?;
-        Ok((kvps, tid))
+        match rx.await??.event {
+            PStateEvent::KeyValuePairs(_) => Ok(vec![]),
+            PStateEvent::Deleted(kvps) => Ok(kvps),
+        }
     }
 
     pub async fn pdelete<T: DeserializeOwned>(
         &self,
         key: Key,
         quiet: bool,
-    ) -> ConnectionResult<(TypedKeyValuePairs<T>, TransactionId)> {
-        let (kvps, tid) = self.pdelete_generic(key, quiet).await?;
+    ) -> ConnectionResult<TypedKeyValuePairs<T>> {
+        let kvps = self.pdelete_generic(key, quiet).await?;
         let typed_kvps = deserialize_key_value_pairs(kvps)?;
-        Ok((typed_kvps, tid))
+        Ok(typed_kvps)
     }
 
     pub async fn ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
@@ -507,16 +627,13 @@ impl Worterbuch {
         Ok(tid)
     }
 
-    pub async fn ls(
-        &self,
-        parent: Option<Key>,
-    ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
+    pub async fn ls(&self, parent: Option<Key>) -> ConnectionResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Ls(parent, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let children = rx.await?;
+        let children = rx.await??.children;
         Ok(children)
     }
 
@@ -536,13 +653,13 @@ impl Worterbuch {
     pub async fn pls(
         &self,
         parent: Option<RequestPattern>,
-    ) -> ConnectionResult<(Vec<RegularKeySegment>, TransactionId)> {
+    ) -> ConnectionResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PLs(parent, tx);
         debug!("Queuing command {cmd:?}");
         self.commands.send(cmd).await?;
         debug!("Command queued.");
-        let children = rx.await?;
+        let children = rx.await??.children;
         Ok(children)
     }
 
@@ -571,8 +688,8 @@ impl Worterbuch {
         self.commands
             .send(Command::Subscribe(key, unique, tid_tx, val_tx, live_only))
             .await?;
-        let transaction_id = tid_rx.await?;
-        Ok((val_rx, transaction_id))
+        let res = tid_rx.await??;
+        Ok((val_rx, res.transaction_id))
     }
 
     pub async fn subscribe<T: DeserializeOwned + Send + 'static>(
@@ -627,8 +744,8 @@ impl Worterbuch {
                 live_only,
             ))
             .await?;
-        let transaction_id = tid_rx.await?;
-        Ok((event_rx, transaction_id))
+        let res = tid_rx.await??;
+        Ok((event_rx, res.transaction_id))
     }
 
     pub async fn psubscribe<T: DeserializeOwned + Send + 'static>(
@@ -647,10 +764,24 @@ impl Worterbuch {
     }
 
     pub async fn unsubscribe(&self, transaction_id: TransactionId) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::Unsubscribe(transaction_id))
+            .send(Command::Unsubscribe(transaction_id, tx))
             .await?;
+        rx.await??;
         Ok(())
+    }
+
+    pub async fn unsubscribe_async(
+        &self,
+        transaction_id: TransactionId,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::UnsubscribeAsync(transaction_id, tx))
+            .await?;
+        let res = rx.await?;
+        Ok(res)
     }
 
     pub async fn subscribe_ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
@@ -674,15 +805,59 @@ impl Worterbuch {
         self.commands
             .send(Command::SubscribeLs(parent, tid_tx, children_tx))
             .await?;
-        let transaction_id = tid_rx.await?;
-        Ok((children_rx, transaction_id))
+        let res = tid_rx.await??;
+        Ok((children_rx, res.transaction_id))
     }
 
     pub async fn unsubscribe_ls(&self, transaction_id: TransactionId) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::UnsubscribeLs(transaction_id))
+            .send(Command::UnsubscribeLs(transaction_id, tx))
             .await?;
+        rx.await??;
         Ok(())
+    }
+
+    pub async fn unsubscribe_ls_async(
+        &self,
+        transaction_id: TransactionId,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::UnsubscribeLsAsync(transaction_id, tx))
+            .await?;
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn lock(&self, key: Key) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::Lock(key, tx)).await?;
+        rx.await??;
+        Ok(())
+    }
+
+    pub async fn lock_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::LockAsync(key, tx)).await?;
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn release_lock(&self, key: Key) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::ReleaseLock(key, tx)).await?;
+        rx.await??;
+        Ok(())
+    }
+
+    pub async fn release_lock_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::ReleaseLockAsync(key, tx))
+            .await?;
+        let res = rx.await?;
+        Ok(res)
     }
 
     pub async fn send_buffer(&self, delay: Duration) -> SendBuffer {
@@ -752,27 +927,32 @@ async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
     }
 }
 
-type AllCallbacks = Vec<mpsc::UnboundedSender<ServerMessage>>;
-type GetCallbacks = HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>;
-type CGetCallbacks =
-    HashMap<TransactionId, oneshot::Sender<(Option<(Value, CasVersion)>, TransactionId)>>;
-type PGetCallbacks = HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>;
-type DelCallbacks = HashMap<TransactionId, oneshot::Sender<(Option<Value>, TransactionId)>>;
-type PDelCallbacks = HashMap<TransactionId, oneshot::Sender<(KeyValuePairs, TransactionId)>>;
-type LsCallbacks = HashMap<TransactionId, oneshot::Sender<(Vec<RegularKeySegment>, TransactionId)>>;
+type GenericCallback = mpsc::UnboundedSender<ServerMessage>;
+type AsyncTicket = oneshot::Sender<TransactionId>;
+type AckCallback = oneshot::Sender<Result<Ack, Err>>;
+type StateCallback = oneshot::Sender<Result<State, Err>>;
+type CStateCallback = oneshot::Sender<Result<CState, Err>>;
+type PStateCallback = oneshot::Sender<Result<PState, Err>>;
+type LsStateCallback = oneshot::Sender<Result<LsState, Err>>;
+
+type GenericCallbacks = Vec<GenericCallback>;
+type AckCallbacks = HashMap<TransactionId, AckCallback>;
+type StateCallbacks = HashMap<TransactionId, StateCallback>;
+type CStateCallbacks = HashMap<TransactionId, CStateCallback>;
+type PStateCallbacks = HashMap<TransactionId, PStateCallback>;
+type LsStateCallbacks = HashMap<TransactionId, LsStateCallback>;
 type SubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>;
 type PSubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>;
 type SubLsCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>;
 
 #[derive(Default)]
 struct Callbacks {
-    all: AllCallbacks,
-    get: GetCallbacks,
-    cget: CGetCallbacks,
-    pget: PGetCallbacks,
-    del: DelCallbacks,
-    pdel: PDelCallbacks,
-    ls: LsCallbacks,
+    generic: GenericCallbacks,
+    ack: AckCallbacks,
+    state: StateCallbacks,
+    cstate: CStateCallbacks,
+    pstate: PStateCallbacks,
+    lsstate: LsStateCallbacks,
     sub: SubCallbacks,
     psub: PSubCallbacks,
     subls: SubLsCallbacks,
@@ -1549,7 +1729,15 @@ async fn process_incoming_command(
         let transaction_id = transaction_ids.next();
         let cm = match command {
             Command::Set(key, value, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::Set(Set {
+                    transaction_id,
+                    key,
+                    value,
+                }))
+            }
+            Command::SetAsync(key, value, callback) => {
+                callback.send(transaction_id).ok();
                 Some(CM::Set(Set {
                     transaction_id,
                     key,
@@ -1557,7 +1745,16 @@ async fn process_incoming_command(
                 }))
             }
             Command::CSet(key, value, version, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::CSet(CSet {
+                    transaction_id,
+                    key,
+                    value,
+                    version,
+                }))
+            }
+            Command::CSetAsync(key, value, version, callback) => {
+                callback.send(transaction_id).ok();
                 Some(CM::CSet(CSet {
                     transaction_id,
                     key,
@@ -1566,21 +1763,43 @@ async fn process_incoming_command(
                 }))
             }
             Command::SPubInit(key, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::SPubInit(SPubInit {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::SPubInitAsync(key, callback) => {
+                callback.send(transaction_id).ok();
                 Some(CM::SPubInit(SPubInit {
                     transaction_id,
                     key,
                 }))
             }
             Command::SPub(transaction_id, value, callback) => {
-                callback.send(()).expect("error in callback");
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::SPub(SPub {
+                    transaction_id,
+                    value,
+                }))
+            }
+            Command::SPubAsync(transaction_id, value, callback) => {
+                callback.send(transaction_id).ok();
                 Some(CM::SPub(SPub {
                     transaction_id,
                     value,
                 }))
             }
             Command::Publish(key, value, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::Publish(Publish {
+                    transaction_id,
+                    key,
+                    value,
+                }))
+            }
+            Command::PublishAsync(key, value, callback) => {
+                callback.send(transaction_id).ok();
                 Some(CM::Publish(Publish {
                     transaction_id,
                     key,
@@ -1588,63 +1807,63 @@ async fn process_incoming_command(
                 }))
             }
             Command::Get(key, callback) => {
-                callbacks.get.insert(transaction_id, callback);
+                callbacks.state.insert(transaction_id, callback);
                 Some(CM::Get(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::GetAsync(key, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::Get(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::CGet(key, callback) => {
-                callbacks.cget.insert(transaction_id, callback);
+                callbacks.cstate.insert(transaction_id, callback);
                 Some(CM::CGet(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::CGetAsync(key, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::CGet(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::PGet(request_pattern, callback) => {
-                callbacks.pget.insert(transaction_id, callback);
+                callbacks.pstate.insert(transaction_id, callback);
                 Some(CM::PGet(PGet {
                     transaction_id,
                     request_pattern,
                 }))
             }
             Command::PGetAsync(request_pattern, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::PGet(PGet {
                     transaction_id,
                     request_pattern,
                 }))
             }
             Command::Delete(key, callback) => {
-                callbacks.del.insert(transaction_id, callback);
+                callbacks.state.insert(transaction_id, callback);
                 Some(CM::Delete(Delete {
                     transaction_id,
                     key,
                 }))
             }
             Command::DeleteAsync(key, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::Delete(Delete {
                     transaction_id,
                     key,
                 }))
             }
             Command::PDelete(request_pattern, quiet, callback) => {
-                callbacks.pdel.insert(transaction_id, callback);
+                callbacks.pstate.insert(transaction_id, callback);
                 Some(CM::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
@@ -1652,7 +1871,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::PDeleteAsync(request_pattern, quiet, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
@@ -1660,28 +1879,28 @@ async fn process_incoming_command(
                 }))
             }
             Command::Ls(parent, callback) => {
-                callbacks.ls.insert(transaction_id, callback);
+                callbacks.lsstate.insert(transaction_id, callback);
                 Some(CM::Ls(Ls {
                     transaction_id,
                     parent,
                 }))
             }
             Command::LsAsync(parent, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::Ls(Ls {
                     transaction_id,
                     parent,
                 }))
             }
             Command::PLs(parent_pattern, callback) => {
-                callbacks.ls.insert(transaction_id, callback);
+                callbacks.lsstate.insert(transaction_id, callback);
                 Some(CM::PLs(PLs {
                     transaction_id,
                     parent_pattern,
                 }))
             }
             Command::PLsAsync(parent_pattern, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::PLs(PLs {
                     transaction_id,
                     parent_pattern,
@@ -1689,9 +1908,7 @@ async fn process_incoming_command(
             }
             Command::Subscribe(key, unique, tid_callback, value_callback, live_only) => {
                 callbacks.sub.insert(transaction_id, value_callback);
-                tid_callback
-                    .send(transaction_id)
-                    .expect("error in callback");
+                callbacks.ack.insert(transaction_id, tid_callback);
                 Some(CM::Subscribe(Subscribe {
                     transaction_id,
                     key,
@@ -1700,7 +1917,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SubscribeAsync(key, unique, callback, live_only) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::Subscribe(Subscribe {
                     transaction_id,
                     key,
@@ -1717,9 +1934,7 @@ async fn process_incoming_command(
                 live_only,
             ) => {
                 callbacks.psub.insert(transaction_id, event_callback);
-                tid_callback
-                    .send(transaction_id)
-                    .expect("error in callback");
+                callbacks.ack.insert(transaction_id, tid_callback);
                 Some(CM::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
@@ -1735,7 +1950,7 @@ async fn process_incoming_command(
                 aggregate_events,
                 live_only,
             ) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
@@ -1744,34 +1959,73 @@ async fn process_incoming_command(
                     live_only: Some(live_only),
                 }))
             }
-            Command::Unsubscribe(transaction_id) => {
+            Command::Unsubscribe(transaction_id, callback) => {
+                callbacks.ack.insert(transaction_id, callback);
                 callbacks.sub.remove(&transaction_id);
                 callbacks.psub.remove(&transaction_id);
                 Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
             }
+            Command::UnsubscribeAsync(transaction_id, callback) => {
+                callbacks.sub.remove(&transaction_id);
+                callbacks.psub.remove(&transaction_id);
+                callback.send(transaction_id).ok();
+                Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
+            }
             Command::SubscribeLs(parent, tid_callback, children_callback) => {
                 callbacks.subls.insert(transaction_id, children_callback);
-                tid_callback
-                    .send(transaction_id)
-                    .expect("error in callback");
+                callbacks.ack.insert(transaction_id, tid_callback);
                 Some(CM::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
                 }))
             }
             Command::SubscribeLsAsync(parent, callback) => {
-                callback.send(transaction_id).expect("error in callback");
+                callback.send(transaction_id).ok();
                 Some(CM::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
                 }))
             }
-            Command::UnsubscribeLs(transaction_id) => {
+            Command::UnsubscribeLs(transaction_id, callback) => {
+                callbacks.ack.insert(transaction_id, callback);
                 callbacks.subls.remove(&transaction_id);
                 Some(CM::UnsubscribeLs(UnsubscribeLs { transaction_id }))
             }
+            Command::UnsubscribeLsAsync(transaction_id, callback) => {
+                callbacks.subls.remove(&transaction_id);
+                callback.send(transaction_id).ok();
+                Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
+            }
+            Command::Lock(key, callback) => {
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::Lock(Lock {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::LockAsync(key, callback) => {
+                callback.send(transaction_id).ok();
+                Some(CM::Lock(Lock {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::ReleaseLock(key, callback) => {
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::ReleaseLock(Lock {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::ReleaseLockAsync(key, callback) => {
+                callback.send(transaction_id).ok();
+                Some(CM::ReleaseLock(Lock {
+                    transaction_id,
+                    key,
+                }))
+            }
             Command::AllMessages(tx) => {
-                callbacks.all.push(tx);
+                callbacks.generic.push(tx);
                 None
             }
         };
@@ -1795,7 +2049,8 @@ async fn process_incoming_server_message(
                 SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
                 SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 SM::Err(err) => deliver_err(err, callbacks).await,
-                SM::Ack(_) | SM::Welcome(_) | SM::Authorized(_) => (),
+                SM::Ack(ack) => deliver_ack(ack, callbacks).await,
+                SM::Welcome(_) | SM::Authorized(_) => (),
             }
             Ok(ControlFlow::Continue(()))
         }
@@ -1811,7 +2066,7 @@ async fn process_incoming_server_message(
 }
 
 fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
-    callbacks.all.retain(|tx| match tx.send(msg.clone()) {
+    callbacks.generic.retain(|tx| match tx.send(msg.clone()) {
         Ok(_) => true,
         Err(e) => {
             error!("Removing callback due to failure to deliver message to receiver: {e}");
@@ -1821,18 +2076,10 @@ fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
 }
 
 async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionResult<()> {
-    if let Some(cb) = callbacks.get.remove(&state.transaction_id) {
-        if let StateEvent::Value(v) = &state.event {
-            cb.send((Some(v.clone()), state.transaction_id))
-                .expect("error in callback");
-        }
+    if let Some(cb) = callbacks.state.remove(&state.transaction_id) {
+        cb.send(Ok(state.clone())).ok();
     }
-    if let Some(cb) = callbacks.del.remove(&state.transaction_id) {
-        if let StateEvent::Deleted(v) = &state.event {
-            cb.send((Some(v.clone()), state.transaction_id))
-                .expect("error in callback");
-        }
-    }
+
     if let Some(cb) = callbacks.sub.get(&state.transaction_id) {
         let value = match state.event {
             StateEvent::Value(v) => Some(v),
@@ -1844,29 +2091,17 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
 }
 
 async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
-    if let Some(cb) = callbacks.cget.remove(&state.transaction_id) {
-        cb.send((
-            Some((state.event.value, state.event.version)),
-            state.transaction_id,
-        ))
-        .expect("error in callback");
+    if let Some(cb) = callbacks.cstate.remove(&state.transaction_id) {
+        cb.send(Ok(state)).ok();
     }
     Ok(())
 }
 
 async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
-    if let Some(cb) = callbacks.pget.remove(&pstate.transaction_id) {
-        if let PStateEvent::KeyValuePairs(kvps) = &pstate.event {
-            cb.send((kvps.clone(), pstate.transaction_id))
-                .expect("error in callback");
-        }
+    if let Some(cb) = callbacks.pstate.remove(&pstate.transaction_id) {
+        cb.send(Ok(pstate.clone())).ok();
     }
-    if let Some(cb) = callbacks.pdel.remove(&pstate.transaction_id) {
-        if let PStateEvent::Deleted(kvps) = &pstate.event {
-            cb.send((kvps.clone(), pstate.transaction_id))
-                .expect("error in callback");
-        }
-    }
+
     if let Some(cb) = callbacks.psub.get(&pstate.transaction_id) {
         cb.send(pstate.event)?;
     }
@@ -1874,10 +2109,10 @@ async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> Connection
 }
 
 async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
-    if let Some(cb) = callbacks.ls.remove(&ls.transaction_id) {
-        cb.send((ls.children.clone(), ls.transaction_id))
-            .expect("error in callback");
+    if let Some(cb) = callbacks.lsstate.remove(&ls.transaction_id) {
+        cb.send(Ok(ls.clone())).ok();
     }
+
     if let Some(cb) = callbacks.subls.get(&ls.transaction_id) {
         cb.send(ls.children)?;
     }
@@ -1885,14 +2120,27 @@ async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<
     Ok(())
 }
 
-async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
-    if let Some(cb) = callbacks.get.remove(&err.transaction_id) {
-        cb.send((None, err.transaction_id))
-            .expect("error in callback");
+async fn deliver_ack(ack: Ack, callbacks: &mut Callbacks) {
+    if let Some(cb) = callbacks.ack.remove(&ack.transaction_id) {
+        cb.send(Ok(ack)).ok();
     }
-    if let Some(cb) = callbacks.del.remove(&err.transaction_id) {
-        cb.send((None, err.transaction_id))
-            .expect("error in callback");
+}
+
+async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
+    if let Some(cb) = callbacks.ack.remove(&err.transaction_id) {
+        cb.send(Err(err.clone())).ok();
+    }
+    if let Some(cb) = callbacks.state.remove(&err.transaction_id) {
+        cb.send(Err(err.clone())).ok();
+    }
+    if let Some(cb) = callbacks.cstate.remove(&err.transaction_id) {
+        cb.send(Err(err.clone())).ok();
+    }
+    if let Some(cb) = callbacks.pstate.remove(&err.transaction_id) {
+        cb.send(Err(err.clone())).ok();
+    }
+    if let Some(cb) = callbacks.lsstate.remove(&err.transaction_id) {
+        cb.send(Err(err.clone())).ok();
     }
 }
 

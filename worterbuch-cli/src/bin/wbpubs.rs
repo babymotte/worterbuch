@@ -130,7 +130,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some(value) => trans_id = wb.publish(key.clone(), &value).await?,
+                Some(value) => trans_id = wb.publish_async(key.clone(), &value).await?,
                 None => done = true,
             },
         }

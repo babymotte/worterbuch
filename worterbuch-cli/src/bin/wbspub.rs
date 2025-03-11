@@ -131,7 +131,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some(value) => wb.spub(tid, value) .await?,
+                Some(value) => _ = wb.spub_generic_async(tid, value) .await?,
                 None => done = true,
             },
         }

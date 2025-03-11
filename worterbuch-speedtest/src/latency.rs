@@ -192,7 +192,7 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
             recv = dummy_rx.recv() => if let Some(data) = recv {
                 let key = format!("speedtest/latency/{}",data.0);
                 let value = data.1;
-                match wb.set(key, &value).await.into_diagnostic()  {
+                match wb.set_async(key, &value).await.into_diagnostic()  {
                     Ok(t) => tid_sent = t,
                     Err(e) => {
                         error!("Error setting value: {e}");

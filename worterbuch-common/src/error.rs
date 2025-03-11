@@ -274,6 +274,7 @@ pub enum ConnectionError {
     HttpError(tungstenite::http::Error),
     AuthorizationError(String),
     NoServerAddressesConfigured,
+    ServerResponse(Err),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -281,29 +282,36 @@ impl std::error::Error for ConnectionError {}
 impl fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IoError(e) => fmt::Display::fmt(&e, f),
-            Self::SendError(e) => fmt::Display::fmt(&e, f),
+            Self::IoError(e) => e.fmt(f),
+            Self::SendError(e) => e.fmt(f),
             #[cfg(any(feature = "ws", feature = "wasm"))]
-            Self::WebsocketError(e) => fmt::Display::fmt(&e, f),
-            Self::TrySendError(e) => fmt::Display::fmt(&e, f),
-            Self::RecvError(e) => fmt::Display::fmt(&e, f),
-            Self::BcRecvError(e) => fmt::Display::fmt(&e, f),
-            Self::WorterbuchError(e) => fmt::Display::fmt(&e, f),
-            Self::ConfigError(e) => fmt::Display::fmt(&e, f),
-            Self::SerdeError(e) => fmt::Display::fmt(&e, f),
-            Self::AckError(e) => fmt::Display::fmt(&e, f),
-            Self::Timeout(msg) => fmt::Display::fmt(msg, f),
+            Self::WebsocketError(e) => e.fmt(f),
+            Self::TrySendError(e) => e.fmt(f),
+            Self::RecvError(e) => e.fmt(f),
+            Self::BcRecvError(e) => e.fmt(f),
+            Self::WorterbuchError(e) => e.fmt(f),
+            Self::ConfigError(e) => e.fmt(f),
+            Self::SerdeError(e) => e.fmt(f),
+            Self::AckError(e) => e.fmt(f),
+            Self::Timeout(msg) => msg.fmt(f),
             #[cfg(feature = "ws")]
-            Self::HttpError(e) => fmt::Display::fmt(&e, f),
-            Self::AuthorizationError(msg) => fmt::Display::fmt(&msg, f),
+            Self::HttpError(e) => e.fmt(f),
+            Self::AuthorizationError(msg) => msg.fmt(f),
             Self::NoServerAddressesConfigured => {
                 fmt::Display::fmt("no server addresses configured", f)
             }
+            Self::ServerResponse(e) => e.fmt(f),
         }
     }
 }
 
 pub type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
+
+impl From<Err> for ConnectionError {
+    fn from(value: Err) -> Self {
+        ConnectionError::ServerResponse(value)
+    }
+}
 
 impl From<io::Error> for ConnectionError {
     fn from(e: io::Error) -> Self {
