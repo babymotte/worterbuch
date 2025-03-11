@@ -119,6 +119,7 @@ pub struct Store {
     subscribers: SubscribersNode,
     #[serde(skip_serializing, default = "bool::default")]
     unsaved_changes: bool,
+    #[serde(skip_serializing, default = "HashMap::default")]
     locks: HashMap<Uuid, Vec<Vec<RegularKeySegment>>>,
 }
 
