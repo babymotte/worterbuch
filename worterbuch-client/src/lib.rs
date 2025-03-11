@@ -81,11 +81,17 @@ const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
 #[derive(Debug)]
 pub(crate) enum Command {
     Set(Key, Value, oneshot::Sender<TransactionId>),
+    CSet(Key, Value, CasVersion, oneshot::Sender<TransactionId>),
     SPubInit(Key, oneshot::Sender<TransactionId>),
     SPub(TransactionId, Value, oneshot::Sender<()>),
     Publish(Key, Value, oneshot::Sender<TransactionId>),
     Get(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
     GetAsync(Key, oneshot::Sender<TransactionId>),
+    CGet(
+        Key,
+        oneshot::Sender<(Option<(Value, CasVersion)>, TransactionId)>,
+    ),
+    CGetAsync(Key, oneshot::Sender<TransactionId>),
     PGet(Key, oneshot::Sender<(KeyValuePairs, TransactionId)>),
     PGetAsync(Key, oneshot::Sender<TransactionId>),
     Delete(Key, oneshot::Sender<(Option<Value>, TransactionId)>),
@@ -266,6 +272,31 @@ impl Worterbuch {
         self.set_generic(key, value).await
     }
 
+    pub async fn cset_generic(
+        &self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+    ) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::CSet(key, value, version, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let transaction_id = rx.await?;
+        Ok(transaction_id)
+    }
+
+    pub async fn cset<T: Serialize>(
+        &self,
+        key: Key,
+        value: T,
+        version: CasVersion,
+    ) -> ConnectionResult<TransactionId> {
+        let value = json::to_value(value)?;
+        self.cset_generic(key, value, version).await
+    }
+
     pub async fn spub_init(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPubInit(key, tx);
@@ -331,6 +362,39 @@ impl Worterbuch {
     ) -> ConnectionResult<(Option<T>, TransactionId)> {
         Ok(match self.get_generic(key).await? {
             (Some(val), tid) => (Some(json::from_value(val)?), tid),
+            (None, tid) => (None, tid),
+        })
+    }
+
+    pub async fn cget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::CGetAsync(key, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn cget_generic(
+        &self,
+        key: Key,
+    ) -> ConnectionResult<(Option<(Value, CasVersion)>, TransactionId)> {
+        let (tx, rx) = oneshot::channel();
+        let cmd = Command::CGet(key, tx);
+        debug!("Queuing command {cmd:?}");
+        self.commands.send(cmd).await?;
+        debug!("Command queued.");
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    pub async fn cget<T: DeserializeOwned>(
+        &self,
+        key: Key,
+    ) -> ConnectionResult<(Option<(T, CasVersion)>, TransactionId)> {
+        Ok(match self.cget_generic(key).await? {
+            (Some((val, version)), tid) => (Some((json::from_value(val)?, version)), tid),
             (None, tid) => (None, tid),
         })
     }
@@ -1492,6 +1556,15 @@ async fn process_incoming_command(
                     value,
                 }))
             }
+            Command::CSet(key, value, version, callback) => {
+                callback.send(transaction_id).expect("error in callback");
+                Some(CM::CSet(CSet {
+                    transaction_id,
+                    key,
+                    value,
+                    version,
+                }))
+            }
             Command::SPubInit(key, callback) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::SPubInit(SPubInit {
@@ -1524,6 +1597,20 @@ async fn process_incoming_command(
             Command::GetAsync(key, callback) => {
                 callback.send(transaction_id).expect("error in callback");
                 Some(CM::Get(Get {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::CGet(key, callback) => {
+                callbacks.cget.insert(transaction_id, callback);
+                Some(CM::CGet(Get {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::CGetAsync(key, callback) => {
+                callback.send(transaction_id).expect("error in callback");
+                Some(CM::CGet(Get {
                     transaction_id,
                     key,
                 }))
