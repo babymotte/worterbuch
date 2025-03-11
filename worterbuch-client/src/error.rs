@@ -18,11 +18,13 @@
  */
 
 use std::fmt;
+#[cfg(feature = "tokio")]
 use tokio::sync::broadcast;
 use worterbuch_common::Err;
 
 #[derive(Debug)]
 pub enum SubscriptionError {
+    #[cfg(feature = "tokio")]
     RecvError(broadcast::error::RecvError),
     ServerError(Err),
     SerdeError(serde_json::Error),
@@ -31,6 +33,7 @@ pub enum SubscriptionError {
 impl fmt::Display for SubscriptionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(feature = "tokio")]
             SubscriptionError::RecvError(e) => e.fmt(f),
             SubscriptionError::ServerError(e) => e.fmt(f),
             SubscriptionError::SerdeError(e) => e.fmt(f),

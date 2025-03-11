@@ -10,16 +10,35 @@ license = "AGPL-3.0-or-later"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
+[features]
+default = ["tcp", "unix"]
+tcp = ["tokio/net"]
+ws = ["worterbuch-common/ws", "tokio/rt", "tokio-tungstenite", "async-stream"]
+unix = ["tokio/net"]
+wasm = [
+    "tokio",
+    "worterbuch-common/wasm",
+    "tokio-tungstenite-wasm",
+    "getrandom/wasm_js",
+]
+
 [dependencies]
+tokio-tungstenite-wasm = { version = "0.5.0", optional = true }
 worterbuch-common = "1.0.0"
-tokio = { version = "1.26.0", features = ["sync", "rt", "macros", "time"] }
+tokio = { version = "1.26.0", optional = true, features = [
+    "macros",
+    "rt",
+    "sync",
+] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
-async-stream = "0.3.4"
-futures-core = "0.3.27"
+async-stream = { version = "0.3.4", optional = true }
+futures-core = { version = "0.3.27", optional = true }
 futures-util = { version = "0.3.27", default-features = false }
-tokio-tungstenite = "0.26.2"
+tokio-tungstenite = { version = "0.26.2", optional = true }
 tracing = "0.1.41"
+getrandom = { version = "^0.3", optional = true, features = ["wasm_js"] }
+mio = { version = "1.0.3", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

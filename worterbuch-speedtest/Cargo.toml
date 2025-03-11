@@ -20,6 +20,8 @@ tokio-stream = { version = "0.1.14", features = ["sync"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 worterbuch-client = { path = "../worterbuch-client" }
+worterbuch-common = { path = "../worterbuch-common", features = ["benchmark"] }
+
 
 [lints.rust]
 unsafe_code = "forbid"

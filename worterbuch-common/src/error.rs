@@ -258,7 +258,10 @@ pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 pub enum ConnectionError {
     IoError(io::Error),
     SendError(Box<dyn std::error::Error + Send + Sync>),
+    #[cfg(feature = "ws")]
     WebsocketError(tungstenite::Error),
+    #[cfg(feature = "wasm")]
+    WebsocketError(tokio_tungstenite_wasm::Error),
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
     RecvError(oneshot::error::RecvError),
     BcRecvError(broadcast::error::RecvError),
@@ -267,6 +270,7 @@ pub enum ConnectionError {
     SerdeError(serde_json::Error),
     AckError(broadcast::error::SendError<u64>),
     Timeout(String),
+    #[cfg(feature = "ws")]
     HttpError(tungstenite::http::Error),
     AuthorizationError(String),
     NoServerAddressesConfigured,
@@ -279,6 +283,7 @@ impl fmt::Display for ConnectionError {
         match self {
             Self::IoError(e) => fmt::Display::fmt(&e, f),
             Self::SendError(e) => fmt::Display::fmt(&e, f),
+            #[cfg(any(feature = "ws", feature = "wasm"))]
             Self::WebsocketError(e) => fmt::Display::fmt(&e, f),
             Self::TrySendError(e) => fmt::Display::fmt(&e, f),
             Self::RecvError(e) => fmt::Display::fmt(&e, f),
@@ -288,6 +293,7 @@ impl fmt::Display for ConnectionError {
             Self::SerdeError(e) => fmt::Display::fmt(&e, f),
             Self::AckError(e) => fmt::Display::fmt(&e, f),
             Self::Timeout(msg) => fmt::Display::fmt(msg, f),
+            #[cfg(feature = "ws")]
             Self::HttpError(e) => fmt::Display::fmt(&e, f),
             Self::AuthorizationError(msg) => fmt::Display::fmt(&msg, f),
             Self::NoServerAddressesConfigured => {
@@ -311,8 +317,16 @@ impl<T: fmt::Debug + 'static + Send + Sync> From<SendError<T>> for ConnectionErr
     }
 }
 
+#[cfg(feature = "ws")]
 impl From<tungstenite::Error> for ConnectionError {
     fn from(e: tungstenite::Error) -> Self {
+        ConnectionError::WebsocketError(e)
+    }
+}
+
+#[cfg(feature = "wasm")]
+impl From<tokio_tungstenite_wasm::Error> for ConnectionError {
+    fn from(e: tokio_tungstenite_wasm::Error) -> Self {
         ConnectionError::WebsocketError(e)
     }
 }
@@ -353,6 +367,7 @@ impl From<mpsc::error::TrySendError<ClientMessage>> for ConnectionError {
     }
 }
 
+#[cfg(feature = "ws")]
 impl From<tungstenite::http::Error> for ConnectionError {
     fn from(e: tungstenite::http::Error) -> Self {
         Self::HttpError(e)

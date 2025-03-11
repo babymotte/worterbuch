@@ -18,7 +18,9 @@
  */
 
 use futures_util::{SinkExt, StreamExt};
+#[cfg(feature = "ws")]
 use tokio::net::TcpStream;
+#[cfg(feature = "ws")]
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
     tungstenite::{
@@ -26,15 +28,27 @@ use tokio_tungstenite::{
         protocol::{CloseFrame, frame::coding::CloseCode},
     },
 };
+#[cfg(any(feature = "wasm"))]
+use tokio_tungstenite_wasm::{Message, WebSocketStream};
+#[cfg(any(feature = "ws", feature = "wasm"))]
 use tracing::debug;
 use worterbuch_common::{ClientMessage, ServerMessage, error::ConnectionResult};
 
 pub struct WsClientSocket {
+    #[cfg(feature = "ws")]
     websocket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    #[cfg(feature = "wasm")]
+    websocket: WebSocketStream,
 }
 
 impl WsClientSocket {
+    #[cfg(feature = "ws")]
     pub fn new(websocket: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
+        Self { websocket }
+    }
+
+    #[cfg(any(feature = "wasm"))]
+    pub fn new(websocket: WebSocketStream) -> Self {
         Self { websocket }
     }
 
@@ -59,12 +73,16 @@ impl WsClientSocket {
     }
 
     pub async fn close(mut self) -> ConnectionResult<()> {
+        #[cfg(any(feature = "ws"))]
         self.websocket
             .close(Some(CloseFrame {
                 code: CloseCode::Normal,
                 reason: "client closed".into(),
             }))
             .await?;
+
+        #[cfg(any(feature = "wasm"))]
+        self.websocket.close().await?;
 
         Ok(())
     }

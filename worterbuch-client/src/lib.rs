@@ -20,38 +20,52 @@
 pub mod buffer;
 pub mod config;
 pub mod error;
+#[cfg(feature = "tcp")]
 pub mod tcp;
-#[cfg(target_family = "unix")]
+#[cfg(all(target_family = "unix", feature = "unix"))]
 pub mod unix;
+#[cfg(any(feature = "ws", feature = "wasm"))]
 pub mod ws;
 
 use crate::config::Config;
 use buffer::SendBuffer;
 use error::SubscriptionError;
-use futures_util::{FutureExt, SinkExt, StreamExt};
+use futures_util::FutureExt;
+#[cfg(any(feature = "ws", feature = "wasm"))]
+use futures_util::{SinkExt, StreamExt};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{self as json};
 use std::{
     collections::HashMap, future::Future, io, net::SocketAddr, ops::ControlFlow, time::Duration,
 };
+#[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
-#[cfg(target_family = "unix")]
+#[cfg(feature = "tcp")]
+use tokio::net::TcpStream;
+#[cfg(all(target_family = "unix", feature = "unix"))]
 use tokio::net::UnixStream;
+#[cfg(any(feature = "tcp", feature = "unix"))]
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
-    select, spawn,
-    sync::{mpsc, oneshot},
     time::sleep,
 };
+#[cfg(feature = "tokio")]
+use tokio::{
+    select, spawn,
+    sync::{mpsc, oneshot},
+};
+#[cfg(feature = "ws")]
 use tokio_tungstenite::{
     connect_async_with_config,
     tungstenite::{Message, handshake::client::generate_key, http::Request},
 };
+#[cfg(feature = "wasm")]
+use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
 use tracing::{debug, error, info, trace, warn};
-#[cfg(target_family = "unix")]
+#[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
+#[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
@@ -128,36 +142,44 @@ pub(crate) enum Command {
 }
 
 enum ClientSocket {
+    #[cfg(feature = "tcp")]
     Tcp(TcpClientSocket),
+    #[cfg(any(feature = "ws", feature = "wasm"))]
     Ws(WsClientSocket),
-    #[cfg(target_family = "unix")]
+    #[cfg(all(target_family = "unix", feature = "unix"))]
     Unix(UnixClientSocket),
 }
 
 impl ClientSocket {
-    pub async fn send_msg(&mut self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
+    pub async fn send_msg(&mut self, msg: ClientMessage, _wait: bool) -> ConnectionResult<()> {
         match self {
-            ClientSocket::Tcp(sock) => sock.send_msg(msg, wait).await,
+            #[cfg(feature = "tcp")]
+            ClientSocket::Tcp(sock) => sock.send_msg(msg, _wait).await,
+            #[cfg(any(feature = "ws", feature = "wasm"))]
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
-            #[cfg(target_family = "unix")]
+            #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.send_msg(msg).await,
         }
     }
 
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
         match self {
+            #[cfg(feature = "tcp")]
             ClientSocket::Tcp(sock) => sock.receive_msg().await,
+            #[cfg(any(feature = "ws", feature = "wasm"))]
             ClientSocket::Ws(sock) => sock.receive_msg().await,
-            #[cfg(target_family = "unix")]
+            #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.receive_msg().await,
         }
     }
 
     pub async fn close(self) -> ConnectionResult<()> {
         match self {
+            #[cfg(feature = "tcp")]
             ClientSocket::Tcp(tcp_client_socket) => tcp_client_socket.close().await?,
+            #[cfg(any(feature = "ws", feature = "wasm"))]
             ClientSocket::Ws(ws_client_socket) => ws_client_socket.close().await?,
-            #[cfg(target_family = "unix")]
+            #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(unix_client_socket) => unix_client_socket.close().await?,
         }
         Ok(())
@@ -782,13 +804,21 @@ pub async fn try_connect(
     let (disco_tx, disco_rx) = oneshot::channel();
 
     let wb = if tcp {
+        #[cfg(not(feature = "tcp"))]
+        panic!("tcp not supported, binary was compiled without the tcp feature flag");
+        #[cfg(feature = "tcp")]
         connect_tcp(host_addr, disco_tx, config).await?
     } else if unix {
-        #[cfg(not(target_family = "unix"))]
-        panic!("not supported on non-unix operating systems");
-        #[cfg(target_family = "unix")]
+        #[cfg(not(all(target_family = "unix", feature = "unix")))]
+        panic!(
+            "not supported, binary was compile without the unix feature flag or for non-unix operating systems"
+        );
+        #[cfg(all(target_family = "unix", feature = "unix"))]
         connect_unix(url, disco_tx, config).await?
     } else {
+        #[cfg(not(any(feature = "ws", feature = "wasm")))]
+        panic!("websocket not supported, binary was compiled without the ws feature flag");
+        #[cfg(any(feature = "ws", feature = "wasm"))]
         connect_ws(url, disco_tx, config).await?
     };
 
@@ -797,6 +827,7 @@ pub async fn try_connect(
     Ok((wb, disconnected))
 }
 
+#[cfg(any(feature = "ws", feature = "wasm"))]
 async fn connect_ws(
     url: String,
     on_disconnect: oneshot::Sender<()>,
@@ -804,18 +835,28 @@ async fn connect_ws(
 ) -> Result<Worterbuch, ConnectionError> {
     debug!("Connecting to server {url} over websocket …");
 
-    let auth_token = config.auth_token.clone();
-    let mut request = Request::builder()
-        .uri(url)
-        .header("Sec-WebSocket-Protocol", "worterbuch".to_owned())
-        .header("Sec-WebSocket-Key", generate_key());
+    #[cfg(feature = "ws")]
+    let mut websocket = {
+        let auth_token = config.auth_token.clone();
+        let mut request = Request::builder()
+            .uri(url)
+            .header("Sec-WebSocket-Protocol", "worterbuch".to_owned())
+            .header("Sec-WebSocket-Key", generate_key());
 
-    if let Some(auth_token) = auth_token {
-        request = request.header("Authorization", format!("Bearer {auth_token}"));
-    }
-    let request: Request<()> = request.body(())?;
+        if let Some(auth_token) = auth_token {
+            request = request.header("Authorization", format!("Bearer {auth_token}"));
+        }
+        let request: Request<()> = request.body(())?;
 
-    let (mut websocket, _) = connect_async_with_config(request, None, true).await?;
+        #[cfg(feature = "ws")]
+        let (websocket, _) = connect_async_with_config(request, None, true).await?;
+
+        websocket
+    };
+
+    #[cfg(feature = "wasm")]
+    let mut websocket = connect_wasm(url).await?;
+
     debug!("Connected to server.");
 
     let Welcome { client_id, info } = match websocket.next().await {
@@ -974,6 +1015,7 @@ async fn connect_ws(
     }
 }
 
+#[cfg(feature = "tcp")]
 async fn connect_tcp(
     host_addr: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
@@ -1165,7 +1207,7 @@ async fn connect_tcp(
     }
 }
 
-#[cfg(target_family = "unix")]
+#[cfg(all(target_family = "unix", feature = "unix"))]
 async fn connect_unix(
     path: String,
     on_disconnect: oneshot::Sender<()>,

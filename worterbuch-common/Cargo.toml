@@ -10,17 +10,24 @@ license = "AGPL-3.0-or-later"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
+[features]
+default = []
+benchmark = ["random_word"]
+ws = ["tungstenite"]
+wasm = ["tokio-tungstenite-wasm"]
+
 [dependencies]
 tokio = { version = "1.26.0", features = ["sync", "io-util", "time"] }
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
-tungstenite = "0.26.2"
+tungstenite = { version = "0.26.2", optional = true }
 serde_repr = "0.1.16"
-random_word = { version = "0.5.0", features = ["en"] }
+random_word = { version = "0.5.0", features = ["en"], optional = true }
 sha2 = "0.10.8"
 miette = "7.5.0"
 tracing = "0.1.41"
 uuid = "1.15.1"
+tokio-tungstenite-wasm = { version = "0.5.0", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
