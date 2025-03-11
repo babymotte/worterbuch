@@ -2225,6 +2225,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "getrandom 0.3.1",
+ "miette",
  "mio",
  "serde",
  "serde_json",
@@ -2232,6 +2233,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-tungstenite-wasm",
  "tracing",
+ "tracing-subscriber",
  "worterbuch-common",
 ]
 

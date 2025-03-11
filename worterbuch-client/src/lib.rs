@@ -860,6 +860,71 @@ impl Worterbuch {
         Ok(res)
     }
 
+    pub async fn update<T: DeserializeOwned + Serialize, S: Fn() -> T, F: Fn(&mut T)>(
+        &self,
+        key: Key,
+        seed: S,
+        update: F,
+    ) -> ConnectionResult<()> {
+        let f = |mut set: Option<T>| match set.take() {
+            Some(mut it) => {
+                update(&mut it);
+                it
+            }
+            None => {
+                let mut it = seed();
+                update(&mut it);
+                it
+            }
+        };
+
+        self.try_update(key, f, 0).await
+    }
+
+    pub async fn swap<T: DeserializeOwned, V: Serialize, F: Fn(Option<T>) -> V>(
+        &self,
+        key: Key,
+        swap: F,
+    ) -> ConnectionResult<()> {
+        self.try_update(key, swap, 0).await
+    }
+
+    async fn try_update<T: DeserializeOwned, V: Serialize, F: Fn(Option<T>) -> V>(
+        &self,
+        key: Key,
+        transform: F,
+        counter: usize,
+    ) -> ConnectionResult<()> {
+        if counter >= 100 {
+            return Err(ConnectionError::Timeout(
+                "could not update, value keeps being changed by another instance".to_owned(),
+            ));
+        }
+
+        let (new_val, version) = match self.cget::<T>(key.clone()).await? {
+            Some((val, version)) => (transform(Some(val)), version),
+            None => (transform(None), 0),
+        };
+
+        if let Err(e) = self.cset(key.clone(), new_val, version).await {
+            match e {
+                ConnectionError::ServerResponse(Err {
+                    transaction_id: _,
+                    error_code: ErrorCode::CasVersionMismatch,
+                    metadata: _,
+                }) => {
+                    tracing::debug!(
+                        "value has changed in the mean time, re-fetching and trying again"
+                    );
+                    Box::pin(self.try_update(key, transform, counter + 1)).await
+                }
+                e => Err(e),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn send_buffer(&self, delay: Duration) -> SendBuffer {
         SendBuffer::new(self.commands.clone(), delay).await
     }
