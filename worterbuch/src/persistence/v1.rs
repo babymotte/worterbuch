@@ -20,14 +20,14 @@
 use super::*;
 
 pub async fn load(config: &Config) -> Result<Worterbuch> {
-    let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(&config);
+    let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(config);
 
     if !json_path.exists() && !json_temp_path.exists() {
         info!("No persistence file found, starting empty instance.");
         return Ok(Worterbuch::with_config(config.clone()));
     }
 
-    match try_load(&json_path, &sha_path, &config).await {
+    match try_load(&json_path, &sha_path, config).await {
         Ok(worterbuch) => {
             info!("Wörterbuch successfully restored form persistence.");
             Ok(worterbuch)
@@ -35,7 +35,7 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
         Err(e) => {
             warn!("Default persistence file could not be loaded: {e}");
             info!("Restoring Wörterbuch form backup file …");
-            let worterbuch = try_load(&json_temp_path, &sha_temp_path, &config).await?;
+            let worterbuch = try_load(&json_temp_path, &sha_temp_path, config).await?;
             info!("Wörterbuch successfully restored form backup file.");
             Ok(worterbuch)
         }

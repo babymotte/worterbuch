@@ -319,12 +319,12 @@ fn compute_checksum(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     let result = hasher.finalize();
-    hex::encode(&result)
+    hex::encode(result)
 }
 
 fn validate_checksum(data: &[u8], checksum: &str) -> Result<()> {
     let sum = compute_checksum(data);
-    if &sum == checksum {
+    if sum == checksum {
         Ok(())
     } else {
         Err(miette!("checksum did not match"))

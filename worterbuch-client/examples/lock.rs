@@ -44,7 +44,7 @@ async fn add_number(i: usize) -> Result<()> {
         let mut set = wb
             .get(topic!("hello", "world"))
             .await?
-            .unwrap_or_else(|| BTreeSet::new());
+            .unwrap_or_else(BTreeSet::new);
 
         tracing::info!("adding {i}");
 
