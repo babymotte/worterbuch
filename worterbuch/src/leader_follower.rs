@@ -218,6 +218,7 @@ pub async fn process_leader_message(
                     INTERNAL_CLIENT_ID,
                 )
                 .await?;
+            info!("Successfully synced with leader.");
             Ok(true)
         }
         LeaderSyncMessage::Mut(client_write_command) => {
@@ -243,7 +244,7 @@ pub async fn process_leader_message(
 }
 
 pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
-    info!("Registring stdin close handler …");
+    info!("Registering stdin close handler …");
 
     let (tx, rx) = oneshot::channel();
 

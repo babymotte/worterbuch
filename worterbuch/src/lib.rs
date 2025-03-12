@@ -621,6 +621,11 @@ async fn persist(
     persistence_interval: Duration,
     last_persisted: &mut Option<Instant>,
 ) {
+    if !initial_sync_complete {
+        warn!("Skipping persistence, not synced with leader yet.");
+        return;
+    }
+
     let persist = initial_sync_complete
         && match last_persisted {
             Some(last) => last.elapsed() >= persistence_interval,
