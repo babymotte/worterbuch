@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "clap",
  "dotenvy",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "async-stream",
  "futures-core",
