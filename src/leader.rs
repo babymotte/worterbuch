@@ -22,15 +22,10 @@ use super::{
 use crate::{
     Heartbeat, PeerMessage, Vote,
     config::Peers,
-    persist_active_timestamp,
     utils::{listen, send_heartbeat_requests},
 };
 use miette::Result;
-use std::{
-    collections::HashMap,
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
@@ -51,8 +46,6 @@ pub async fn lead(
     let mut buf = [0u8; 65507];
 
     let mut heartbeat_interval = interval(config.heartbeat_interval);
-    let mut leader_timestamp_interval = interval(Duration::from_secs(1));
-
     let mut heartbeat_responses = HashMap::new();
 
     for peer in peers.peer_nodes() {
@@ -79,9 +72,6 @@ pub async fn lead(
                 if !check_heartbeat_responses(&heartbeat_responses, config, peers) {
                     break;
                 }
-            },
-            _ = leader_timestamp_interval.tick() => {
-                persist_active_timestamp(&config.data_dir).await?;
             },
             recv = peers_rx.recv() => if let Some(p) = recv {
                 info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
@@ -116,8 +106,6 @@ pub async fn lead(
             _ = subsys.on_shutdown_requested() => break,
         }
     }
-
-    persist_active_timestamp(&config.data_dir).await?;
 
     proc_manager.stop().await?;
 

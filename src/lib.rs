@@ -28,7 +28,7 @@ use config::load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
 use leader::lead;
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{Result, miette};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;
@@ -165,13 +165,7 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
     Ok(())
 }
 
-const TIMESTAMP_FILE_NAME: &str = ".last.active";
-
-pub async fn persist_active_timestamp(path: &Path) -> Result<()> {
-    let path = path.join(TIMESTAMP_FILE_NAME);
-    File::create(&path).await.into_diagnostic()?;
-    Ok(())
-}
+const TIMESTAMP_FILE_NAME: &str = "last-presisted";
 
 pub async fn load_millis_since_active(path: &Path) -> Option<i64> {
     let path = path.join(TIMESTAMP_FILE_NAME);

@@ -23,16 +23,11 @@ use super::{
 use crate::{
     Heartbeat, HeartbeatRequest, Vote,
     config::Peers,
-    persist_active_timestamp,
     utils::{listen, send_heartbeat_response},
 };
 use miette::Result;
-use std::{net::SocketAddr, ops::ControlFlow, pin::pin, time::Duration};
-use tokio::{
-    net::UdpSocket,
-    select,
-    time::{interval, sleep},
-};
+use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
+use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
 
@@ -51,8 +46,6 @@ pub async fn follow(
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-follower", true);
     proc_manager.restart(cmd(leader_addr, config)).await;
 
-    let mut follower_timestamp_interval = interval(Duration::from_secs(1));
-
     let mut buf = [0u8; 65507];
 
     'outer: loop {
@@ -63,9 +56,6 @@ pub async fn follow(
                 _ = &mut timeout => {
                     info!("Leader heartbeat timed out. Leaving follower mode …");
                     break 'outer;
-                },
-                _ = follower_timestamp_interval.tick() => {
-                    persist_active_timestamp(&config.data_dir).await?;
                 },
                 flow = listen(socket, &mut buf, |msg| async {
                     match msg {
@@ -95,8 +85,6 @@ pub async fn follow(
             }
         }
     }
-
-    persist_active_timestamp(&config.data_dir).await?;
 
     proc_manager.stop().await?;
 
