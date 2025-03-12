@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "clap",
  "dotenvy",
@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.2.1"
+version = "1.2.4"
 dependencies = [
  "miette",
  "random_word",
