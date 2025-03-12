@@ -117,17 +117,11 @@ pub struct Store {
         default = "SubscribersNode::default"
     )]
     subscribers: SubscribersNode,
-    #[serde(skip_serializing, default = "bool::default")]
-    unsaved_changes: bool,
     #[serde(skip_serializing, default = "HashMap::default")]
     locks: HashMap<Uuid, Vec<Vec<RegularKeySegment>>>,
 }
 
 impl Store {
-    pub fn has_unsaved_changes(&self) -> bool {
-        self.unsaved_changes
-    }
-
     pub fn export(&mut self) -> Node {
         Node {
             v: self.data.v.clone(),
@@ -138,8 +132,6 @@ impl Store {
 
     pub fn export_for_persistence(&mut self) -> Self {
         let data = self.export();
-
-        self.unsaved_changes = false;
 
         Self {
             data,
@@ -224,7 +216,6 @@ impl Store {
         .0;
         if removed.is_some() {
             self.len -= 1;
-            self.unsaved_changes = true;
         }
         Ok(removed.map(|it| (it, ls_subscribers)))
     }
@@ -263,9 +254,6 @@ impl Store {
             self.len = 0;
         } else {
             self.len -= matches.len();
-        }
-        if !matches.is_empty() {
-            self.unsaved_changes = true;
         }
         // TODO notify subscribers
         Ok((matches, ls_subscribers))
@@ -680,10 +668,6 @@ impl Store {
             })
             .collect();
 
-        if changed {
-            self.unsaved_changes = true;
-        }
-
         Ok((changed, ls_subscribers))
     }
 
@@ -723,7 +707,6 @@ impl Store {
         let path = Vec::new();
         Store::nmerge(&mut self.data, other.data, None, &mut insertions, &path);
         self.len = Store::ncount_values(&self.data);
-        self.unsaved_changes = true;
         // TODO notify subscribers
         insertions
     }
@@ -891,7 +874,6 @@ impl Store {
     pub(crate) fn reset(&mut self, data: Node) {
         self.data = data;
         self.count_entries();
-        self.unsaved_changes = true;
     }
 }
 

@@ -593,21 +593,13 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
-    pub fn export_for_persistence(
-        &mut self,
-        tx: oneshot::Sender<Option<(Value, GraveGoods, LastWill)>>,
-    ) {
-        if !self.store.has_unsaved_changes() {
-            tx.send(None).ok();
-            return;
-        }
-
+    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<(Value, GraveGoods, LastWill)>) {
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
         spawn(async move {
             let value = json!(store);
-            tx.send(Some((value, grave_goods, last_will))).ok();
+            tx.send((value, grave_goods, last_will)).ok();
         });
     }
 

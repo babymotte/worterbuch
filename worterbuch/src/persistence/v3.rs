@@ -48,29 +48,23 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
     ) = file_paths(config, true).await?;
 
     debug!("Exporting database state …");
-    match worterbuch.export().await? {
-        Some((json, grave_goods, last_will)) => {
-            debug!("Exporting database state done.");
+    let (json, grave_goods, last_will) = worterbuch.export().await?;
+    debug!("Exporting database state done.");
 
-            let json = json.to_string();
-            write_and_check(json.as_bytes(), &store_path, &store_path_checksum).await?;
+    let json = json.to_string();
+    write_and_check(json.as_bytes(), &store_path, &store_path_checksum).await?;
 
-            let json = serde_json::to_string(&GraveGoodsLastWill {
-                grave_goods,
-                last_will,
-            })
-            .into_diagnostic()?;
-            write_and_check(
-                json.as_bytes(),
-                &grave_goods_last_will_path,
-                &grave_goods_last_will_path_checksum,
-            )
-            .await?;
-        }
-        None => {
-            debug!("No unsaved changes, skipping export.");
-        }
-    }
+    let json = serde_json::to_string(&GraveGoodsLastWill {
+        grave_goods,
+        last_will,
+    })
+    .into_diagnostic()?;
+    write_and_check(
+        json.as_bytes(),
+        &grave_goods_last_will_path,
+        &grave_goods_last_will_path_checksum,
+    )
+    .await?;
 
     File::create(&last_persisted).await.into_diagnostic()?;
 
