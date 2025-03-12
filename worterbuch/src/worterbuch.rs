@@ -765,7 +765,7 @@ impl Worterbuch {
         trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
         for subscriber in filtered_subscribers {
             if subscriber.is_pstate_subscriber() {
-                let kvps = vec![(key.clone(), value.clone()).into()];
+                let kvps = vec![KeyValuePair::of(key, value)];
                 if let Err(e) = if deleted {
                     subscriber.send_pstate(PStateEvent::Deleted(kvps)).await
                 } else {

@@ -37,10 +37,10 @@ type CanDelete = bool;
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
 enum ValueEntry {
-    Plain(Value),
     Cas(Value, u64),
+    #[serde(untagged)]
+    Plain(Value),
 }
 
 impl AsRef<Value> for ValueEntry {
@@ -319,7 +319,11 @@ impl Store {
         if relative_path.is_empty() {
             if let Some(value) = node.v.take() {
                 let key = traversed_path.join("/");
-                matches.push((key, value).into());
+                let value = match value {
+                    ValueEntry::Plain(it) => it,
+                    ValueEntry::Cas(it, _) => it,
+                };
+                matches.push(KeyValuePair::new(key, value));
             }
             return Ok(node.t.is_empty() && node.lock.is_none());
         }
@@ -423,7 +427,11 @@ impl Store {
         if remaining_path.is_empty() {
             if let Some(value) = &node.v {
                 let key = traversed_path.join("/");
-                matches.push((key, value.to_owned()).into());
+                let value = match value {
+                    ValueEntry::Plain(it) => it,
+                    ValueEntry::Cas(it, _) => it,
+                };
+                matches.push(KeyValuePair::new(key, value.to_owned()));
             }
 
             return Ok(());
@@ -440,7 +448,11 @@ impl Store {
 
                 if let Some(value) = &node.v {
                     let key = traversed_path.join("/");
-                    matches.push((key, value.to_owned()).into());
+                    let value = match value {
+                        ValueEntry::Plain(it) => it,
+                        ValueEntry::Cas(it, _) => it,
+                    };
+                    matches.push(KeyValuePair::new(key, value.to_owned()));
                 }
 
                 for (key, node) in &node.t {
@@ -955,48 +967,48 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/b".to_owned(), json!("1")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/c".to_owned(), json!("2")))
         );
 
         let res = store.get_matches(&key_segs("trolo/?/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a/b".to_owned(), json!("3")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b".to_owned(), json!("4")))
         );
 
         let res = store.get_matches(&key_segs("?/a/b")).unwrap();
         assert_eq!(res.len(), 2);
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/b".to_owned(), json!("1")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a/b".to_owned(), json!("3")))
         );
 
         let res = store.get_matches(&key_segs("?/?/b")).unwrap();
         assert_eq!(res.len(), 3);
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/b".to_owned(), json!("1")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a/b".to_owned(), json!("3")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b".to_owned(), json!("4")))
         );
     }
 
@@ -1021,57 +1033,57 @@ mod test {
         assert_eq!(res.len(), 2);
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/b".to_owned(), json!("1")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/c".to_owned(), json!("2")))
         );
 
         let res = store.get_matches(&key_segs("trolo/#")).unwrap();
         assert_eq!(res.len(), 4);
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a".to_owned(), json!("0")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a".to_owned(), json!("0")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a/b".to_owned(), json!("3")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b".to_owned(), json!("4")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b/d".to_owned(), json!("5")))
         );
 
         let res = store.get_matches(&key_segs("#")).unwrap();
         assert_eq!(res.len(), 6);
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a".to_owned(), json!("0")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a".to_owned(), json!("0")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/b".to_owned(), json!("1")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/b".to_owned(), json!("1")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("test/a/c".to_owned(), json!("2")).into())
+                .any(|e| e == &KeyValuePair::of("test/a/c".to_owned(), json!("2")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/a/b".to_owned(), json!("3")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/a/b".to_owned(), json!("3")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b".to_owned(), json!("4")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b".to_owned(), json!("4")))
         );
         assert!(
             res.iter()
-                .any(|e| e == &("trolo/c/b/d".to_owned(), json!("5")).into())
+                .any(|e| e == &KeyValuePair::of("trolo/c/b/d".to_owned(), json!("5")))
         );
     }
 
@@ -1315,5 +1327,20 @@ mod test {
         assert_eq!(store.get(&path), None);
         assert_eq!(store.get(&path2), None);
         assert_eq!(store.get(&path3), None);
+    }
+
+    #[test]
+    fn cas_values_are_serde_roundtrippable() {
+        let val = ValueEntry::Cas(json!(123), 1);
+
+        // Value
+        let json = json!(val);
+        let deserialized = serde_json::from_value(json).unwrap();
+        assert_eq!(val, deserialized);
+
+        // String
+        let json = json!(val).to_string();
+        let deserialized = serde_json::from_str(&json).unwrap();
+        assert_eq!(val, deserialized);
     }
 }

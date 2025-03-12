@@ -397,7 +397,7 @@ mod test {
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
-            event: PStateEvent::KeyValuePairs(vec![("$SYS/clients", 2).into()]),
+            event: PStateEvent::KeyValuePairs(vec![KeyValuePair::of("$SYS/clients", 2)]),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","keyValuePairs":[{"key":"$SYS/clients","value":2}]}"#;
@@ -407,7 +407,7 @@ mod test {
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
-            event: PStateEvent::Deleted(vec![("$SYS/clients", 2).into()]),
+            event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;
@@ -420,7 +420,7 @@ mod test {
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
-            event: PStateEvent::KeyValuePairs(vec![("$SYS/clients", 2).into()]),
+            event: PStateEvent::KeyValuePairs(vec![KeyValuePair::of("$SYS/clients", 2)]),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","keyValuePairs":[{"key":"$SYS/clients","value":2}]}"#;
@@ -430,7 +430,7 @@ mod test {
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
-            event: PStateEvent::Deleted(vec![("$SYS/clients", 2).into()]),
+            event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;

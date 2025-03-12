@@ -199,12 +199,12 @@ impl From<KeyValuePair> for Value {
 }
 
 impl KeyValuePair {
-    pub fn new<S: Serialize>(key: String, value: S) -> Self {
-        (key, value).into()
+    pub fn new(key: String, value: Value) -> Self {
+        KeyValuePair { key, value }
     }
 
-    pub fn of<S: Serialize>(key: String, value: S) -> Self {
-        KeyValuePair::new(key, value)
+    pub fn of<S: Serialize>(key: impl Into<String>, value: S) -> Self {
+        KeyValuePair::new(key.into(), json!(value))
     }
 }
 
