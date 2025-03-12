@@ -46,10 +46,7 @@ use leader_follower::{
 use miette::{IntoDiagnostic, Result, miette};
 use serde_json::{Value, json};
 use server::common::{CloneableWbApi, WbFunction};
-use std::{
-    error::Error,
-    time::{Duration, Instant},
-};
+use std::error::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
@@ -579,9 +576,7 @@ async fn run_in_follower_mode(
         .await?;
 
     // TODO configure lower persistence interval for follower
-    let persistence_interval = config.persistence_interval;
-    let mut last_persisted: Option<Instant> = None;
-    let mut interval = interval(config.persistence_interval);
+    let mut persistence_interval = interval(config.persistence_interval);
     let mut initial_sync_complete = false;
 
     let stream = TcpStream::connect(leader_addr).await.into_diagnostic()?;
@@ -592,9 +587,12 @@ async fn run_in_follower_mode(
         select! {
             recv = receive_msg(&mut lines) => match recv {
                 Ok(Some(msg)) => {
-                    initial_sync_complete |= process_leader_message(msg, worterbuch).await?;
-
-                    persist(worterbuch, &config, initial_sync_complete,  persistence_interval, &mut last_persisted).await;
+                    let initial_sync = process_leader_message(msg, worterbuch).await?;
+                    if initial_sync {
+                        initial_sync_complete = true;
+                        persistence_interval.reset();
+                        persistence::synchronous(worterbuch, &config).await?;
+                    }
                 },
                 Ok(None) => break,
                 Err(e) => {
@@ -606,39 +604,18 @@ async fn run_in_follower_mode(
                 Some(function) => process_api_call_as_follower(worterbuch, function).await,
                 None => break,
             },
-            _ = interval.tick() => persist(worterbuch, &config, initial_sync_complete,  persistence_interval, &mut last_persisted).await,
+            _ = persistence_interval.tick() => {
+                if initial_sync_complete {
+                    persistence::synchronous(worterbuch, &config).await?;
+                } else {
+                    warn!("Skipping persistence, not synced with leader yet!");
+                }
+            },
             _ = subsys.on_shutdown_requested() => break,
         }
     }
 
     shutdown(subsys, worterbuch, config, web_server, None, None).await
-}
-
-async fn persist(
-    worterbuch: &mut Worterbuch,
-    config: &Config,
-    initial_sync_complete: bool,
-    persistence_interval: Duration,
-    last_persisted: &mut Option<Instant>,
-) {
-    if !initial_sync_complete {
-        warn!("Skipping persistence, not synced with leader yet.");
-        return;
-    }
-
-    let persist = initial_sync_complete
-        && match last_persisted {
-            Some(last) => last.elapsed() >= persistence_interval,
-            None => true,
-        };
-
-    if persist {
-        if let Err(e) = persistence::synchronous(worterbuch, config).await {
-            warn!("Could not persist state: {e}");
-        } else {
-            *last_persisted = Some(Instant::now());
-        }
-    }
 }
 
 async fn shutdown(
