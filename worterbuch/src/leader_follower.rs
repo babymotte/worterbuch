@@ -205,7 +205,7 @@ async fn forward_events_to_follower(
 pub async fn process_leader_message(
     msg: LeaderSyncMessage,
     worterbuch: &mut Worterbuch,
-) -> Result<()> {
+) -> Result<bool> {
     trace!("Received leader sync message: {msg:?}");
 
     match msg {
@@ -218,26 +218,28 @@ pub async fn process_leader_message(
                     INTERNAL_CLIENT_ID,
                 )
                 .await?;
+            Ok(true)
         }
-        LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
-            ClientWriteCommand::Set(key, value) => {
-                worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
+        LeaderSyncMessage::Mut(client_write_command) => {
+            match client_write_command {
+                ClientWriteCommand::Set(key, value) => {
+                    worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
+                }
+                ClientWriteCommand::CSet(key, value, versions) => {
+                    worterbuch
+                        .cset(key, value, versions, INTERNAL_CLIENT_ID)
+                        .await?;
+                }
+                ClientWriteCommand::Delete(key) => {
+                    worterbuch.delete(key, INTERNAL_CLIENT_ID).await?;
+                }
+                ClientWriteCommand::PDelete(pattern) => {
+                    worterbuch.pdelete(pattern, INTERNAL_CLIENT_ID).await?;
+                }
             }
-            ClientWriteCommand::CSet(key, value, versions) => {
-                worterbuch
-                    .cset(key, value, versions, INTERNAL_CLIENT_ID)
-                    .await?;
-            }
-            ClientWriteCommand::Delete(key) => {
-                worterbuch.delete(key, INTERNAL_CLIENT_ID).await?;
-            }
-            ClientWriteCommand::PDelete(pattern) => {
-                worterbuch.pdelete(pattern, INTERNAL_CLIENT_ID).await?;
-            }
-        },
+            Ok(false)
+        }
     }
-
-    Ok(())
 }
 
 pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
