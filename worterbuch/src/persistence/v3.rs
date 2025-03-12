@@ -44,6 +44,7 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
         store_path_checksum,
         grave_goods_last_will_path,
         grave_goods_last_will_path_checksum,
+        last_persisted,
     ) = file_paths(config, true).await?;
 
     debug!("Exporting database state …");
@@ -71,6 +72,8 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
         }
     }
 
+    File::create(&last_persisted).await.into_diagnostic()?;
+
     Ok(())
 }
 
@@ -80,6 +83,7 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
         store_path_checksum,
         grave_goods_last_will_path,
         grave_goods_last_will_path_checksum,
+        last_persisted,
     ) = file_paths(config, true).await?;
 
     debug!("Exporting database state …");
@@ -100,6 +104,8 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
         &grave_goods_last_will_path_checksum,
     )
     .await?;
+
+    File::create(&last_persisted).await.into_diagnostic()?;
 
     Ok(())
 }
@@ -173,6 +179,7 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
         store_path_checksum,
         grave_goods_last_will_path,
         grave_goods_last_will_path_checksum,
+        _,
     ) = file_paths(config, false).await?;
 
     let mut wb = match try_load(&store_path, &store_path_checksum, config).await {
@@ -182,7 +189,7 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
                 "Could not load persistence file {}: {e}",
                 store_path.to_string_lossy()
             );
-            let (store_path, store_path_checksum, _, _) = file_paths(config, true).await?;
+            let (store_path, store_path_checksum, _, _, _) = file_paths(config, true).await?;
             info!(
                 "Trying to load persistence file {} …",
                 store_path.to_string_lossy()
@@ -203,7 +210,7 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
                 "Could not load persistence file {}: {e}",
                 grave_goods_last_will_path.to_string_lossy()
             );
-            let (_, _, grave_goods_last_will_path, grave_goods_last_will_path_checksum) =
+            let (_, _, grave_goods_last_will_path, grave_goods_last_will_path_checksum, _) =
                 file_paths(config, true).await?;
             info!(
                 "Trying to load persistence file {} …",
@@ -251,7 +258,7 @@ async fn read_json_from_file(path: &Path, checksum: &Path) -> Result<String, mie
 pub(crate) async fn file_paths(
     config: &Config,
     write: bool,
-) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
+) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
     let dir = PathBuf::from(&config.data_dir);
 
     let mut toggle_path = dir.clone();
@@ -262,7 +269,8 @@ pub(crate) async fn file_paths(
     let mut store_path = dir.clone();
     let mut store_path_checksum = dir.clone();
     let mut grave_goods_last_will_path = dir.clone();
-    let mut grave_goods_last_will_path_checksum = dir;
+    let mut grave_goods_last_will_path_checksum = dir.clone();
+    let mut last_persisted = dir;
 
     if main {
         store_path.push("store.a.json");
@@ -275,12 +283,14 @@ pub(crate) async fn file_paths(
         grave_goods_last_will_path.push("gglw.b.json");
         grave_goods_last_will_path_checksum.push("gglw.b.json.sha256");
     }
+    last_persisted.push("last-presisted");
 
     Ok((
         store_path,
         store_path_checksum,
         grave_goods_last_will_path,
         grave_goods_last_will_path_checksum,
+        last_persisted,
     ))
 }
 
