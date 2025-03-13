@@ -40,22 +40,22 @@ use crate::stats::track_stats;
 pub use crate::worterbuch::*;
 pub use config::*;
 use leader_follower::{
-    ClientWriteCommand, Mode, StateSync, process_leader_message, run_cluster_sync_port,
-    shutdown_on_stdin_close,
+    ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, initial_sync, process_leader_message,
+    run_cluster_sync_port, shutdown_on_stdin_close,
 };
 use miette::{IntoDiagnostic, Result, miette};
+use persistence::PERSISTENCE_LOCKED;
 use serde_json::{Value, json};
 use server::common::{CloneableWbApi, WbFunction};
-use std::error::Error;
+use std::{error::Error, sync::atomic::Ordering};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
     select,
     sync::{mpsc, oneshot},
-    time::interval,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 use worterbuch_common::{
     KeySegment, PStateEvent, ProtocolVersion, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
@@ -587,25 +587,38 @@ async fn run_in_follower_mode(
         )
         .await?;
 
-    // TODO configure lower persistence interval for follower
-    let mut persistence_interval = interval(config.persistence_interval);
-    let mut initial_sync_complete = false;
+    let mut persistence_interval = config.persistence_interval();
 
     let stream = TcpStream::connect(leader_addr).await.into_diagnostic()?;
 
     let mut lines = BufReader::new(stream).lines();
 
+    info!("Waiting for initial sync message from leader …");
+    select! {
+        recv = receive_msg(&mut lines) => match recv {
+            Ok(Some(msg)) => {
+                if let LeaderSyncMessage::Init(state) = msg {
+                    initial_sync(state, worterbuch).await?;
+                    PERSISTENCE_LOCKED.store(false, Ordering::Release);
+                    persistence_interval.reset();
+                    persistence::synchronous(worterbuch, &config).await?;
+                } else {
+                    return Err(miette!("first message from leader is supposed to be the initial sync, but it wasn't"));
+                }
+            },
+            Ok(None) => return Err(miette!("connection to leader closed before initial sync")),
+            Err(e) => {
+                return Err(miette!("error receiving update from leader: {e}"));
+            }
+        },
+        _ = subsys.on_shutdown_requested() => return Err(miette!("shut down before initial sync")),
+    }
+    info!("Successfully synced with leader.");
+
     loop {
         select! {
             recv = receive_msg(&mut lines) => match recv {
-                Ok(Some(msg)) => {
-                    let initial_sync = process_leader_message(msg, worterbuch).await?;
-                    if initial_sync {
-                        initial_sync_complete = true;
-                        persistence_interval.reset();
-                        persistence::synchronous(worterbuch, &config).await?;
-                    }
-                },
+                Ok(Some(msg)) => process_leader_message(msg, worterbuch).await?,
                 Ok(None) => break,
                 Err(e) => {
                     error!("Error receiving update from leader: {e}");
@@ -617,11 +630,8 @@ async fn run_in_follower_mode(
                 None => break,
             },
             _ = persistence_interval.tick() => {
-                if initial_sync_complete {
-                    persistence::synchronous(worterbuch, &config).await?;
-                } else {
-                    warn!("Skipping persistence, not synced with leader yet!");
-                }
+                info!("Follower persistence interval triggered");
+                persistence::synchronous(worterbuch, &config).await?;
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -644,11 +654,9 @@ async fn shutdown(
 
     shutdown_servers(web_server, tcp_server, unix_socket).await;
 
-    info!("Applying grave goods and last wills …");
-
-    worterbuch.apply_all_grave_goods_and_last_wills().await;
-
     if config.use_persistence {
+        info!("Applying grave goods and last wills …");
+        worterbuch.apply_all_grave_goods_and_last_wills().await;
         info!("Waiting for persistence hook to complete …");
         persistence::synchronous(worterbuch, &config).await?;
         info!("Shutdown persistence hook complete.");

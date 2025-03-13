@@ -24,7 +24,7 @@ pub(crate) async fn periodic(
     config: Config,
     subsys: SubsystemHandle,
 ) -> Result<()> {
-    let mut interval = interval(config.persistence_interval);
+    let mut interval = config.persistence_interval();
 
     loop {
         select! {
@@ -39,6 +39,17 @@ pub(crate) async fn periodic(
 }
 
 async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()> {
+    debug!("Exporting database state …");
+    let (json, grave_goods, last_will) = worterbuch.export().await?;
+    debug!("Exporting database state done.");
+
+    // checking AFTER export, since the interval may tick before the initial load is complete, but PERSISTENCE_LOCKED
+    // is only set to false after the initial load. Export will however never complete before the initial load is done,
+    // so this prevents random Errors
+    if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
+        return Err(miette!("store is locked"));
+    }
+
     let (
         store_path,
         store_path_checksum,
@@ -46,10 +57,6 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
         grave_goods_last_will_path_checksum,
         last_persisted,
     ) = file_paths(config, true).await?;
-
-    debug!("Exporting database state …");
-    let (json, grave_goods, last_will) = worterbuch.export().await?;
-    debug!("Exporting database state done.");
 
     let json = json.to_string();
     write_and_check(json.as_bytes(), &store_path, &store_path_checksum).await?;
@@ -72,6 +79,10 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
 }
 
 pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) -> Result<()> {
+    if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
+        return Err(miette!("store is locked"));
+    }
+
     let (
         store_path,
         store_path_checksum,

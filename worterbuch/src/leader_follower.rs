@@ -21,7 +21,7 @@ use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     store::{Node, ValueEntry},
 };
-use miette::{Error, IntoDiagnostic, Result};
+use miette::{Error, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -205,45 +205,45 @@ async fn forward_events_to_follower(
     info!("TCP connection to follower {} closed.", follower);
 }
 
+pub async fn initial_sync(state_sync: StateSync, worterbuch: &mut Worterbuch) -> Result<()> {
+    worterbuch.reset_store(state_sync.0);
+    worterbuch
+        .set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+            json!(Mode::Follower),
+            INTERNAL_CLIENT_ID,
+        )
+        .await?;
+    Ok(())
+}
+
 pub async fn process_leader_message(
     msg: LeaderSyncMessage,
     worterbuch: &mut Worterbuch,
-) -> Result<bool> {
+) -> Result<()> {
     trace!("Received leader sync message: {msg:?}");
 
     match msg {
-        LeaderSyncMessage::Init(state_sync) => {
-            worterbuch.reset_store(state_sync.0);
-            worterbuch
-                .set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
-                    json!(Mode::Follower),
-                    INTERNAL_CLIENT_ID,
-                )
-                .await?;
-            info!("Successfully synced with leader.");
-            Ok(true)
-        }
-        LeaderSyncMessage::Mut(client_write_command) => {
-            match client_write_command {
-                ClientWriteCommand::Set(key, value) => {
-                    worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
-                }
-                ClientWriteCommand::CSet(key, value, versions) => {
-                    worterbuch
-                        .cset(key, value, versions, INTERNAL_CLIENT_ID)
-                        .await?;
-                }
-                ClientWriteCommand::Delete(key) => {
-                    worterbuch.delete(key, INTERNAL_CLIENT_ID).await?;
-                }
-                ClientWriteCommand::PDelete(pattern) => {
-                    worterbuch.pdelete(pattern, INTERNAL_CLIENT_ID).await?;
-                }
+        LeaderSyncMessage::Init(_) => return Err(miette!("already synced")),
+        LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
+            ClientWriteCommand::Set(key, value) => {
+                worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;
             }
-            Ok(false)
-        }
+            ClientWriteCommand::CSet(key, value, versions) => {
+                worterbuch
+                    .cset(key, value, versions, INTERNAL_CLIENT_ID)
+                    .await?;
+            }
+            ClientWriteCommand::Delete(key) => {
+                worterbuch.delete(key, INTERNAL_CLIENT_ID).await?;
+            }
+            ClientWriteCommand::PDelete(pattern) => {
+                worterbuch.pdelete(pattern, INTERNAL_CLIENT_ID).await?;
+            }
+        },
     }
+
+    Ok(())
 }
 
 pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {

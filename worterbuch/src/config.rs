@@ -20,6 +20,7 @@
 use crate::license::{License, load_license};
 use clap::Parser;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
+use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use worterbuch_common::{
     AuthToken, Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
@@ -243,5 +244,14 @@ impl Config {
             }
             Err(e) => Err(ConfigError::InvalidLicense(e.to_string())),
         }
+    }
+
+    pub fn persistence_interval(&self) -> Interval {
+        let mut interval = interval_at(
+            Instant::now() + self.persistence_interval,
+            self.persistence_interval,
+        );
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval
     }
 }

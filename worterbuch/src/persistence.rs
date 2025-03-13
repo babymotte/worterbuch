@@ -31,11 +31,17 @@ use tokio::{
     fs::{self, File, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
     select,
-    time::interval,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, info, warn};
 use worterbuch_common::{GraveGoods, LastWill};
+
+use lazy_static::lazy_static;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+lazy_static! {
+    pub static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {
@@ -57,7 +63,7 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
 
 pub(crate) async fn load(config: Config) -> Result<Worterbuch> {
     info!("Trying to load v3 persistence file …");
-    match v3::load(&config).await {
+    let wb = match v3::load(&config).await {
         Ok(wb) => Ok(wb),
         Err(e) => {
             warn!("Could not load persistence file: {e}");
@@ -71,5 +77,7 @@ pub(crate) async fn load(config: Config) -> Result<Worterbuch> {
                 }
             }
         }
-    }
+    };
+    PERSISTENCE_LOCKED.store(false, Ordering::Release);
+    wb
 }
