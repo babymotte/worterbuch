@@ -1,8 +1,10 @@
 use super::v0::V0;
 use crate::auth::JwtClaims;
-use tracing::trace;
+use tokio::spawn;
+use tracing::{debug, trace};
 use worterbuch_common::{
-    Ack, CSet, CState, CStateEvent, ClientMessage as CM, Get, Lock, Privilege, ServerMessage,
+    Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, ErrorCode, Get, Lock, Privilege,
+    ServerMessage,
     error::{Context, WorterbuchResult},
 };
 
@@ -52,6 +54,17 @@ impl V1 {
                 {
                     trace!("Locking key for client {} …", self.v0.client_id);
                     self.lock(msg).await?;
+                    trace!("Locking key for client {} done.", self.v0.client_id);
+                }
+            }
+            CM::AcquireLock(msg) => {
+                if self
+                    .v0
+                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                    .await?
+                {
+                    trace!("Locking key for client {} …", self.v0.client_id);
+                    self.acquire_lock(msg).await?;
                     trace!("Locking key for client {} done.", self.v0.client_id);
                 }
             }
@@ -148,6 +161,48 @@ impl V1 {
                 msg.transaction_id
             )
         })?;
+
+        Ok(())
+    }
+
+    pub async fn acquire_lock(&self, msg: Lock) -> WorterbuchResult<()> {
+        let rx = match self
+            .v0
+            .worterbuch
+            .acquire_lock(msg.key, self.v0.client_id)
+            .await
+        {
+            Err(e) => {
+                self.v0.handle_store_error(e, msg.transaction_id).await?;
+                return Ok(());
+            }
+            Ok(rx) => rx,
+        };
+
+        let client = self.v0.tx.clone();
+        let transaction_id = msg.transaction_id;
+        spawn(async move {
+            debug!("Receiving lock confirmation for transaction {transaction_id:?} …");
+
+            match rx.await {
+                Ok(_) => {
+                    client
+                        .send(ServerMessage::Ack(Ack { transaction_id }))
+                        .await
+                        .ok();
+                }
+                Err(_) => {
+                    client
+                        .send(ServerMessage::Err(Err {
+                            transaction_id,
+                            error_code: ErrorCode::LockAcquisitionCancelled,
+                            metadata: "lock acquisition was cancelled".to_owned(),
+                        }))
+                        .await
+                        .ok();
+                }
+            }
+        });
 
         Ok(())
     }

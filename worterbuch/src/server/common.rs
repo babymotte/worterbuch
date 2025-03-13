@@ -110,6 +110,11 @@ pub enum WbFunction {
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
     Lock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
+    AcquireLock(
+        Key,
+        Uuid,
+        oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>,
+    ),
     ReleaseLock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
     Connected(Uuid, Option<SocketAddr>, Protocol),
     Disconnected(Uuid, Option<SocketAddr>),
@@ -207,6 +212,34 @@ impl CloneableWbApi {
             trace!("Sending lock request to core system …");
         }
         let res = self.tx.send(WbFunction::Lock(key, client_id, tx)).await;
+        if trace {
+            trace!("Sending lock request to core system done.");
+        }
+        res?;
+        if trace {
+            trace!("Waiting for response to lock request …");
+        }
+        let res = rx.await;
+        if trace {
+            trace!("Waiting for response to lock request done.");
+        }
+        res?
+    }
+
+    pub async fn acquire_lock(
+        &self,
+        key: Key,
+        client_id: Uuid,
+    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+        let (tx, rx) = oneshot::channel();
+        let trace = client_id != INTERNAL_CLIENT_ID;
+        if trace {
+            trace!("Sending lock request to core system …");
+        }
+        let res = self
+            .tx
+            .send(WbFunction::AcquireLock(key, client_id, tx))
+            .await;
         if trace {
             trace!("Sending lock request to core system done.");
         }

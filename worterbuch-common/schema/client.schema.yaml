@@ -349,6 +349,20 @@ properties:
     required:
       - transactionId
       - key
+  acquireLock:
+    description: A message sent by a client to request a lock on the specified key and to be notified when the lock has been acquired
+    type: object
+    properties:
+      transactionId:
+        description: A unique transaction ID
+        type: integer
+        format: u64
+      key:
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
   releaseLock:
     description: A message sent by a client to request releasing a lock on the specified key
     type: object

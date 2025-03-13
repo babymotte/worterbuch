@@ -19,7 +19,8 @@
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
+use tokio::sync::oneshot;
 use tracing::{debug, warn};
 use uuid::Uuid;
 use worterbuch_common::{
@@ -29,15 +30,69 @@ use worterbuch_common::{
     parse_segments,
 };
 
-type NodeValue = Option<ValueEntry>;
-type Tree = HashMap<RegularKeySegment, Node>;
+type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 type CanDelete = bool;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PersistedStore {
+    pub data: Node<ValueEntry>,
+}
+
+impl From<PersistedStore> for Store {
+    fn from(value: PersistedStore) -> Self {
+        let mut store = Store {
+            data: value.data,
+            ..Default::default()
+        };
+        store.count_entries();
+        store
+    }
+}
+
+struct Lock {
+    holder: Uuid,
+    candidates: VecDeque<(Uuid, Vec<oneshot::Sender<()>>)>,
+}
+
+impl Lock {
+    fn new(client_id: Uuid) -> Self {
+        Lock {
+            holder: client_id,
+            candidates: VecDeque::new(),
+        }
+    }
+
+    async fn release(&mut self, client_id: Uuid) -> (bool, bool) {
+        if client_id == self.holder {
+            if let Some((id, txs)) = self.candidates.pop_front() {
+                self.holder = id;
+                for tx in txs {
+                    tx.send(()).ok();
+                }
+                (true, false)
+            } else {
+                (true, true)
+            }
+        } else {
+            self.candidates.retain(|(c, _)| c != &client_id);
+            (false, false)
+        }
+    }
+
+    async fn queue(&mut self, client_id: Uuid, tx: oneshot::Sender<()>) {
+        if let Some((_, txs)) = self.candidates.iter_mut().find(|(id, _)| id == &client_id) {
+            txs.push(tx);
+        } else {
+            self.candidates.push_back((client_id, vec![tx]));
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-enum ValueEntry {
+pub enum ValueEntry {
     Cas(Value, u64),
     #[serde(untagged)]
     Plain(Value),
@@ -83,15 +138,31 @@ impl StoreError {
 pub type StoreResult<T> = Result<T, StoreError>;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Node {
+pub struct Node<V> {
     #[serde(rename = "v")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    v: NodeValue,
+    v: Option<V>,
     #[serde(rename = "t")]
     #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
-    t: Tree,
-    #[serde(skip_serializing, default = "Option::default")]
-    lock: Option<Uuid>,
+    t: Tree<V>,
+}
+
+impl Default for Node<ValueEntry> {
+    fn default() -> Self {
+        Self {
+            v: Default::default(),
+            t: Default::default(),
+        }
+    }
+}
+
+impl Default for Node<Lock> {
+    fn default() -> Self {
+        Self {
+            v: Default::default(),
+            t: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,40 +177,41 @@ pub struct StoreStats {
     num_entries: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Store {
-    data: Node,
-    #[serde(skip_serializing, default = "usize::default")]
+    data: Node<ValueEntry>,
     len: usize,
-    #[serde(
-        skip_serializing,
-        skip_deserializing,
-        default = "SubscribersNode::default"
-    )]
     subscribers: SubscribersNode,
-    #[serde(skip_serializing, default = "HashMap::default")]
-    locks: HashMap<Uuid, Vec<Vec<RegularKeySegment>>>,
+    locked_keys: HashMap<Uuid, Vec<Box<[RegularKeySegment]>>>,
+    locks: Node<Lock>,
 }
 
 impl Store {
-    pub fn export(&mut self) -> Node {
+    pub fn with_data(data: Node<ValueEntry>) -> Self {
+        let mut store = Self {
+            data,
+            ..Default::default()
+        };
+
+        store.count_entries();
+
+        store
+    }
+
+    pub fn export(&mut self) -> Node<ValueEntry> {
         Node {
             v: self.data.v.clone(),
             t: self.slim_copy_top_level_children(),
-            lock: None,
         }
     }
 
-    pub fn export_for_persistence(&mut self) -> Self {
+    pub fn export_for_persistence(&mut self) -> PersistedStore {
         let data = self.export();
 
-        Self {
-            data,
-            ..Default::default()
-        }
+        PersistedStore { data }
     }
 
-    fn slim_copy_top_level_children(&self) -> Tree {
+    fn slim_copy_top_level_children(&self) -> Tree<ValueEntry> {
         let mut children = Tree::new();
         for (k, v) in &self.data.t {
             if k != SYSTEM_TOPIC_ROOT {
@@ -175,7 +247,7 @@ impl Store {
         }
     }
 
-    fn get_node(&self, path: &[RegularKeySegment]) -> Option<&Node> {
+    fn get_node(&self, path: &[RegularKeySegment]) -> Option<&Node<ValueEntry>> {
         let mut current = &self.data;
 
         for elem in path {
@@ -189,8 +261,8 @@ impl Store {
         Some(current)
     }
 
-    fn get_or_create_node(&mut self, path: Vec<RegularKeySegment>) -> &mut Node {
-        let mut current = &mut self.data;
+    fn get_or_create_lock_node(&mut self, path: Box<[RegularKeySegment]>) -> &mut Node<Lock> {
+        let mut current = &mut self.locks;
 
         for elem in path {
             current = match current.t.entry(elem) {
@@ -218,6 +290,29 @@ impl Store {
             self.len -= 1;
         }
         Ok(removed.map(|it| (it, ls_subscribers)))
+    }
+
+    pub fn delete_lock_node(&mut self, path: &[RegularKeySegment]) {
+        Store::ndelete_lock_nodes(&mut self.locks, path);
+    }
+
+    fn ndelete_lock_nodes(node: &mut Node<Lock>, relative_path: &[RegularKeySegment]) -> CanDelete {
+        if relative_path.is_empty() {
+            node.v.take();
+            return node.t.is_empty();
+        }
+
+        let head = &relative_path[0];
+        let tail = &relative_path[1..];
+
+        if let Entry::Occupied(mut e) = node.t.entry(head.to_owned()) {
+            let next = e.get_mut();
+            let can_delete = Store::ndelete_lock_nodes(next, tail);
+            if can_delete {
+                e.remove();
+            }
+        }
+        node.v.is_none() && node.t.is_empty()
     }
 
     /// retrieve values for a key containing at least one single-level wildcard and possibly a multi-level wildcard
@@ -260,7 +355,7 @@ impl Store {
     }
 
     fn ndelete(
-        node: &mut Node,
+        node: &mut Node<ValueEntry>,
         relative_path: &[RegularKeySegment],
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
@@ -271,7 +366,7 @@ impl Store {
                     ValueEntry::Plain(value) => return Ok((Some(value), node.t.is_empty())),
                     ValueEntry::Cas(value, _) => return Ok((Some(value), node.t.is_empty())),
                 },
-                None => return Ok((None, node.t.is_empty() && node.lock.is_none())),
+                None => return Ok((None, node.t.is_empty())),
             }
         }
 
@@ -296,20 +391,14 @@ impl Store {
                     }
                 }
             }
-            Ok((
-                val,
-                node.v.is_none() && node.t.is_empty() && node.lock.is_none(),
-            ))
+            Ok((val, node.v.is_none() && node.t.is_empty()))
         } else {
-            Ok((
-                None,
-                node.v.is_none() && node.t.is_empty() && node.lock.is_none(),
-            ))
+            Ok((None, node.v.is_none() && node.t.is_empty()))
         }
     }
 
     fn ndelete_matches(
-        node: &mut Node,
+        node: &mut Node<ValueEntry>,
         traversed_path: Vec<&str>,
         matches: &mut KeyValuePairs,
         relative_path: &[KeySegment],
@@ -325,7 +414,7 @@ impl Store {
                 };
                 matches.push(KeyValuePair::new(key, value));
             }
-            return Ok(node.t.is_empty() && node.lock.is_none());
+            return Ok(node.t.is_empty());
         }
 
         let head = &relative_path[0];
@@ -378,11 +467,11 @@ impl Store {
             }
         }
 
-        Ok(node.v.is_none() && node.t.is_empty() && node.lock.is_none())
+        Ok(node.v.is_none() && node.t.is_empty())
     }
 
     fn ndelete_child_matches<'a>(
-        node: &mut Node,
+        node: &mut Node<ValueEntry>,
         id: &'a RegularKeySegment,
         mut traversed_path: Vec<&'a str>,
         matches: &mut KeyValuePairs,
@@ -417,7 +506,7 @@ impl Store {
     }
 
     fn ncollect_matches<'p>(
-        node: &Node,
+        node: &Node<ValueEntry>,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &'p [KeySegment],
         matches: &mut Vec<KeyValuePair>,
@@ -515,7 +604,7 @@ impl Store {
     }
 
     fn ncollect_matching_children<'p>(
-        node: &Node,
+        node: &Node<ValueEntry>,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &'p [KeySegment],
         children: &mut HashSet<RegularKeySegment>,
@@ -714,10 +803,10 @@ impl Store {
         Ok(children.into_iter().collect())
     }
 
-    pub fn merge(&mut self, other: Store) -> Vec<(String, Value)> {
+    pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, Value)> {
         let mut insertions = Vec::new();
         let path = Vec::new();
-        Store::nmerge(&mut self.data, other.data, None, &mut insertions, &path);
+        Store::nmerge(&mut self.data, other, None, &mut insertions, &path);
         self.len = Store::ncount_values(&self.data);
         // TODO notify subscribers
         insertions
@@ -734,8 +823,8 @@ impl Store {
     }
 
     fn nmerge(
-        node: &mut Node,
-        other: Node,
+        node: &mut Node<ValueEntry>,
+        other: Node<ValueEntry>,
         key: Option<&str>,
         insertions: &mut Vec<(String, Value)>,
         path: &[&str],
@@ -761,7 +850,7 @@ impl Store {
         }
     }
 
-    fn ncount_values(node: &Node) -> usize {
+    fn ncount_values<V>(node: &Node<V>) -> usize {
         let mut count = if node.v.is_some() { 1 } else { 0 };
         for child in node.t.values() {
             count += Store::ncount_values(child);
@@ -828,19 +917,23 @@ impl Store {
         removed
     }
 
-    pub fn lock(&mut self, client_id: Uuid, path: Vec<RegularKeySegment>) -> WorterbuchResult<()> {
-        let node = self.get_or_create_node(path.clone());
-        match node.lock {
-            Some(id) => {
-                if client_id == id {
+    pub fn lock(
+        &mut self,
+        client_id: Uuid,
+        path: Box<[RegularKeySegment]>,
+    ) -> WorterbuchResult<()> {
+        let node = self.get_or_create_lock_node(path.clone());
+        match &mut node.v {
+            Some(lock) => {
+                if client_id == lock.holder {
                     debug!("Client {client_id} already holds the lock on {path:?}");
                 } else {
-                    return Err(WorterbuchError::KeyIsLocked(path.join("/"), client_id));
+                    return Err(WorterbuchError::KeyIsLocked(path.join("/")));
                 }
             }
             None => {
-                node.lock = Some(client_id);
-                let paths = match self.locks.entry(client_id) {
+                node.v = Some(Lock::new(client_id));
+                let paths = match self.locked_keys.entry(client_id) {
                     Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
                     Entry::Vacant(vacant_entry) => vacant_entry.insert(Vec::new()),
                 };
@@ -851,29 +944,58 @@ impl Store {
         Ok(())
     }
 
-    pub fn unlock_all(&mut self, client_id: Uuid) {
-        if let Some(paths) = self.locks.remove(&client_id) {
+    pub async fn acquire_lock(
+        &mut self,
+        client_id: Uuid,
+        path: Box<[RegularKeySegment]>,
+    ) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        let node = self.get_or_create_lock_node(path.clone());
+        match &mut node.v {
+            Some(lock) => {
+                if client_id == lock.holder {
+                    debug!("Client {client_id} already holds the lock on {path:?}");
+                    tx.send(()).ok();
+                } else {
+                    lock.queue(client_id, tx).await;
+                }
+            }
+            None => {
+                node.v = Some(Lock::new(client_id));
+                tx.send(()).ok();
+            }
+        }
+
+        let paths = match self.locked_keys.entry(client_id) {
+            Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
+            Entry::Vacant(vacant_entry) => vacant_entry.insert(Vec::new()),
+        };
+        paths.push(path);
+
+        rx
+    }
+
+    pub async fn unlock_all(&mut self, client_id: Uuid) {
+        if let Some(paths) = self.locked_keys.remove(&client_id) {
             for path in paths {
-                self.unlock(client_id, path).ok();
+                self.unlock(client_id, path).await.ok();
             }
         }
     }
 
-    pub fn unlock(
+    pub async fn unlock(
         &mut self,
         client_id: Uuid,
-        path: Vec<RegularKeySegment>,
+        path: Box<[RegularKeySegment]>,
     ) -> WorterbuchResult<()> {
-        let node = self.get_or_create_node(path.clone());
-        if let Some(lock) = node.lock.take() {
-            if lock == client_id {
-                if node.t.is_empty() && node.v.is_none() {
-                    self.delete(&path).ok();
-                }
-            } else {
-                debug!("Node {path:?} locked by client {lock}, not {client_id}.");
-                node.lock = Some(lock);
-                return Err(WorterbuchError::KeyIsLocked(path.join("/"), lock));
+        let node = self.get_or_create_lock_node(path.clone());
+
+        if let Some(lock) = &mut node.v {
+            let (was_holder, is_now_unlocked) = lock.release(client_id).await;
+            if !was_holder {
+                return Err(WorterbuchError::KeyIsLocked(path.join("/")));
+            } else if is_now_unlocked {
+                self.delete_lock_node(&path);
             }
         } else {
             warn!("Node {path:?} is not locked.");
@@ -883,7 +1005,7 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn reset(&mut self, data: Node) {
+    pub(crate) fn reset(&mut self, data: Node<ValueEntry>) {
         self.data = data;
         self.count_entries();
     }
@@ -909,8 +1031,8 @@ mod test {
     use uuid::Uuid;
     use worterbuch_common::parse_segments;
 
-    fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
-        parse_segments(key).unwrap()
+    fn reg_key_segs(key: &str) -> Box<[RegularKeySegment]> {
+        parse_segments(key).unwrap().into()
     }
 
     fn key_segs(key: &str) -> Vec<KeySegment> {
@@ -1253,15 +1375,15 @@ mod test {
         assert!(store.lock(client_2, path).is_err());
     }
 
-    #[test]
-    fn lock_can_be_re_acquired_after_unlock() {
+    #[tokio::test]
+    async fn lock_can_be_re_acquired_after_unlock() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let client_1 = Uuid::new_v4();
         let client_2 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path.clone()).is_err());
-        store.unlock(client_1, path.clone()).unwrap();
+        store.unlock(client_1, path.clone()).await.unwrap();
         assert!(store.lock(client_2, path).is_ok());
     }
 
@@ -1287,26 +1409,26 @@ mod test {
         assert_eq!(store.get(&path), None);
     }
 
-    #[test]
-    fn unlocking_a_key_does_not_delete_its_value() {
+    #[tokio::test]
+    async fn unlocking_a_key_does_not_delete_its_value() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone()).unwrap();
+        store.unlock(client_1, path.clone()).await.unwrap();
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
 
-    #[test]
-    fn unlocking_a_key_does_not_delete_its_sub_tree() {
+    #[tokio::test]
+    async fn unlocking_a_key_does_not_delete_its_sub_tree() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let path2 = reg_key_segs("hello/cas/test");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path2, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone()).unwrap();
+        store.unlock(client_1, path.clone()).await.unwrap();
         assert_eq!(store.get(&path2), Some(&json!("hello")));
     }
 

@@ -28,7 +28,6 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
 };
-use uuid::Uuid;
 
 #[derive(Debug, Diagnostic)]
 pub enum ConfigError {
@@ -137,7 +136,7 @@ pub enum WorterbuchError {
     Cas,
     CasVersionMismatch,
     NotImplemented,
-    KeyIsLocked(Key, Uuid),
+    KeyIsLocked(Key),
     KeyIsNotLocked(Key),
 }
 
@@ -210,8 +209,8 @@ impl fmt::Display for WorterbuchError {
                     "This function is not implemented in the negotiated protocol version",
                 )
             }
-            WorterbuchError::KeyIsLocked(key, client) => {
-                write!(f, "Key {key} is locked by client {client}",)
+            WorterbuchError::KeyIsLocked(key) => {
+                write!(f, "Key {key} is locked by another client",)
             }
             WorterbuchError::KeyIsNotLocked(key) => {
                 write!(f, "Key {key} is not locked",)
@@ -405,7 +404,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::Cas => ErrorCode::Cas,
             WorterbuchError::CasVersionMismatch => ErrorCode::CasVersionMismatch,
             WorterbuchError::NotImplemented => ErrorCode::NotImplemented,
-            WorterbuchError::KeyIsLocked(_, _) => ErrorCode::KeyIsLocked,
+            WorterbuchError::KeyIsLocked(_) => ErrorCode::KeyIsLocked,
             WorterbuchError::KeyIsNotLocked(_) => ErrorCode::KeyIsNotLocked,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }

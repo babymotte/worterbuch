@@ -220,6 +220,7 @@ impl V0 {
             | CM::CSet(_)
             | CM::Transform(_)
             | CM::Lock(_)
+            | CM::AcquireLock(_)
             | CM::ReleaseLock(_) => {
                 return Err(WorterbuchError::NotImplemented);
             }

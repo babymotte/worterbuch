@@ -72,7 +72,7 @@ fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
             Err(poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY))
         }
 
-        WorterbuchError::KeyIsLocked(_, _)
+        WorterbuchError::KeyIsLocked(_)
         | WorterbuchError::Cas
         | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::CONFLICT)),
 

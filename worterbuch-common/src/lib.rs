@@ -110,6 +110,7 @@ pub enum ErrorCode {
     NotImplemented = 0b00010011,
     KeyIsLocked = 0b00010100,
     KeyIsNotLocked = 0b00010101,
+    LockAcquisitionCancelled = 0b00010110,
     Other = 0b11111111,
 }
 

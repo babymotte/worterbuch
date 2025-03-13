@@ -20,7 +20,7 @@
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
-    store::{Node, Store, StoreStats},
+    store::{Node, PersistedStore, Store, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
 use hashlink::LinkedHashMap;
@@ -270,9 +270,9 @@ impl Worterbuch {
     }
 
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
-        let mut store: Store = from_str(json)
+        let store: PersistedStore = from_str(json)
             .map_err(|e| WorterbuchError::SerDeError(e, "Error parsing store JSON".to_owned()))?;
-        store.count_entries();
+        let store: Store = store.into();
         Ok(Worterbuch {
             config,
             store,
@@ -585,7 +585,7 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    pub fn export(&mut self) -> (Node, GraveGoods, LastWill) {
+    pub fn export(&mut self) -> (Node<ValueEntry>, GraveGoods, LastWill) {
         let store = self.store.export();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
@@ -605,11 +605,11 @@ impl Worterbuch {
 
     pub async fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
         debug!("Parsing store data …");
-        let store: Store = from_str(json).map_err(|e| {
+        let store: PersistedStore = from_str(json).map_err(|e| {
             WorterbuchError::SerDeError(e, "Error parsing JSON during import".to_owned())
         })?;
         debug!("Done. Merging nodes …");
-        let imported_values = self.store.merge(store);
+        let imported_values = self.store.merge(store.data);
 
         for (key, val) in &imported_values {
             let path: Vec<RegularKeySegment> = parse_segments(key)?;
@@ -863,21 +863,29 @@ impl Worterbuch {
     }
 
     pub fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
-        check_for_read_only_key(&key, client_id)?;
-
-        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         self.store.lock(client_id, path)?;
 
         Ok(())
     }
 
-    pub fn release_lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
-        check_for_read_only_key(&key, client_id)?;
+    pub async fn acquire_lock(
+        &mut self,
+        key: Key,
+        client_id: Uuid,
+    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
-        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+        let rx = self.store.acquire_lock(client_id, path).await;
 
-        self.store.unlock(client_id, path)?;
+        Ok(rx)
+    }
+
+    pub async fn release_lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
+
+        self.store.unlock(client_id, path).await?;
 
         Ok(())
     }
@@ -1043,7 +1051,7 @@ impl Worterbuch {
         }
 
         info!("Dropping locks of client {}.", client_id);
-        self.store.unlock_all(client_id);
+        self.store.unlock_all(client_id).await;
 
         let grave_goods = self.grave_goods_for_client(&client_id);
         let last_wills = self.last_will_for_client(&client_id);
@@ -1201,7 +1209,7 @@ impl Worterbuch {
             .map(ToOwned::to_owned)
     }
 
-    pub(crate) fn reset_store(&mut self, data: Node) {
+    pub(crate) fn reset_store(&mut self, data: Node<ValueEntry>) {
         self.store.reset(data);
     }
 

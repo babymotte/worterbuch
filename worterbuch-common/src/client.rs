@@ -46,6 +46,7 @@ pub enum ClientMessage {
     SubscribeLs(SubscribeLs),
     UnsubscribeLs(UnsubscribeLs),
     Lock(Lock),
+    AcquireLock(Lock),
     ReleaseLock(Lock),
     Transform(Transform),
 }
@@ -73,6 +74,7 @@ impl ClientMessage {
             ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
             ClientMessage::Lock(m) => Some(m.transaction_id),
+            ClientMessage::AcquireLock(m) => Some(m.transaction_id),
             ClientMessage::ReleaseLock(m) => Some(m.transaction_id),
             ClientMessage::Transform(m) => Some(m.transaction_id),
         }
