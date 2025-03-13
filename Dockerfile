@@ -16,7 +16,7 @@ RUN cargo clippy -- --deny warnings
 RUN cargo test
 RUN cargo build --release
 
-FROM babymotte/worterbuch:1.3.1
+FROM babymotte/worterbuch:1.3.2
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
 ENV WBCLUSTER_CONGIF_PATH=/cfg/config.yaml
