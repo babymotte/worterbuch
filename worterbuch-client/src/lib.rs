@@ -133,6 +133,7 @@ pub(crate) enum Command {
     UnsubscribeLsAsync(TransactionId, AsyncTicket),
     Lock(Key, AckCallback),
     LockAsync(Key, AsyncTicket),
+    AcquireLock(Key, AckCallback),
     ReleaseLock(Key, AckCallback),
     ReleaseLockAsync(Key, AsyncTicket),
     AllMessages(GenericCallback),
@@ -842,6 +843,15 @@ impl Worterbuch {
         self.commands.send(Command::LockAsync(key, tx)).await?;
         let res = rx.await?;
         Ok(res)
+    }
+
+    pub async fn acquire_lock(&self, key: Key) -> ConnectionResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.commands.send(Command::AcquireLock(key, tx)).await?;
+        match rx.await? {
+            Ok(_) => Ok(()),
+            Result::Err(e) => Err(ConnectionError::ServerResponse(e)),
+        }
     }
 
     pub async fn release_lock(&self, key: Key) -> ConnectionResult<()> {
@@ -2071,6 +2081,13 @@ async fn process_incoming_command(
             Command::LockAsync(key, callback) => {
                 callback.send(transaction_id).ok();
                 Some(CM::Lock(Lock {
+                    transaction_id,
+                    key,
+                }))
+            }
+            Command::AcquireLock(key, callback) => {
+                callbacks.ack.insert(transaction_id, callback);
+                Some(CM::AcquireLock(Lock {
                     transaction_id,
                     key,
                 }))
