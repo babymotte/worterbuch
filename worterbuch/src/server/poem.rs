@@ -26,9 +26,13 @@ use crate::{
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
 };
+use flate2::{
+    Compression,
+    write::{GzDecoder, GzEncoder},
+};
 use miette::IntoDiagnostic;
 use poem::{
-    Addr, EndpointExt, IntoResponse, Request, Response, Result, Route, delete,
+    Addr, Body, EndpointExt, IntoResponse, Request, Response, Result, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
     http::StatusCode,
@@ -44,11 +48,15 @@ use poem::{
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    io,
+    io::{self, Write},
     net::{IpAddr, SocketAddr},
+    thread,
     time::Duration,
 };
-use tokio::{select, spawn, sync::mpsc};
+use tokio::{
+    select, spawn,
+    sync::{mpsc, oneshot},
+};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info};
 use uuid::Uuid;
@@ -132,6 +140,124 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
     );
 
     Ok(Json(info))
+}
+
+#[handler]
+async fn export(
+    Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&Option<JwtClaims>>,
+) -> Result<impl IntoResponse> {
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Read, "#") {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
+    }
+    let config = match wb.config().await {
+        Ok(it) => it,
+        Err(e) => return to_error_response(e),
+    };
+    let file_name = config
+        .default_export_file_name
+        .unwrap_or_else(|| "export".to_owned())
+        + ".json";
+    let (exported, _, _) = match wb.export().await {
+        Ok(it) => it,
+        Err(e) => return to_error_response(e),
+    };
+    let json = exported.to_string();
+
+    let (tx, rx) = oneshot::channel();
+    thread::spawn(move || {
+        let res = compress(json.as_bytes());
+        tx.send(res).ok();
+    });
+
+    let compressed = match rx.await {
+        Ok(Ok(it)) => it,
+        Ok(Err(e)) => {
+            return to_error_response(WorterbuchError::Other(
+                Box::new(e),
+                "error while compressing exported data".to_owned(),
+            ));
+        }
+        Err(e) => {
+            return to_error_response(WorterbuchError::Other(
+                Box::new(e),
+                "error while compressing exported data".to_owned(),
+            ));
+        }
+    };
+
+    let response = compressed.into_response().with_header(
+        "Content-Disposition",
+        format!(r#"attachment; filename={file_name}.gz"#),
+    );
+
+    Ok(response)
+}
+
+#[handler]
+async fn import(
+    Data(wb): Data<&CloneableWbApi>,
+    Data(privileges): Data<&Option<JwtClaims>>,
+    data: Body,
+) -> Result<impl IntoResponse> {
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Write, "#") {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
+    }
+
+    let data = match data.into_vec().await {
+        Ok(it) => it,
+        Err(e) => {
+            return to_error_response(WorterbuchError::Other(
+                Box::new(e),
+                "error parsing request body".to_owned(),
+            ));
+        }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    thread::spawn(move || {
+        let res = decompress(&data);
+        tx.send(res).ok();
+    });
+
+    let json = match rx.await {
+        Ok(Ok(it)) => it,
+        Ok(Err(e)) => {
+            return to_error_response(WorterbuchError::Other(
+                Box::new(e),
+                "error while decompressing exported data".to_owned(),
+            ));
+        }
+        Err(e) => {
+            return to_error_response(WorterbuchError::Other(
+                Box::new(e),
+                "error while decompressing exported data".to_owned(),
+            ));
+        }
+    };
+    let json = String::from_utf8_lossy(&json).to_string();
+
+    if let Err(e) = wb.import(json).await {
+        return to_error_response(e);
+    }
+
+    Ok(())
+}
+
+fn compress(data: &[u8]) -> io::Result<Vec<u8>> {
+    let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    e.write_all(data)?;
+    e.finish()
+}
+
+fn decompress(data: &[u8]) -> io::Result<Vec<u8>> {
+    let mut e = GzDecoder::new(Vec::new());
+    e.write_all(data)?;
+    e.finish()
 }
 
 #[handler]
@@ -676,6 +802,20 @@ pub async fn start(
             get(subscribels
                 .with(BearerAuth::new(config.clone()))
                 .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/export"),
+            get(export
+                .with(BearerAuth::new(config.clone()))
+                .with(AddData::new(worterbuch.clone()))),
+        )
+        .at(
+            format!("{rest_root}/import"),
+            post(
+                import
+                    .with(BearerAuth::new(config.clone()))
+                    .with(AddData::new(worterbuch.clone())),
+            ),
         );
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");

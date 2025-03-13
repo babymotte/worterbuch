@@ -120,6 +120,7 @@ pub enum WbFunction {
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<(Value, GraveGoods, LastWill)>),
+    Import(String, oneshot::Sender<WorterbuchResult<()>>),
     Len(oneshot::Sender<usize>),
 }
 
@@ -494,6 +495,12 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Export(tx)).await?;
         Ok(rx.await?)
+    }
+
+    pub async fn import(&self, json: String) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(WbFunction::Import(json, tx)).await?;
+        rx.await?
     }
 
     pub async fn len(&self) -> WorterbuchResult<usize> {

@@ -25,7 +25,7 @@ use std::{
     io::{self, Read},
 };
 use tracing_subscriber::EnvFilter;
-use worterbuch_client::{AuthToken, KeyValuePair, config::Config};
+use worterbuch_client::KeyValuePair;
 
 #[derive(Parser)]
 #[command(author, version, about = "Convert JSON into Wörterbuch key/value pairs.", long_about = None)]
@@ -38,9 +38,6 @@ struct Args {
     /// Prefix the keys with a string.
     #[arg(short, long)]
     prefix: Option<String>,
-    /// Auth token to be used for acquiring authorization from the server
-    #[arg(long)]
-    auth: Option<AuthToken>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -50,10 +47,7 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    let mut config = Config::new();
     let args: Args = Args::parse();
-
-    config.auth_token = args.auth.or(config.auth_token);
 
     let json = if let Some(file) = args.file {
         fs::read_to_string(file).into_diagnostic()?

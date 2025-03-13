@@ -294,6 +294,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Export(tx) => {
             worterbuch.export_for_persistence(tx);
         }
+        WbFunction::Import(json, tx) => {
+            tx.send(worterbuch.import(&json).await.map(|_| ())).ok();
+        }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
         }
@@ -392,6 +395,9 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         }
         WbFunction::Export(tx) => {
             worterbuch.export_for_persistence(tx);
+        }
+        WbFunction::Import(_, tx) => {
+            tx.send(Err(WorterbuchError::NotLeader)).ok();
         }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
@@ -705,6 +711,7 @@ async fn forward_api_call(
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)
         | WbFunction::Export(_)
+        | WbFunction::Import(_, _)
         | WbFunction::Len(_)
         | WbFunction::Lock(_, _, _)
         | WbFunction::AcquireLock(_, _, _)

@@ -91,6 +91,7 @@ pub struct Config {
     pub follower: bool,
     pub sync_port: Option<u16>,
     pub leader_address: Option<String>,
+    pub default_export_file_name: Option<String>,
 }
 
 impl Config {
@@ -192,6 +193,10 @@ impl Config {
             self.shutdown_timeout = Duration::from_secs(secs);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_DEFAULT_EXPORT_FILE_NAME") {
+            self.default_export_file_name = Some(val);
+        }
+
         Ok(())
     }
 
@@ -231,6 +236,7 @@ impl Config {
                     leader: args.leader,
                     sync_port: args.sync_port,
                     leader_address: args.leader_address,
+                    default_export_file_name: None,
                 };
                 config.load_env()?;
                 Ok(config)
