@@ -28,8 +28,9 @@ use miette::Result;
 use std::{collections::HashMap, ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
+// #[instrument(skip(subsys, socket, config, peers_rx), err)]
 pub async fn lead(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
@@ -112,6 +113,7 @@ pub async fn lead(
     Ok(())
 }
 
+// #[instrument(skip(config))]
 fn check_heartbeat_responses(
     heartbeat_responses: &HashMap<String, Instant>,
     config: &Config,

@@ -19,8 +19,9 @@ use super::config::Config;
 use miette::{Context, IntoDiagnostic, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
-use tracing::info;
+use tracing::{info, instrument};
 
+// #[instrument(ret, err)]
 pub async fn init_socket(config: &Config) -> Result<UdpSocket> {
     let bind_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
     let port = config.raft_port;

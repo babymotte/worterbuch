@@ -25,8 +25,9 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
 use tokio_process_terminate::TerminateExt;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
+#[derive(Debug)]
 pub struct CommandDefinition {
     cmd: String,
     args: Vec<String>,
@@ -73,12 +74,14 @@ impl Drop for ChildProcessManager {
     }
 }
 
+#[derive(Debug)]
 enum ChildProcessMessage {
     Restart(CommandDefinition),
 }
 
 impl ChildProcessManagerActor {
-    async fn run(mut self) -> Result<()> {
+    // #[instrument(skip(self), err)]
+    async fn run_process_manager(mut self) -> Result<()> {
         let mut crash_counter = 0;
         let mut interval = interval(Duration::from_secs(10));
         let mut wait = None;
@@ -159,6 +162,7 @@ impl ChildProcessManagerActor {
         Ok(())
     }
 
+    // #[instrument(skip(self), err)]
     async fn process_msg(&mut self, msg: ChildProcessMessage) -> Result<()> {
         match msg {
             ChildProcessMessage::Restart(command) => self.restart(command).await?,
@@ -166,6 +170,7 @@ impl ChildProcessManagerActor {
         Ok(())
     }
 
+    // #[instrument(skip(self), err)]
     async fn restart(&mut self, command: CommandDefinition) -> Result<()> {
         self.command = Some(command);
         if let Some((mut proc, cmd)) = self.process.take() {
@@ -174,6 +179,7 @@ impl ChildProcessManagerActor {
         Ok(())
     }
 
+    // #[instrument(skip(self), err)]
     async fn stop(&mut self) -> Result<()> {
         info!("Stopping child daemon process …");
         self.stopped = true;
@@ -191,10 +197,10 @@ impl ChildProcessManagerActor {
 }
 
 impl ChildProcessManager {
-    pub fn new(subsys: &SubsystemHandle, name: impl AsRef<str>, restart: bool) -> Self {
+    pub fn new(subsys: &SubsystemHandle, name: &str, restart: bool) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
-        let subsys = subsys.start(SubsystemBuilder::new(name.as_ref(), move |s| async move {
+        let subsys = subsys.start(SubsystemBuilder::new(name, move |s| async move {
             let actor = ChildProcessManagerActor {
                 subsys: s,
                 api_rx,
@@ -205,12 +211,13 @@ impl ChildProcessManager {
                 stopped: false,
                 restart,
             };
-            actor.run().await
+            actor.run_process_manager().await
         }));
 
         ChildProcessManager { api_tx, subsys }
     }
 
+    // #[instrument(skip(self))]
     pub async fn restart(&mut self, command: CommandDefinition) {
         self.api_tx
             .send(ChildProcessMessage::Restart(command))
@@ -218,6 +225,7 @@ impl ChildProcessManager {
             .ok();
     }
 
+    // #[instrument(skip(self), err)]
     pub async fn stop(&self) -> Result<()> {
         self.subsys.initiate_shutdown();
         self.subsys
@@ -229,6 +237,7 @@ impl ChildProcessManager {
     }
 }
 
+// #[instrument(skip(proc))]
 async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
     info!("Terminating child process {cmd} …");
     match proc
@@ -244,6 +253,7 @@ async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+// #[instrument]
 fn delay(crash_counter: usize) -> u64 {
     ((crash_counter as f32).powi(2) * 50.0) as u64
 }

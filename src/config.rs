@@ -16,7 +16,7 @@
  */
 
 use super::PeerInfo;
-use crate::{Priority, load_millis_since_active};
+use crate::{Priority, load_millis_since_active, telemetry};
 use clap::Parser;
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::Deserialize;
@@ -78,9 +78,53 @@ impl TryFrom<&RawPeerInfo> for PeerInfo {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct ConfigFile {
     nodes: Vec<RawPeerInfo>,
+    telemetry: Option<TelemetryConfig>,
 }
 
-#[derive(Parser)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryConfig {
+    pub endpoint: EndpointConfig,
+    pub credentials: Option<Credentials>,
+    #[serde(default)]
+    pub app: AppConfig,
+}
+
+impl TelemetryConfig {
+    pub fn instance_name(&self, node_id: &str) -> String {
+        format!("{}/{}", self.app.name, node_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EndpointConfig {
+    Grpc(String),
+    Http(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Credentials {
+    pub user: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppConfig {
+    pub name: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            name: "worterbuch-cluster-orchestrator".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
 #[command(author, version, about = "Wörterbuch cluster orchestrator", long_about = None)]
 struct Args {
     /// The ID of this node
@@ -261,6 +305,7 @@ impl Config {
         Priority(i64::MAX)
     }
 
+    // #[instrument(skip(self))]
     pub fn update_quorum(&mut self, peers: &Peers) -> Result<()> {
         let (quorum, quorum_too_low) =
             quorum_sanity_check(self.quorum_configured, peers.peer_nodes())?;
@@ -272,28 +317,37 @@ impl Config {
     }
 }
 
-pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Receiver<Peers>)> {
-    let (tx, rx) = mpsc::channel(1);
-
-    info!("Loading orchestrator config …");
-
-    let mut peer_addresses = HashSet::new();
-
+pub async fn instrument_and_load_config(
+    subsys: &SubsystemHandle,
+) -> Result<(Config, mpsc::Receiver<Peers>)> {
     let args: Args = Args::parse();
     let config_file = load_config_file(&args.config_path).await?;
+
+    telemetry::init(config_file.telemetry.as_ref(), args.node_id.clone()).await?;
+
+    load_config(subsys, args, config_file).await
+}
+
+// #[instrument(skip(subsys), err)]
+async fn load_config(
+    subsys: &SubsystemHandle,
+    args: Args,
+    config_file: ConfigFile,
+) -> Result<(Config, mpsc::Receiver<Peers>)> {
+    info!("Loading orchestrator config …");
+    let (tx, rx) = mpsc::channel(1);
+    let mut peer_addresses = HashSet::new();
     let nodes = config_file
         .nodes
         .iter()
         .map(PeerInfo::try_from)
         .collect::<Result<Vec<PeerInfo>>>()?;
-
     if !nodes.iter().any(|p| p.node_id == args.node_id) {
         return Err(miette!(
             "Node '{}' is not defined in the cluster config.",
             args.node_id
         ));
     }
-
     let peers: Vec<PeerInfo> = nodes
         .iter()
         .filter_map(|p| {
@@ -305,17 +359,12 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
             }
         })
         .collect();
-
     debug!("Configured nodes: {nodes:?}");
     debug!("Configured peers: {peers:?}");
-
     let data_dir = args.data_dir;
     let priority = args.priority;
-
     let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum, &peers)?;
-
     let peers = Peers(peers);
-
     let config = Config {
         node_id: args.node_id.clone(),
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
@@ -331,9 +380,7 @@ pub async fn load_config(subsys: &SubsystemHandle) -> Result<(Config, mpsc::Rece
         quorum_configured: args.quorum,
         config_scan_interval: args.config_scan_interval,
     };
-
     tx.send(peers).await.ok();
-
     let config_path = args.config_path.into();
     let scan_interval = Duration::from_secs(args.config_scan_interval);
     let node_id = args.node_id;

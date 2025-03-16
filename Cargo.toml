@@ -13,12 +13,19 @@ categories = ["database-implementations"]
 [dependencies]
 axum = { version = "0.8.1", features = ["http2"] }
 clap = { version = "4.5.32", features = ["derive", "env"] }
+gethostname = "1.0.0"
 dotenvy = "0.15.7"
 miette = { version = "7.4.0", features = ["fancy"] }
+opentelemetry = "0.28.0"
+opentelemetry-otlp = { version = "0.28.0", features = ["grpc-tonic"] }
+opentelemetry-resource-detectors = "0.7.0"
+opentelemetry-semantic-conventions = "0.28.0"
+opentelemetry_sdk = "0.28.0"
 rand = "0.9.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_yaml = "0.9.34"
+supports-color = "3.0.2"
 tokio = { version = "1.44.1", features = [
     "rt-multi-thread",
     "macros",
@@ -28,9 +35,13 @@ tokio = { version = "1.44.1", features = [
     "process",
 ] }
 tokio-graceful-shutdown = { version = "0.16.0", features = ["tracing"] }
+tower-http = { version = "0.6.2", features = ["trace"] }
 tokio-process-terminate = "0.3.2"
 tracing = "0.1.41"
+tracing-opentelemetry = "0.29.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+thiserror = "2.0.12"
+backtrace-on-stack-overflow = "0.3.0"
 
 [profile.release]
 lto = "fat"
@@ -42,7 +53,7 @@ opt-level = 3
 
 
 [lints.rust]
-unsafe_code = "forbid"
+# unsafe_code = "forbid"
 
 [lints.clippy]
 all = "deny"

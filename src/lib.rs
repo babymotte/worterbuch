@@ -17,14 +17,16 @@
 
 mod config;
 mod election;
+mod error;
 mod follower;
 mod leader;
 mod process_manager;
 mod socket;
 mod stats;
+mod telemetry;
 mod utils;
 
-use config::load_config;
+use config::instrument_and_load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
 use leader::lead;
@@ -39,7 +41,7 @@ use std::{
 };
 use tokio::{fs::File, select};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,9 +124,17 @@ impl PeerInfo {
     }
 }
 
-pub async fn run(subsys: SubsystemHandle) -> Result<()> {
-    let (mut config, mut peers_rx) = load_config(&subsys).await?;
+pub async fn instrument_and_run_main(subsys: SubsystemHandle) -> Result<()> {
+    let (config, peers_rx) = instrument_and_load_config(&subsys).await?;
+    run_main(subsys, config, peers_rx).await
+}
 
+// #[instrument(skip(subsys), err)]
+async fn run_main(
+    subsys: SubsystemHandle,
+    mut config: config::Config,
+    mut peers_rx: tokio::sync::mpsc::Receiver<config::Peers>,
+) -> std::result::Result<(), miette::Error> {
     let mut peers = peers_rx
         .recv()
         .await
@@ -167,6 +177,7 @@ pub async fn run(subsys: SubsystemHandle) -> Result<()> {
 
 const TIMESTAMP_FILE_NAME: &str = "last-presisted";
 
+// #[instrument]
 pub async fn load_millis_since_active(path: &Path) -> Option<i64> {
     let path = path.join(TIMESTAMP_FILE_NAME);
     debug!("getting metadata of file {path:?}");

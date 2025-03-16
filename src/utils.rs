@@ -20,8 +20,9 @@ use crate::config::Peers;
 use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
-use tracing::{debug, error, warn};
+use tracing::{Level, debug, error, instrument, warn};
 
+// #[instrument(skip(config, socket), level = "trace", err)]
 pub async fn send_heartbeat_requests(
     config: &Config,
     socket: &UdpSocket,
@@ -49,6 +50,7 @@ pub async fn send_heartbeat_requests(
     Ok(())
 }
 
+#[instrument(skip(config, socket), level = "trace", err)]
 pub async fn send_heartbeat_response(
     heartbeat: &HeartbeatRequest,
     config: &Config,
@@ -81,6 +83,7 @@ pub async fn send_heartbeat_response(
     Ok(())
 }
 
+#[instrument(skip(config, socket), err)]
 pub async fn support_vote(
     vote: VoteRequest,
     config: &Config,
@@ -110,6 +113,7 @@ pub async fn support_vote(
     Ok(())
 }
 
+#[instrument(level = Level::TRACE, skip(socket, buf, op), err)]
 pub async fn listen<F, T>(
     socket: &UdpSocket,
     buf: &mut [u8],
@@ -131,7 +135,7 @@ where
     match serde_json::from_slice(&buf[..received]) {
         Ok(msg) => op(msg).await,
         Err(e) => {
-            error!("Could not parse peer message: {e}");
+            error!(error = ?e, "Could not parse peer message: {e}");
             debug!("Message: {}", String::from_utf8_lossy(&buf[..received]));
             Ok(ControlFlow::Continue(()))
         }

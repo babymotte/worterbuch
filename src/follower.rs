@@ -31,6 +31,7 @@ use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
 
+// #[instrument(skip(subsys, socket, config), err)]
 pub async fn follow(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,

@@ -8,7 +8,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::info;
+use tracing::{info, instrument};
 
 pub struct StatsSender(mpsc::Sender<StatsEvent>);
 
@@ -35,17 +35,19 @@ impl StatsSender {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum ElectionState {
     Candidate,
     Leader,
     Follower,
 }
 
+#[derive(Debug)]
 enum StatsEvent {
     Election(ElectionState),
 }
 
+#[derive(Debug)]
 enum StatsApiMessage {
     ElectionState(oneshot::Sender<ElectionState>),
 }
@@ -56,6 +58,7 @@ struct Server {
 }
 
 impl Server {
+    // #[instrument(skip(server))]
     async fn ready(State(server): State<Server>) -> impl IntoResponse {
         let (tx, rx) = oneshot::channel();
         server
@@ -77,11 +80,12 @@ impl Server {
     }
 }
 
+// #[instrument(skip(subsys))]
 pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
     let (evt_tx, evt_rx) = mpsc::channel(1);
     let (api_tx, api_rx) = mpsc::channel(1);
 
-    StatsActor::start(subsys, evt_rx, api_rx);
+    StatsActor::start_stats_actor(subsys, evt_rx, api_rx);
 
     subsys.start(SubsystemBuilder::new("stats-endpoint", move |s| {
         run_server(s, api_tx, port)
@@ -90,6 +94,7 @@ pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result
     Ok(StatsSender(evt_tx))
 }
 
+// #[instrument(skip(subsys, api_tx))]
 async fn run_server(
     subsys: SubsystemHandle,
     api_tx: mpsc::Sender<StatsApiMessage>,
@@ -130,7 +135,8 @@ struct StatsActor {
 }
 
 impl StatsActor {
-    fn start(
+    // #[instrument(skip(subsys, stats_rx, api_rx))]
+    fn start_stats_actor(
         subsys: &SubsystemHandle,
         stats_rx: mpsc::Receiver<StatsEvent>,
         api_rx: mpsc::Receiver<StatsApiMessage>,
@@ -142,11 +148,12 @@ impl StatsActor {
                 api_rx,
                 election_state: ElectionState::Candidate,
             };
-            actor.run().await
+            actor.run_stats_actor().await
         }));
     }
 
-    async fn run(mut self) -> Result<()> {
+    // #[instrument(skip(self), err)]
+    async fn run_stats_actor(mut self) -> Result<()> {
         loop {
             select! {
                 recv = self.stats_rx.recv() => match recv {
@@ -164,12 +171,14 @@ impl StatsActor {
         Ok(())
     }
 
+    // #[instrument(skip(self))]
     fn stats_event(&mut self, e: StatsEvent) {
         match e {
             StatsEvent::Election(state) => self.election_state = state,
         }
     }
 
+    // #[instrument(skip(self))]
     fn api_request(&mut self, e: StatsApiMessage) {
         match e {
             StatsApiMessage::ElectionState(sender) => {

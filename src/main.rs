@@ -16,21 +16,19 @@
  */
 
 use miette::Result;
-use std::{io, time::Duration};
+use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
-use tracing_subscriber::EnvFilter;
-use worterbuch_cluster_orchestrator::run;
+use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    miette::set_panic_hook();
+    unsafe { backtrace_on_stack_overflow::enable() };
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(io::stderr)
-        .init();
     Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new("cluster-orchestrator", run));
+        s.start(SubsystemBuilder::new(
+            "cluster-orchestrator",
+            instrument_and_run_main,
+        ));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(5))
