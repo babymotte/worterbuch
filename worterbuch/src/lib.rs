@@ -655,7 +655,7 @@ async fn run_in_follower_mode(
                 None => break,
             },
             _ = persistence_interval.tick() => {
-                info!("Follower persistence interval triggered");
+                debug!("Follower persistence interval triggered");
                 persistence::synchronous(worterbuch, &config).await?;
             },
             _ = subsys.on_shutdown_requested() => break,

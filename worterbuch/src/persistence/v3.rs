@@ -137,10 +137,24 @@ async fn write_and_check(data: &[u8], file_path: &Path, checksum_file_path: &Pat
 async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
     debug!("Writing file {} …", path.to_string_lossy());
     let tmp_file = format!("{}.tmp", path.to_string_lossy());
-    let mut file = File::create(&tmp_file)
+    write_file(&tmp_file, data).await?;
+    validate_file_content(&tmp_file, data).await?;
+    fs::rename(tmp_file, path)
+        .instrument(debug_span!("rename"))
         .await
         .into_diagnostic()
-        .wrap_err_with(|| format!("creating file {} failed", path.to_string_lossy()))?;
+        .wrap_err("moving temp file to actual file failed")?;
+    debug!("Writing file {} done.", path.to_string_lossy());
+
+    Ok(())
+}
+
+#[instrument(level=Level::DEBUG, skip(data), err)]
+async fn write_file<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> Result<()> {
+    let mut file = File::create(&path)
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("creating file {:?} failed", path))?;
     file.write_all(data)
         .await
         .into_diagnostic()
@@ -149,13 +163,6 @@ async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
         .await
         .into_diagnostic()
         .wrap_err("failed to flush file")?;
-    validate_file_content(&tmp_file, data).await?;
-    fs::rename(tmp_file, path)
-        .await
-        .into_diagnostic()
-        .wrap_err("moving temp file to actual file failed")?;
-    debug!("Writing file {} done.", path.to_string_lossy());
-
     Ok(())
 }
 
