@@ -26,6 +26,7 @@ use crate::{
     server::{common::CloneableWbApi, poem::auth::BearerAuth},
     stats::VERSION,
 };
+use base64::{Engine, prelude::BASE64_STANDARD};
 use flate2::{
     Compression,
     write::{GzDecoder, GzEncoder},
@@ -48,7 +49,7 @@ use poem::{
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
     net::{IpAddr, SocketAddr},
     thread,
     time::Duration,
@@ -58,7 +59,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{debug, error, info};
+use tracing::{debug, debug_span, error, info, instrument};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
@@ -143,15 +144,20 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
 }
 
 #[handler]
+#[instrument(skip(wb), err)]
 async fn export(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<impl IntoResponse> {
+    request: &Request,
+) -> Result<Response> {
     if let Some(privileges) = privileges {
         if let Err(e) = privileges.authorize(&Privilege::Read, "#") {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
+
+    let base64 = request.header("accept") == Some("text/plain");
+
     let config = match wb.config().await {
         Ok(it) => it,
         Err(e) => return to_error_response(e),
@@ -160,16 +166,21 @@ async fn export(
         .default_export_file_name
         .unwrap_or_else(|| "export".to_owned())
         + ".json";
-    let (exported, _, _) = match wb.export().await {
+    let span = debug_span!("export");
+    let (exported, _, _) = match wb.export(span).await {
         Ok(it) => it,
         Err(e) => return to_error_response(e),
     };
     let json = exported.to_string();
 
     let (tx, rx) = oneshot::channel();
+    let compress_span = debug_span!("compress");
     thread::spawn(move || {
-        let res = compress(json.as_bytes());
+        let g = compress_span.enter();
+        let res = compress(json.as_bytes(), base64);
         tx.send(res).ok();
+        drop(g);
+        drop(compress_span);
     });
 
     let compressed = match rx.await {
@@ -188,10 +199,17 @@ async fn export(
         }
     };
 
-    let response = compressed.into_response().with_header(
-        "Content-Disposition",
-        format!(r#"attachment; filename={file_name}.gz"#),
-    );
+    let mut response = compressed
+        .into_response()
+        .with_header(
+            "Content-Disposition",
+            format!(r#"attachment; filename={file_name}.gz"#),
+        )
+        .into_response();
+
+    if base64 {
+        response = response.set_content_type("text/plain");
+    }
 
     Ok(response)
 }
@@ -201,12 +219,15 @@ async fn import(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     data: Body,
+    request: &Request,
 ) -> Result<impl IntoResponse> {
     if let Some(privileges) = privileges {
         if let Err(e) = privileges.authorize(&Privilege::Write, "#") {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
+
+    let base64 = request.content_type() == Some("text/plain");
 
     let data = match data.into_vec().await {
         Ok(it) => it,
@@ -220,7 +241,7 @@ async fn import(
 
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
-        let res = decompress(&data);
+        let res = decompress(&data, base64);
         tx.send(res).ok();
     });
 
@@ -248,15 +269,31 @@ async fn import(
     Ok(())
 }
 
-fn compress(data: &[u8]) -> io::Result<Vec<u8>> {
+fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
     let mut e = GzEncoder::new(Vec::new(), Compression::default());
     e.write_all(data)?;
-    e.finish()
+    let bytes = e.finish()?;
+
+    if base64 {
+        Ok(BASE64_STANDARD.encode(bytes).into_bytes())
+    } else {
+        Ok(bytes)
+    }
 }
 
-fn decompress(data: &[u8]) -> io::Result<Vec<u8>> {
+fn decompress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
     let mut e = GzDecoder::new(Vec::new());
-    e.write_all(data)?;
+
+    if base64 {
+        let mut decoded = vec![];
+        BASE64_STANDARD
+            .decode_vec(data, &mut decoded)
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+        e.write_all(&decoded)?;
+    } else {
+        e.write_all(data)?;
+    }
+
     e.finish()
 }
 

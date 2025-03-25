@@ -19,6 +19,7 @@
 
 use super::*;
 
+#[instrument(skip(config) fields(version=2), err)]
 pub async fn load(config: &Config) -> Result<Worterbuch> {
     let (store_path, grave_goods_last_will_path) = file_paths(config, false).await?;
 

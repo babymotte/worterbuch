@@ -7,7 +7,7 @@ use crate::{
 use serde_json::json;
 use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
-use tracing::{debug, error, trace, warn};
+use tracing::{Level, debug, error, instrument, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls, LsState,
@@ -27,6 +27,7 @@ pub struct V0 {
 }
 
 impl V0 {
+    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v0", client_id=%self.client_id))]
     pub async fn process_incoming_message(
         &self,
         msg: CM,
@@ -153,9 +154,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    trace!("DPeleting value for client {} …", self.client_id);
+                    trace!("PDeleting value for client {} …", self.client_id);
                     self.pdelete(msg).await?;
-                    trace!("DPeleting value for client {} done.", self.client_id);
+                    trace!("PDeleting value for client {} done.", self.client_id);
                 }
             }
             CM::Ls(msg) => {
@@ -349,6 +350,7 @@ impl V0 {
         Ok(())
     }
 
+    #[instrument(level = Level::TRACE, skip(self), fields(client_id=%self.client_id) err)]
     pub async fn set(&self, msg: Set) -> WorterbuchResult<()> {
         if let Err(e) = self
             .worterbuch

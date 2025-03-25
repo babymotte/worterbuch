@@ -34,6 +34,7 @@ mod server;
 mod stats;
 pub mod store;
 mod subscribers;
+mod telemetry;
 mod worterbuch;
 
 use crate::stats::track_stats;
@@ -48,6 +49,7 @@ use persistence::PERSISTENCE_LOCKED;
 use serde_json::{Value, json};
 use server::common::{CloneableWbApi, WbFunction};
 use std::{error::Error, sync::atomic::Ordering};
+use store::ValueEntry;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
@@ -55,7 +57,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{debug, error, info};
+use tracing::{Instrument, Level, debug, error, info, span};
 use uuid::Uuid;
 use worterbuch_common::{
     KeySegment, PStateEvent, ProtocolVersion, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
@@ -206,8 +208,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::CGet(key, tx) => {
             tx.send(worterbuch.cget(&key)).ok();
         }
-        WbFunction::Set(key, value, client_id, tx) => {
-            tx.send(worterbuch.set(key, value, client_id).await).ok();
+        WbFunction::Set(key, value, client_id, tx, span) => {
+            tx.send(worterbuch.set(key, value, client_id).instrument(span).await)
+                .ok();
         }
         WbFunction::CSet(key, value, version, client_id, tx) => {
             tx.send(worterbuch.cset(key, value, version, client_id).await)
@@ -291,11 +294,14 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();
         }
-        WbFunction::Export(tx) => {
+        WbFunction::Export(tx, span) => {
+            let g = span.enter();
             worterbuch.export_for_persistence(tx);
+            drop(g);
+            drop(span);
         }
         WbFunction::Import(json, tx) => {
-            tx.send(worterbuch.import(&json).await.map(|_| ())).ok();
+            tx.send(worterbuch.import(&json).await).ok();
         }
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
@@ -311,7 +317,7 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         WbFunction::CGet(key, tx) => {
             tx.send(worterbuch.cget(&key)).ok();
         }
-        WbFunction::Set(_, _, _, tx) => {
+        WbFunction::Set(_, _, _, tx, _) => {
             tx.send(Err(WorterbuchError::NotLeader)).ok();
         }
         WbFunction::CSet(_, _, _, _, tx) => {
@@ -393,7 +399,8 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();
         }
-        WbFunction::Export(tx) => {
+        WbFunction::Export(tx, span) => {
+            let _ = span.enter();
             worterbuch.export_for_persistence(tx);
         }
         WbFunction::Import(_, tx) => {
@@ -505,7 +512,8 @@ async fn run_in_leader_mode(
                 match e {
                     PStateEvent::KeyValuePairs(kvps) => {
                         for kvp in kvps {
-                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                            let span = span!(Level::DEBUG, "forward_grave_goods");
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0, span), false).await;
                         }
                     },
                     PStateEvent::Deleted(kvps) => {
@@ -520,7 +528,8 @@ async fn run_in_leader_mode(
                 match e {
                     PStateEvent::KeyValuePairs(kvps) => {
                         for kvp in kvps {
-                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0), false).await;
+                            let span = span!(Level::DEBUG, "forward_last_will");
+                            forward_api_call(&mut client_write_txs, &mut dead, &WbFunction::Set(kvp.key, kvp.value, INTERNAL_CLIENT_ID, oneshot::channel().0, span), false).await;
                         }
                     },
                     PStateEvent::Deleted(kvps) => {
@@ -531,6 +540,22 @@ async fn run_in_leader_mode(
                 }
             },
             recv = api_rx.recv() => match recv {
+                Some(WbFunction::Import(json, tx)) => {
+                    let (tx_int, rx_int) = oneshot::channel();
+                    process_api_call(&mut worterbuch, WbFunction::Import(json, tx_int)).await;
+                    let imported_values = rx_int.await.into_diagnostic()??;
+
+                    for (key, (value, changed))  in &imported_values {
+                        if *changed {
+                            let cmd = match value.to_owned() {
+                                ValueEntry::Cas(value, version) => ClientWriteCommand::CSet(key.to_owned(), value, version),
+                                ValueEntry::Plain(value) => ClientWriteCommand::Set(key.to_owned(), value),
+                            };
+                            forward_to_followers(cmd, &mut client_write_txs, &mut dead).await;
+                        }
+                    }
+                    tx.send(Ok(imported_values)).ok();
+                },
                 Some(function) => {
                     forward_api_call(&mut client_write_txs, &mut dead, &function, true).await;
                     process_api_call(&mut worterbuch, function).await;
@@ -718,13 +743,13 @@ async fn forward_api_call(
         | WbFunction::Connected(_, _, _)
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)
-        | WbFunction::Export(_)
+        | WbFunction::Export(_, _)
         | WbFunction::Import(_, _)
         | WbFunction::Len(_)
         | WbFunction::Lock(_, _, _)
         | WbFunction::AcquireLock(_, _, _)
         | WbFunction::ReleaseLock(_, _, _) => None,
-        WbFunction::Set(key, value, _, _) => {
+        WbFunction::Set(key, value, _, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 Some(ClientWriteCommand::Set(key.to_owned(), value.to_owned()))
             } else {
@@ -757,14 +782,22 @@ async fn forward_api_call(
             }
         }
     } {
-        for (id, tx) in client_write_txs.iter() {
-            if tx.send(cmd.clone()).await.is_err() {
-                dead.push(*id);
-            }
+        forward_to_followers(cmd, client_write_txs, dead).await;
+    }
+}
+
+async fn forward_to_followers(
+    cmd: ClientWriteCommand,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    dead: &mut Vec<usize>,
+) {
+    for (id, tx) in client_write_txs.iter() {
+        if tx.send(cmd.clone()).await.is_err() {
+            dead.push(*id);
         }
-        if !dead.is_empty() {
-            client_write_txs.retain(|(i, _)| !dead.contains(i));
-            dead.clear();
-        }
+    }
+    if !dead.is_empty() {
+        client_write_txs.retain(|(i, _)| !dead.contains(i));
+        dead.clear();
     }
 }

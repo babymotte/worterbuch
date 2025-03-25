@@ -28,6 +28,9 @@ miette = "7.5.0"
 tracing = "0.1.41"
 uuid = "1.15.1"
 tokio-tungstenite-wasm = { version = "0.5.0", optional = true }
+thiserror = "2.0.12"
+serde_yaml = "0.9.34"
+opentelemetry = "0.28.0"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -18,6 +18,8 @@
  */
 
 use super::*;
+use std::fmt::Debug;
+use tracing::{Instrument, Level, debug_span, instrument};
 
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
@@ -38,9 +40,11 @@ pub(crate) async fn periodic(
     Ok(())
 }
 
+#[instrument("persist_asynchronously", skip_all)]
 async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()> {
+    let span = debug_span!("export");
     debug!("Exporting database state …");
-    let (json, grave_goods, last_will) = worterbuch.export().await?;
+    let (json, grave_goods, last_will) = worterbuch.export(span).await?;
     debug!("Exporting database state done.");
 
     // checking AFTER export, since the interval may tick before the initial load is complete, but PERSISTENCE_LOCKED
@@ -78,6 +82,7 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
     Ok(())
 }
 
+#[instrument("persist_synchronously", level=Level::DEBUG, skip(worterbuch, config), err)]
 pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) -> Result<()> {
     if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
         return Err(miette!("store is locked"));
@@ -115,13 +120,10 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
     Ok(())
 }
 
-async fn write_and_check(
-    data: &[u8],
-    file_path: impl AsRef<Path>,
-    checksum_file_path: impl AsRef<Path>,
-) -> Result<()> {
-    let file_path = file_path.as_ref();
-    let checksum_file_path = checksum_file_path.as_ref();
+#[instrument(level=Level::DEBUG, skip(data), err)]
+async fn write_and_check(data: &[u8], file_path: &Path, checksum_file_path: &Path) -> Result<()> {
+    let file_path = file_path;
+    let checksum_file_path = checksum_file_path;
 
     let checksum = compute_checksum(data);
 
@@ -131,6 +133,7 @@ async fn write_and_check(
     Ok(())
 }
 
+#[instrument(level=Level::DEBUG, skip(data), err)]
 async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
     debug!("Writing file {} …", path.to_string_lossy());
     let tmp_file = format!("{}.tmp", path.to_string_lossy());
@@ -156,7 +159,8 @@ async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn validate_file_content(path: impl AsRef<Path>, data: &[u8]) -> Result<()> {
+#[instrument(level=Level::DEBUG, skip(data), err)]
+async fn validate_file_content<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> Result<()> {
     let path = path.as_ref();
     debug!("Validating content of file {} …", path.to_string_lossy());
     let mut written_data = vec![];
@@ -178,6 +182,7 @@ async fn validate_file_content(path: impl AsRef<Path>, data: &[u8]) -> Result<()
     Ok(())
 }
 
+#[instrument(skip(config) fields(version=3), err)]
 pub async fn load(config: &Config) -> Result<Worterbuch> {
     let (
         store_path,
@@ -243,6 +248,7 @@ async fn try_load(path: &Path, checksum: &Path, config: &Config) -> Result<Worte
     Ok(worterbuch)
 }
 
+#[instrument(level=Level::DEBUG, err)]
 async fn try_load_grave_goods_last_will(
     path: &Path,
     checksum: &Path,
@@ -253,13 +259,27 @@ async fn try_load_grave_goods_last_will(
     Ok(grave_goods_last_will)
 }
 
+#[instrument(level=Level::DEBUG, err)]
 async fn read_json_from_file(path: &Path, checksum: &Path) -> Result<String, miette::Error> {
-    let json = fs::read_to_string(path).await.into_diagnostic()?;
-    let checksum = fs::read_to_string(checksum).await.into_diagnostic()?;
+    let json = fs::read_to_string(path)
+        .instrument(debug_span!(
+            "read_to_string",
+            path = path.to_string_lossy().to_string()
+        ))
+        .await
+        .into_diagnostic()?;
+    let checksum = fs::read_to_string(checksum)
+        .instrument(debug_span!(
+            "read_to_string",
+            path = checksum.to_string_lossy().to_string()
+        ))
+        .await
+        .into_diagnostic()?;
     validate_checksum(json.as_bytes(), &checksum)?;
     Ok(json)
 }
 
+#[instrument(level=Level::DEBUG, skip(config), ret, err)]
 pub(crate) async fn file_paths(
     config: &Config,
     write: bool,
@@ -299,6 +319,7 @@ pub(crate) async fn file_paths(
     ))
 }
 
+#[instrument(level=Level::DEBUG, ret, err)]
 async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
     if write {
         if remove_file(path).await.is_ok() {
@@ -330,6 +351,7 @@ async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
     }
 }
 
+#[instrument(level=Level::DEBUG, skip(data), ret)]
 fn compute_checksum(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -337,6 +359,7 @@ fn compute_checksum(data: &[u8]) -> String {
     hex::encode(result)
 }
 
+#[instrument(level=Level::DEBUG, skip(data), ret, err)]
 fn validate_checksum(data: &[u8], checksum: &str) -> Result<()> {
     let sum = compute_checksum(data);
     if sum == checksum {

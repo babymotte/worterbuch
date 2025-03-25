@@ -19,14 +19,14 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, subscribers::SubscriptionId};
+use crate::{Config, INTERNAL_CLIENT_ID, store::ValueEntry, subscribers::SubscriptionId};
 use serde::Serialize;
 use std::{net::SocketAddr, time::Duration};
 use tokio::sync::{
     mpsc::{self, Receiver},
     oneshot,
 };
-use tracing::trace;
+use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, MetaData, PStateEvent,
@@ -46,7 +46,13 @@ struct SubscriptionInfo {
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
     CGet(Key, oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>),
-    Set(Key, Value, Uuid, oneshot::Sender<WorterbuchResult<()>>),
+    Set(
+        Key,
+        Value,
+        Uuid,
+        oneshot::Sender<WorterbuchResult<()>>,
+        Span,
+    ),
     CSet(
         Key,
         Value,
@@ -119,8 +125,11 @@ pub enum WbFunction {
     Connected(Uuid, Option<SocketAddr>, Protocol),
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
-    Export(oneshot::Sender<(Value, GraveGoods, LastWill)>),
-    Import(String, oneshot::Sender<WorterbuchResult<()>>),
+    Export(oneshot::Sender<(Value, GraveGoods, LastWill)>, Span),
+    Import(
+        String,
+        oneshot::Sender<WorterbuchResult<Vec<(String, (ValueEntry, bool))>>>,
+    ),
     Len(oneshot::Sender<usize>),
 }
 
@@ -152,27 +161,20 @@ impl CloneableWbApi {
         rx.await?
     }
 
+    #[instrument(level=Level::TRACE, skip(self))]
     pub async fn set(&self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let trace = client_id != INTERNAL_CLIENT_ID;
-        if trace {
-            trace!("Sending set request to core system …");
-        }
+
+        trace!("Sending set request to core system …");
         let res = self
             .tx
-            .send(WbFunction::Set(key, value, client_id, tx))
+            .send(WbFunction::Set(key, value, client_id, tx, Span::current()))
             .await;
-        if trace {
-            trace!("Sending set request to core system done.");
-        }
+        trace!("Sending set request to core system done.");
         res?;
-        if trace {
-            trace!("Waiting for response to set request …");
-        }
+        trace!("Waiting for response to set request …");
         let res = rx.await;
-        if trace {
-            trace!("Waiting for response to set request done.");
-        }
+        trace!("Waiting for response to set request done.");
         res?
     }
 
@@ -491,13 +493,16 @@ impl CloneableWbApi {
         Ok(rx.await?)
     }
 
-    pub async fn export(&self) -> WorterbuchResult<(Value, GraveGoods, LastWill)> {
+    pub async fn export(&self, span: Span) -> WorterbuchResult<(Value, GraveGoods, LastWill)> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Export(tx)).await?;
+        self.tx.send(WbFunction::Export(tx, span)).await?;
         Ok(rx.await?)
     }
 
-    pub async fn import(&self, json: String) -> WorterbuchResult<()> {
+    pub async fn import(
+        &self,
+        json: String,
+    ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Import(json, tx)).await?;
         rx.await?

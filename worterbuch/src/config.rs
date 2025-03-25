@@ -17,7 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::license::{License, load_license};
+use crate::{
+    license::{License, load_license},
+    telemetry,
+};
 use clap::Parser;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
@@ -51,6 +54,9 @@ pub struct Args {
     /// Socket address of the leader node to sync to in the form <IP or hostname>:<port> (only with --follower)
     #[arg(long, short)]
     leader_address: Option<String>,
+    /// Instance name
+    #[arg(short = 'n', long, env = "WORTERBUCH_INSTANCE_NAME")]
+    instance_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +209,12 @@ impl Config {
 
     pub async fn new() -> ConfigResult<Self> {
         let args = Args::parse();
+        let hostname = hostname::get()?;
+        telemetry::init(
+            args.instance_name
+                .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
+        )
+        .await?;
 
         match load_license().await {
             Ok(license) => {

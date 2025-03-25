@@ -21,7 +21,7 @@ use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
 use tokio::sync::oneshot;
-use tracing::{debug, warn};
+use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
@@ -198,6 +198,7 @@ impl Store {
         store
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> Node<ValueEntry> {
         Node {
             v: self.data.v.clone(),
@@ -205,12 +206,13 @@ impl Store {
         }
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export_for_persistence(&mut self) -> PersistedStore {
         let data = self.export();
-
         PersistedStore { data }
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     fn slim_copy_top_level_children(&self) -> Tree<ValueEntry> {
         let mut children = Tree::new();
         for (k, v) in &self.data.t {
@@ -803,12 +805,11 @@ impl Store {
         Ok(children.into_iter().collect())
     }
 
-    pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, Value)> {
+    pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, (ValueEntry, bool))> {
         let mut insertions = Vec::new();
         let path = Vec::new();
         Store::nmerge(&mut self.data, other, None, &mut insertions, &path);
         self.len = Store::ncount_values(&self.data);
-        // TODO notify subscribers
         insertions
     }
 
@@ -826,14 +827,15 @@ impl Store {
         node: &mut Node<ValueEntry>,
         other: Node<ValueEntry>,
         key: Option<&str>,
-        insertions: &mut Vec<(String, Value)>,
+        insertions: &mut Vec<(String, (ValueEntry, bool))>,
         path: &[&str],
     ) {
         if let Some(v) = other.v {
+            let changed = node.v.as_ref() != Some(&v);
             node.v = Some(v.clone());
             let key = concat_key(path, key);
             debug!("Imported {} = {:?}", key, v);
-            insertions.push((key, v.into()));
+            insertions.push((key, (v, changed)));
         }
 
         let mut path = path.to_owned();

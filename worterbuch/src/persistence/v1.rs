@@ -19,6 +19,7 @@
 
 use super::*;
 
+#[instrument(skip(config) fields(version=1), err)]
 pub async fn load(config: &Config) -> Result<Worterbuch> {
     let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(config);
 

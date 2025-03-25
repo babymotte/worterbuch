@@ -33,7 +33,7 @@ use tokio::{
     select,
 };
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 use worterbuch_common::{GraveGoods, LastWill};
 
 use lazy_static::lazy_static;
@@ -61,6 +61,7 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
     v3::synchronous(worterbuch, config).await
 }
 
+#[instrument(skip(config), err)]
 pub(crate) async fn load(config: Config) -> Result<Worterbuch> {
     info!("Trying to load v3 persistence file …");
     let wb = match v3::load(&config).await {

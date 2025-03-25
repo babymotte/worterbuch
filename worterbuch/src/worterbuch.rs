@@ -43,7 +43,7 @@ use tokio::{
     },
     time::sleep,
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
@@ -310,6 +310,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     pub async fn set(&mut self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
 
@@ -585,6 +586,7 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> (Node<ValueEntry>, GraveGoods, LastWill) {
         let store = self.store.export();
         let grave_goods = self.grave_goods();
@@ -594,16 +596,36 @@ impl Worterbuch {
     }
 
     pub fn export_for_persistence(&mut self, tx: oneshot::Sender<(Value, GraveGoods, LastWill)>) {
+        let span = debug_span!("export_for_persistence");
+        let g = span.enter();
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
-        spawn(async move {
-            let value = json!(store);
-            tx.send((value, grave_goods, last_will)).ok();
-        });
+        let span2 = debug_span!("serialize_and_send");
+        drop(g);
+        let serialize_and_send = async {
+            Self::serialize_and_send(store, grave_goods, last_will, tx)
+                .instrument(span)
+                .instrument(span2)
+                .await;
+        };
+        spawn(serialize_and_send);
     }
 
-    pub async fn import(&mut self, json: &str) -> WorterbuchResult<Vec<(String, Value)>> {
+    async fn serialize_and_send(
+        store: PersistedStore,
+        grave_goods: GraveGoods,
+        last_will: LastWill,
+        tx: oneshot::Sender<(Value, GraveGoods, LastWill)>,
+    ) {
+        let value = json!(store);
+        tx.send((value, grave_goods, last_will)).ok();
+    }
+
+    pub async fn import(
+        &mut self,
+        json: &str,
+    ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         debug!("Parsing store data …");
         let store: PersistedStore = from_str(json).map_err(|e| {
             WorterbuchError::SerDeError(e, "Error parsing JSON during import".to_owned())
@@ -611,13 +633,10 @@ impl Worterbuch {
         debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store.data);
 
-        for (key, val) in &imported_values {
+        for (key, (val, changed)) in &imported_values {
             let path: Vec<RegularKeySegment> = parse_segments(key)?;
-            self.notify_subscribers(
-                &path, key, val, // TODO only pass true if the value actually changed
-                true, false,
-            )
-            .await;
+            self.notify_subscribers(&path, key, val.as_ref(), *changed, false)
+                .await;
         }
 
         Ok(imported_values)
@@ -1218,6 +1237,7 @@ impl Worterbuch {
         self.apply_last_wills(self.last_wills()).await;
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     fn grave_goods(&self) -> GraveGoods {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
@@ -1241,6 +1261,7 @@ impl Worterbuch {
         ggs
     }
 
+    #[instrument(level=Level::DEBUG, skip(self))]
     fn last_wills(&self) -> LastWill {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
@@ -1264,12 +1285,14 @@ impl Worterbuch {
         lws
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn apply_grave_goods(&mut self, grave_goods: GraveGoods) {
         for gg in grave_goods {
             self.pdelete(gg, INTERNAL_CLIENT_ID).await.ok();
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill) {
         for lw in last_wills {
             self.set(lw.key, lw.value, INTERNAL_CLIENT_ID).await.ok();

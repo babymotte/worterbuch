@@ -22,47 +22,37 @@ use crate::{
     TransactionId, server::Err,
 };
 use miette::Diagnostic;
+use opentelemetry::trace::TraceError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
+use thiserror::Error;
 use tokio::sync::{
     broadcast,
     mpsc::{self, error::SendError},
     oneshot,
 };
 
-#[derive(Debug, Diagnostic)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum ConfigError {
+    #[error("invalid separator: {0}; separator must be a single ASCII char")]
     InvalidSeparator(String),
+    #[error("invalid wildcard: {0}; wildcard must be a single ASCII char")]
     InvalidWildcard(String),
+    #[error("invalid multi-wildcard: {0}; multi-wildcard must be a single ASCII char")]
     InvalidMultiWildcard(String),
+    #[error("invalid port: {0}")]
     InvalidPort(ParseIntError),
+    #[error("invalid address: {0}")]
     InvalidAddr(AddrParseError),
+    #[error("invalid interval: {0}")]
     InvalidInterval(ParseIntError),
+    #[error("license file could not be loaded: {0}")]
     InvalidLicense(String),
-}
-
-impl std::error::Error for ConfigError {}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigError::InvalidSeparator(str) => write!(
-                f,
-                "invalid separator: {str}; separator must be a single ASCII char"
-            ),
-            ConfigError::InvalidWildcard(str) => write!(
-                f,
-                "invalid wildcard: {str}; wildcard must be a single ASCII char"
-            ),
-            ConfigError::InvalidMultiWildcard(str) => write!(
-                f,
-                "invalid multi-wildcard: {str}; multi-wildcard must be a single ASCII char"
-            ),
-            ConfigError::InvalidPort(e) => write!(f, "invalid port: {e}"),
-            ConfigError::InvalidAddr(e) => write!(f, "invalid address: {e}"),
-            ConfigError::InvalidInterval(e) => write!(f, "invalid interval: {e}"),
-            ConfigError::InvalidLicense(e) => write!(f, "license file could not be loaded: {e}"),
-        }
-    }
+    #[error("could not load config file: {0}")]
+    IoError(#[from] io::Error),
+    #[error("could not load config file: {0}")]
+    YamlError(#[from] serde_yaml::Error),
+    #[error("error setting up telemetry: {0}")]
+    TraceError(#[from] TraceError),
 }
 
 pub trait ConfigIntContext<I> {

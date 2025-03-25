@@ -18,11 +18,9 @@
  */
 
 use miette::Result;
-use std::io;
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
-use tracing_subscriber::EnvFilter;
 use worterbuch::{Config, run_worterbuch};
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
@@ -32,10 +30,6 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[tokio::main()]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_writer(io::stderr)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
 
     let config = Config::new().await?;
 

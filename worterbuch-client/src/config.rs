@@ -26,7 +26,7 @@ use std::{
     time::Duration,
 };
 
-use tracing::error;
+use tracing::{debug, error, instrument};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -138,12 +138,16 @@ impl Default for Config {
 }
 
 impl Config {
+    #[instrument]
     pub fn new() -> Self {
+        debug!("Creating default config");
         let mut config = Config::default();
+        debug!("Loading environment variables");
         config.load_env();
         config
     }
 
+    #[instrument]
     pub fn with_servers(proto: String, servers: Box<[SocketAddr]>) -> Self {
         let mut config = Config::new();
         config.proto = proto;

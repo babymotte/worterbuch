@@ -1,7 +1,7 @@
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace};
+use tracing::{Instrument, Level, debug, error, info, instrument, trace, trace_span};
 use uuid::Uuid;
 use v0::V0;
 use v1::V1;
@@ -44,6 +44,7 @@ impl Proto {
         }
     }
 
+    #[instrument(skip(self))]
     pub fn switch_protocol(&mut self, version: ProtocolVersionSegment) -> bool {
         match version {
             0 => {
@@ -58,13 +59,17 @@ impl Proto {
         }
     }
 
+    #[instrument(level=Level::TRACE, skip(self), fields(client_id=%self.client_id()))]
     pub async fn process_incoming_message(
         &mut self,
         msg: &str,
         authorized: &mut Option<JwtClaims>,
     ) -> WorterbuchResult<bool> {
         debug!("Received message from client {}: {}", self.client_id(), msg);
-        match serde_json::from_str(msg) {
+        let deserialized = async { serde_json::from_str(msg) }
+            .instrument(trace_span!("from_str"))
+            .await;
+        match deserialized {
             Ok(Some(msg)) => {
                 if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
                     info!("Switching protocol to v{}", protocol_switch_request.version);
@@ -82,14 +87,14 @@ impl Proto {
                         ));
                     }
                     return Ok(true);
-                }
-
-                match &self.handler {
-                    ProtocolHandler::V0(v0) => {
-                        v0.process_incoming_message(msg, authorized).await?;
-                    }
-                    ProtocolHandler::V1(v1) => {
-                        v1.process_incoming_message(msg, authorized).await?;
+                } else {
+                    match &self.handler {
+                        ProtocolHandler::V0(v0) => {
+                            v0.process_incoming_message(msg, authorized).await?;
+                        }
+                        ProtocolHandler::V1(v1) => {
+                            v1.process_incoming_message(msg, authorized).await?;
+                        }
                     }
                 }
 

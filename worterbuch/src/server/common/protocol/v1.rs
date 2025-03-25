@@ -1,7 +1,7 @@
 use super::v0::V0;
 use crate::auth::JwtClaims;
 use tokio::spawn;
-use tracing::{debug, trace};
+use tracing::{Level, debug, instrument, trace};
 use worterbuch_common::{
     Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, ErrorCode, Get, Lock, Privilege,
     ServerMessage,
@@ -18,6 +18,7 @@ impl V1 {
         Self { v0 }
     }
 
+    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v1", client_id=%self.v0.client_id))]
     pub async fn process_incoming_message(
         &self,
         msg: CM,

@@ -36,7 +36,13 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{self as json};
 use std::{
-    collections::HashMap, future::Future, io, net::SocketAddr, ops::ControlFlow, time::Duration,
+    collections::HashMap,
+    fmt::{Debug, Display},
+    future::Future,
+    io,
+    net::SocketAddr,
+    ops::ControlFlow,
+    time::Duration,
 };
 #[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
@@ -61,7 +67,7 @@ use tokio_tungstenite::{
 };
 #[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{Level, debug, error, info, instrument, trace, warn};
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
 use worterbuch_common::error::WorterbuchError;
@@ -149,10 +155,11 @@ enum ClientSocket {
 }
 
 impl ClientSocket {
-    pub async fn send_msg(&mut self, msg: ClientMessage, _wait: bool) -> ConnectionResult<()> {
+    #[instrument(skip(self), level = "trace", err)]
+    pub async fn send_msg(&mut self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
         match self {
             #[cfg(feature = "tcp")]
-            ClientSocket::Tcp(sock) => sock.send_msg(msg, _wait).await,
+            ClientSocket::Tcp(sock) => sock.send_msg(msg, wait).await,
             #[cfg(any(feature = "ws", feature = "wasm"))]
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
             #[cfg(all(target_family = "unix", feature = "unix"))]
@@ -160,6 +167,7 @@ impl ClientSocket {
         }
     }
 
+    #[instrument(skip(self), level = "trace", err)]
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
         match self {
             #[cfg(feature = "tcp")]
@@ -171,6 +179,7 @@ impl ClientSocket {
         }
     }
 
+    #[instrument(skip(self), level = "debug", err)]
     pub async fn close(self) -> ConnectionResult<()> {
         match self {
             #[cfg(feature = "tcp")]
@@ -204,6 +213,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn set_last_will(&self, last_will: &[KeyValuePair]) -> ConnectionResult<()> {
         self.set(
             topic!(
@@ -217,6 +227,7 @@ impl Worterbuch {
         .await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn set_grave_goods(&self, grave_goods: &[&str]) -> ConnectionResult<()> {
         self.set(
             topic!(
@@ -230,7 +241,11 @@ impl Worterbuch {
         .await
     }
 
-    pub async fn set_client_name<T: Serialize>(&self, client_name: T) -> ConnectionResult<()> {
+    #[instrument(skip(self), err)]
+    pub async fn set_client_name<T: Display + Debug>(
+        &self,
+        client_name: T,
+    ) -> ConnectionResult<()> {
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -238,11 +253,12 @@ impl Worterbuch {
                 &self.client_id,
                 SYSTEM_TOPIC_CLIENT_NAME
             ),
-            client_name,
+            client_name.to_string(),
         )
         .await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn set_generic(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Set(key, value, tx);
@@ -253,11 +269,13 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn set<T: Serialize>(&self, key: Key, value: T) -> ConnectionResult<()> {
         let value = json::to_value(value)?;
         self.set_generic(key, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn set_generic_async(
         &self,
         key: Key,
@@ -272,6 +290,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn set_async<T: Serialize>(
         &self,
         key: Key,
@@ -281,6 +300,7 @@ impl Worterbuch {
         self.set_generic_async(key, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn cset_generic(
         &self,
         key: Key,
@@ -296,6 +316,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn cset<T: Serialize>(
         &self,
         key: Key,
@@ -306,6 +327,7 @@ impl Worterbuch {
         self.cset_generic(key, value, version).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn cset_generic_async(
         &self,
         key: Key,
@@ -321,6 +343,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn cset_async<T: Serialize>(
         &self,
         key: Key,
@@ -331,6 +354,7 @@ impl Worterbuch {
         self.cset_generic_async(key, value, version).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn spub_init(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPubInit(key, tx);
@@ -341,6 +365,7 @@ impl Worterbuch {
         Ok(res.transaction_id)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn spub_init_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::SPubInitAsync(key, tx);
@@ -351,6 +376,7 @@ impl Worterbuch {
         Ok(transaction_id)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn spub_generic(
         &self,
         transaction_id: TransactionId,
@@ -365,6 +391,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn spub<T: Serialize>(
         &self,
         transaction_id: TransactionId,
@@ -374,6 +401,7 @@ impl Worterbuch {
         self.spub_generic(transaction_id, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn spub_generic_async(
         &self,
         transaction_id: TransactionId,
@@ -388,6 +416,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn spub_async<T: Serialize>(
         &self,
         transaction_id: TransactionId,
@@ -397,6 +426,7 @@ impl Worterbuch {
         self.spub_generic_async(transaction_id, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn publish_generic(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Publish(key, value, tx);
@@ -407,11 +437,13 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn publish<T: Serialize>(&self, key: Key, value: &T) -> ConnectionResult<()> {
         let value = json::to_value(value)?;
         self.publish_generic(key, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn publish_generic_async(
         &self,
         key: Key,
@@ -426,6 +458,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self, value), fields(value), err)]
     pub async fn publish_async<T: Serialize>(
         &self,
         key: Key,
@@ -435,6 +468,7 @@ impl Worterbuch {
         self.publish_generic_async(key, value).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn get_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::GetAsync(key, tx);
@@ -445,6 +479,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn get_generic(&self, key: Key) -> ConnectionResult<Option<Value>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Get(key, tx);
@@ -469,6 +504,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn get<T: DeserializeOwned>(&self, key: Key) -> ConnectionResult<Option<T>> {
         if let Some(val) = self.get_generic(key).await? {
             Ok(Some(json::from_value(val)?))
@@ -477,6 +513,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn cget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::CGetAsync(key, tx);
@@ -487,6 +524,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn cget_generic(&self, key: Key) -> ConnectionResult<Option<(Value, CasVersion)>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::CGet(key, tx);
@@ -505,6 +543,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn cget<T: DeserializeOwned>(
         &self,
         key: Key,
@@ -516,6 +555,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn pget_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGetAsync(key, tx);
@@ -526,6 +566,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn pget_generic(&self, key: Key) -> ConnectionResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PGet(key, tx);
@@ -538,7 +579,8 @@ impl Worterbuch {
         }
     }
 
-    pub async fn pget<T: DeserializeOwned>(
+    #[instrument(skip(self), err)]
+    pub async fn pget<T: DeserializeOwned + Debug>(
         &self,
         key: Key,
     ) -> ConnectionResult<TypedKeyValuePairs<T>> {
@@ -547,6 +589,7 @@ impl Worterbuch {
         Ok(typed_kvps)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn delete_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::DeleteAsync(key, tx);
@@ -557,6 +600,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn delete_generic(&self, key: Key) -> ConnectionResult<Option<Value>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Delete(key, tx);
@@ -578,7 +622,11 @@ impl Worterbuch {
         }
     }
 
-    pub async fn delete<T: DeserializeOwned>(&self, key: Key) -> ConnectionResult<Option<T>> {
+    #[instrument(skip(self), err)]
+    pub async fn delete<T: DeserializeOwned + Debug>(
+        &self,
+        key: Key,
+    ) -> ConnectionResult<Option<T>> {
         if let Some(val) = self.delete_generic(key).await? {
             Ok(Some(json::from_value(val)?))
         } else {
@@ -586,6 +634,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn pdelete_async(&self, key: Key, quiet: bool) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDeleteAsync(key, quiet, tx);
@@ -596,6 +645,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn pdelete_generic(&self, key: Key, quiet: bool) -> ConnectionResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::PDelete(key, quiet, tx);
@@ -608,7 +658,8 @@ impl Worterbuch {
         }
     }
 
-    pub async fn pdelete<T: DeserializeOwned>(
+    #[instrument(skip(self), err)]
+    pub async fn pdelete<T: DeserializeOwned + Debug>(
         &self,
         key: Key,
         quiet: bool,
@@ -618,6 +669,7 @@ impl Worterbuch {
         Ok(typed_kvps)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::LsAsync(parent, tx);
@@ -628,6 +680,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn ls(&self, parent: Option<Key>) -> ConnectionResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
         let cmd = Command::Ls(parent, tx);
@@ -638,6 +691,7 @@ impl Worterbuch {
         Ok(children)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn pls_async(
         &self,
         parent: Option<RequestPattern>,
@@ -651,6 +705,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), ret, err)]
     pub async fn pls(
         &self,
         parent: Option<RequestPattern>,
@@ -664,6 +719,7 @@ impl Worterbuch {
         Ok(children)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn subscribe_async(
         &self,
         key: Key,
@@ -678,6 +734,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn subscribe_generic(
         &self,
         key: Key,
@@ -693,6 +750,7 @@ impl Worterbuch {
         Ok((val_rx, res.transaction_id))
     }
 
+    #[instrument(skip(self), err)]
     pub async fn subscribe<T: DeserializeOwned + Send + 'static>(
         &self,
         key: Key,
@@ -705,6 +763,7 @@ impl Worterbuch {
         Ok((typed_val_rx, transaction_id))
     }
 
+    #[instrument(skip(self), err)]
     pub async fn psubscribe_async(
         &self,
         request_pattern: RequestPattern,
@@ -726,6 +785,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn psubscribe_generic(
         &self,
         request_pattern: RequestPattern,
@@ -749,7 +809,8 @@ impl Worterbuch {
         Ok((event_rx, res.transaction_id))
     }
 
-    pub async fn psubscribe<T: DeserializeOwned + Send + 'static>(
+    #[instrument(skip(self), err)]
+    pub async fn psubscribe<T: DeserializeOwned + Debug + Send + 'static>(
         &self,
         request_pattern: RequestPattern,
         unique: bool,
@@ -764,6 +825,7 @@ impl Worterbuch {
         Ok((typed_event_rx, transaction_id))
     }
 
+    #[instrument(skip(self), err)]
     pub async fn unsubscribe(&self, transaction_id: TransactionId) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands
@@ -773,6 +835,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
     pub async fn unsubscribe_async(
         &self,
         transaction_id: TransactionId,
@@ -785,6 +848,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn subscribe_ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
@@ -794,6 +858,7 @@ impl Worterbuch {
         Ok(tid)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn subscribe_ls(
         &self,
         parent: Option<Key>,
@@ -810,6 +875,7 @@ impl Worterbuch {
         Ok((children_rx, res.transaction_id))
     }
 
+    #[instrument(skip(self), err)]
     pub async fn unsubscribe_ls(&self, transaction_id: TransactionId) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands
@@ -819,6 +885,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
     pub async fn unsubscribe_ls_async(
         &self,
         transaction_id: TransactionId,
@@ -831,6 +898,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn lock(&self, key: Key) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::Lock(key, tx)).await?;
@@ -838,6 +906,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
     pub async fn lock_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::LockAsync(key, tx)).await?;
@@ -845,6 +914,7 @@ impl Worterbuch {
         Ok(res)
     }
 
+    #[instrument(skip(self), err)]
     pub async fn acquire_lock(&self, key: Key) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::AcquireLock(key, tx)).await?;
@@ -854,6 +924,7 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self), err)]
     pub async fn release_lock(&self, key: Key) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::ReleaseLock(key, tx)).await?;
@@ -861,6 +932,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self), err)]
     pub async fn release_lock_async(&self, key: Key) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
@@ -870,7 +942,8 @@ impl Worterbuch {
         Ok(res)
     }
 
-    pub async fn update<T: DeserializeOwned + Serialize, S: Fn() -> T, F: Fn(&mut T)>(
+    #[instrument(skip(self, seed, update), err)]
+    pub async fn update<T: DeserializeOwned + Serialize + Debug, S: Fn() -> T, F: Fn(&mut T)>(
         &self,
         key: Key,
         seed: S,
@@ -891,7 +964,8 @@ impl Worterbuch {
         self.try_update(key, f, 0).await
     }
 
-    pub async fn swap<T: DeserializeOwned, V: Serialize, F: Fn(Option<T>) -> V>(
+    #[instrument(skip(self, swap), err)]
+    pub async fn swap<T: DeserializeOwned + Debug, V: Serialize, F: Fn(Option<T>) -> V>(
         &self,
         key: Key,
         swap: F,
@@ -899,7 +973,8 @@ impl Worterbuch {
         self.try_update(key, swap, 0).await
     }
 
-    async fn try_update<T: DeserializeOwned, V: Serialize, F: Fn(Option<T>) -> V>(
+    #[instrument(skip(self, transform), level = "debug", err)]
+    async fn try_update<T: DeserializeOwned + Debug, V: Serialize, F: Fn(Option<T>) -> V>(
         &self,
         key: Key,
         transform: F,
@@ -935,10 +1010,12 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn send_buffer(&self, delay: Duration) -> SendBuffer {
         SendBuffer::new(self.commands.clone(), delay).await
     }
 
+    #[instrument(skip(self), err)]
     pub async fn close(&self) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.stop.send(tx).await?;
@@ -946,6 +1023,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub async fn all_messages(&self) -> ConnectionResult<mpsc::UnboundedReceiver<ServerMessage>> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.commands.send(Command::AllMessages(tx)).await?;
@@ -957,6 +1035,7 @@ impl Worterbuch {
     }
 }
 
+#[instrument(level = "trace")]
 async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
     mut val_rx: mpsc::UnboundedReceiver<Option<Value>>,
     typed_val_tx: mpsc::UnboundedSender<Option<T>>,
@@ -983,7 +1062,8 @@ async fn deserialize_values<T: DeserializeOwned + Send + 'static>(
     }
 }
 
-async fn deserialize_events<T: DeserializeOwned + Send + 'static>(
+#[instrument(level = "trace")]
+async fn deserialize_events<T: DeserializeOwned + Debug + Send + 'static>(
     mut event_rx: mpsc::UnboundedReceiver<PStateEvent>,
     typed_event_tx: mpsc::UnboundedSender<TypedPStateEvent<T>>,
 ) {
@@ -1068,12 +1148,14 @@ impl Future for OnDisconnect {
     }
 }
 
+#[instrument(, err)]
 pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDisconnect, Config)> {
     let config = Config::new();
     let (conn, disconnected) = connect(config.clone()).await?;
     Ok((conn, disconnected, config))
 }
 
+#[instrument(, err)]
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let mut err = None;
     for addr in &config.servers {
@@ -1096,6 +1178,7 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
     }
 }
 
+#[instrument(skip(config), err(level = Level::WARN))]
 pub async fn try_connect(
     config: Config,
     host_addr: SocketAddr,
@@ -1147,6 +1230,7 @@ pub async fn try_connect(
 }
 
 #[cfg(any(feature = "ws", feature = "wasm"))]
+#[instrument(skip(config, on_disconnect), level = Level::Info)]
 async fn connect_ws(
     url: String,
     on_disconnect: oneshot::Sender<()>,
@@ -1335,6 +1419,7 @@ async fn connect_ws(
 }
 
 #[cfg(feature = "tcp")]
+#[instrument(skip(config, on_disconnect))]
 async fn connect_tcp(
     host_addr: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
@@ -1527,6 +1612,7 @@ async fn connect_tcp(
 }
 
 #[cfg(all(target_family = "unix", feature = "unix"))]
+#[instrument(skip(config, on_disconnect), err(level = Level::WARN))]
 async fn connect_unix(
     path: String,
     on_disconnect: oneshot::Sender<()>,
@@ -1718,6 +1804,7 @@ async fn connect_unix(
     }
 }
 
+#[instrument(skip(client_socket, on_disconnect, config))]
 fn connected(
     client_socket: ClientSocket,
     on_disconnect: oneshot::Sender<()>,
@@ -1739,6 +1826,7 @@ fn connected(
     Ok(Worterbuch::new(cmd_tx, stop_tx, client_id))
 }
 
+#[instrument(skip(cmd_rx, client_socket, stop_rx, config), err)]
 async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
     mut client_socket: ClientSocket,
@@ -1794,6 +1882,7 @@ async fn run(
     Ok(())
 }
 
+#[instrument(skip(callbacks, transaction_ids), level = "trace", err)]
 async fn process_incoming_command(
     cmd: Option<Command>,
     callbacks: &mut Callbacks,
@@ -2118,6 +2207,7 @@ async fn process_incoming_command(
     }
 }
 
+#[instrument(skip(callbacks), level = "trace", err)]
 async fn process_incoming_server_message(
     msg: ConnectionResult<Option<ServerMessage>>,
     callbacks: &mut Callbacks,
@@ -2147,6 +2237,7 @@ async fn process_incoming_server_message(
     }
 }
 
+#[instrument(skip(callbacks), level = "trace", ret)]
 fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
     callbacks.generic.retain(|tx| match tx.send(msg.clone()) {
         Ok(_) => true,
@@ -2157,6 +2248,7 @@ fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
     });
 }
 
+#[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.state.remove(&state.transaction_id) {
         cb.send(Ok(state.clone())).ok();
@@ -2172,6 +2264,7 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
     Ok(())
 }
 
+#[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.cstate.remove(&state.transaction_id) {
         cb.send(Ok(state)).ok();
@@ -2179,6 +2272,7 @@ async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionR
     Ok(())
 }
 
+#[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.pstate.remove(&pstate.transaction_id) {
         cb.send(Ok(pstate.clone())).ok();
@@ -2190,6 +2284,7 @@ async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> Connection
     Ok(())
 }
 
+#[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.lsstate.remove(&ls.transaction_id) {
         cb.send(Ok(ls.clone())).ok();
@@ -2202,12 +2297,14 @@ async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<
     Ok(())
 }
 
+#[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_ack(ack: Ack, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.ack.remove(&ack.transaction_id) {
         cb.send(Ok(ack)).ok();
     }
 }
 
+#[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.ack.remove(&err.transaction_id) {
         cb.send(Err(err.clone())).ok();
@@ -2226,7 +2323,8 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     }
 }
 
-fn deserialize_key_value_pairs<T: DeserializeOwned>(
+#[instrument(level = "trace", err)]
+fn deserialize_key_value_pairs<T: DeserializeOwned + Debug>(
     kvps: KeyValuePairs,
 ) -> Result<TypedKeyValuePairs<T>, ConnectionError> {
     let mut typed = TypedKeyValuePairs::new();
@@ -2236,7 +2334,8 @@ fn deserialize_key_value_pairs<T: DeserializeOwned>(
     Ok(typed)
 }
 
-fn deserialize_pstate_event<T: DeserializeOwned>(
+#[instrument(level = "trace", err)]
+fn deserialize_pstate_event<T: DeserializeOwned + Debug>(
     pstate: PStateEvent,
 ) -> Result<TypedPStateEvent<T>, SubscriptionError> {
     Ok(pstate.try_into()?)
