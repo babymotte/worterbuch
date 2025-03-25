@@ -43,6 +43,8 @@ struct SubscriptionInfo {
     channel_buffer_size: usize,
 }
 
+pub type InsertedValues = Vec<(String, (ValueEntry, bool))>;
+
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
     CGet(Key, oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>),
@@ -126,10 +128,7 @@ pub enum WbFunction {
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<(Value, GraveGoods, LastWill)>, Span),
-    Import(
-        String,
-        oneshot::Sender<WorterbuchResult<Vec<(String, (ValueEntry, bool))>>>,
-    ),
+    Import(String, oneshot::Sender<WorterbuchResult<InsertedValues>>),
     Len(oneshot::Sender<usize>),
 }
 
