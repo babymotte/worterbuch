@@ -16,18 +16,18 @@
  */
 
 use miette::{Context, IntoDiagnostic, Result};
-use std::{error::Error, process::Stdio, time::Duration};
+use std::{error::Error, fmt, ops::ControlFlow, process::Stdio, time::Duration};
 use tokio::{
     process::{Child, ChildStdin, Command},
     select,
     sync::mpsc,
-    time::{interval, sleep},
+    time::{Interval, interval, sleep},
 };
 use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
 use tokio_process_terminate::TerminateExt;
 use tracing::{info, instrument, warn};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommandDefinition {
     cmd: String,
     args: Vec<String>,
@@ -49,6 +49,12 @@ impl From<&CommandDefinition> for Command {
             .stderr(Stdio::inherit())
             .stdin(Stdio::piped());
         cmd
+    }
+}
+
+impl fmt::Display for CommandDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.cmd, self.args.join(" "))
     }
 }
 
@@ -80,89 +86,141 @@ enum ChildProcessMessage {
 }
 
 impl ChildProcessManagerActor {
-    // #[instrument(skip(self), err)]
     async fn run_process_manager(mut self) -> Result<()> {
         let mut crash_counter = 0;
         let mut interval = interval(Duration::from_secs(10));
         let mut wait = None;
 
         while !self.stopped {
-            if let Some(command) = &self.command {
-                if let Some((mut proc, cmd)) = self.process.take() {
-                    select! {
-                        recv = self.api_rx.recv() => if let Some(msg) = recv {
-                            self.process = Some((proc, cmd));
-                            self.process_msg(msg).await?;
-                        } else {
-                            break;
-                        },
-                        exit_code = proc.wait() => {
-                            match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {}", cmd))?.code() {
-                                Some(exit_code) => warn!("Child process {} terminated with exit code {exit_code}.", cmd),
-                                None => warn!("Child process {} terminated with unknown exit code", cmd)
-                            }
-                            if crash_counter >= 10 {
-                                self.restart = false;
-                            }
-                            if self.restart {
-                                crash_counter += 1;
-                                let del = delay(crash_counter);
-                                wait = Some(del);
-                                info!("Restarting (crashed {crash_counter} time(s), restart delay {del}ms) …");
-                            } else {
-                                self.stop().await?;
-                            }
-                        },
-                        _ = interval.tick() => {
-                            self.process = Some((proc, cmd));
-                            crash_counter = crash_counter.saturating_sub(1);
-                        },
-                        _ = self.subsys.on_shutdown_requested() => {
-                            self.process = Some((proc, cmd));
-                            self.stop().await?;
-                        },
-                    }
-                } else {
-                    info!("(Re-)starting child daemon process {} …", command.cmd);
-                    let cmd = command.cmd.to_owned();
-                    let mut command = Command::from(command);
-                    let mut proc = command
-                        .spawn()
-                        .into_diagnostic()
-                        .wrap_err_with(|| format!("could not start child process {}", cmd))?;
-                    self.stdin = proc.stdin.take();
-                    self.process = Some((proc, cmd));
-                    self.started = true;
-                }
-            } else {
-                select! {
-                    recv = self.api_rx.recv() => if let Some(msg) = recv {
-                        self.process_msg(msg).await?;
-                    },
-                    _ = self.subsys.on_shutdown_requested() => self.stop().await?,
-                }
-            }
-
-            if let Some(millis) = wait {
-                wait = None;
-                select! {
-                    _ = sleep(Duration::from_millis(millis)) => (),
-                    _ = self.subsys.on_shutdown_requested() => self.stop().await?,
-                }
+            if let ControlFlow::Break(()) = self
+                .run_child_process(&mut crash_counter, &mut interval, &mut wait)
+                .await?
+            {
+                break;
             }
         }
 
+        self.child_process_stopped();
+
+        Ok(())
+    }
+
+    #[instrument(skip(self), fields())]
+    fn child_process_stopped(self) {
         info!("Child process manager actor stopped.");
 
         if !self.restart && self.started {
             info!("Automatic restart disabled, shutting down …");
             self.subsys.request_shutdown();
         }
+    }
+
+    async fn run_child_process(
+        &mut self,
+        crash_counter: &mut usize,
+        interval: &mut Interval,
+        wait: &mut Option<u64>,
+    ) -> Result<ControlFlow<()>> {
+        if let Some(command) = self.command.clone() {
+            if let Some((proc, cmd)) = self.process.take() {
+                return self
+                    .monitor_process(proc, cmd, crash_counter, wait, interval)
+                    .await;
+            } else {
+                self.trigger_restart(command)?;
+            }
+        } else {
+            select! {
+                recv = self.api_rx.recv() => if let Some(msg) = recv {
+                    self.process_msg(msg).await?;
+                },
+                _ = self.subsys.on_shutdown_requested() => self.stop().await?,
+            }
+        }
+
+        if let Some(millis) = wait.take() {
+            self.wait(millis).await?;
+        }
+
+        Ok(ControlFlow::Continue(()))
+    }
+
+    #[instrument(skip(self), fields())]
+    async fn wait(&mut self, millis: u64) -> Result<()> {
+        select! {
+            _ = sleep(Duration::from_millis(millis)) => (),
+            _ = self.subsys.on_shutdown_requested() => self.stop().await?,
+        }
 
         Ok(())
     }
 
-    // #[instrument(skip(self), err)]
+    #[instrument(
+        skip(self),
+        fields(%command)
+    )]
+    fn trigger_restart(&mut self, command: CommandDefinition) -> Result<()> {
+        info!("(Re-)starting child daemon process {} …", command.cmd);
+        let cmd = command.cmd.to_owned();
+        let mut command = Command::from(&command);
+        let mut proc = command
+            .spawn()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("could not start child process {}", cmd))?;
+        self.stdin = proc.stdin.take();
+        self.process = Some((proc, cmd));
+        self.started = true;
+        Ok(())
+    }
+
+    async fn monitor_process(
+        &mut self,
+        mut proc: Child,
+        cmd: String,
+        crash_counter: &mut usize,
+        wait: &mut Option<u64>,
+        interval: &mut Interval,
+    ) -> Result<ControlFlow<()>> {
+        select! {
+            recv = self.api_rx.recv() => if let Some(msg) = recv {
+                self.process = Some((proc, cmd));
+                self.process_msg(msg).await?;
+            } else {
+                return Ok(ControlFlow::Break(()));
+            },
+            exit_code = proc.wait() => {
+                match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {}", cmd))?.code() {
+                    Some(exit_code) => warn!("Child process {} terminated with exit code {exit_code}.", cmd),
+                    None => warn!("Child process {} terminated with unknown exit code", cmd)
+                }
+                if *crash_counter >= 10 {
+                    self.restart = false;
+                }
+                if self.restart {
+                    *crash_counter += 1;
+                    let del = delay(*crash_counter);
+                    *wait = Some(del);
+                    info!("Restarting (crashed {crash_counter} time(s), restart delay {del}ms) …");
+                } else {
+                    self.stop().await?;
+                }
+            },
+            _ = interval.tick() => {
+                self.process = Some((proc, cmd));
+                if *crash_counter > 0 {
+                    *crash_counter -= 1;
+                }
+            },
+            _ = self.subsys.on_shutdown_requested() => {
+                self.process = Some((proc, cmd));
+                self.stop().await?;
+            },
+        }
+
+        Ok(ControlFlow::Continue(()))
+    }
+
+    #[instrument(skip(self), err)]
     async fn process_msg(&mut self, msg: ChildProcessMessage) -> Result<()> {
         match msg {
             ChildProcessMessage::Restart(command) => self.restart(command).await?,
@@ -170,7 +228,7 @@ impl ChildProcessManagerActor {
         Ok(())
     }
 
-    // #[instrument(skip(self), err)]
+    #[instrument(skip(self), err)]
     async fn restart(&mut self, command: CommandDefinition) -> Result<()> {
         self.command = Some(command);
         if let Some((mut proc, cmd)) = self.process.take() {
@@ -179,7 +237,7 @@ impl ChildProcessManagerActor {
         Ok(())
     }
 
-    // #[instrument(skip(self), err)]
+    #[instrument(skip(self), err)]
     async fn stop(&mut self) -> Result<()> {
         info!("Stopping child daemon process …");
         self.stopped = true;
@@ -217,7 +275,7 @@ impl ChildProcessManager {
         ChildProcessManager { api_tx, subsys }
     }
 
-    // #[instrument(skip(self))]
+    #[instrument(skip(self), fields())]
     pub async fn restart(&mut self, command: CommandDefinition) {
         self.api_tx
             .send(ChildProcessMessage::Restart(command))
@@ -225,7 +283,7 @@ impl ChildProcessManager {
             .ok();
     }
 
-    // #[instrument(skip(self), err)]
+    #[instrument(skip(self), err)]
     pub async fn stop(&self) -> Result<()> {
         self.subsys.initiate_shutdown();
         self.subsys
@@ -237,7 +295,7 @@ impl ChildProcessManager {
     }
 }
 
-// #[instrument(skip(proc))]
+#[instrument(skip(proc), err)]
 async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
     info!("Terminating child process {cmd} …");
     match proc
@@ -253,7 +311,6 @@ async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-// #[instrument]
 fn delay(crash_counter: usize) -> u64 {
     ((crash_counter as f32).powi(2) * 50.0) as u64
 }

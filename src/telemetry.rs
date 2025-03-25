@@ -24,10 +24,8 @@ use opentelemetry_resource_detectors::{
 use opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace::SdkTracerProvider};
 use std::io;
 use supports_color::Stream;
-use tracing::info;
-use tracing_subscriber::{
-    EnvFilter, Layer, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
-};
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::TelemetryConfig;
 
@@ -39,10 +37,12 @@ pub async fn init(
         fmt::Layer::new()
             .with_ansi(supports_color::on(Stream::Stderr).is_some())
             .with_writer(io::stderr)
-            .with_filter(EnvFilter::from_default_env())
-            .with_filter(filter_fn(|meta| {
-                !meta.is_span() && meta.fields().iter().any(|f| f.name() == "message")
-            })),
+            .with_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .with_env_var("WORTERBUCH_LOG")
+                    .from_env_lossy(),
+            ),
     );
 
     if let Some(config) = config {
@@ -83,9 +83,10 @@ pub async fn init(
         let opentelemetry = tracing_opentelemetry::layer()
             .with_tracer(tracer)
             .with_filter(
-                EnvFilter::from_default_env()
-                    .add_directive("tower_http=debug".parse()?)
-                    .add_directive("worterbuch_cluster_orchestrator=debug".parse()?),
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .with_env_var("WORTERBUCH_TRACING")
+                    .from_env_lossy(),
             );
 
         subscriber.with(opentelemetry).init();

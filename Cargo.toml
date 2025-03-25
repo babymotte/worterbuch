@@ -41,7 +41,6 @@ tracing = "0.1.41"
 tracing-opentelemetry = "0.29.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 thiserror = "2.0.12"
-backtrace-on-stack-overflow = "0.3.0"
 
 [profile.release]
 lto = "fat"

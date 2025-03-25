@@ -100,7 +100,7 @@ impl<'a> Election<'a> {
         }
     }
 
-    #[instrument(skip(self, peers_rx), err)]
+    #[instrument(skip(self, peers_rx, buf), err)]
     async fn election_round(
         &mut self,
         peers_rx: &mut mpsc::Receiver<Peers>,

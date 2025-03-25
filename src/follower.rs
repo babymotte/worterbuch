@@ -29,9 +29,8 @@ use miette::Result;
 use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, time::sleep};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{info, warn};
+use tracing::{Level, info, instrument, warn};
 
-// #[instrument(skip(subsys, socket, config), err)]
 pub async fn follow(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
@@ -58,28 +57,12 @@ pub async fn follow(
                     info!("Leader heartbeat timed out. Leaving follower mode …");
                     break 'outer;
                 },
-                flow = listen(socket, &mut buf, |msg| async {
-                    match msg {
-                        PeerMessage::Vote(Vote::Request(vote)) => {
-                            info!("Node '{}' has started a leader election and requested our support, but we are still following '{}'. Ignoring it …", vote.node_id, leader_heartbeat.node_id);
-                        },
-                        PeerMessage::Vote(Vote::Response(vote)) => {
-                            warn!("Node '{}' is sending us vote responses, but we did not start an election. Weird.", vote.node_id);
-                        },
-                        PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                            if heartbeat == leader_heartbeat {
-                                send_heartbeat_response(&heartbeat, config, peers, socket).await?;
-                                return Ok(ControlFlow::Break(()));
-                            } else {
-                                info!("Node '{}' seems to think its the new leader, but we are still following '{}'. Ignoring it …", heartbeat.node_id, leader_heartbeat.node_id);
-                            }
-                        },
-                        PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                            warn!("Node '{}' is sending us heartbeat responses but we are not the leader. Weird.", heartbeat.node_id);
-                        }
-                    }
-                    Ok(ControlFlow::Continue::<()>(()))
-                }) => if let ControlFlow::Break(_) = flow? {
+                flow = listen(socket, &mut buf, |msg| process_peer_message(
+                    msg,
+                    &leader_heartbeat,
+                    config, peers,
+                    socket
+                )) => if let ControlFlow::Break(_) = flow? {
                     break 'inner;
                 },
                 _ = subsys.on_shutdown_requested() => break 'outer,
@@ -94,6 +77,48 @@ pub async fn follow(
     Ok(())
 }
 
+#[instrument(level = Level::TRACE, skip(config, peers, socket))]
+async fn process_peer_message(
+    msg: PeerMessage,
+    leader_heartbeat: &HeartbeatRequest,
+    config: &Config,
+    peers: &Peers,
+    socket: &UdpSocket,
+) -> Result<ControlFlow<()>> {
+    match msg {
+        PeerMessage::Vote(Vote::Request(vote)) => {
+            info!(
+                "Node '{}' has started a leader election and requested our support, but we are still following '{}'. Ignoring it …",
+                vote.node_id, leader_heartbeat.node_id
+            );
+        }
+        PeerMessage::Vote(Vote::Response(vote)) => {
+            warn!(
+                "Node '{}' is sending us vote responses, but we did not start an election. Weird.",
+                vote.node_id
+            );
+        }
+        PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+            if &heartbeat == leader_heartbeat {
+                send_heartbeat_response(&heartbeat, config, peers, socket).await?;
+                return Ok(ControlFlow::Break(()));
+            } else {
+                info!(
+                    "Node '{}' seems to think its the new leader, but we are still following '{}'. Ignoring it …",
+                    heartbeat.node_id, leader_heartbeat.node_id
+                );
+            }
+        }
+        PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
+            warn!(
+                "Node '{}' is sending us heartbeat responses but we are not the leader. Weird.",
+                heartbeat.node_id
+            );
+        }
+    }
+    Ok(ControlFlow::Continue::<()>(()))
+}
+
 fn cmd(leader: SocketAddr, config: &Config) -> CommandDefinition {
     CommandDefinition::new(
         config.worterbuch_executable.to_owned(),
@@ -101,6 +126,8 @@ fn cmd(leader: SocketAddr, config: &Config) -> CommandDefinition {
             "--follower".to_owned(),
             "--leader-address".to_owned(),
             leader.to_string(),
+            "--instance-name".to_owned(),
+            config.node_id.to_owned(),
         ],
     )
 }

@@ -22,7 +22,6 @@ use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    unsafe { backtrace_on_stack_overflow::enable() };
     dotenvy::dotenv().ok();
     Toplevel::new(|s| async move {
         s.start(SubsystemBuilder::new(

@@ -28,9 +28,8 @@ use miette::Result;
 use std::{collections::HashMap, ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{Level, debug, error, info, instrument, trace, warn};
 
-// #[instrument(skip(subsys, socket, config, peers_rx), err)]
 pub async fn lead(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
@@ -81,27 +80,11 @@ pub async fn lead(
             } else {
                 break;
             },
-            flow = listen(socket, &mut buf, |msg| async {
-                match msg {
-                    PeerMessage::Vote(Vote::Request(vote)) => {
-                        info!("Node '{}' wants to take the lead. Over my cold, dead body …", vote.node_id);
-                    },
-                    PeerMessage::Vote(Vote::Response(_)) => {
-                        // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
-                    },
-                    PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                        if config.quorum_too_low {
-                            error!("Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.", heartbeat.node_id);
-                            return Ok(ControlFlow::Break(()));
-                        }
-                    },
-                    PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                        trace!("Received heartbeat response from node '{}'.", heartbeat.node_id);
-                        heartbeat_responses.insert(heartbeat.node_id, Instant::now());
-                    },
-                }
-                Ok(ControlFlow::Continue(()))
-            }) => if let ControlFlow::Break(_) = flow? {
+            flow = listen(socket, &mut buf, |msg| process_peer_message(
+                msg,
+                config,
+                &mut heartbeat_responses
+            )) => if let ControlFlow::Break(_) = flow? {
                 break;
             },
             _ = subsys.on_shutdown_requested() => break,
@@ -113,7 +96,43 @@ pub async fn lead(
     Ok(())
 }
 
-// #[instrument(skip(config))]
+#[instrument(level = Level::TRACE, skip(config))]
+async fn process_peer_message(
+    msg: PeerMessage,
+    config: &Config,
+    heartbeat_responses: &mut HashMap<String, Instant>,
+) -> Result<ControlFlow<()>> {
+    match msg {
+        PeerMessage::Vote(Vote::Request(vote)) => {
+            info!(
+                "Node '{}' wants to take the lead. Over my cold, dead body …",
+                vote.node_id
+            );
+        }
+        PeerMessage::Vote(Vote::Response(_)) => {
+            // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
+        }
+        PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+            if config.quorum_too_low {
+                error!(
+                    "Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.",
+                    heartbeat.node_id
+                );
+                return Ok(ControlFlow::Break(()));
+            }
+        }
+        PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
+            trace!(
+                "Received heartbeat response from node '{}'.",
+                heartbeat.node_id
+            );
+            heartbeat_responses.insert(heartbeat.node_id, Instant::now());
+        }
+    }
+    Ok(ControlFlow::Continue(()))
+}
+
+#[instrument(level = Level::TRACE, skip(config))]
 fn check_heartbeat_responses(
     heartbeat_responses: &HashMap<String, Instant>,
     config: &Config,
@@ -153,6 +172,8 @@ fn cmd(config: &Config) -> CommandDefinition {
             "--leader".to_owned(),
             "--sync-port".to_owned(),
             config.sync_port.to_string(),
+            "--instance-name".to_owned(),
+            config.node_id.to_owned(),
         ],
     )
 }

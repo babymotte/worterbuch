@@ -134,7 +134,7 @@ struct Args {
     #[arg(
         short,
         long,
-        env = "WBCLUSTER_CONGIF_PATH",
+        env = "WBCLUSTER_CONFIG_PATH",
         default_value = "./config.yaml"
     )]
     config_path: String,

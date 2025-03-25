@@ -20,5 +20,6 @@ nodes:
   #   raftPort: 1341
   #   syncPort: 8282
 telemetry:
-  # endpoint: !http http://127.0.0.1:4317
+  # endpoint: !http http://127.0.0.1:7280
+  # endpoint: !grpc http://127.0.0.1:7281
   endpoint: !grpc http://127.0.0.1:4317

@@ -129,7 +129,6 @@ pub async fn instrument_and_run_main(subsys: SubsystemHandle) -> Result<()> {
     run_main(subsys, config, peers_rx).await
 }
 
-// #[instrument(skip(subsys), err)]
 async fn run_main(
     subsys: SubsystemHandle,
     mut config: config::Config,
@@ -177,7 +176,7 @@ async fn run_main(
 
 const TIMESTAMP_FILE_NAME: &str = "last-presisted";
 
-// #[instrument]
+#[instrument(ret)]
 pub async fn load_millis_since_active(path: &Path) -> Option<i64> {
     let path = path.join(TIMESTAMP_FILE_NAME);
     debug!("getting metadata of file {path:?}");

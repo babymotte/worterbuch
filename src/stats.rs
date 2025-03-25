@@ -58,7 +58,7 @@ struct Server {
 }
 
 impl Server {
-    // #[instrument(skip(server))]
+    #[instrument(skip(server), ret)]
     async fn ready(State(server): State<Server>) -> impl IntoResponse {
         let (tx, rx) = oneshot::channel();
         server
@@ -80,7 +80,6 @@ impl Server {
     }
 }
 
-// #[instrument(skip(subsys))]
 pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
     let (evt_tx, evt_rx) = mpsc::channel(1);
     let (api_tx, api_rx) = mpsc::channel(1);
@@ -94,7 +93,6 @@ pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result
     Ok(StatsSender(evt_tx))
 }
 
-// #[instrument(skip(subsys, api_tx))]
 async fn run_server(
     subsys: SubsystemHandle,
     api_tx: mpsc::Sender<StatsApiMessage>,
@@ -135,7 +133,6 @@ struct StatsActor {
 }
 
 impl StatsActor {
-    // #[instrument(skip(subsys, stats_rx, api_rx))]
     fn start_stats_actor(
         subsys: &SubsystemHandle,
         stats_rx: mpsc::Receiver<StatsEvent>,
@@ -152,7 +149,6 @@ impl StatsActor {
         }));
     }
 
-    // #[instrument(skip(self), err)]
     async fn run_stats_actor(mut self) -> Result<()> {
         loop {
             select! {
@@ -171,14 +167,12 @@ impl StatsActor {
         Ok(())
     }
 
-    // #[instrument(skip(self))]
     fn stats_event(&mut self, e: StatsEvent) {
         match e {
             StatsEvent::Election(state) => self.election_state = state,
         }
     }
 
-    // #[instrument(skip(self))]
     fn api_request(&mut self, e: StatsApiMessage) {
         match e {
             StatsApiMessage::ElectionState(sender) => {
