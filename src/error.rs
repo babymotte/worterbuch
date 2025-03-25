@@ -25,15 +25,15 @@ use tracing_subscriber::{filter::ParseError, util::TryInitError};
 #[derive(Error, Debug, Diagnostic)]
 pub enum WorterbuchClusterOrchestratorError {
     #[error("I/O error: {0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("YAML parse error: {0}")]
-    YamlError(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yaml::Error),
     #[error("Tracing init error: {0}")]
-    TryInitError(#[from] TryInitError),
+    TryInit(#[from] TryInitError),
     #[error("Tracing init error: {0}")]
-    TraceError(#[from] TraceError),
+    Trace(#[from] TraceError),
     #[error("Tracing config parse error: {0}")]
-    ParseError(#[from] ParseError),
+    Parse(#[from] ParseError),
 }
 
 impl IntoResponse for WorterbuchClusterOrchestratorError {

@@ -19,7 +19,7 @@ use super::config::Config;
 use miette::{Context, IntoDiagnostic, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
-use tracing::{info, instrument};
+use tracing::info;
 
 // #[instrument(ret, err)]
 pub async fn init_socket(config: &Config) -> Result<UdpSocket> {
