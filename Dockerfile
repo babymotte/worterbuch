@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
+FROM rust:slim-bookworm AS worterbuch-chef
 RUN cargo install cargo-chef
 WORKDIR /app
 
