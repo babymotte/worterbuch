@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM rust:bookworm AS worterbuch-chef
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
 RUN cargo install cargo-chef
 WORKDIR /app
 
@@ -28,12 +28,13 @@ ARG FEATURES=""
 COPY --from=worterbuch-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release ${FEATURES} --recipe-path recipe.json
 COPY . .
-RUN cargo build -p worterbuch ${FEATURES}
+RUN cargo build -p worterbuch --release ${FEATURES}
 
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=worterbuch-builder /app/target/release/worterbuch /usr/local/bin
-ENV RUST_LOG=info
+ENV WORTERBUCH_LOG=info
+ENV WORTERBUCH_TRACING=info,worterbuch=debug,tower_html=debug
 ENV WORTERBUCH_WS_BIND_ADDRESS=0.0.0.0
 ENV WORTERBUCH_TCP_BIND_ADDRESS=0.0.0.0
 ENV WORTERBUCH_USE_PERSISTENCE=true
@@ -43,7 +44,5 @@ ENV WORTERBUCH_WS_SERVER_PORT=80
 ENV WORTERBUCH_TCP_SERVER_PORT=9090
 ENV WORTERBUCH_SINGLE_THREADED=false
 ENV WORTERBUCH_WEBAPP=false
-ENV _RJEM_MALLOC_CONF=prof:true,prof_active:false,lg_prof_interval:30,lg_prof_sample:21,prof_prefix:/prof/jeprof
 VOLUME [ "/data" ]
-VOLUME [ "/prof" ]
 ENTRYPOINT ["/usr/local/bin/worterbuch"]
