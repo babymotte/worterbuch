@@ -53,7 +53,5 @@ jobs:
           # For pull requests, export results to the build cache.
           # Otherwise, push to a registry.
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry,push=true' }}
-          cache-from: type=registry,ref=babymotte/worterbuch:buildcache
-          cache-to: type=registry,ref=babymotte/worterbuch:buildcache,mode=max
           build-args: |
             FEATURES="--no-default-features"
