@@ -51,3 +51,5 @@ jobs:
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry,push=true' }}
           cache-from: type=registry,ref=babymotte/worterbuch:buildcache
           cache-to: type=registry,ref=babymotte/worterbuch:buildcache,mode=max
+          build-args: |
+            FEATURES="--no-default-features"
