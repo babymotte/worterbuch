@@ -43,7 +43,7 @@ jobs:
         with:
           push: true
           context: .
-          platforms: linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8
+          platforms: linux/arm64/v8
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # For pull requests, export results to the build cache.
