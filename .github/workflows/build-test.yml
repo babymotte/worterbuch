@@ -32,11 +32,11 @@ jobs:
             ext: ".exe"
             target-path: ""
           - target: aarch64-apple-darwin
-            image: macos-latest
+            image: macos-15
             ext: ""
             target-path: ""
           - target: x86_64-apple-darwin
-            image: macos-15
+            image: macos-13
             ext: ""
             target-path: ""
 
