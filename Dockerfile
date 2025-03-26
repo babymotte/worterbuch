@@ -16,6 +16,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
+RUN cargo install cargo-chef
 WORKDIR /app
 
 FROM worterbuch-chef AS worterbuch-planner
