@@ -21,12 +21,12 @@ jobs:
             target-path: ""
           - target: arm-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
-            ext: "/arm-unknown-linux-gnueabihf"
-            target-path: ""
+            ext: ""
+            target-path: "/arm-unknown-linux-gnueabihf"
           - target: armv7-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
-            ext: "/armv7-unknown-linux-gnueabihf"
-            target-path: ""
+            ext: ""
+            target-path: "/armv7-unknown-linux-gnueabihf"
           - target: x86_64-pc-windows-msvc
             image: windows-2022
             ext: ".exe"
