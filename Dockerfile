@@ -18,6 +18,8 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
 RUN cargo install cargo-chef
 WORKDIR /app
+RUN rustup component add rustfmt
+RUN rustup component add clippy
 
 FROM worterbuch-chef AS worterbuch-planner
 COPY . .
@@ -28,6 +30,9 @@ ARG FEATURES=""
 COPY --from=worterbuch-planner /app/recipe.json recipe.json
 RUN cargo chef cook -p worterbuch --release ${FEATURES} --recipe-path recipe.json
 COPY . .
+RUN cargo fmt --check
+RUN cargo clippy -- --deny warnings
+RUN cargo test
 RUN cargo build -p worterbuch --release ${FEATURES}
 
 FROM debian:bookworm-slim
