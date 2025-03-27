@@ -125,23 +125,18 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
-            target-path: ""
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
             ext: ""
-            target-path: ""
           - target: arm-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
-            target-path: "/arm-unknown-linux-gnueabihf"
           - target: armv7-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
-            target-path: "/armv7-unknown-linux-gnueabihf"
           - target: x86_64-pc-windows-msvc
             image: windows-2022
             ext: ".exe"
-            target-path: ""
           - target: aarch64-apple-darwin
             image: macos-15
             ext: ""
@@ -149,7 +144,6 @@ jobs:
           - target: x86_64-apple-darwin
             image: macos-13
             ext: ""
-            target-path: ""
 
     steps:
       - name: Checkout
@@ -174,7 +168,7 @@ jobs:
       - name: Package Binaries
         uses: vimtor/action-zip@v1
         with:
-          files: target/release/worterbuch${{ matrix.ext }} target${{ matrix.target-path }}/release/wbdel${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbjson${{ matrix.ext }} target/release/wbls${{ matrix.ext }} target/release/wblssub${{ matrix.ext }} target/release/wbpdel${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbpls${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbpub${{ matrix.ext }} target/release/wbpubs${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsets${{ matrix.ext }} target/release/wbspub${{ matrix.ext }} target/release/wbsub${{ matrix.ext }}
+          files: target/release/worterbuch${{ matrix.ext }} target/release/wbdel${{ matrix.ext }} target/release/wbget${{ matrix.ext }} target/release/wbjson${{ matrix.ext }} target/release/wbls${{ matrix.ext }} target/release/wblssub${{ matrix.ext }} target/release/wbpdel${{ matrix.ext }} target/release/wbpget${{ matrix.ext }} target/release/wbpls${{ matrix.ext }} target/release/wbpsub${{ matrix.ext }} target/release/wbpub${{ matrix.ext }} target/release/wbpubs${{ matrix.ext }} target/release/wbset${{ matrix.ext }} target/release/wbsets${{ matrix.ext }} target/release/wbspub${{ matrix.ext }} target/release/wbsub${{ matrix.ext }}
           dest: worterbuch-${{ matrix.target }}.zip
 
       - name: Release
