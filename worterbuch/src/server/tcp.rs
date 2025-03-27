@@ -197,24 +197,21 @@ async fn serve_loop(
     );
 
     loop {
-        select! {
-            recv = tcp_rx.next_line() => match recv {
-                Ok(Some(json)) => {
-                    trace!("Processing incoming message …");
-                    let msg_processed = proto.process_incoming_message(
-                        &json,
-                        &mut authorized,
-                    ).await?;
-                    if !msg_processed {
-                        break;
-                    }
-                    trace!("Processing incoming message done.");
-                },
-                Ok(None) =>  break,
-                Err(e) => {
-                    warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
+        match tcp_rx.next_line().await {
+            Ok(Some(json)) => {
+                trace!("Processing incoming message …");
+                let msg_processed = proto
+                    .process_incoming_message(&json, &mut authorized)
+                    .await?;
+                if !msg_processed {
                     break;
                 }
+                trace!("Processing incoming message done.");
+            }
+            Ok(None) => break,
+            Err(e) => {
+                warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
+                break;
             }
         }
     }

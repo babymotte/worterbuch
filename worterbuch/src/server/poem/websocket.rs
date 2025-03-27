@@ -111,31 +111,27 @@ async fn serve_loop(
     );
 
     loop {
-        select! {
-            recv = ws_rx.next() => if let Some(msg) = recv {
-                match msg {
-                    Ok(incoming_msg) => {
-                        trace!("Processing incoming message …");
-                        if let Message::Text(text) = incoming_msg {
-                            let msg_processed = proto.process_incoming_message(
-                                &text,
-                                &mut authorized,
-                            )
+        if let Some(msg) = ws_rx.next().await {
+            match msg {
+                Ok(incoming_msg) => {
+                    trace!("Processing incoming message …");
+                    if let Message::Text(text) = incoming_msg {
+                        let msg_processed = proto
+                            .process_incoming_message(&text, &mut authorized)
                             .await?;
-                            if !msg_processed {
-                                break;
-                            }
+                        if !msg_processed {
+                            break;
                         }
-                    },
-                    Err(e) => {
-                        error!("Error in WebSocket connection: {e}");
-                        break;
                     }
                 }
-            } else {
-                info!("WS stream of client {client_id} ({remote_addr}) closed.");
-                break;
-            },
+                Err(e) => {
+                    error!("Error in WebSocket connection: {e}");
+                    break;
+                }
+            }
+        } else {
+            info!("WS stream of client {client_id} ({remote_addr}) closed.");
+            break;
         }
     }
 
