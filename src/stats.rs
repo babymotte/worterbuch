@@ -1,7 +1,15 @@
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Json, Router, extract::State, response::IntoResponse, routing::get};
+#[cfg(feature = "jemalloc")]
+use axum::{
+    body::Body,
+    http::{HeaderValue, Response, StatusCode},
+};
 use miette::{Context, IntoDiagnostic, Result};
 use serde_json::json;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    env,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+};
 use tokio::{
     net::TcpListener,
     select,
@@ -78,6 +86,49 @@ impl Server {
             ElectionState::Follower => (StatusCode::SERVICE_UNAVAILABLE, Json(json!("follower"))),
         }
     }
+
+    #[cfg(feature = "jemalloc")]
+    async fn get_heap() -> Result<Response<Body>, (StatusCode, String)> {
+        let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
+            it
+        } else {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "jemalloc profiling is not enabled".to_owned(),
+            ));
+        };
+        let mut prof_ctl = prof_ctl.lock().await;
+        Self::require_profiling_activated(&prof_ctl)?;
+        let pprof = match prof_ctl.dump_pprof() {
+            Ok(it) => it,
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("error generating heap dump: {e}"),
+                ));
+            }
+        };
+
+        let mut response = pprof.into_response();
+
+        response.headers_mut().insert(
+            "Content-Disposition",
+            HeaderValue::from_static("attachment; filename=heap.pb.gz"),
+        );
+
+        Ok(response)
+    }
+
+    #[cfg(feature = "jemalloc")]
+    fn require_profiling_activated(
+        prof_ctl: &jemalloc_pprof::JemallocProfCtl,
+    ) -> Result<(), (StatusCode, String)> {
+        if prof_ctl.activated() {
+            Ok(())
+        } else {
+            Err((StatusCode::FORBIDDEN, "heap profiling not activated".into()))
+        }
+    }
 }
 
 pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
@@ -100,9 +151,15 @@ async fn run_server(
 ) -> Result<()> {
     let server = Server { api_tx };
 
-    let app = Router::new()
-        .route("/ready", get(Server::ready))
-        .with_state(server);
+    let mut app = Router::new().route("/ready", get(Server::ready));
+
+    #[cfg(feature = "jemalloc")]
+    if env::var("MALLOC_CONF")
+        .unwrap_or("".into())
+        .contains("prof_active:true")
+    {
+        app = app.route("/debug/heap", get(Server::get_heap))
+    }
 
     let ip = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
     let addr = SocketAddr::new(ip, port);
@@ -114,7 +171,7 @@ async fn run_server(
         .into_diagnostic()
         .wrap_err_with(|| format!("stats endpoint could not bind to socket address {addr}"))?;
 
-    axum::serve(listener, app)
+    axum::serve(listener, app.with_state(server))
         .with_graceful_shutdown(async move {
             subsys.on_shutdown_requested().await;
         })

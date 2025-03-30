@@ -22,14 +22,15 @@ FROM wbco-chef AS wbco-planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM wbco-chef AS wbco-builder 
+FROM wbco-chef AS wbco-builder
+ARG FEATURES=""
 COPY --from=wbco-planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release ${FEATURES} --recipe-path recipe.json
 COPY . .
 RUN cargo fmt --check
 RUN cargo clippy -- --deny warnings
 RUN cargo test
-RUN cargo build --release
+RUN cargo build --release ${FEATURES}
 
 FROM babymotte/worterbuch:1.3.2
 WORKDIR /app
@@ -40,5 +41,7 @@ ENV WBCLUSTER_HEARTBEAT_MIN_TIMEOUT=500
 ENV WBCLUSTER_RAFT_PORT=8181
 ENV WBCLUSTER_SYNC_PORT=8282
 ENV WBCLUSTER_WB_EXECUTABLE=/usr/local/bin/worterbuch
+ENV MALLOC_CONF=thp:always,metadata_thp:always,prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_gdump:false,prof_leak:true,prof_final:true,prof_prefix:/profiling/jeprof
 VOLUME [ "/cfg" ]
+VOLUME [ "/profiling" ]
 ENTRYPOINT ["/usr/local/bin/worterbuch-cluster-orchestrator"]
