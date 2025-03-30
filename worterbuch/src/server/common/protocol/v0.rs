@@ -10,10 +10,10 @@ use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
-    Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls, LsState,
-    PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub, SPubInit,
-    ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
-    UnsubscribeLs,
+    Ack, AuthCheck, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls,
+    LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub,
+    SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
+    Unsubscribe, UnsubscribeLs,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 
@@ -239,7 +239,7 @@ impl V0 {
         if self.auth_required {
             match authorized {
                 Some(claims) => {
-                    if let Err(e) = claims.authorize(&privilege, pattern) {
+                    if let Err(e) = claims.authorize(&privilege, AuthCheck::Pattern(pattern)) {
                         trace!("Client is not authorized, sending error …");
                         self.handle_store_error(
                             WorterbuchError::Unauthorized(e.clone()),

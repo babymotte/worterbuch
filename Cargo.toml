@@ -15,11 +15,7 @@ worterbuch-client = { path = "./worterbuch-client" }
 [profile.release]
 lto = "fat"
 codegen-units = 1
-panic = "abort"
-strip = true
-debug = 0
+# panic = "abort"
+# strip = true
+# debug = 0
 opt-level = 3
-
-[profile.release-web]
-inherits = "release"
-opt-level = "s"

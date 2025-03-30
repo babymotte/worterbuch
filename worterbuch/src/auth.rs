@@ -20,11 +20,13 @@
 use crate::Config;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use tracing::error;
 use worterbuch_common::{
-    KeySegment, Privilege, RequestPattern,
+    AuthCheck, KeySegment, Privilege,
     error::{AuthorizationError, AuthorizationResult},
 };
+
+const EMPTY_PRIVILEGES: Vec<String> = vec![];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,29 +34,108 @@ pub struct JwtClaims {
     pub sub: String,
     pub name: String,
     pub exp: u64,
-    pub worterbuch_privileges: HashMap<Privilege, Vec<RequestPattern>>,
+    pub worterbuch_privileges: Privileges,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Privileges {
+    read: Option<Vec<String>>,
+    write: Option<Vec<String>>,
+    delete: Option<Vec<String>>,
+    profile: Option<bool>,
 }
 
 impl JwtClaims {
-    pub fn authorize(&self, privilege: &Privilege, pattern: &str) -> AuthorizationResult<()> {
-        self.worterbuch_privileges.get(privilege).map_or_else(
-            || {
-                Err(AuthorizationError::InsufficientPrivileges(
-                    privilege.to_owned(),
-                    pattern.to_owned(),
-                ))
-            },
-            |allowed_patters| {
-                if allowed_patters.iter().any(|p| pattern_matches(p, pattern)) {
-                    Ok(())
+    pub fn authorize(&self, privilege: &Privilege, check: AuthCheck) -> AuthorizationResult<()> {
+        match privilege {
+            Privilege::Read => {
+                if let AuthCheck::Pattern(pattern) = check {
+                    if self
+                        .worterbuch_privileges
+                        .read
+                        .as_ref()
+                        .unwrap_or(&EMPTY_PRIVILEGES)
+                        .iter()
+                        .any(|p| pattern_matches(p, pattern))
+                    {
+                        Ok(())
+                    } else {
+                        Err(AuthorizationError::InsufficientPrivileges(
+                            privilege.to_owned(),
+                            check.into(),
+                        ))
+                    }
                 } else {
-                    Err(AuthorizationError::InsufficientPrivileges(
-                        privilege.to_owned(),
-                        pattern.to_owned(),
-                    ))
+                    error!("Read privileges can only be checked against a pattern");
+                    Err(AuthorizationError::InvalidCheck)
                 }
-            },
-        )
+            }
+            Privilege::Write => {
+                if let AuthCheck::Pattern(pattern) = check {
+                    if self
+                        .worterbuch_privileges
+                        .write
+                        .as_ref()
+                        .unwrap_or(&EMPTY_PRIVILEGES)
+                        .iter()
+                        .any(|p| pattern_matches(p, pattern))
+                    {
+                        Ok(())
+                    } else {
+                        Err(AuthorizationError::InsufficientPrivileges(
+                            privilege.to_owned(),
+                            check.into(),
+                        ))
+                    }
+                } else {
+                    error!("Write privileges can only be checked against a pattern");
+                    Err(AuthorizationError::InvalidCheck)
+                }
+            }
+            Privilege::Delete => {
+                if let AuthCheck::Pattern(pattern) = check {
+                    if self
+                        .worterbuch_privileges
+                        .delete
+                        .as_ref()
+                        .unwrap_or(&EMPTY_PRIVILEGES)
+                        .iter()
+                        .any(|p| pattern_matches(p, pattern))
+                    {
+                        Ok(())
+                    } else {
+                        Err(AuthorizationError::InsufficientPrivileges(
+                            privilege.to_owned(),
+                            check.into(),
+                        ))
+                    }
+                } else {
+                    error!("Delete privileges can only be checked against a pattern");
+                    Err(AuthorizationError::InvalidCheck)
+                }
+            }
+            Privilege::Profile => {
+                if let AuthCheck::Flag = check {
+                    if *self
+                        .worterbuch_privileges
+                        .profile
+                        .as_ref()
+                        .unwrap_or(&false)
+                    {
+                        Ok(())
+                    } else {
+                        Err(AuthorizationError::InsufficientPrivileges(
+                            privilege.to_owned(),
+                            check.into(),
+                        ))
+                    }
+                } else {
+                    error!("Profile privileges can only be checked against a flag");
+                    Err(AuthorizationError::InvalidCheck)
+                }
+            }
+        }
     }
 }
 

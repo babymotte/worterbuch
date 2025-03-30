@@ -49,5 +49,7 @@ ENV WORTERBUCH_WS_SERVER_PORT=80
 ENV WORTERBUCH_TCP_SERVER_PORT=9090
 ENV WORTERBUCH_SINGLE_THREADED=false
 ENV WORTERBUCH_WEBAPP=false
+ENV MALLOC_CONF=thp:always,metadata_thp:always,prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_gdump:false,prof_leak:true,prof_final:true,prof_prefix:/profiling/jeprof
 VOLUME [ "/data" ]
+VOLUME [ "/profiling" ]
 ENTRYPOINT ["/usr/local/bin/worterbuch"]

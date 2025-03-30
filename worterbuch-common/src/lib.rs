@@ -72,6 +72,7 @@ pub enum Privilege {
     Read,
     Write,
     Delete,
+    Profile,
 }
 
 impl fmt::Display for Privilege {
@@ -80,6 +81,39 @@ impl fmt::Display for Privilege {
             Privilege::Read => "read".fmt(f),
             Privilege::Write => "write".fmt(f),
             Privilege::Delete => "delete".fmt(f),
+            Privilege::Profile => "profile".fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthCheck<'a> {
+    Pattern(&'a str),
+    Flag,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthCheckOwned {
+    Pattern(String),
+    Flag,
+}
+
+impl<'a> From<AuthCheck<'a>> for AuthCheckOwned {
+    fn from(value: AuthCheck<'a>) -> Self {
+        match value {
+            AuthCheck::Pattern(p) => AuthCheckOwned::Pattern(p.to_owned()),
+            AuthCheck::Flag => AuthCheckOwned::Flag,
+        }
+    }
+}
+
+impl fmt::Display for AuthCheckOwned {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuthCheckOwned::Pattern(p) => p.fmt(f),
+            AuthCheckOwned::Flag => true.fmt(f),
         }
     }
 }

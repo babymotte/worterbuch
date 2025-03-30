@@ -18,8 +18,8 @@
  */
 
 use crate::{
-    ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment, RequestPattern,
-    TransactionId, server::Err,
+    AuthCheckOwned, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
+    RequestPattern, TransactionId, server::Err,
 };
 use miette::Diagnostic;
 use opentelemetry::trace::TraceError;
@@ -82,21 +82,23 @@ pub trait Context<T, E: std::error::Error> {
 }
 #[derive(Debug, Clone, Diagnostic)]
 pub enum AuthorizationError {
-    InsufficientPrivileges(Privilege, RequestPattern),
+    InsufficientPrivileges(Privilege, AuthCheckOwned),
     TokenDecodeError(String),
     MissingToken,
     MissingSecret,
+    InvalidCheck,
 }
 
 impl fmt::Display for AuthorizationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AuthorizationError::InsufficientPrivileges(privilege, pattern) => {
-                write!(f, "Client does not have {privilege} access to '{pattern}'")
+            AuthorizationError::InsufficientPrivileges(privilege, check) => {
+                write!(f, "Client lacks privilege '{privilege} {check}'")
             }
             AuthorizationError::TokenDecodeError(msg) => msg.fmt(f),
             AuthorizationError::MissingToken => "No JWT was included in the request".fmt(f),
             AuthorizationError::MissingSecret => "No JWT was configured".fmt(f),
+            AuthorizationError::InvalidCheck => "Incorrect check provided. This is a bug.".fmt(f),
         }
     }
 }

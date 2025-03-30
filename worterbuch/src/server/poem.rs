@@ -47,6 +47,8 @@ use poem::{
     },
 };
 use serde_json::Value;
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+use std::env;
 use std::{
     collections::HashMap,
     io::{self, ErrorKind, Write},
@@ -63,7 +65,7 @@ use tracing::{debug, debug_span, error, info, instrument};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
-    Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
+    AuthCheck, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
     error::WorterbuchError,
 };
 
@@ -151,7 +153,7 @@ async fn export(
     request: &Request,
 ) -> Result<Response> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, "#") {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#")) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -222,7 +224,7 @@ async fn import(
     request: &Request,
 ) -> Result<impl IntoResponse> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, "#") {
+        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#")) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -306,7 +308,7 @@ async fn get_value(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Response> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -348,7 +350,7 @@ async fn pget(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &pattern) {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -366,7 +368,7 @@ async fn set(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -385,7 +387,7 @@ async fn publish(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -402,7 +404,7 @@ async fn delete_value(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Value>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Delete, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -420,7 +422,7 @@ async fn pdelete(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Delete, &pattern) {
+        if let Err(e) = privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -438,7 +440,9 @@ async fn ls(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+        if let Err(e) =
+            privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))
+        {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -454,7 +458,7 @@ async fn ls_root(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?")) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -473,7 +477,7 @@ async fn subscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -552,7 +556,7 @@ async fn psubscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &key) {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -619,7 +623,7 @@ async fn subscribels_root(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, "?") {
+        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?")) {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -676,7 +680,9 @@ async fn subscribels(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, &format!("{parent}/?")) {
+        if let Err(e) =
+            privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))
+        {
             return to_error_response(WorterbuchError::Unauthorized(e));
         }
     }
@@ -725,6 +731,53 @@ async fn subscribels(
             )))
         }
         Err(e) => to_error_response(e),
+    }
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[handler]
+async fn get_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Result<Response> {
+    if let Some(privileges) = privileges {
+        if let Err(e) = privileges.authorize(&Privilege::Profile, AuthCheck::Flag) {
+            return to_error_response(WorterbuchError::Unauthorized(e));
+        }
+    }
+
+    let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
+        it
+    } else {
+        let meta = "jemalloc profiling is not enabled".to_owned();
+        return to_error_response(WorterbuchError::IoError(
+            io::Error::new(io::ErrorKind::Other, meta.clone()),
+            meta,
+        ));
+    };
+    let mut prof_ctl = prof_ctl.lock().await;
+    require_profiling_activated(&prof_ctl)?;
+    let pprof = match prof_ctl.dump_pprof() {
+        Ok(it) => it,
+        Err(e) => {
+            let meta = format!("error generating heap dump: {e}");
+            return to_error_response(WorterbuchError::IoError(
+                io::Error::new(io::ErrorKind::Other, e),
+                meta,
+            ));
+        }
+    };
+
+    let response = pprof.into_response();
+
+    Ok(response
+        .with_header("Content-Disposition", "attachment; filename=heap.pb.gz")
+        .into_response())
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+fn require_profiling_activated(prof_ctl: &jemalloc_pprof::JemallocProfCtl) -> Result<()> {
+    if prof_ctl.activated() {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "heap profiling not activated".into()).into())
     }
 }
 
@@ -854,6 +907,17 @@ pub async fn start(
                     .with(AddData::new(worterbuch.clone())),
             ),
         );
+
+    #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+    if env::var("MALLOC_CONF")
+        .unwrap_or("".into())
+        .contains("prof_active:true")
+    {
+        app = app.at(
+            format!("{rest_root}/debug/heap"),
+            get(get_heap).with(BearerAuth::new(config.clone())),
+        )
+    }
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
     app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));

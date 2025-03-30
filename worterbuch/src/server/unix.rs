@@ -271,7 +271,7 @@ async fn forward_messages_to_socket(
     Ok(())
 }
 
-impl<'a> ServeLoop<'a> {
+impl ServeLoop<'_> {
     async fn run(mut self) -> Result<()> {
         loop {
             let next_line = self.unix_rx.next_line().await;
