@@ -26,9 +26,7 @@ use tokio::{
 };
 use tracing::error;
 use worterbuch_common::{
-    ClientMessage, ServerMessage,
-    error::ConnectionResult,
-    tcp::{self, write_line_and_flush},
+    ClientMessage, ServerMessage, error::ConnectionResult, write_line_and_flush,
 };
 
 const SERVER_ID: &str = "worterbuch server";
@@ -67,7 +65,7 @@ impl TcpClientSocket {
     }
 
     pub async fn receive_msg(&mut self) -> ConnectionResult<Option<ServerMessage>> {
-        tcp::receive_msg(&mut self.rx).await
+        worterbuch_common::receive_msg(&mut self.rx).await
     }
 
     pub async fn close(self) -> ConnectionResult<()> {

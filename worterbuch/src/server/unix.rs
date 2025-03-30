@@ -18,20 +18,30 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{SUPPORTED_PROTOCOL_VERSIONS, server::common::CloneableWbApi, stats::VERSION};
+use crate::{
+    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
+};
 use miette::{IntoDiagnostic, Result};
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{UnixListener, UnixStream, unix::SocketAddr},
-    select, spawn,
+    io::{AsyncBufReadExt, BufReader, Lines},
+    net::{
+        UnixListener, UnixStream,
+        unix::{OwnedReadHalf, OwnedWriteHalf, SocketAddr},
+    },
+    select,
     sync::mpsc,
-    time::MissedTickBehavior,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, tcp::write_line_and_flush};
+use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, write_line_and_flush};
+
+enum SocketEvent {
+    Disconnected(Option<Uuid>),
+    Connected(Option<Result<(UnixStream, SocketAddr), io::Error>>),
+    ShutdownRequested,
+}
 
 pub async fn start(
     worterbuch: CloneableWbApi,
@@ -51,29 +61,40 @@ pub async fn start(
     let mut clients = HashMap::new();
 
     loop {
-        select! {
-            recv = conn_closed_rx.recv() => if let Some(id) = recv {
-                clients.remove(&id);
-                while let Ok(id) = conn_closed_rx.try_recv() {
-                    clients.remove(&id);
-                }
-                debug!("{} UNIX connection(s) open.", clients.len());
-                waiting_for_free_connections = false;
-            } else {
-                break;
-            },
-            con = listener.accept(), if !waiting_for_free_connections => {
-                debug!("Trying to accept new client connection.");
-                match con {
-                    Ok((socket, remote_addr)) => {
-                        let id = Uuid::new_v4();
-                        debug!("{} UNIX connection(s) open.", clients.len());
-                        let worterbuch = worterbuch.clone();
-                        let conn_closed_tx = conn_closed_tx.clone();
+        let evt = next_socket_event(
+            &subsys,
+            &mut conn_closed_rx,
+            &listener,
+            waiting_for_free_connections,
+        )
+        .await;
 
-                        let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
+        match evt {
+            SocketEvent::Disconnected(uuid) => {
+                if let Some(id) = uuid {
+                    clients.remove(&id);
+                    while let Ok(id) = conn_closed_rx.try_recv() {
+                        clients.remove(&id);
+                    }
+                    debug!("{} UNIX connection(s) open.", clients.len());
+                    waiting_for_free_connections = false;
+                } else {
+                    break;
+                }
+            }
+            SocketEvent::Connected(con) => {
+                if let Some(con) = con {
+                    debug!("Trying to accept new client connection.");
+                    match con {
+                        Ok((socket, remote_addr)) => {
+                            let id = Uuid::new_v4();
+                            debug!("{} UNIX connection(s) open.", clients.len());
+                            let worterbuch = worterbuch.clone();
+                            let conn_closed_tx = conn_closed_tx.clone();
+
+                            let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
                             select! {
-                                s = serve(id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                s = serve(&s, id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
                                 _ = s.on_shutdown_requested() => (),
@@ -81,17 +102,21 @@ pub async fn start(
                             conn_closed_tx.send(id).await.ok();
                             Ok::<(),miette::Error>(())
                         }));
-                        clients.insert(id, client);
-                    },
-                    Err(e) => {
-                        error!("Error while trying to accept client connection: {e}");
-                        warn!("{} UNIX connections open, waiting for connections to close.", clients.len());
-                        waiting_for_free_connections = true;
+                            clients.insert(id, client);
+                        }
+                        Err(e) => {
+                            error!("Error while trying to accept client connection: {e}");
+                            warn!(
+                                "{} UNIX connections open, waiting for connections to close.",
+                                clients.len()
+                            );
+                            waiting_for_free_connections = true;
+                        }
                     }
+                    debug!("Ready to accept new connections.");
                 }
-                debug!("Ready to accept new connections.");
-            },
-            _ = subsys.on_shutdown_requested() => break,
+            }
+            SocketEvent::ShutdownRequested => break,
         }
     }
 
@@ -112,7 +137,25 @@ pub async fn start(
     Ok(())
 }
 
+async fn next_socket_event(
+    subsys: &SubsystemHandle,
+    conn_closed_rx: &mut mpsc::Receiver<Uuid>,
+    listener: &UnixListener,
+    waiting_for_free_connections: bool,
+) -> SocketEvent {
+    select! {
+        recv = conn_closed_rx.recv() => SocketEvent::Disconnected(recv),
+        con = listener.accept() => if !waiting_for_free_connections {
+            SocketEvent::Connected(Some(con))
+        } else {
+            SocketEvent::Connected(None)
+        },
+        _ = subsys.on_shutdown_requested() => SocketEvent::ShutdownRequested,
+    }
+}
+
 async fn serve(
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
@@ -125,7 +168,8 @@ async fn serve(
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
-        if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
+        if let Err(e) = serve_loop(subsys, client_id, remote_addr, worterbuch.clone(), socket).await
+        {
             error!("Error in serve loop: {e}");
         }
     }
@@ -135,7 +179,16 @@ async fn serve(
     Ok(())
 }
 
+struct ServeLoop<'a> {
+    client_id: Uuid,
+    remote_addr: &'a SocketAddr,
+    authorized: Option<JwtClaims>,
+    unix_rx: Lines<BufReader<OwnedReadHalf>>,
+    proto: Proto,
+}
+
 async fn serve_loop(
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
@@ -144,25 +197,18 @@ async fn serve_loop(
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
-    let mut keepalive_timer = tokio::time::interval(Duration::from_secs(1));
-    let mut authorized = None;
-    keepalive_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-    let (unix_rx, mut unix_tx) = socket.into_split();
-    let (unix_send_tx, mut unix_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let authorized = None;
 
     // unix socket send loop
-    spawn(async move {
-        while let Some(msg) = unix_send_rx.recv().await {
-            if let Err(e) = write_line_and_flush(msg, &mut unix_tx, send_timeout, client_id).await {
-                error!("Error sending unix socket message: {e}");
-                break;
-            }
-        }
-    });
+    let (unix_rx, unix_tx) = socket.into_split();
+    let (unix_send_tx, unix_send_rx) = mpsc::channel(config.channel_buffer_size);
+    subsys.start(SubsystemBuilder::new(
+        "forward_messages_to_socket",
+        move |s| forward_messages_to_socket(s, unix_send_rx, unix_tx, client_id, send_timeout),
+    ));
 
     let unix_rx = BufReader::new(unix_rx);
-    let mut unix_rx = unix_rx.lines();
+    let unix_rx = unix_rx.lines();
 
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
@@ -178,7 +224,7 @@ async fn serve_loop(
         .await
         .into_diagnostic()?;
 
-    let mut proto = Proto::new(
+    let proto = Proto::new(
         client_id,
         unix_send_tx,
         authorization_required,
@@ -186,27 +232,92 @@ async fn serve_loop(
         worterbuch,
     );
 
+    let serve_loop = ServeLoop {
+        authorized,
+        client_id,
+        proto,
+        remote_addr,
+        unix_rx,
+    };
+
+    serve_loop.run().await
+}
+
+async fn forward_messages_to_socket(
+    subsys: SubsystemHandle,
+    mut unix_send_rx: mpsc::Receiver<ServerMessage>,
+    mut unix_tx: OwnedWriteHalf,
+    client_id: Uuid,
+    send_timeout: Duration,
+) -> Result<()> {
     loop {
-        match unix_rx.next_line().await {
-            Ok(Some(json)) => {
-                trace!("Processing incoming message …");
-                let msg_processed = proto
-                    .process_incoming_message(&json, &mut authorized)
-                    .await?;
-                if !msg_processed {
+        select! {
+            recv = unix_send_rx.recv() => if let Some(msg) = recv {
+                if let Err(e) = write_line_and_flush(msg, &mut unix_tx, send_timeout, client_id).await {
+                    error!("Error sending UNIX message: {e}");
                     break;
                 }
-                trace!("Processing incoming message done.");
-            }
-            Ok(None) => break,
-            Err(e) => {
-                warn!(
-                    "UNIX stream of client {client_id} ({remote_addr:?}) closed with error:, {e}"
-                );
+            } else {
+                warn!("Message forwarding to client {client_id} stopped: channel closed.");
                 break;
-            }
+            },
+            _ = subsys.on_shutdown_requested() => {
+                warn!("Message forwarding to client {client_id} stopped: subsystem stopped.");
+                break;
+            },
         }
     }
 
     Ok(())
+}
+
+impl<'a> ServeLoop<'a> {
+    async fn run(mut self) -> Result<()> {
+        loop {
+            let next_line = self.unix_rx.next_line().await;
+            if let ControlFlow::Break(it) = self.process_next_line(next_line).await? {
+                break Ok(it);
+            }
+        }
+    }
+
+    async fn process_next_line(
+        &mut self,
+        next_line: Result<Option<String>, io::Error>,
+    ) -> Result<ControlFlow<()>> {
+        match next_line {
+            Ok(Some(json)) => self.process_line(json).await,
+            Ok(None) => self.done(),
+            Err(e) => self.unix_error(e),
+        }
+    }
+
+    async fn process_line(&mut self, json: String) -> Result<ControlFlow<()>> {
+        trace!("Processing incoming message …");
+        let msg_processed = self
+            .proto
+            .process_incoming_message(&json, &mut self.authorized)
+            .await?;
+        if !msg_processed {
+            return Ok(ControlFlow::Break(()));
+        }
+        trace!("Processing incoming message done.");
+        Ok(ControlFlow::Continue(()))
+    }
+
+    fn unix_error(&mut self, e: io::Error) -> std::result::Result<ControlFlow<()>, miette::Error> {
+        warn!(
+            "UNIX stream of client {} ({:?}) closed with error:, {}",
+            self.client_id, self.remote_addr, e
+        );
+        Ok(ControlFlow::Break(()))
+    }
+
+    fn done(&self) -> std::result::Result<ControlFlow<()>, miette::Error> {
+        debug!(
+            "UNIX stream of client {} ({:?}) closed normally.",
+            self.client_id, self.remote_addr
+        );
+        Ok(ControlFlow::Break(()))
+    }
 }

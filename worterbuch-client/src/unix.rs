@@ -27,7 +27,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 use worterbuch_common::{
-    ClientMessage, ServerMessage, error::ConnectionResult, tcp::write_line_and_flush,
+    ClientMessage, ServerMessage, error::ConnectionResult, write_line_and_flush,
 };
 
 const SERVER_ID: &str = "worterbuch server";

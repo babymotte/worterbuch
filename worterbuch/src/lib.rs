@@ -62,7 +62,7 @@ use uuid::Uuid;
 use worterbuch_common::{
     KeySegment, PStateEvent, ProtocolVersion, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
     SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, error::WorterbuchError, tcp::receive_msg, topic,
+    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, error::WorterbuchError, receive_msg, topic,
 };
 
 pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =

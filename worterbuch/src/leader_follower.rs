@@ -38,7 +38,7 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-    Value, tcp::write_line_and_flush, topic,
+    Value, topic, write_line_and_flush,
 };
 
 #[derive(Serialize)]

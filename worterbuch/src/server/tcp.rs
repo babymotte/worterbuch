@@ -18,22 +18,36 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{SUPPORTED_PROTOCOL_VERSIONS, server::common::CloneableWbApi, stats::VERSION};
+use crate::{
+    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
+};
 use miette::{IntoDiagnostic, Result};
 use std::{
     collections::HashMap,
+    io,
     net::{IpAddr, SocketAddr},
+    ops::ControlFlow,
+    time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{TcpSocket, TcpStream},
-    select, spawn,
+    io::{AsyncBufReadExt, BufReader, Lines},
+    net::{
+        TcpListener, TcpSocket, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    select,
     sync::mpsc,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, tcp::write_line_and_flush};
+use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, write_line_and_flush};
+
+enum SocketEvent {
+    Disconnected(Option<Uuid>),
+    Connected(Option<Result<(TcpStream, SocketAddr), io::Error>>),
+    ShutdownRequested,
+}
 
 pub async fn start(
     worterbuch: CloneableWbApi,
@@ -57,49 +71,63 @@ pub async fn start(
     let mut waiting_for_free_connections = false;
 
     let mut clients = HashMap::new();
-
     loop {
-        select! {
-            recv = conn_closed_rx.recv() => if let Some(id) = recv {
-                clients.remove(&id);
-                while let Ok(id) = conn_closed_rx.try_recv() {
-                    clients.remove(&id);
-                }
-                debug!("{} TCP connection(s) open.", clients.len());
-                waiting_for_free_connections = false;
-            } else {
-                break;
-            },
-            con = listener.accept(), if !waiting_for_free_connections => {
-                debug!("Trying to accept new client connection.");
-                match con {
-                    Ok((socket, remote_addr)) => {
-                        let id = Uuid::new_v4();
-                        debug!("{} TCP connection(s) open.",clients.len());
-                        let worterbuch = worterbuch.clone();
-                        let conn_closed_tx = conn_closed_tx.clone();
+        let evt = next_socket_event(
+            &subsys,
+            &mut conn_closed_rx,
+            &listener,
+            waiting_for_free_connections,
+        )
+        .await;
 
-                        let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
+        match evt {
+            SocketEvent::Disconnected(uuid) => {
+                if let Some(id) = uuid {
+                    clients.remove(&id);
+                    while let Ok(id) = conn_closed_rx.try_recv() {
+                        clients.remove(&id);
+                    }
+                    debug!("{} TCP connection(s) open.", clients.len());
+                    waiting_for_free_connections = false;
+                } else {
+                    break;
+                }
+            }
+            SocketEvent::Connected(con) => {
+                if let Some(con) = con {
+                    debug!("Trying to accept new client connection.");
+                    match con {
+                        Ok((socket, remote_addr)) => {
+                            let id = Uuid::new_v4();
+                            debug!("{} TCP connection(s) open.", clients.len());
+                            let worterbuch = worterbuch.clone();
+                            let conn_closed_tx = conn_closed_tx.clone();
+
+                            let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
                             select! {
-                                s = serve(id, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                s = serve(&s, id, remote_addr, worterbuch, socket) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
                                 _ = s.on_shutdown_requested() => (),
                             }
-                            conn_closed_tx.send(id).await.ok();
-                            Ok::<(),miette::Error>(())
-                        }));
-                        clients.insert(id, client);
-                    },
-                    Err(e) => {
-                        error!("Error while trying to accept client connection: {e}");
-                        warn!("{} TCP connections open, waiting for connections to close.", clients.len());
-                        waiting_for_free_connections = true;
+                        conn_closed_tx.send(id).await.ok();
+                        Ok::<(),miette::Error>(())
+                    }));
+                            clients.insert(id, client);
+                        }
+                        Err(e) => {
+                            error!("Error while trying to accept client connection: {e}");
+                            warn!(
+                                "{} TCP connections open, waiting for connections to close.",
+                                clients.len()
+                            );
+                            waiting_for_free_connections = true;
+                        }
                     }
+                    debug!("Ready to accept new connections.");
                 }
-                debug!("Ready to accept new connections.");
-            },
-            _ = subsys.on_shutdown_requested() => break,
+            }
+            SocketEvent::ShutdownRequested => break,
         }
     }
 
@@ -119,7 +147,25 @@ pub async fn start(
     Ok(())
 }
 
+async fn next_socket_event(
+    subsys: &SubsystemHandle,
+    conn_closed_rx: &mut mpsc::Receiver<Uuid>,
+    listener: &TcpListener,
+    waiting_for_free_connections: bool,
+) -> SocketEvent {
+    select! {
+        recv = conn_closed_rx.recv() => SocketEvent::Disconnected(recv),
+        con = listener.accept() => if !waiting_for_free_connections {
+            SocketEvent::Connected(Some(con))
+        } else {
+            SocketEvent::Connected(None)
+        },
+        _ = subsys.on_shutdown_requested() => SocketEvent::ShutdownRequested,
+    }
+}
+
 async fn serve(
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -135,7 +181,8 @@ async fn serve(
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-        if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), socket).await {
+        if let Err(e) = serve_loop(subsys, client_id, remote_addr, worterbuch.clone(), socket).await
+        {
             error!("Error in serve loop: {e}");
         }
     }
@@ -147,7 +194,16 @@ async fn serve(
     Ok(())
 }
 
+struct ServeLoop {
+    client_id: Uuid,
+    remote_addr: SocketAddr,
+    authorized: Option<JwtClaims>,
+    tcp_rx: Lines<BufReader<OwnedReadHalf>>,
+    proto: Proto,
+}
+
 async fn serve_loop(
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -156,23 +212,18 @@ async fn serve_loop(
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
     let send_timeout = config.send_timeout;
-    let mut authorized = None;
-
-    let (tcp_rx, mut tcp_tx) = socket.into_split();
-    let (tcp_send_tx, mut tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let authorized = None;
 
     // tcp socket send loop
-    spawn(async move {
-        while let Some(msg) = tcp_send_rx.recv().await {
-            if let Err(e) = write_line_and_flush(msg, &mut tcp_tx, send_timeout, client_id).await {
-                error!("Error sending TCP message: {e}");
-                break;
-            }
-        }
-    });
+    let (tcp_rx, tcp_tx) = socket.into_split();
+    let (tcp_send_tx, tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
+    subsys.start(SubsystemBuilder::new(
+        "forward_messages_to_socket",
+        move |s| forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout),
+    ));
 
     let tcp_rx = BufReader::new(tcp_rx);
-    let mut tcp_rx = tcp_rx.lines();
+    let tcp_rx = tcp_rx.lines();
 
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
@@ -188,7 +239,7 @@ async fn serve_loop(
         .await
         .into_diagnostic()?;
 
-    let mut proto = Proto::new(
+    let proto = Proto::new(
         client_id,
         tcp_send_tx,
         authorization_required,
@@ -196,25 +247,92 @@ async fn serve_loop(
         worterbuch,
     );
 
+    let serve_loop = ServeLoop {
+        authorized,
+        client_id,
+        proto,
+        remote_addr,
+        tcp_rx,
+    };
+
+    serve_loop.run().await
+}
+
+async fn forward_messages_to_socket(
+    subsys: SubsystemHandle,
+    mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
+    mut tcp_tx: OwnedWriteHalf,
+    client_id: Uuid,
+    send_timeout: Duration,
+) -> Result<()> {
     loop {
-        match tcp_rx.next_line().await {
-            Ok(Some(json)) => {
-                trace!("Processing incoming message …");
-                let msg_processed = proto
-                    .process_incoming_message(&json, &mut authorized)
-                    .await?;
-                if !msg_processed {
+        select! {
+            recv = tcp_send_rx.recv() => if let Some(msg) = recv {
+                if let Err(e) = write_line_and_flush(msg, &mut tcp_tx, send_timeout, client_id).await {
+                    error!("Error sending TCP message: {e}");
                     break;
                 }
-                trace!("Processing incoming message done.");
-            }
-            Ok(None) => break,
-            Err(e) => {
-                warn!("TCP stream of client {client_id} ({remote_addr}) closed with error:, {e}");
+            } else {
+                warn!("Message forwarding to client {client_id} stopped: channel closed.");
                 break;
-            }
+            },
+            _ = subsys.on_shutdown_requested() => {
+                warn!("Message forwarding to client {client_id} stopped: subsystem stopped.");
+                break;
+            },
         }
     }
 
     Ok(())
+}
+
+impl ServeLoop {
+    async fn run(mut self) -> Result<()> {
+        loop {
+            let next_line = self.tcp_rx.next_line().await;
+            if let ControlFlow::Break(it) = self.process_next_line(next_line).await? {
+                break Ok(it);
+            }
+        }
+    }
+
+    async fn process_next_line(
+        &mut self,
+        next_line: Result<Option<String>, io::Error>,
+    ) -> Result<ControlFlow<()>> {
+        match next_line {
+            Ok(Some(json)) => self.process_line(json).await,
+            Ok(None) => self.done(),
+            Err(e) => self.tcp_error(e),
+        }
+    }
+
+    async fn process_line(&mut self, json: String) -> Result<ControlFlow<()>> {
+        trace!("Processing incoming message …");
+        let msg_processed = self
+            .proto
+            .process_incoming_message(&json, &mut self.authorized)
+            .await?;
+        if !msg_processed {
+            return Ok(ControlFlow::Break(()));
+        }
+        trace!("Processing incoming message done.");
+        Ok(ControlFlow::Continue(()))
+    }
+
+    fn tcp_error(&mut self, e: io::Error) -> std::result::Result<ControlFlow<()>, miette::Error> {
+        warn!(
+            "TCP stream of client {} ({}) closed with error:, {}",
+            self.client_id, self.remote_addr, e
+        );
+        Ok(ControlFlow::Break(()))
+    }
+
+    fn done(&self) -> std::result::Result<ControlFlow<()>, miette::Error> {
+        debug!(
+            "TCP stream of client {} ({}) closed normally.",
+            self.client_id, self.remote_addr
+        );
+        Ok(ControlFlow::Break(()))
+    }
 }
