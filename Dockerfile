@@ -38,7 +38,7 @@ FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=worterbuch-builder /app/target/release/worterbuch /usr/local/bin
 ENV WORTERBUCH_LOG=info
-ENV WORTERBUCH_TRACING=info,worterbuch=debug,tower_html=debug
+ENV WORTERBUCH_TRACING=info,worterbuch=debug
 ENV WORTERBUCH_WS_BIND_ADDRESS=0.0.0.0
 ENV WORTERBUCH_TCP_BIND_ADDRESS=0.0.0.0
 ENV WORTERBUCH_USE_PERSISTENCE=true
