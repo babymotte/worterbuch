@@ -1,3 +1,18 @@
+# Copyright (C) 2024 Michael Bachmann
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
 WORKDIR /app
 RUN rustup component add rustfmt
@@ -25,5 +40,7 @@ ENV WBCLUSTER_HEARTBEAT_MIN_TIMEOUT=500
 ENV WBCLUSTER_RAFT_PORT=8181
 ENV WBCLUSTER_SYNC_PORT=8282
 ENV WBCLUSTER_WB_EXECUTABLE=/usr/local/bin/worterbuch
+ENV MALLOC_CONF=thp:always,metadata_thp:always,prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_gdump:false,prof_leak:true,prof_final:true,prof_prefix:/profiling/jeprof
 VOLUME [ "/cfg" ]
+VOLUME [ /profiling ]
 ENTRYPOINT ["/usr/local/bin/worterbuch-cluster-orchestrator"]
