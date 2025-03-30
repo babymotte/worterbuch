@@ -138,25 +138,32 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
+            args: ""
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
             ext: ""
+            args: "--no-default-features"
           - target: arm-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
+            args: "--no-default-features"
           - target: armv7-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
+            args: "--no-default-features"
           - target: x86_64-pc-windows-msvc
             image: windows-2022
             ext: ".exe"
+            args: "--no-default-features"
           - target: aarch64-apple-darwin
             image: macos-15
             ext: ""
+            args: "--no-default-features"
             target-path: ""
           - target: x86_64-apple-darwin
             image: macos-13
             ext: ""
+            args: "--no-default-features"
 
     steps:
       - name: Checkout
@@ -176,7 +183,7 @@ jobs:
           key: wb-${{ runner.os }}-cargo
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release ${{ matrix.args }}
 
       - name: Package Binaries
         uses: vimtor/action-zip@v1
