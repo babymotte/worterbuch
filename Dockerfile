@@ -26,14 +26,13 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM worterbuch-chef AS worterbuch-builder 
-ARG FEATURES=""
 COPY --from=worterbuch-planner /app/recipe.json recipe.json
-RUN cargo chef cook -p worterbuch --release ${FEATURES} --recipe-path recipe.json
+RUN cargo chef cook -p worterbuch --release --recipe-path recipe.json
 COPY . .
 RUN cargo fmt --check
 RUN cargo clippy -- --deny warnings
 RUN cargo test
-RUN cargo build -p worterbuch --release ${FEATURES}
+RUN cargo build -p worterbuch --release
 
 FROM debian:bookworm-slim
 WORKDIR /app
