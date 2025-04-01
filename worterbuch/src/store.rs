@@ -215,8 +215,7 @@ impl Store {
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export_for_persistence(&mut self) -> PersistedStore {
         let data = self.export();
-        let store = PersistedStore { data };
-        store
+        PersistedStore { data }
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
