@@ -49,8 +49,10 @@ spec:
           image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           env:
-            - name: RUST_LOG
-              value: info
+            - name: WORTERBUCH_LOG
+              value: info,worterbuch_cluster_orchestrator::stats=warn
+            - name: WORTERBUCH_TRACING
+              value: info,worterbuch_cluster_orchestrator=debug,worterbuch=debug
             - name: WBCLUSTER_RAFT_PORT
               value: "{{ $.Values.service.port.raft }}"
             - name: WBCLUSTER_STATS_PORT

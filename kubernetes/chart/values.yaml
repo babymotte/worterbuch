@@ -62,6 +62,24 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  stats:
+    hosts:
+      - host: stats.wb.homelab
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: stats.wb.local
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: stats.worterbuch.homelab
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: stats.worterbuch.local
+        paths:
+          - path: /
+            pathType: Prefix
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
