@@ -31,9 +31,11 @@ RUN cargo clippy -- --deny warnings
 RUN cargo test
 RUN cargo build --release
 
-FROM babymotte/worterbuch:1.3.3
+FROM babymotte/worterbuch:1.3.4
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
+ENV WORTERBUCH_LOG=info,worterbuch_cluster_orchestrator::stats=warn
+ENV WORTERBUCH_TRACING=info,worterbuch_cluster_orchestrator=debug,worterbuch=debug
 ENV WBCLUSTER_CONFIG_PATH=/cfg/config.yaml
 ENV WBCLUSTER_HEARTBEAT_INTERVAL=100
 ENV WBCLUSTER_HEARTBEAT_MIN_TIMEOUT=500
