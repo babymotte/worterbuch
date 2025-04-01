@@ -44,7 +44,7 @@ impl Proto {
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level=Level::TRACE, skip(self))]
     pub fn switch_protocol(&mut self, version: ProtocolVersionSegment) -> bool {
         match version {
             0 => {

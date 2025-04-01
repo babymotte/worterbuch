@@ -269,10 +269,12 @@ impl Worterbuch {
         }
     }
 
+    #[instrument(skip(json, config), err)]
     pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
         let store: PersistedStore = from_str(json)
             .map_err(|e| WorterbuchError::SerDeError(e, "Error parsing store JSON".to_owned()))?;
         let store: Store = store.into();
+        debug!("Loaded persisted store with {} entries.", store.len());
         Ok(Worterbuch {
             config,
             store,
@@ -595,24 +597,18 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
+    #[instrument(level=Level::DEBUG, skip(self, tx))]
     pub fn export_for_persistence(&mut self, tx: oneshot::Sender<(Value, GraveGoods, LastWill)>) {
-        let span = debug_span!("export_for_persistence");
-        let g = span.enter();
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
-        let span2 = debug_span!("serialize_and_send");
-        drop(g);
-        let serialize_and_send = async {
-            Self::serialize_and_send(store, grave_goods, last_will, tx)
-                .instrument(span)
-                .instrument(span2)
-                .await;
-        };
-        spawn(serialize_and_send);
+        let span = debug_span!("serialize_and_send");
+        spawn(
+            async { Self::serialize_and_send(store, grave_goods, last_will, tx) }.instrument(span),
+        );
     }
 
-    async fn serialize_and_send(
+    fn serialize_and_send(
         store: PersistedStore,
         grave_goods: GraveGoods,
         last_will: LastWill,

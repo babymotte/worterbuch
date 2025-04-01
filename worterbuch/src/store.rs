@@ -200,16 +200,23 @@ impl Store {
 
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> Node<ValueEntry> {
-        Node {
+        debug!("Exporting slim copy of store with {} entries …", self.len);
+        let data = Node {
             v: self.data.v.clone(),
             t: self.slim_copy_top_level_children(),
-        }
+        };
+        debug!(
+            "Exported slim copy with {} entries.",
+            Store::ncount_values(&data)
+        );
+        data
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export_for_persistence(&mut self) -> PersistedStore {
         let data = self.export();
-        PersistedStore { data }
+        let store = PersistedStore { data };
+        store
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
