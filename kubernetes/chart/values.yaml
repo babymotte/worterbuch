@@ -172,3 +172,9 @@ readinessProbe:
   failureThreshold: 1
 
 authToken: ""
+
+telemetry:
+  endpoint:
+    grpc: ""
+    # grpc: "http://jaeger.telemetry.svc.cluster.local:4317"
+    http: ""

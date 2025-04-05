@@ -11,3 +11,11 @@ data:
         raftPort: {{ $.Values.service.port.raft }}
         syncPort: {{ $.Values.service.port.clusterSync }}
       {{- end }}
+    {{- with .Values.telemetry.endpoint.grpc }}
+    telemetry:
+      endpoint: !grpc {{ . }}
+    {{- end }}
+    {{- with .Values.telemetry.endpoint.http }}
+    telemetry:
+      endpoint: !http {{ . }}
+    {{- end }}

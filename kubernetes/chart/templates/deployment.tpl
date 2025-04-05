@@ -52,7 +52,7 @@ spec:
             - name: WORTERBUCH_LOG
               value: info,worterbuch_cluster_orchestrator::stats=warn
             - name: WORTERBUCH_TRACING
-              value: info,worterbuch_cluster_orchestrator=debug,worterbuch=debug
+              value: info,worterbuch_cluster_orchestrator=debug,worterbuch_cluster_orchestrator::stats=warn,worterbuch=debug
             - name: WBCLUSTER_RAFT_PORT
               value: "{{ $.Values.service.port.raft }}"
             - name: WBCLUSTER_STATS_PORT
@@ -87,6 +87,10 @@ spec:
             {{- end }}
             - name: WORTERBUCH_SINGLE_THREADED
               value: "false"
+            {{- with $.Values.telemetry.endpoint.grpc }}
+            - name: WORTERBUCH_OPENTELEMETRY_ENDPOINT
+              value: {{ . }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ $.Values.service.port.http }}
