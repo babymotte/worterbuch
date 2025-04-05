@@ -210,9 +210,17 @@ impl Config {
     pub async fn new() -> ConfigResult<Self> {
         let args = Args::parse();
         let hostname = hostname::get()?;
+        let cluster_role = if args.leader {
+            Some("leader".to_owned())
+        } else if args.follower {
+            Some("follower".to_owned())
+        } else {
+            None
+        };
         telemetry::init(
             args.instance_name
                 .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
+            cluster_role,
         )
         .await?;
 

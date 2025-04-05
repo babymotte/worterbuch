@@ -27,7 +27,7 @@ use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use worterbuch_common::error::ConfigResult;
 
-pub async fn init(node_id: String) -> ConfigResult<()> {
+pub async fn init(node_id: String, cluster_role: Option<String>) -> ConfigResult<()> {
     let subscriber = tracing_subscriber::registry().with(
         fmt::Layer::new()
             .with_ansi(supports_color::on(Stream::Stderr).is_some())
@@ -51,19 +51,23 @@ pub async fn init(node_id: String) -> ConfigResult<()> {
             builder.with_tonic().with_endpoint(endpoint).build()?
         };
 
+        let mut resource_builder = Resource::builder()
+            .with_service_name("worterbuch")
+            .with_detectors(&[
+                Box::new(HostResourceDetector::default()),
+                Box::new(OsResourceDetector),
+                Box::new(ProcessResourceDetector),
+            ])
+            .with_attributes(vec![KeyValue::new("instance.name", node_id.clone())]);
+
+        if let Some(cluster_role) = cluster_role {
+            resource_builder =
+                resource_builder.with_attributes(vec![KeyValue::new("cluster.role", cluster_role)]);
+        }
+
         let tracer_provider = SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
-            .with_resource(
-                Resource::builder()
-                    .with_service_name("worterbuch")
-                    .with_detectors(&[
-                        Box::new(HostResourceDetector::default()),
-                        Box::new(OsResourceDetector),
-                        Box::new(ProcessResourceDetector),
-                    ])
-                    .with_attributes(vec![KeyValue::new("instance.name", node_id.clone())])
-                    .build(),
-            )
+            .with_resource(resource_builder.build())
             .build();
 
         let tracer = tracer_provider.tracer(node_id);
