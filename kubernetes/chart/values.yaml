@@ -112,9 +112,13 @@ tolerations: []
 affinity: {}
 
 storage:
-  enabled: true
-  size: 3Gi
-  class: ""
+  data:
+    enabled: true
+    size: 3Gi
+    class: ""
+  profiling:
+    size: 3Gi
+    class: ""
 
 timeouts:
   send: 10

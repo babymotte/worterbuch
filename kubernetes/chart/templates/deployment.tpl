@@ -31,15 +31,18 @@ spec:
       serviceAccountName: {{ include "worterbuch.serviceAccountName" $ }}
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
-      {{- if $.Values.storage.enabled }}
       volumes:
         - name: worterbuch-cluster-config
           configMap:
             name: worterbuch-cluster-config
-        - name: worterbuch-{{ $nodeID }}
+      {{- if $.Values.storage.data.enabled }}
+        - name: worterbuch-{{ $nodeID }}-data
           persistentVolumeClaim:
-            claimName: worterbuch-{{ $nodeID }}
+            claimName: worterbuch-{{ $nodeID }}-data
       {{- end }}
+        - name: worterbuch-{{ $nodeID }}-profiling
+          persistentVolumeClaim:
+            claimName: worterbuch-{{ $nodeID }}-profiling
       containers:
         - name: worterbuch-{{ $nodeID }}
           args: 
@@ -91,6 +94,8 @@ spec:
             - name: WORTERBUCH_OPENTELEMETRY_ENDPOINT
               value: {{ . }}
             {{- end }}
+            - name: MALLOC_CONF
+              value: "thp:always,metadata_thp:always,prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_gdump:false,prof_leak:true,prof_final:true,prof_prefix:/profiling/jeprof"
           ports:
             - name: http
               containerPort: {{ $.Values.service.port.http }}
@@ -117,14 +122,16 @@ spec:
           {{- end }}
           resources:
             {{- toYaml $.Values.resources | nindent 12 }}
-          {{- if $.Values.storage.enabled }}
           volumeMounts:
+          {{- if $.Values.storage.enabled }}
             - mountPath: "/data"
-              name: worterbuch-{{ $nodeID }}
+              name: worterbuch-{{ $nodeID }}-data
+          {{- end }}
             - mountPath: "/cfg"
               name: worterbuch-cluster-config
               readOnly: true
-          {{- end }}
+            - mountPath: "/profiling"
+              name: worterbuch-{{ $nodeID }}-profiling
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
