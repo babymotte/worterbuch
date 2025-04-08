@@ -632,7 +632,7 @@ async fn get_heap_files_list(
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
     }
 
-    let files = list_heap_profile_files().await.unwrap_or_else(|| vec![]);
+    let files = list_heap_profile_files().await.unwrap_or_else(Vec::new);
 
     Ok(Json(files).into_response())
 }
