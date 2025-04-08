@@ -36,11 +36,14 @@ use poem::{
     Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
+    http::StatusCode,
     listener::TcpListener,
     middleware::{AddData, CookieJarManager},
     post,
     web::{
         Data, Json, Path, Query, RemoteAddr,
+        cookie::{Cookie, SameSite},
+        headers::{self, HeaderMapExt, authorization::Bearer},
         sse::{Event, SSE},
         websocket::{WebSocket, WebSocketStream},
     },
@@ -734,6 +737,27 @@ async fn get_flamegraph_file(
     }
 }
 
+#[instrument(ret)]
+#[handler]
+async fn login(req: &Request) -> Response {
+    let header_jwt = req
+        .headers()
+        .typed_get::<headers::Authorization<Bearer>>()
+        .map(|it| it.0.token().to_owned());
+
+    if let Some(jwt) = header_jwt {
+        let mut cookie = Cookie::named("worterbuch_auth_jwt");
+        cookie.set_path("/api/v1/");
+        cookie.set_value_str(jwt);
+        cookie.set_http_only(true);
+        cookie.set_same_site(Some(SameSite::Strict));
+        req.cookie().add(cookie);
+        return (StatusCode::OK, "Ok").into_response();
+    } else {
+        return (StatusCode::BAD_REQUEST, "no Authorization header").into_response();
+    }
+}
+
 pub async fn start(
     worterbuch: CloneableWbApi,
     tls: bool,
@@ -859,6 +883,10 @@ pub async fn start(
                     .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
             ),
+        )
+        .at(
+            format!("{rest_root}/login"),
+            post(login.with(BearerAuth::new(config.clone()))),
         );
 
     #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
