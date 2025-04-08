@@ -41,7 +41,7 @@ use poem::{
     post,
     web::{
         Data, Json, Path, Query, RemoteAddr,
-        cookie::{Cookie, SameSite},
+        cookie::Cookie,
         headers::{self, HeaderMapExt, authorization::Bearer},
         sse::{Event, SSE},
         websocket::{WebSocket, WebSocketStream},
