@@ -35,15 +35,17 @@ pub struct JwtClaims {
     pub name: String,
     pub exp: u64,
     pub worterbuch_privileges: Privileges,
+    pub cors: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct Privileges {
-    read: Option<Vec<String>>,
-    write: Option<Vec<String>>,
-    delete: Option<Vec<String>>,
-    profile: Option<bool>,
+    pub read: Option<Vec<String>>,
+    pub write: Option<Vec<String>>,
+    pub delete: Option<Vec<String>>,
+    pub profile: Option<bool>,
+    pub web_login: Option<bool>,
 }
 
 impl JwtClaims {
@@ -133,6 +135,26 @@ impl JwtClaims {
                     }
                 } else {
                     error!("Profile privileges can only be checked against a flag");
+                    Err(AuthorizationError::InvalidCheck)
+                }
+            }
+            Privilege::WebLogin => {
+                if let AuthCheck::Flag = check {
+                    if *self
+                        .worterbuch_privileges
+                        .web_login
+                        .as_ref()
+                        .unwrap_or(&false)
+                    {
+                        Ok(())
+                    } else {
+                        Err(AuthorizationError::InsufficientPrivileges(
+                            privilege.to_owned(),
+                            check.into(),
+                        ))
+                    }
+                } else {
+                    error!("WebLogin privileges can only be checked against a flag");
                     Err(AuthorizationError::InvalidCheck)
                 }
             }

@@ -73,6 +73,7 @@ pub enum Privilege {
     Write,
     Delete,
     Profile,
+    WebLogin,
 }
 
 impl fmt::Display for Privilege {
@@ -82,6 +83,7 @@ impl fmt::Display for Privilege {
             Privilege::Write => "write".fmt(f),
             Privilege::Delete => "delete".fmt(f),
             Privilege::Profile => "profile".fmt(f),
+            Privilege::WebLogin => "web-login".fmt(f),
         }
     }
 }

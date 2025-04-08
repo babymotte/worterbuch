@@ -36,9 +36,8 @@ use poem::{
     Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
-    http::StatusCode,
     listener::TcpListener,
-    middleware::{AddData, CookieJarManager},
+    middleware::{AddData, CookieJarManager, Cors, TokioMetrics},
     post,
     web::{
         Data, Json, Path, Query, RemoteAddr,
@@ -68,7 +67,7 @@ use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
     AuthCheck, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
-    error::{WorterbuchError, WorterbuchResult},
+    error::{AuthorizationError, WorterbuchError, WorterbuchResult},
 };
 
 #[handler]
@@ -711,7 +710,7 @@ async fn get_heap_file(
 }
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-#[instrument(ret)]
+#[instrument(ret, err)]
 #[handler]
 async fn get_flamegraph_file(
     Path(filename): Path<String>,
@@ -737,9 +736,16 @@ async fn get_flamegraph_file(
     }
 }
 
-#[instrument(ret)]
+#[instrument(ret, err)]
 #[handler]
-async fn login(req: &Request) -> Response {
+async fn login(req: &Request, Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<()> {
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::WebLogin, AuthCheck::Flag)?;
+        privileges
+    } else {
+        return Err(WorterbuchError::AlreadyAuthorized);
+    };
+
     let header_jwt = req
         .headers()
         .typed_get::<headers::Authorization<Bearer>>()
@@ -750,12 +756,21 @@ async fn login(req: &Request) -> Response {
         cookie.set_path("/api/v1/");
         cookie.set_value_str(jwt);
         cookie.set_http_only(true);
-        cookie.set_same_site(Some(SameSite::Strict));
+        // cookie.set_same_site(Some(SameSite::Strict));
         req.cookie().add(cookie);
-        return (StatusCode::OK, "Ok").into_response();
+
+        Ok(())
     } else {
-        return (StatusCode::BAD_REQUEST, "no Authorization header").into_response();
+        Err(WorterbuchError::Unauthorized(
+            AuthorizationError::MissingToken,
+        ))
     }
+}
+
+#[instrument(ret)]
+#[handler]
+async fn preflight(req: &Request) -> WorterbuchResult<()> {
+    Ok(())
 }
 
 pub async fn start(
@@ -795,20 +810,23 @@ pub async fn start(
             format!("{rest_root}/get/*"),
             get(get_value
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/set/*"),
             post(
                 set.with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
-            ),
+            )
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/pget/*"),
             get(pget
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/publish/*"),
@@ -816,7 +834,8 @@ pub async fn start(
                 publish
                     .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
-            ),
+            )
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/delete/*"),
@@ -824,7 +843,8 @@ pub async fn start(
                 delete_value
                     .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
-            ),
+            )
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/pdelete/*"),
@@ -832,49 +852,57 @@ pub async fn start(
                 pdelete
                     .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
-            ),
+            )
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/ls"),
             get(ls_root
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/ls/*"),
             get(ls
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/subscribe/*"),
             get(subscribe
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/psubscribe/*"),
             get(psubscribe
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/subscribels"),
             get(subscribels_root
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/subscribels/*"),
             get(subscribels
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/export"),
             get(export
                 .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone()))),
+                .with(AddData::new(worterbuch.clone())))
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/import"),
@@ -882,11 +910,12 @@ pub async fn start(
                 import
                     .with(BearerAuth::new(config.clone()))
                     .with(AddData::new(worterbuch.clone())),
-            ),
+            )
+            .options(preflight.with(cors())),
         )
         .at(
             format!("{rest_root}/login"),
-            post(login.with(BearerAuth::new(config.clone()))),
+            post(login.with(BearerAuth::new(config.clone()))).options(preflight.with(cors())),
         );
 
     #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
@@ -897,28 +926,37 @@ pub async fn start(
         app = app
             .at(
                 format!("{rest_root}/debug/heap/list"),
-                get(get_heap_files_list.with(BearerAuth::new(config.clone()))),
+                get(get_heap_files_list.with(BearerAuth::new(config.clone())))
+                    .options(preflight.with(cors())),
             )
             .at(
                 format!("{rest_root}/debug/heap/live"),
-                get(get_live_heap.with(BearerAuth::new(config.clone()))),
+                get(get_live_heap.with(BearerAuth::new(config.clone())))
+                    .options(preflight.with(cors())),
             )
             .at(
                 format!("{rest_root}/debug/heap/file/:file"),
-                get(get_heap_file.with(BearerAuth::new(config.clone()))),
+                get(get_heap_file.with(BearerAuth::new(config.clone())))
+                    .options(preflight.with(cors())),
             )
             .at(
                 format!("{rest_root}/debug/flamegraph/live"),
-                get(get_live_flamegraph.with(BearerAuth::new(config.clone()))),
+                get(get_live_flamegraph.with(BearerAuth::new(config.clone())))
+                    .options(preflight.with(cors())),
             )
             .at(
                 format!("{rest_root}/debug/flamegraph/file/:file"),
-                get(get_flamegraph_file.with(BearerAuth::new(config.clone()))),
+                get(get_flamegraph_file.with(BearerAuth::new(config.clone())))
+                    .options(preflight.with(cors())),
             )
     }
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
     app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
+
+    let metrics = TokioMetrics::new();
+
+    app = app.at("/metrics/tokio", metrics.exporter());
 
     if let Some(web_root_path) = &config.web_root_path {
         info!(
@@ -936,7 +974,7 @@ pub async fn start(
 
     poem::Server::new(TcpListener::bind(addr))
         .run_with_graceful_shutdown(
-            app.with(CookieJarManager::new()),
+            app.with(CookieJarManager::new()).with(metrics),
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )
@@ -953,6 +991,12 @@ pub async fn start(
     debug!("webserver subsystem completed.");
 
     Ok(())
+}
+
+fn cors() -> Cors {
+    Cors::new()
+        .allow_credentials(true)
+        .expose_header("Set-Cookie")
 }
 
 async fn run_ws_server(

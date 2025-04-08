@@ -22,8 +22,8 @@ use crate::{
     auth::{JwtClaims, get_claims},
 };
 use poem::{
-    Endpoint, EndpointExt, Middleware, Request, Result,
-    middleware::AddData,
+    Endpoint, EndpointExt, Middleware, Request, Response, Result,
+    middleware::{AddData, Cors},
     web::headers::{self, HeaderMapExt, authorization::Bearer},
 };
 
@@ -60,31 +60,38 @@ impl<E> BearerAuthEndpoint<E> {
 }
 
 impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
-    type Output = E::Output;
+    type Output = Response;
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
+        let header_jwt = req
+            .headers()
+            .typed_get::<headers::Authorization<Bearer>>()
+            .map(|it| it.0.token().to_owned());
+
+        let cookie_jwt = req
+            .cookie()
+            .get("worterbuch_auth_jwt")
+            .map(|c| c.value_str().to_owned());
+
+        let jwt = header_jwt.or(cookie_jwt);
+
+        let claims = get_claims(jwt.as_deref(), &self.config)?;
+
+        let cors = Cors::new()
+            .allow_credentials(true)
+            .expose_header("Set-Cookie")
+            .allow_origins(claims.cors.clone().unwrap_or_else(Vec::new));
+
         if self.auth_required() {
-            let header_jwt = req
-                .headers()
-                .typed_get::<headers::Authorization<Bearer>>()
-                .map(|it| it.0.token().to_owned());
-
-            let cookie_jwt = req
-                .cookie()
-                .get("worterbuch_auth_jwt")
-                .map(|c| c.value_str().to_owned());
-
-            let jwt = header_jwt.or(cookie_jwt);
-
-            let claims = get_claims(jwt.as_deref(), &self.config)?;
-
             (&self.ep)
                 .with(AddData::<Option<JwtClaims>>::new(Some(claims)))
+                .with(cors)
                 .call(req)
                 .await
         } else {
             (&self.ep)
                 .with(AddData::<Option<JwtClaims>>::new(None))
+                .with(cors)
                 .call(req)
                 .await
         }

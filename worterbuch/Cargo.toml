@@ -28,12 +28,7 @@ clap = { version = "4.1.11", features = ["derive", "env"] }
 sha2 = "0.10.6"
 hex = "0.4.3"
 futures = { version = "0.3.27" }
-poem = { version = "3.0.1", features = [
-    "websocket",
-    "static-files",
-    "sse",
-    "session",
-] }
+poem = { version = "3.0.1", features = ["websocket", "static-files", "sse", "session", "tokio-metrics"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 serde_yaml = "0.9.22"
 hashlink = "0.10.0"
@@ -59,6 +54,7 @@ mappings = "0.7.0"
 regex = "1.11.1"
 jemalloc_pprof = { version = "0.7.0", features = ["flamegraph"] }
 inferno = "0.12.2"
+tokio-metrics = "0.4.0"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6.0", optional = true, features = [
