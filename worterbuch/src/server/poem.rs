@@ -36,7 +36,6 @@ use poem::{
     Addr, Body, EndpointExt, IntoResponse, Request, Response, Result, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
-    http::StatusCode,
     listener::TcpListener,
     middleware::AddData,
     post,
@@ -69,47 +68,6 @@ use worterbuch_common::{
     error::WorterbuchError,
 };
 
-fn to_error_response<T>(e: WorterbuchError) -> Result<T> {
-    match &e {
-        WorterbuchError::IllegalMultiWildcard(_)
-        | WorterbuchError::IllegalWildcard(_)
-        | WorterbuchError::MultiWildcardAtIllegalPosition(_)
-        | WorterbuchError::NotImplemented
-        | WorterbuchError::KeyIsNotLocked(_) => Err(poem::Error::new(e, StatusCode::BAD_REQUEST)),
-
-        WorterbuchError::AlreadyAuthorized
-        | WorterbuchError::NotSubscribed
-        | WorterbuchError::NoPubStream(_) => {
-            Err(poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY))
-        }
-
-        WorterbuchError::KeyIsLocked(_)
-        | WorterbuchError::Cas
-        | WorterbuchError::CasVersionMismatch => Err(poem::Error::new(e, StatusCode::CONFLICT)),
-
-        WorterbuchError::ReadOnlyKey(_) => Err(poem::Error::new(e, StatusCode::METHOD_NOT_ALLOWED)),
-
-        WorterbuchError::AuthorizationRequired(_) => {
-            Err(poem::Error::new(e, StatusCode::UNAUTHORIZED))
-        }
-
-        WorterbuchError::NoSuchValue(_) => Err(poem::Error::new(e, StatusCode::NOT_FOUND)),
-
-        WorterbuchError::Unauthorized(_) => Err(poem::Error::new(e, StatusCode::FORBIDDEN)),
-
-        WorterbuchError::IoError(_, _)
-        | WorterbuchError::SerDeError(_, _)
-        | WorterbuchError::InvalidServerResponse(_)
-        | WorterbuchError::Other(_, _)
-        | WorterbuchError::ServerResponse(_)
-        | WorterbuchError::ProtocolNegotiationFailed(_) => {
-            Err(poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR))
-        }
-
-        WorterbuchError::NotLeader => Err(poem::Error::new(e, StatusCode::NO_CONTENT)),
-    }
-}
-
 #[handler]
 fn ws(
     ws: WebSocket,
@@ -132,10 +90,7 @@ fn ws(
 #[handler]
 async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
-    let config = match wb.config().await {
-        Ok(it) => it,
-        Err(e) => return to_error_response(e),
-    };
+    let config = wb.config().await?;
     let info = ServerInfo::new(
         VERSION.to_owned(),
         supported_protocol_versions,
@@ -153,26 +108,18 @@ async fn export(
     request: &Request,
 ) -> Result<Response> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#")) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#"))?;
     }
 
     let base64 = request.header("accept") == Some("text/plain");
 
-    let config = match wb.config().await {
-        Ok(it) => it,
-        Err(e) => return to_error_response(e),
-    };
+    let config = wb.config().await?;
     let file_name = config
         .default_export_file_name
         .unwrap_or_else(|| "export".to_owned())
         + ".json";
     let span = debug_span!("export");
-    let (exported, _, _) = match wb.export(span).await {
-        Ok(it) => it,
-        Err(e) => return to_error_response(e),
-    };
+    let (exported, _, _) = wb.export(span).await?;
     let json = exported.to_string();
 
     let (tx, rx) = oneshot::channel();
@@ -188,16 +135,16 @@ async fn export(
     let compressed = match rx.await {
         Ok(Ok(it)) => it,
         Ok(Err(e)) => {
-            return to_error_response(WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while compressing exported data".to_owned(),
-            ));
+            ))?;
         }
         Err(e) => {
-            return to_error_response(WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while compressing exported data".to_owned(),
-            ));
+            ))?;
         }
     };
 
@@ -224,22 +171,12 @@ async fn import(
     request: &Request,
 ) -> Result<impl IntoResponse> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#")) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#"))?;
     }
 
     let base64 = request.content_type() == Some("text/plain");
 
-    let data = match data.into_vec().await {
-        Ok(it) => it,
-        Err(e) => {
-            return to_error_response(WorterbuchError::Other(
-                Box::new(e),
-                "error parsing request body".to_owned(),
-            ));
-        }
-    };
+    let data = data.into_vec().await?;
 
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
@@ -250,23 +187,21 @@ async fn import(
     let json = match rx.await {
         Ok(Ok(it)) => it,
         Ok(Err(e)) => {
-            return to_error_response(WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            ));
+            ))?;
         }
         Err(e) => {
-            return to_error_response(WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            ));
+            ))?;
         }
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    if let Err(e) = wb.import(json).await {
-        return to_error_response(e);
-    }
+    wb.import(json).await?;
 
     Ok(())
 }
@@ -308,9 +243,7 @@ async fn get_value(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Response> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let pointer = params.get("pointer");
     let raw = params.get("raw");
@@ -328,7 +261,7 @@ async fn get_value(
                     }
                     Ok(Json(extracted.to_owned()).into_response())
                 } else {
-                    to_error_response(WorterbuchError::NoSuchValue(key))
+                    Err(WorterbuchError::NoSuchValue(key))?
                 }
             } else {
                 if raw.is_some() || content_type.as_deref() == Some("text/plain") {
@@ -339,7 +272,7 @@ async fn get_value(
                 Ok(Json(value).into_response())
             }
         }
-        Err(e) => to_error_response(e),
+        Err(e) => Err(e)?,
     }
 }
 
@@ -350,14 +283,9 @@ async fn pget(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
     }
-    match wb.pget(pattern).await {
-        Ok(kvps) => Ok(Json(kvps)),
-        Err(e) => to_error_response(e),
-    }
+    Ok(Json(wb.pget(pattern).await?))
 }
 
 #[handler]
@@ -368,15 +296,11 @@ async fn set(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
-    match wb.set(key, value, client_id).await {
-        Ok(()) => Ok(Json("Ok")),
-        Err(e) => to_error_response(e),
-    }
+    wb.set(key, value, client_id).await?;
+    Ok(Json("Ok"))
 }
 
 #[handler]
@@ -387,14 +311,10 @@ async fn publish(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<&'static str>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
-    match wb.publish(key, value).await {
-        Ok(()) => Ok(Json("Ok")),
-        Err(e) => to_error_response(e),
-    }
+    wb.publish(key, value).await?;
+    Ok(Json("Ok"))
 }
 
 #[handler]
@@ -404,15 +324,10 @@ async fn delete_value(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Value>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
-    match wb.delete(key, client_id).await {
-        Ok(value) => Ok(Json(value)),
-        Err(e) => to_error_response(e),
-    }
+    Ok(Json(wb.delete(key, client_id).await?))
 }
 
 #[handler]
@@ -422,15 +337,10 @@ async fn pdelete(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
     let client_id = Uuid::new_v4();
-    match wb.pdelete(pattern, client_id).await {
-        Ok(kvps) => Ok(Json(kvps)),
-        Err(e) => to_error_response(e),
-    }
+    Ok(Json(wb.pdelete(pattern, client_id).await?))
 }
 
 #[handler]
@@ -440,16 +350,9 @@ async fn ls(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
-        if let Err(e) =
-            privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))
-        {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
-    match wb.ls(Some(parent)).await {
-        Ok(kvps) => Ok(Json(kvps)),
-        Err(e) => to_error_response(e),
-    }
+    Ok(Json(wb.ls(Some(parent)).await?))
 }
 
 #[handler]
@@ -458,14 +361,9 @@ async fn ls_root(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> Result<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?")) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
-    match wb.ls(None).await {
-        Ok(kvps) => Ok(Json(kvps)),
-        Err(e) => to_error_response(e),
-    }
+    Ok(Json(wb.ls(None).await?))
 }
 
 #[handler]
@@ -477,9 +375,7 @@ async fn subscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -494,57 +390,53 @@ async fn subscribe(
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
     let wb_unsub = wb.clone();
-    match wb
+
+    let (mut rx, _) = wb
         .subscribe(client_id, transaction_id, key, unique, live_only)
-        .await
-    {
-        Ok((mut rx, _)) => {
-            let (sse_tx, sse_rx) = mpsc::channel(100);
-            spawn(async move {
-                'recv_loop: loop {
-                    select! {
-                        _ = sse_tx.closed() => break 'recv_loop,
-                        recv = rx.recv() => if let Some(state) = recv {
-                            match state {
-                                StateEvent::Value(value) => {
-                                    match serde_json::to_string(&value) {
-                                        Ok(json) => {
-                                            if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                                error!("Error forwarding state event: {e}");
-                                                break 'recv_loop;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            error!("Error serializiing state event: {e}");
-                                            break 'recv_loop;
-                                        }
-                                    }
-                                },
-                                StateEvent::Deleted(_) => {
-                                    if let Err(e) = sse_tx.send(Event::message("null")).await {
+        .await?;
+    let (sse_tx, sse_rx) = mpsc::channel(100);
+    spawn(async move {
+        'recv_loop: loop {
+            select! {
+                _ = sse_tx.closed() => break 'recv_loop,
+                recv = rx.recv() => if let Some(state) = recv {
+                    match state {
+                        StateEvent::Value(value) => {
+                            match serde_json::to_string(&value) {
+                                Ok(json) => {
+                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
                                         error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
-                                },
+                                }
+                                Err(e) => {
+                                    error!("Error serializiing state event: {e}");
+                                    break 'recv_loop;
+                                }
                             }
-                        } else {
-                            break 'recv_loop;
-                        }
+                        },
+                        StateEvent::Deleted(_) => {
+                            if let Err(e) = sse_tx.send(Event::message("null")).await {
+                                error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
+                            }
+                        },
                     }
+                } else {
+                    break 'recv_loop;
                 }
-                if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
-                    error!("Error stopping subscription: {e}");
-                }
-                if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    error!("Error disconnecting client: {e}");
-                }
-            });
-            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
-                sse_rx,
-            )))
+            }
         }
-        Err(e) => to_error_response(e),
-    }
+        if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+            error!("Error stopping subscription: {e}");
+        }
+        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+            error!("Error disconnecting client: {e}");
+        }
+    });
+    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+        sse_rx,
+    )))
 }
 
 #[handler]
@@ -556,9 +448,7 @@ async fn psubscribe(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key)) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
@@ -573,47 +463,44 @@ async fn psubscribe(
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
     let wb_unsub = wb.clone();
-    match wb
+
+    let (mut rx, _) = wb
         .psubscribe(client_id, transaction_id, key, unique, live_only)
-        .await
-    {
-        Ok((mut rx, _)) => {
-            let (sse_tx, sse_rx) = mpsc::channel(100);
-            spawn(async move {
-                'recv_loop: loop {
-                    select! {
-                        _ = sse_tx.closed() => break 'recv_loop,
-                        recv = rx.recv() => if let Some(pstate) = recv {
-                            match serde_json::to_string(&pstate) {
-                                Ok(json) => {
-                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        error!("Error forwarding state event: {e}");
-                                        break 'recv_loop;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error serializiing state event: {e}");
-                                    break 'recv_loop;
-                                }
+        .await?;
+
+    let (sse_tx, sse_rx) = mpsc::channel(100);
+    spawn(async move {
+        'recv_loop: loop {
+            select! {
+                _ = sse_tx.closed() => break 'recv_loop,
+                recv = rx.recv() => if let Some(pstate) = recv {
+                    match serde_json::to_string(&pstate) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
                             }
-                        } else {
+                        }
+                        Err(e) => {
+                            error!("Error serializiing state event: {e}");
                             break 'recv_loop;
                         }
                     }
+                } else {
+                    break 'recv_loop;
                 }
-                if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
-                    error!("Error stopping subscription: {e}");
-                }
-                if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    error!("Error disconnecting client: {e}");
-                }
-            });
-            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
-                sse_rx,
-            )))
+            }
         }
-        Err(e) => to_error_response(e),
-    }
+        if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+            error!("Error stopping subscription: {e}");
+        }
+        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+            error!("Error disconnecting client: {e}");
+        }
+    });
+    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+        sse_rx,
+    )))
 }
 
 #[handler]
@@ -623,53 +510,49 @@ async fn subscribels_root(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?")) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
-    match wb.subscribe_ls(client_id, transaction_id, None).await {
-        Ok((mut rx, _)) => {
-            let (sse_tx, sse_rx) = mpsc::channel(100);
-            spawn(async move {
-                'recv_loop: loop {
-                    select! {
-                        _ = sse_tx.closed() => break 'recv_loop,
-                        recv = rx.recv() => if let Some(children) = recv {
-                            match serde_json::to_string(&children) {
-                                Ok(json) => {
-                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        error!("Error forwarding state event: {e}");
-                                        break 'recv_loop;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error serializiing state event: {e}");
-                                    break 'recv_loop;
-                                }
+
+    let (mut rx, _) = wb.subscribe_ls(client_id, transaction_id, None).await?;
+
+    let (sse_tx, sse_rx) = mpsc::channel(100);
+    spawn(async move {
+        'recv_loop: loop {
+            select! {
+                _ = sse_tx.closed() => break 'recv_loop,
+                recv = rx.recv() => if let Some(children) = recv {
+                    match serde_json::to_string(&children) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
                             }
-                        } else {
+                        }
+                        Err(e) => {
+                            error!("Error serializiing state event: {e}");
                             break 'recv_loop;
                         }
                     }
+                } else {
+                    break 'recv_loop;
                 }
-                if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
-                    error!("Error stopping subscription: {e}");
-                }
-                if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    error!("Error disconnecting client: {e}");
-                }
-            });
-            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
-                sse_rx,
-            )))
+            }
         }
-        Err(e) => to_error_response(e),
-    }
+        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+            error!("Error stopping subscription: {e}");
+        }
+        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+            error!("Error disconnecting client: {e}");
+        }
+    });
+    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+        sse_rx,
+    )))
 }
 
 #[handler]
@@ -680,77 +563,68 @@ async fn subscribels(
     RemoteAddr(addr): &RemoteAddr,
 ) -> Result<SSE> {
     if let Some(privileges) = privileges {
-        if let Err(e) =
-            privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))
-        {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
     let client_id = Uuid::new_v4();
     let remote_addr = to_socket_addr(addr)?;
     connected(wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
-    match wb
+
+    let (mut rx, _) = wb
         .subscribe_ls(client_id, transaction_id, Some(parent))
-        .await
-    {
-        Ok((mut rx, _)) => {
-            let (sse_tx, sse_rx) = mpsc::channel(100);
-            spawn(async move {
-                'recv_loop: loop {
-                    select! {
-                        _ = sse_tx.closed() => break 'recv_loop,
-                        recv = rx.recv() => if let Some(children) = recv {
-                            match serde_json::to_string(&children) {
-                                Ok(json) => {
-                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
-                                        error!("Error forwarding state event: {e}");
-                                        break 'recv_loop;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error serializiing state event: {e}");
-                                    break 'recv_loop;
-                                }
+        .await?;
+
+    let (sse_tx, sse_rx) = mpsc::channel(100);
+    spawn(async move {
+        'recv_loop: loop {
+            select! {
+                _ = sse_tx.closed() => break 'recv_loop,
+                recv = rx.recv() => if let Some(children) = recv {
+                    match serde_json::to_string(&children) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
                             }
-                        } else {
+                        }
+                        Err(e) => {
+                            error!("Error serializiing state event: {e}");
                             break 'recv_loop;
                         }
                     }
+                } else {
+                    break 'recv_loop;
                 }
-                if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
-                    error!("Error stopping subscription: {e}");
-                }
-                if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-                    error!("Error disconnecting client: {e}");
-                }
-            });
-            Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
-                sse_rx,
-            )))
+            }
         }
-        Err(e) => to_error_response(e),
-    }
+        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+            error!("Error stopping subscription: {e}");
+        }
+        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+            error!("Error disconnecting client: {e}");
+        }
+    });
+    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+        sse_rx,
+    )))
 }
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 #[handler]
 async fn get_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Result<Response> {
+    use crate::profiling::require_profiling_activated;
+
     if let Some(privileges) = privileges {
-        if let Err(e) = privileges.authorize(&Privilege::Profile, AuthCheck::Flag) {
-            return to_error_response(WorterbuchError::Unauthorized(e));
-        }
+        privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
     }
 
     let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
         it
     } else {
-        let meta = "jemalloc profiling is not enabled".to_owned();
-        return to_error_response(WorterbuchError::IoError(
-            io::Error::new(io::ErrorKind::Other, meta.clone()),
-            meta,
-        ));
+        return Err(WorterbuchError::FeatureDisabled(
+            "jemalloc profiling is not enabled".to_owned(),
+        ))?;
     };
     let mut prof_ctl = prof_ctl.lock().await;
     require_profiling_activated(&prof_ctl)?;
@@ -758,10 +632,10 @@ async fn get_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Result<Response
         Ok(it) => it,
         Err(e) => {
             let meta = format!("error generating heap dump: {e}");
-            return to_error_response(WorterbuchError::IoError(
+            return Err(WorterbuchError::IoError(
                 io::Error::new(io::ErrorKind::Other, e),
                 meta,
-            ));
+            ))?;
         }
     };
 
@@ -770,15 +644,6 @@ async fn get_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Result<Response
     Ok(response
         .with_header("Content-Disposition", "attachment; filename=heap.pb.gz")
         .into_response())
-}
-
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-fn require_profiling_activated(prof_ctl: &jemalloc_pprof::JemallocProfCtl) -> Result<()> {
-    if prof_ctl.activated() {
-        Ok(())
-    } else {
-        Err((StatusCode::FORBIDDEN, "heap profiling not activated".into()).into())
-    }
 }
 
 pub async fn start(
@@ -1027,13 +892,13 @@ fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
     if let Addr::SocketAddr(it) = addr {
         Ok(it.to_owned())
     } else {
-        to_error_response(WorterbuchError::IoError(
+        Err(WorterbuchError::IoError(
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "only network socket connections are supported",
             ),
             "only network socket connections are supported".to_owned(),
-        ))
+        ))?
     }
 }
 
@@ -1043,7 +908,7 @@ async fn connected(wb: &CloneableWbApi, client_id: Uuid, remote_addr: SocketAddr
         .await
     {
         error!("Error adding client {client_id} ({remote_addr}): {e}");
-        to_error_response(e)
+        Err(e)?
     } else {
         Ok(())
     }

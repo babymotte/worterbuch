@@ -144,6 +144,7 @@ pub enum ErrorCode {
     KeyIsLocked = 0b00010100,
     KeyIsNotLocked = 0b00010101,
     LockAcquisitionCancelled = 0b00010110,
+    FeatureDisabled = 0b00010111,
     Other = 0b11111111,
 }
 

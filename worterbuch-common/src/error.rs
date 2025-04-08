@@ -23,6 +23,7 @@ use crate::{
 };
 use miette::Diagnostic;
 use opentelemetry::trace::TraceError;
+use poem::http::StatusCode;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use thiserror::Error;
 use tokio::sync::{
@@ -106,7 +107,7 @@ impl std::error::Error for AuthorizationError {}
 
 pub type AuthorizationResult<T> = Result<T, AuthorizationError>;
 
-#[derive(Debug, Diagnostic)]
+#[derive(Debug, Diagnostic, thiserror::Error)]
 pub enum WorterbuchError {
     IllegalWildcard(RequestPattern),
     IllegalMultiWildcard(RequestPattern),
@@ -122,7 +123,7 @@ pub enum WorterbuchError {
     ReadOnlyKey(Key),
     AuthorizationRequired(Privilege),
     AlreadyAuthorized,
-    Unauthorized(AuthorizationError),
+    Unauthorized(#[from] AuthorizationError),
     NoPubStream(TransactionId),
     NotLeader,
     Cas,
@@ -130,9 +131,8 @@ pub enum WorterbuchError {
     NotImplemented,
     KeyIsLocked(Key),
     KeyIsNotLocked(Key),
+    FeatureDisabled(MetaData),
 }
-
-impl std::error::Error for WorterbuchError {}
 
 impl fmt::Display for WorterbuchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -207,6 +207,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::KeyIsNotLocked(key) => {
                 write!(f, "Key {key} is not locked",)
             }
+            WorterbuchError::FeatureDisabled(m) => m.fmt(f),
         }
     }
 }
@@ -398,7 +399,58 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotImplemented => ErrorCode::NotImplemented,
             WorterbuchError::KeyIsLocked(_) => ErrorCode::KeyIsLocked,
             WorterbuchError::KeyIsNotLocked(_) => ErrorCode::KeyIsNotLocked,
+            WorterbuchError::FeatureDisabled(_) => ErrorCode::KeyIsNotLocked,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
+    }
+}
+
+impl From<WorterbuchError> for poem::Error {
+    fn from(e: WorterbuchError) -> Self {
+        match &e {
+            WorterbuchError::IllegalMultiWildcard(_)
+            | WorterbuchError::IllegalWildcard(_)
+            | WorterbuchError::MultiWildcardAtIllegalPosition(_)
+            | WorterbuchError::NotImplemented
+            | WorterbuchError::KeyIsNotLocked(_) => poem::Error::new(e, StatusCode::BAD_REQUEST),
+
+            WorterbuchError::AlreadyAuthorized
+            | WorterbuchError::NotSubscribed
+            | WorterbuchError::FeatureDisabled(_)
+            | WorterbuchError::NoPubStream(_) => {
+                poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY)
+            }
+
+            WorterbuchError::KeyIsLocked(_)
+            | WorterbuchError::Cas
+            | WorterbuchError::CasVersionMismatch => poem::Error::new(e, StatusCode::CONFLICT),
+
+            WorterbuchError::ReadOnlyKey(_) => poem::Error::new(e, StatusCode::METHOD_NOT_ALLOWED),
+
+            WorterbuchError::AuthorizationRequired(_) => {
+                poem::Error::new(e, StatusCode::UNAUTHORIZED)
+            }
+
+            WorterbuchError::NoSuchValue(_) => poem::Error::new(e, StatusCode::NOT_FOUND),
+
+            WorterbuchError::Unauthorized(_) => poem::Error::new(e, StatusCode::FORBIDDEN),
+
+            WorterbuchError::IoError(_, _)
+            | WorterbuchError::SerDeError(_, _)
+            | WorterbuchError::InvalidServerResponse(_)
+            | WorterbuchError::Other(_, _)
+            | WorterbuchError::ServerResponse(_)
+            | WorterbuchError::ProtocolNegotiationFailed(_) => {
+                poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR)
+            }
+
+            WorterbuchError::NotLeader => poem::Error::new(e, StatusCode::NO_CONTENT),
+        }
+    }
+}
+
+impl From<AuthorizationError> for poem::error::Error {
+    fn from(value: AuthorizationError) -> Self {
+        WorterbuchError::from(value).into()
     }
 }
