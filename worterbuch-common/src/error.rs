@@ -23,7 +23,7 @@ use crate::{
 };
 use miette::Diagnostic;
 use opentelemetry::trace::TraceError;
-use poem::http::StatusCode;
+use poem::{IntoResponse, http::StatusCode};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use thiserror::Error;
 use tokio::sync::{
@@ -433,7 +433,10 @@ impl From<WorterbuchError> for poem::Error {
 
             WorterbuchError::NoSuchValue(_) => poem::Error::new(e, StatusCode::NOT_FOUND),
 
-            WorterbuchError::Unauthorized(_) => poem::Error::new(e, StatusCode::FORBIDDEN),
+            WorterbuchError::Unauthorized(ae) => match &ae {
+                AuthorizationError::MissingToken => poem::Error::new(e, StatusCode::UNAUTHORIZED),
+                _ => poem::Error::new(e, StatusCode::FORBIDDEN),
+            },
 
             WorterbuchError::IoError(_, _)
             | WorterbuchError::SerDeError(_, _)
@@ -446,6 +449,12 @@ impl From<WorterbuchError> for poem::Error {
 
             WorterbuchError::NotLeader => poem::Error::new(e, StatusCode::NO_CONTENT),
         }
+    }
+}
+
+impl IntoResponse for WorterbuchError {
+    fn into_response(self) -> poem::Response {
+        poem::Error::from(self).into_response()
     }
 }
 

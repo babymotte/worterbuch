@@ -33,11 +33,11 @@ use flate2::{
 };
 use miette::IntoDiagnostic;
 use poem::{
-    Addr, Body, EndpointExt, IntoResponse, Request, Response, Result, Route, delete,
+    Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, delete,
     endpoint::StaticFilesEndpoint,
     get, handler,
     listener::TcpListener,
-    middleware::AddData,
+    middleware::{AddData, CookieJarManager},
     post,
     web::{
         Data, Json, Path, Query, RemoteAddr,
@@ -65,7 +65,7 @@ use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
     AuthCheck, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
-    error::WorterbuchError,
+    error::{WorterbuchError, WorterbuchResult},
 };
 
 #[handler]
@@ -73,7 +73,7 @@ fn ws(
     ws: WebSocket,
     Data(ws_tx): Data<&mpsc::Sender<(WebSocketStream, SocketAddr)>>,
     RemoteAddr(addr): &RemoteAddr,
-) -> Result<impl IntoResponse> {
+) -> WorterbuchResult<impl IntoResponse> {
     info!("Client connected");
     let remote = to_socket_addr(addr)?;
 
@@ -88,7 +88,7 @@ fn ws(
 }
 
 #[handler]
-async fn info(Data(wb): Data<&CloneableWbApi>) -> Result<Json<ServerInfo>> {
+async fn info(Data(wb): Data<&CloneableWbApi>) -> WorterbuchResult<Json<ServerInfo>> {
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
     let config = wb.config().await?;
     let info = ServerInfo::new(
@@ -106,7 +106,7 @@ async fn export(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     request: &Request,
-) -> Result<Response> {
+) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#"))?;
     }
@@ -169,14 +169,21 @@ async fn import(
     Data(privileges): Data<&Option<JwtClaims>>,
     data: Body,
     request: &Request,
-) -> Result<impl IntoResponse> {
+) -> Response {
     if let Some(privileges) = privileges {
-        privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#"))?;
+        if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#")) {
+            return WorterbuchError::from(e).into_response();
+        }
     }
 
     let base64 = request.content_type() == Some("text/plain");
 
-    let data = data.into_vec().await?;
+    let data = match data.into_vec().await {
+        Ok(it) => it,
+        Err(e) => {
+            return poem::Error::from(e).into_response();
+        }
+    };
 
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
@@ -187,23 +194,26 @@ async fn import(
     let json = match rx.await {
         Ok(Ok(it)) => it,
         Ok(Err(e)) => {
-            return Err(WorterbuchError::Other(
+            return WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            ))?;
+            )
+            .into_response();
         }
         Err(e) => {
-            return Err(WorterbuchError::Other(
+            return WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            ))?;
+            )
+            .into_response();
         }
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    wb.import(json).await?;
-
-    Ok(())
+    match wb.import(json).await {
+        Ok(_) => ().into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
@@ -241,7 +251,7 @@ async fn get_value(
     Query(params): Query<HashMap<String, String>>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Response> {
+) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
@@ -281,7 +291,7 @@ async fn pget(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<KeyValuePairs>> {
+) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
     }
@@ -294,7 +304,7 @@ async fn set(
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<&'static str>> {
+) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
@@ -309,7 +319,7 @@ async fn publish(
     Json(value): Json<Value>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<&'static str>> {
+) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
@@ -322,7 +332,7 @@ async fn delete_value(
     Path(key): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<Value>> {
+) -> WorterbuchResult<Json<Value>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
@@ -335,7 +345,7 @@ async fn pdelete(
     Path(pattern): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<KeyValuePairs>> {
+) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
@@ -348,7 +358,7 @@ async fn ls(
     Path(parent): Path<Key>,
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<Vec<RegularKeySegment>>> {
+) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
@@ -359,7 +369,7 @@ async fn ls(
 async fn ls_root(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
-) -> Result<Json<Vec<RegularKeySegment>>> {
+) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
@@ -373,7 +383,7 @@ async fn subscribe(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
-) -> Result<SSE> {
+) -> WorterbuchResult<SSE> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
@@ -446,7 +456,7 @@ async fn psubscribe(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
-) -> Result<SSE> {
+) -> WorterbuchResult<SSE> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
@@ -508,7 +518,7 @@ async fn subscribels_root(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
-) -> Result<SSE> {
+) -> WorterbuchResult<SSE> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
@@ -561,7 +571,7 @@ async fn subscribels(
     Data(wb): Data<&CloneableWbApi>,
     Data(privileges): Data<&Option<JwtClaims>>,
     RemoteAddr(addr): &RemoteAddr,
-) -> Result<SSE> {
+) -> WorterbuchResult<SSE> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
@@ -611,39 +621,117 @@ async fn subscribels(
 }
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[instrument(ret)]
 #[handler]
-async fn get_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Result<Response> {
-    use crate::profiling::require_profiling_activated;
+async fn get_heap_files_list(
+    Data(privileges): Data<&Option<JwtClaims>>,
+) -> WorterbuchResult<Response> {
+    use crate::profiling::list_heap_profile_files;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
     }
 
-    let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
-        it
-    } else {
-        return Err(WorterbuchError::FeatureDisabled(
-            "jemalloc profiling is not enabled".to_owned(),
-        ))?;
-    };
-    let mut prof_ctl = prof_ctl.lock().await;
-    require_profiling_activated(&prof_ctl)?;
-    let pprof = match prof_ctl.dump_pprof() {
-        Ok(it) => it,
-        Err(e) => {
-            let meta = format!("error generating heap dump: {e}");
-            return Err(WorterbuchError::IoError(
-                io::Error::new(io::ErrorKind::Other, e),
-                meta,
-            ))?;
-        }
-    };
+    let files = list_heap_profile_files().await.unwrap_or_else(|| vec![]);
+
+    Ok(Json(files).into_response())
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[instrument(ret)]
+#[handler]
+async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<Response> {
+    use crate::profiling::get_live_heap_profile;
+
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
+    }
+
+    let pprof = get_live_heap_profile().await?;
 
     let response = pprof.into_response();
 
     Ok(response
         .with_header("Content-Disposition", "attachment; filename=heap.pb.gz")
         .into_response())
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[instrument(ret)]
+#[handler]
+async fn get_live_flamegraph(
+    Data(privileges): Data<&Option<JwtClaims>>,
+) -> WorterbuchResult<Response> {
+    use crate::profiling::get_live_flamegraph;
+
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
+    }
+
+    let pprof = get_live_flamegraph().await?;
+
+    let response = pprof.into_response();
+
+    Ok(response
+        .with_header("Content-Type", "image/svg+xml")
+        .into_response())
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[instrument(ret)]
+#[handler]
+async fn get_heap_file(
+    Path(filename): Path<String>,
+    Data(privileges): Data<&Option<JwtClaims>>,
+) -> WorterbuchResult<Response> {
+    use poem::http::StatusCode;
+
+    use crate::profiling::get_heap_profile_from_file;
+
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
+    }
+
+    match get_heap_profile_from_file(&filename).await? {
+        Some(pprof) => {
+            let response = pprof.into_response();
+
+            Ok(response
+                .with_header(
+                    "Content-Disposition",
+                    format!("attachment; filename={filename}.gz"),
+                )
+                .into_response())
+        }
+        None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
+    }
+}
+
+#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[instrument(ret)]
+#[handler]
+async fn get_flamegraph_file(
+    Path(filename): Path<String>,
+    Data(privileges): Data<&Option<JwtClaims>>,
+) -> WorterbuchResult<Response> {
+    use poem::http::StatusCode;
+
+    use crate::profiling::get_flamegraph_from_file;
+
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
+    }
+
+    match get_flamegraph_from_file(&filename).await? {
+        Some(svg) => {
+            let response = svg.into_response();
+
+            Ok(response
+                .with_header("Content-Type", "image/svg+xml")
+                .into_response())
+        }
+        None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
+    }
 }
 
 pub async fn start(
@@ -778,16 +866,33 @@ pub async fn start(
         .unwrap_or("".into())
         .contains("prof_active:true")
     {
-        app = app.at(
-            format!("{rest_root}/debug/heap"),
-            get(get_heap).with(BearerAuth::new(config.clone())),
-        )
+        app = app
+            .at(
+                format!("{rest_root}/debug/heap/list"),
+                get(get_heap_files_list.with(BearerAuth::new(config.clone()))),
+            )
+            .at(
+                format!("{rest_root}/debug/heap/live"),
+                get(get_live_heap.with(BearerAuth::new(config.clone()))),
+            )
+            .at(
+                format!("{rest_root}/debug/heap/file/:file"),
+                get(get_heap_file.with(BearerAuth::new(config.clone()))),
+            )
+            .at(
+                format!("{rest_root}/debug/flamegraph/live"),
+                get(get_live_flamegraph.with(BearerAuth::new(config.clone()))),
+            )
+            .at(
+                format!("{rest_root}/debug/flamegraph/file/:file"),
+                get(get_flamegraph_file.with(BearerAuth::new(config.clone()))),
+            )
     }
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
     app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
 
-    if let Some(web_root_path) = config.web_root_path {
+    if let Some(web_root_path) = &config.web_root_path {
         info!(
             "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"
         );
@@ -803,7 +908,7 @@ pub async fn start(
 
     poem::Server::new(TcpListener::bind(addr))
         .run_with_graceful_shutdown(
-            app,
+            app.with(CookieJarManager::new()),
             subsys.on_shutdown_requested(),
             Some(Duration::from_secs(1)),
         )
@@ -826,7 +931,7 @@ async fn run_ws_server(
     subsys: SubsystemHandle,
     mut listener: mpsc::Receiver<(WebSocketStream, SocketAddr)>,
     worterbuch: CloneableWbApi,
-) -> Result<()> {
+) -> WorterbuchResult<()> {
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
 
@@ -888,7 +993,7 @@ async fn run_ws_server(
     Ok(())
 }
 
-fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
+fn to_socket_addr(addr: &Addr) -> WorterbuchResult<SocketAddr> {
     if let Addr::SocketAddr(it) = addr {
         Ok(it.to_owned())
     } else {
@@ -902,7 +1007,11 @@ fn to_socket_addr(addr: &Addr) -> Result<SocketAddr> {
     }
 }
 
-async fn connected(wb: &CloneableWbApi, client_id: Uuid, remote_addr: SocketAddr) -> Result<()> {
+async fn connected(
+    wb: &CloneableWbApi,
+    client_id: Uuid,
+    remote_addr: SocketAddr,
+) -> WorterbuchResult<()> {
     if let Err(e) = wb
         .connected(client_id, Some(remote_addr), Protocol::HTTP)
         .await
