@@ -20,7 +20,7 @@
 use crate::Config;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{Level, error, instrument};
 use worterbuch_common::{
     AuthCheck, KeySegment, Privilege,
     error::{AuthorizationError, AuthorizationResult},
@@ -47,6 +47,7 @@ pub struct Privileges {
 }
 
 impl JwtClaims {
+    #[instrument(level=Level::DEBUG, err)]
     pub fn authorize(&self, privilege: &Privilege, check: AuthCheck) -> AuthorizationResult<()> {
         match privilege {
             Privilege::Read => {

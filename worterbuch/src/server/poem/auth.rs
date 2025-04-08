@@ -23,7 +23,6 @@ use crate::{
 };
 use poem::{
     Endpoint, EndpointExt, Middleware, Request, Result,
-    http::StatusCode,
     middleware::AddData,
     web::headers::{self, HeaderMapExt, authorization::Bearer},
 };
@@ -65,13 +64,20 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
 
     async fn call(&self, req: Request) -> Result<Self::Output> {
         if self.auth_required() {
-            let jwt = req
+            let header_jwt = req
                 .headers()
                 .typed_get::<headers::Authorization<Bearer>>()
                 .map(|it| it.0.token().to_owned());
 
-            let claims = get_claims(jwt.as_deref(), &self.config)
-                .map_err(|e| poem::Error::new(e, StatusCode::UNAUTHORIZED))?;
+            let cookie_jwt = req
+                .cookie()
+                .get("worterbuch_auth_jwt")
+                .map(|c| c.value_str().to_owned());
+
+            let jwt = header_jwt.or(cookie_jwt);
+
+            let claims = get_claims(jwt.as_deref(), &self.config)?;
+
             (&self.ep)
                 .with(AddData::<Option<JwtClaims>>::new(Some(claims)))
                 .call(req)
