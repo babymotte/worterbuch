@@ -13,6 +13,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+#[cfg(feature = "jemalloc")]
 use tower_http::cors::Any;
 #[cfg(feature = "jemalloc")]
 use tower_http::cors::CorsLayer;
