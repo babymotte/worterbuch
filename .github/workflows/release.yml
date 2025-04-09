@@ -19,14 +19,9 @@ jobs:
           - features: ""
           - features: "jemalloc"
           - features: "commercial"
-          - features: "jemalloc,commercial"
           - features: "tcp"
           - features: "unix"
           - features: "ws"
-          - features: "tcp,unix"
-          - features: "tcp,ws"
-          - features: "unix,ws"
-          - features: "tcp,unix,ws"
 
     steps:
       - name: Checkout

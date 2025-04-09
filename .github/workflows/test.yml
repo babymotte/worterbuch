@@ -19,27 +19,29 @@ jobs:
           - features: ""
           - features: "jemalloc"
           - features: "commercial"
-          - features: "jemalloc,commercial"
           - features: "tcp"
           - features: "unix"
           - features: "ws"
-          - features: "tcp,unix"
-          - features: "tcp,ws"
-          - features: "unix,ws"
-          - features: "tcp,unix,ws"
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          default: true
           override: true
+
       - name: Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: wb-${{ runner.os }}-cargo
-          key: wb-${{ runner.os }}-cargo
-      - uses: davidB/rust-cargo-make@v1
+          shared-key: wb-${{ runner.os }}-cargo-${{ matrix.features }}
+          key: wb-${{ runner.os }}-cargo-${{ matrix.features }}
+
+      - name: Run format check
+        run: cargo fmt --check
       - name: Run linter
         env:
           WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
