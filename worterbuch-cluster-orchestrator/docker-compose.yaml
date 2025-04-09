@@ -1,0 +1,49 @@
+# docker-compose.yaml
+services:
+  quickwit:
+    image: quickwit/quickwit:latest
+    command: run
+    restart: always
+    environment:
+      QW_ENABLE_OTLP_ENDPOINT: true
+      QW_ENABLE_JAEGER_ENDPOINT: true
+    ports:
+      - "7280:7280"
+      - "7281:7281"
+    volumes:
+      - ./qwdata:/quickwit/qwdata
+
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    # command:
+    #   - "--config"
+    #   - /jaeger/config.yaml
+    restart: always
+    depends_on:
+      - quickwit
+    ports:
+      - "6831:6831/udp" # Jaeger compact Thrift protocol (UDP)
+      - "6832:6832/udp" # Jaeger binary Thrift protocol (UDP)
+      - "5778:5778" # Jaeger agent HTTP management port
+      - "16686:16686" # Jaeger query UI port
+      - "4317:4317" # Jaeger gRPC HTTP collector port
+      - "4318:4318" # Jaeger gRPC HTTP collector port (encrypted)
+      - "14250:14250" # Jaeger gRPC tracing port
+      - "14268:14268" # Jaeger gRPC HTTP internal service communication port
+      - "14269:14269" # Jaeger gRPC HTTP internal service communication port (encrypted)
+      - "9411:9411" # Zipkin collector port
+    volumes:
+      - ./jaeger:/jaeger
+
+  grafana:
+    image: grafana/grafana-enterprise:latest
+    restart: always
+    user: root
+    depends_on:
+      - quickwit
+    environment:
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "quickwit-quickwit-datasource"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana-storage:/var/lib/grafana
