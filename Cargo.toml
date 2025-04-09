@@ -3,6 +3,7 @@ members = [
     "worterbuch-common",
     "worterbuch-client",
     "worterbuch",
+    "worterbuch-cluster-orchestrator",
     "worterbuch-cli",
     "worterbuch-speedtest",
 ]
