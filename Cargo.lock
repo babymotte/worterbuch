@@ -3571,7 +3571,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -3646,7 +3646,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "axum 0.8.3",
  "clap",
