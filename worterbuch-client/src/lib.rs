@@ -1230,7 +1230,7 @@ pub async fn try_connect(
 }
 
 #[cfg(any(feature = "ws", feature = "wasm"))]
-#[instrument(skip(config, on_disconnect), level = Level::Info)]
+#[instrument(skip(config, on_disconnect), level = Level::INFO)]
 async fn connect_ws(
     url: String,
     on_disconnect: oneshot::Sender<()>,

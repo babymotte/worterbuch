@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database"]
 
 [features]
-default = ["tcp", "unix"]
+default = ["tcp", "unix", "ws"]
 tcp = ["tokio/net"]
 ws = ["worterbuch-common/ws", "tokio/rt", "tokio-tungstenite", "async-stream"]
 unix = ["tokio/net"]

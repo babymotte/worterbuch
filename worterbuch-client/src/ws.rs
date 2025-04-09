@@ -28,7 +28,7 @@ use tokio_tungstenite::{
         protocol::{CloseFrame, frame::coding::CloseCode},
     },
 };
-#[cfg(any(feature = "wasm"))]
+#[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, WebSocketStream};
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use tracing::debug;
@@ -47,7 +47,7 @@ impl WsClientSocket {
         Self { websocket }
     }
 
-    #[cfg(any(feature = "wasm"))]
+    #[cfg(feature = "wasm")]
     pub fn new(websocket: WebSocketStream) -> Self {
         Self { websocket }
     }
@@ -73,7 +73,7 @@ impl WsClientSocket {
     }
 
     pub async fn close(mut self) -> ConnectionResult<()> {
-        #[cfg(any(feature = "ws"))]
+        #[cfg(feature = "ws")]
         self.websocket
             .close(Some(CloseFrame {
                 code: CloseCode::Normal,
@@ -81,7 +81,7 @@ impl WsClientSocket {
             }))
             .await?;
 
-        #[cfg(any(feature = "wasm"))]
+        #[cfg(feature = "wasm")]
         self.websocket.close().await?;
 
         Ok(())
