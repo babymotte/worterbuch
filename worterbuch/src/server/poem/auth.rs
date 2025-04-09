@@ -75,25 +75,36 @@ impl<E: Endpoint> Endpoint for BearerAuthEndpoint<E> {
 
         let jwt = header_jwt.or(cookie_jwt);
 
-        let claims = get_claims(jwt.as_deref(), &self.config)?;
+        let resp = match get_claims(jwt.as_deref(), &self.config) {
+            Ok(claims) => {
+                let cors = Cors::new()
+                    .allow_credentials(true)
+                    .expose_header("Set-Cookie")
+                    .allow_origins(claims.cors.clone().unwrap_or_else(Vec::new));
 
-        let cors = Cors::new()
-            .allow_credentials(true)
-            .expose_header("Set-Cookie")
-            .allow_origins(claims.cors.clone().unwrap_or_else(Vec::new));
+                (&self.ep)
+                    .with(AddData::<Option<JwtClaims>>::new(Some(claims)))
+                    .with(cors)
+                    .call(req)
+                    .await?
+            }
+            Err(e) => {
+                if self.auth_required() {
+                    return Err(e.into());
+                }
 
-        if self.auth_required() {
-            (&self.ep)
-                .with(AddData::<Option<JwtClaims>>::new(Some(claims)))
-                .with(cors)
-                .call(req)
-                .await
-        } else {
-            (&self.ep)
-                .with(AddData::<Option<JwtClaims>>::new(None))
-                .with(cors)
-                .call(req)
-                .await
-        }
+                let cors = Cors::new()
+                    .allow_credentials(true)
+                    .expose_header("Set-Cookie");
+
+                (&self.ep)
+                    .with(AddData::<Option<JwtClaims>>::new(None))
+                    .with(cors)
+                    .call(req)
+                    .await?
+            }
+        };
+
+        Ok(resp)
     }
 }
