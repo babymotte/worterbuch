@@ -12,6 +12,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - features: ""
+          - features: "jemalloc"
+          - features: "commercial"
+          - features: "jemalloc,commercial"
+          - features: "tcp"
+          - features: "unix"
+          - features: "ws"
+          - features: "tcp,unix"
+          - features: "tcp,ws"
+          - features: "unix,ws"
+          - features: "tcp,unix,ws"
+
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -24,18 +40,12 @@ jobs:
           shared-key: wb-${{ runner.os }}-cargo
           key: wb-${{ runner.os }}-cargo
       - uses: davidB/rust-cargo-make@v1
-      - name: Run linter FOSS
+      - name: Run linter
         env:
           WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
-        run: cargo clippy -- --deny warnings
-      - name: Run linter commercial
-        env:
-          WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_LICENSE_SECRET }}
-        run: cargo clippy --features=commercial -- --deny warnings
-      - name: Run tests FOSS
-        run: cargo test
-      - name: Run tests commercial
+        run: cargo clippy --no-default-features --features=${{ matrix.features }} -- --deny warnings
+      - name: Run tests
         env:
           WORTERBUCH_LICENSE_SECRET: ${{ secrets.WORTERBUCH_TEST_LICENSE_SECRET }}
           WORTERBUCH_LICENSE_FILE: ./test/license
-        run: cargo test --features=commercial
+        run: cargo test --no-default-features --features=${{ matrix.features }}
