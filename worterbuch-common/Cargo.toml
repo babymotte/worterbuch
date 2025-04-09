@@ -15,6 +15,14 @@ default = []
 benchmark = ["random_word"]
 ws = ["tungstenite"]
 wasm = ["tokio-tungstenite-wasm"]
+jemalloc = [
+    "tikv-jemallocator",
+    "jemalloc_pprof",
+    "inferno",
+    "pprof_util",
+    "mappings",
+    "regex",
+]
 
 [dependencies]
 tokio = { version = "1.26.0", features = ["sync", "io-util", "time"] }
@@ -32,6 +40,19 @@ thiserror = "2.0.12"
 serde_yaml = "0.9.34"
 opentelemetry = "0.28.0"
 poem = "3.1.8"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6.0", optional = true, features = [
+    "profiling",
+    "unprefixed_malloc_on_supported_platforms",
+] }
+jemalloc_pprof = { version = "0.7.0", features = [
+    "flamegraph",
+], optional = true }
+inferno = { version = "0.12.2", optional = true }
+pprof_util = { version = "0.7.0", features = ["flamegraph"], optional = true }
+mappings = { version = "0.7.0", optional = true }
+regex = { version = "1.11.1", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"

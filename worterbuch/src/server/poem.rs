@@ -48,8 +48,6 @@ use poem::{
     },
 };
 use serde_json::Value;
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-use std::env;
 use std::{
     collections::HashMap,
     io::{self, ErrorKind, Write},
@@ -628,7 +626,7 @@ async fn subscribels(
 async fn get_heap_files_list(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Response> {
-    use crate::profiling::list_heap_profile_files;
+    use worterbuch_common::profiling::list_heap_profile_files;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
@@ -643,7 +641,7 @@ async fn get_heap_files_list(
 #[instrument(ret)]
 #[handler]
 async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<Response> {
-    use crate::profiling::get_live_heap_profile;
+    use worterbuch_common::profiling::get_live_heap_profile;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
@@ -664,7 +662,7 @@ async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Worterbuch
 async fn get_live_flamegraph(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Response> {
-    use crate::profiling::get_live_flamegraph;
+    use worterbuch_common::profiling::get_live_flamegraph;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
@@ -687,8 +685,7 @@ async fn get_heap_file(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Response> {
     use poem::http::StatusCode;
-
-    use crate::profiling::get_heap_profile_from_file;
+    use worterbuch_common::profiling::get_heap_profile_from_file;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
@@ -717,8 +714,7 @@ async fn get_flamegraph_file(
     Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Response> {
     use poem::http::StatusCode;
-
-    use crate::profiling::get_flamegraph_from_file;
+    use worterbuch_common::profiling::get_flamegraph_from_file;
 
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Profile, AuthCheck::Flag)?;
@@ -919,7 +915,7 @@ pub async fn start(
         );
 
     #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-    if env::var("MALLOC_CONF")
+    if std::env::var("MALLOC_CONF")
         .unwrap_or("".into())
         .contains("prof_active:true")
     {

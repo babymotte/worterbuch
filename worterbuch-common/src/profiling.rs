@@ -1,3 +1,4 @@
+use crate::error::{WorterbuchError, WorterbuchResult};
 use inferno::flamegraph::{Direction, Palette, color::MultiPalette};
 use mappings::MAPPINGS;
 use pprof_util::{FlamegraphOptions, StackProfile, parse_jeheap};
@@ -10,7 +11,6 @@ use std::{
 };
 use tokio::fs;
 use tracing::{Level, info, instrument};
-use worterbuch_common::error::{WorterbuchError, WorterbuchResult};
 
 #[instrument(level=Level::DEBUG, err)]
 pub async fn get_live_heap_profile() -> WorterbuchResult<Vec<u8>> {
@@ -145,7 +145,6 @@ pub async fn list_heap_profile_files() -> Option<Vec<String>> {
     Some(files)
 }
 
-#[instrument(ret)]
 fn get_profile_dir() -> Option<(PathBuf, String)> {
     let re = Regex::new(r".*prof_prefix:(.+)\/(.+)").ok()?;
     let env = env::var("MALLOC_CONF").ok()?;

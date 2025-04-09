@@ -510,9 +510,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.14"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ba6d68e24814cb8de6bb986db8222d3a027d15872cabc0d18817bc3c0e4471"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2178,9 +2178,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.0.3"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e56a18552996ac8d29ecc3b190b4fdbb2d91ca4ec396de7bbffaf43f3d637e96"
+checksum = "d97817398dd4bb2e6da002002db259209759911da105da92bec29ccb12cf58bf"
 dependencies = [
  "bitflags",
  "errno",
@@ -2443,7 +2443,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.1",
  "once_cell",
- "rustix 1.0.3",
+ "rustix 1.0.5",
  "windows-sys 0.59.0",
 ]
 
@@ -3486,11 +3486,8 @@ dependencies = [
  "hashlink",
  "hex",
  "hostname",
- "inferno",
- "jemalloc_pprof",
  "jsonwebtoken",
  "lazy_static",
- "mappings",
  "miette",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -3498,14 +3495,11 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "poem",
- "pprof_util",
- "regex",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "supports-color",
- "tikv-jemallocator",
  "tokio",
  "tokio-graceful-shutdown",
  "tokio-metrics",
@@ -3559,16 +3553,22 @@ dependencies = [
 name = "worterbuch-common"
 version = "1.3.5"
 dependencies = [
+ "inferno",
+ "jemalloc_pprof",
+ "mappings",
  "miette",
  "opentelemetry",
  "poem",
+ "pprof_util",
  "random_word",
+ "regex",
  "serde",
  "serde_json",
  "serde_repr",
  "serde_yaml",
  "sha2",
  "thiserror 2.0.12",
+ "tikv-jemallocator",
  "tokio",
  "tokio-tungstenite-wasm",
  "tracing",

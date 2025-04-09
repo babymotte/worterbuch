@@ -30,8 +30,6 @@ mod config;
 mod leader_follower;
 pub mod license;
 mod persistence;
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-mod profiling;
 mod server;
 mod stats;
 pub mod store;

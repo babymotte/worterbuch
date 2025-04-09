@@ -19,14 +19,8 @@
 
 use miette::{IntoDiagnostic, Result};
 use std::env;
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-use tikv_jemallocator::Jemalloc;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use worterbuch::{Config, run_worterbuch};
-
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 fn main() -> Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
