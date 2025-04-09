@@ -246,6 +246,7 @@ async fn run_server(
     Ok(())
 }
 
+#[cfg(feature = "jemalloc")]
 fn cors() -> CorsLayer {
     CorsLayer::new()
         // .allow_credentials(true)
