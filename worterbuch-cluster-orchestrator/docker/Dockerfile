@@ -13,7 +13,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM rust:1-bookworm AS worterbuch-chef
+ARG WORTERBUCH_VERSION
+
+FROM rust:1-bookworm AS wbco-chef
 RUN cargo install cargo-chef
 RUN rustup component add rustfmt
 RUN rustup component add clippy
@@ -32,7 +34,7 @@ RUN cargo clippy -- --deny warnings
 RUN cargo test
 RUN cargo build --release
 
-FROM babymotte/worterbuch:1.3.4
+FROM babymotte/worterbuch:${WORTERBUCH_VERSION}
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
 ENV WORTERBUCH_LOG=info,worterbuch_cluster_orchestrator::stats=warn
