@@ -1,15 +1,12 @@
-use axum::{Json, Router, extract::State, response::IntoResponse, routing::get};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 #[cfg(feature = "jemalloc")]
 use axum::{
     body::Body,
-    http::{HeaderValue, Response, StatusCode},
+    http::{HeaderValue, Response},
 };
 use miette::{Context, IntoDiagnostic, Result};
 use serde_json::json;
-use std::{
-    env,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::{
     net::TcpListener,
     select,
@@ -151,10 +148,11 @@ async fn run_server(
 ) -> Result<()> {
     let server = Server { api_tx };
 
-    let mut app = Router::new().route("/ready", get(Server::ready));
+    let mut app = Router::new();
+    app = app.route("/ready", get(Server::ready));
 
     #[cfg(feature = "jemalloc")]
-    if env::var("MALLOC_CONF")
+    if std::env::var("MALLOC_CONF")
         .unwrap_or("".into())
         .contains("prof_active:true")
     {
