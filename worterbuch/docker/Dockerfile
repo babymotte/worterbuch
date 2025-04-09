@@ -15,11 +15,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS worterbuch-chef
+FROM rust:1-bookworm AS worterbuch-chef
 RUN cargo install cargo-chef
-WORKDIR /app
 RUN rustup component add rustfmt
 RUN rustup component add clippy
+WORKDIR /app
 
 FROM worterbuch-chef AS worterbuch-planner
 COPY . .

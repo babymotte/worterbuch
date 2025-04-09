@@ -13,10 +13,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS wbco-chef
-WORKDIR /app
+FROM rust:1-bookworm AS worterbuch-chef
+RUN cargo install cargo-chef
 RUN rustup component add rustfmt
 RUN rustup component add clippy
+WORKDIR /app
 
 FROM wbco-chef AS wbco-planner
 COPY . .

@@ -24,7 +24,7 @@ wasm = [
 
 [dependencies]
 tokio-tungstenite-wasm = { version = "0.5.0", optional = true }
-worterbuch-common = "1.0.0"
+worterbuch-common = { version = "1.0.0", path = "../worterbuch-common" }
 tokio = { version = "1.26.0", optional = true, features = [
     "macros",
     "rt",
