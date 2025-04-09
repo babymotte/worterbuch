@@ -32,15 +32,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_repr::*;
 use sha2::{Digest, Sha256};
 use std::{fmt, ops::Deref};
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 mod jemalloc;
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 pub mod profiling;
-
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-pub const JEMALLOC_ENABLED: bool = true;
-#[cfg(any(target_env = "msvc", not(feature = "jemalloc")))]
-pub const JEMALLOC_ENABLED: bool = false;
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";

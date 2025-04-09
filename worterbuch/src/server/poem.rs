@@ -620,7 +620,7 @@ async fn subscribels(
     )))
 }
 
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[instrument(ret)]
 #[handler]
 async fn get_heap_files_list(
@@ -637,7 +637,7 @@ async fn get_heap_files_list(
     Ok(Json(files).into_response())
 }
 
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[instrument(ret)]
 #[handler]
 async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<Response> {
@@ -656,7 +656,7 @@ async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Worterbuch
         .into_response())
 }
 
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[instrument(ret)]
 #[handler]
 async fn get_live_flamegraph(
@@ -677,7 +677,7 @@ async fn get_live_flamegraph(
         .into_response())
 }
 
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[instrument(ret)]
 #[handler]
 async fn get_heap_file(
@@ -706,7 +706,7 @@ async fn get_heap_file(
     }
 }
 
-#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[instrument(ret, err)]
 #[handler]
 async fn get_flamegraph_file(
@@ -914,7 +914,7 @@ pub async fn start(
             post(login.with(BearerAuth::new(config.clone()))).options(preflight.with(cors())),
         );
 
-    #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
+    #[cfg(feature = "jemalloc")]
     if std::env::var("MALLOC_CONF")
         .unwrap_or("".into())
         .contains("prof_active:true")

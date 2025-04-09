@@ -13,7 +13,10 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{info, instrument};
+use tower_http::cors::Any;
+#[cfg(feature = "jemalloc")]
+use tower_http::cors::CorsLayer;
+use tracing::{Level, info, instrument};
 
 pub struct StatsSender(mpsc::Sender<StatsEvent>);
 
@@ -63,7 +66,7 @@ struct Server {
 }
 
 impl Server {
-    #[instrument(skip(server), ret)]
+    #[instrument(level=Level::TRACE, skip(server), ret)]
     async fn ready(State(server): State<Server>) -> impl IntoResponse {
         let (tx, rx) = oneshot::channel();
         server
@@ -85,27 +88,23 @@ impl Server {
     }
 
     #[cfg(feature = "jemalloc")]
-    async fn get_heap() -> Result<Response<Body>, (StatusCode, String)> {
-        let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
-            it
-        } else {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "jemalloc profiling is not enabled".to_owned(),
-            ));
-        };
-        let mut prof_ctl = prof_ctl.lock().await;
-        Self::require_profiling_activated(&prof_ctl)?;
-        let pprof = match prof_ctl.dump_pprof() {
-            Ok(it) => it,
-            Err(e) => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("error generating heap dump: {e}"),
-                ));
-            }
-        };
+    #[instrument(level=Level::INFO)]
+    async fn get_heap_files_list() -> Result<Response<Body>, (StatusCode, String)> {
+        use worterbuch_common::profiling::list_heap_profile_files;
 
+        let files = list_heap_profile_files().await.unwrap_or_else(Vec::new);
+
+        Ok(Json(files).into_response())
+    }
+
+    #[cfg(feature = "jemalloc")]
+    #[instrument(level=Level::INFO)]
+    async fn get_live_heap() -> Result<Response<Body>, (StatusCode, String)> {
+        use worterbuch_common::profiling::get_live_heap_profile;
+
+        let pprof = get_live_heap_profile()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         let mut response = pprof.into_response();
 
         response.headers_mut().insert(
@@ -117,13 +116,63 @@ impl Server {
     }
 
     #[cfg(feature = "jemalloc")]
-    fn require_profiling_activated(
-        prof_ctl: &jemalloc_pprof::JemallocProfCtl,
-    ) -> Result<(), (StatusCode, String)> {
-        if prof_ctl.activated() {
-            Ok(())
-        } else {
-            Err((StatusCode::FORBIDDEN, "heap profiling not activated".into()))
+    #[instrument(level=Level::INFO)]
+    async fn get_live_flamegraph() -> Result<Response<Body>, (StatusCode, String)> {
+        use worterbuch_common::profiling::get_live_flamegraph;
+
+        let pprof = get_live_flamegraph()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let mut response = pprof.into_response();
+
+        response
+            .headers_mut()
+            .insert("Content-Type", HeaderValue::from_static("image/svg+xml"));
+
+        Ok(response)
+    }
+
+    #[cfg(feature = "jemalloc")]
+    #[instrument(level=Level::INFO)]
+    async fn get_heap_file(file: String) -> Result<Response<Body>, (StatusCode, String)> {
+        use worterbuch_common::profiling::get_heap_profile_from_file;
+
+        match get_heap_profile_from_file(&file)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        {
+            Some(pprof) => {
+                let mut response = pprof.into_response();
+
+                if let Ok(val) = HeaderValue::from_str(&format!("attachment; filename={file}.gz")) {
+                    response.headers_mut().insert("Content-Disposition", val);
+                }
+
+                Ok(response)
+            }
+            None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
+        }
+    }
+
+    #[cfg(feature = "jemalloc")]
+    #[instrument(level=Level::INFO)]
+    async fn get_flamegraph_file(file: String) -> Result<Response<Body>, (StatusCode, String)> {
+        use worterbuch_common::profiling::get_flamegraph_from_file;
+
+        match get_flamegraph_from_file(&file)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        {
+            Some(svg) => {
+                let mut response = svg.into_response();
+
+                response
+                    .headers_mut()
+                    .insert("Content-Type", HeaderValue::from_static("image/svg+xml"));
+
+                Ok(response)
+            }
+            None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
         }
     }
 }
@@ -156,7 +205,24 @@ async fn run_server(
         .unwrap_or("".into())
         .contains("prof_active:true")
     {
-        app = app.route("/debug/heap", get(Server::get_heap))
+        app = app
+            .route(
+                "/debug/heap/list",
+                get(Server::get_heap_files_list).layer(cors()),
+            )
+            .route("/debug/heap/live", get(Server::get_live_heap).layer(cors()))
+            .route(
+                "/debug/heap/file/{file}",
+                get(Server::get_heap_file).layer(cors()),
+            )
+            .route(
+                "/debug/flamegraph/live",
+                get(Server::get_live_flamegraph).layer(cors()),
+            )
+            .route(
+                "/debug/flamegraph/file/{file}",
+                get(Server::get_flamegraph_file).layer(cors()),
+            )
     }
 
     let ip = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -178,6 +244,13 @@ async fn run_server(
         .wrap_err("error starting stats endpoint web server")?;
 
     Ok(())
+}
+
+fn cors() -> CorsLayer {
+    CorsLayer::new()
+        // .allow_credentials(true)
+        .allow_origin(Any)
+    // .expose_headers([header::SET_COOKIE])
 }
 
 struct StatsActor {

@@ -3652,7 +3652,6 @@ dependencies = [
  "clap",
  "dotenvy",
  "gethostname",
- "jemalloc_pprof",
  "miette",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -3673,6 +3672,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "worterbuch-common",
 ]
 
 [[package]]

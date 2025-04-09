@@ -20,13 +20,6 @@ use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
-#[cfg(feature = "jemalloc")]
-use tikv_jemallocator::Jemalloc;
-
-#[cfg(feature = "jemalloc")]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
