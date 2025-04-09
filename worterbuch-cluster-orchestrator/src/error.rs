@@ -17,7 +17,7 @@
 
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
-use opentelemetry::trace::TraceError;
+use opentelemetry_otlp::ExporterBuildError;
 use std::io;
 use thiserror::Error;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
@@ -31,7 +31,7 @@ pub enum WorterbuchClusterOrchestratorError {
     #[error("Tracing init error: {0}")]
     TryInit(#[from] TryInitError),
     #[error("Tracing init error: {0}")]
-    Trace(#[from] TraceError),
+    ExporterBuildError(#[from] ExporterBuildError),
     #[error("Tracing config parse error: {0}")]
     Parse(#[from] ParseError),
 }

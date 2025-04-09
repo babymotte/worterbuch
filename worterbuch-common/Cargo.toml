@@ -38,7 +38,7 @@ uuid = "1.15.1"
 tokio-tungstenite-wasm = { version = "0.5.0", optional = true }
 thiserror = "2.0.12"
 serde_yaml = "0.9.34"
-opentelemetry = "0.28.0"
+opentelemetry = "0.29.1"
 poem = "3.1.8"
 tikv-jemallocator = { version = "0.6.0", optional = true, features = [
     "profiling",
@@ -51,6 +51,7 @@ inferno = { version = "0.12.2", optional = true }
 pprof_util = { version = "0.7.0", features = ["flamegraph"], optional = true }
 mappings = { version = "0.7.0", optional = true }
 regex = { version = "1.11.1", optional = true }
+opentelemetry-otlp = "0.29.0"
 
 [lints.rust]
 unsafe_code = "forbid"

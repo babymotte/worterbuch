@@ -22,7 +22,7 @@ use crate::{
     RequestPattern, TransactionId, server::Err,
 };
 use miette::Diagnostic;
-use opentelemetry::trace::TraceError;
+use opentelemetry_otlp::ExporterBuildError;
 use poem::{IntoResponse, http::StatusCode};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use thiserror::Error;
@@ -53,7 +53,7 @@ pub enum ConfigError {
     #[error("could not load config file: {0}")]
     YamlError(#[from] serde_yaml::Error),
     #[error("error setting up telemetry: {0}")]
-    TraceError(#[from] TraceError),
+    ExporterBuildError(#[from] ExporterBuildError),
 }
 
 pub trait ConfigIntContext<I> {
