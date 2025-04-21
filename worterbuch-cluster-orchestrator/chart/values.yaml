@@ -179,6 +179,6 @@ authToken: ""
 
 telemetry:
   endpoint:
-    grpc: ""
-    # grpc: "http://jaeger.telemetry.svc.cluster.local:4317"
+    # grpc: ""
+    grpc: "http://quickwit.telemetry.svc.cluster.local:7281"
     http: ""
