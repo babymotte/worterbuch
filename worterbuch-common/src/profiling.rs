@@ -27,10 +27,7 @@ pub async fn get_live_heap_profile() -> WorterbuchResult<Vec<u8>> {
         Ok(it) => it,
         Err(e) => {
             let meta = format!("error generating heap dump: {e}");
-            return Err(WorterbuchError::IoError(
-                io::Error::other(e),
-                meta,
-            ))?;
+            return Err(WorterbuchError::IoError(io::Error::other(e), meta))?;
         }
     };
 
@@ -59,10 +56,7 @@ pub async fn get_live_flamegraph() -> WorterbuchResult<String> {
         }
         Err(e) => {
             let meta = format!("error generating flame graph: {e}");
-            return Err(WorterbuchError::IoError(
-                io::Error::other(e),
-                meta,
-            ))?;
+            return Err(WorterbuchError::IoError(io::Error::other(e), meta))?;
         }
     }
 }
