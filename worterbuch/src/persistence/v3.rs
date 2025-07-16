@@ -154,7 +154,7 @@ async fn write_file<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> Result<()> 
     let mut file = File::create(&path)
         .await
         .into_diagnostic()
-        .wrap_err_with(|| format!("creating file {:?} failed", path))?;
+        .wrap_err_with(|| format!("creating file {path:?} failed"))?;
     file.write_all(data)
         .await
         .into_diagnostic()
@@ -175,7 +175,7 @@ async fn validate_file_content<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> 
     file.read_to_end(&mut written_data)
         .await
         .into_diagnostic()
-        .wrap_err_with(|| format!("failed to read written file {:?}", file))?;
+        .wrap_err_with(|| format!("failed to read written file {file:?}"))?;
 
     if written_data != data {
         Err(miette!(

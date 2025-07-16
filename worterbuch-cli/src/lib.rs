@@ -199,7 +199,7 @@ async fn provide_key_value_pair(
             return ControlFlow::Break(());
         }
     } else {
-        eprintln!("no key/value pair (e.g. 'a=b'): {}", line);
+        eprintln!("no key/value pair (e.g. 'a=b'): {line}");
     }
     ControlFlow::Continue(())
 }
@@ -264,7 +264,7 @@ fn print_state(msg: &State, json: bool, raw: bool) {
         (true, false) => print_msg_as_json(msg),
         (false, true) => {
             if let StateEvent::Value(val) = &msg.event {
-                println!("{}", val);
+                println!("{val}");
             } else {
                 println!("{}", Value::Null);
             }
@@ -304,7 +304,7 @@ fn print_state_change(msg: &State, json: bool) {
             print_msg_as_json(val);
         }
     } else if let StateEvent::Value(val) = &msg.event {
-        println!("{}", val);
+        println!("{val}");
     }
 }
 
@@ -314,7 +314,7 @@ fn print_state_del(msg: &State, json: bool) {
             print_msg_as_json(val);
         }
     } else if let StateEvent::Deleted(val) = &msg.event {
-        println!("{}", val);
+        println!("{val}");
     }
 }
 

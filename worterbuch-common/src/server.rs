@@ -254,8 +254,8 @@ pub type TypedStateEvents<T> = Vec<TypedStateEvent<T>>;
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.event {
-            StateEvent::Value(v) => write!(f, "{}", v),
-            StateEvent::Deleted(v) => write!(f, "!{}", v),
+            StateEvent::Value(v) => write!(f, "{v}"),
+            StateEvent::Deleted(v) => write!(f, "!{v}"),
         }
     }
 }

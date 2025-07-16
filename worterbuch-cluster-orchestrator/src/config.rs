@@ -237,7 +237,7 @@ async fn load_config_file(path: impl AsRef<Path>) -> Result<ConfigFile> {
         })?;
     serde_yaml::from_str(&yaml)
         .into_diagnostic()
-        .wrap_err_with(|| format!("could not parse YAML: {}", yaml))
+        .wrap_err_with(|| format!("could not parse YAML: {yaml}"))
 }
 
 #[derive(Debug, Clone)]

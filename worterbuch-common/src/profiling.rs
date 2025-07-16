@@ -28,7 +28,7 @@ pub async fn get_live_heap_profile() -> WorterbuchResult<Vec<u8>> {
         Err(e) => {
             let meta = format!("error generating heap dump: {e}");
             return Err(WorterbuchError::IoError(
-                io::Error::new(io::ErrorKind::Other, e),
+                io::Error::other(e),
                 meta,
             ))?;
         }
@@ -53,14 +53,14 @@ pub async fn get_live_flamegraph() -> WorterbuchResult<String> {
             let dump_reader = BufReader::new(f);
             let profile = parse_jeheap(dump_reader, MAPPINGS.as_deref()).map_err(|e| {
                 let meta = format!("error generating heap dump: {e}");
-                WorterbuchError::IoError(io::Error::new(io::ErrorKind::Other, e), meta)
+                WorterbuchError::IoError(io::Error::other(e), meta)
             })?;
             to_flame_graph(profile).await
         }
         Err(e) => {
             let meta = format!("error generating flame graph: {e}");
             return Err(WorterbuchError::IoError(
-                io::Error::new(io::ErrorKind::Other, e),
+                io::Error::other(e),
                 meta,
             ))?;
         }

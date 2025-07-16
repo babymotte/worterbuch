@@ -166,7 +166,7 @@ impl ChildProcessManagerActor {
         let mut proc = command
             .spawn()
             .into_diagnostic()
-            .wrap_err_with(|| format!("could not start child process {}", cmd))?;
+            .wrap_err_with(|| format!("could not start child process {cmd}"))?;
         self.stdin = proc.stdin.take();
         self.process = Some((proc, cmd));
         self.started = true;
@@ -189,7 +189,7 @@ impl ChildProcessManagerActor {
                 return Ok(ControlFlow::Break(()));
             },
             exit_code = proc.wait() => {
-                match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {}", cmd))?.code() {
+                match exit_code.into_diagnostic().wrap_err_with(||format!("could not get exit code of child process {cmd}"))?.code() {
                     Some(exit_code) => warn!("Child process {} terminated with exit code {exit_code}.", cmd),
                     None => warn!("Child process {} terminated with unknown exit code", cmd)
                 }
@@ -246,7 +246,7 @@ impl ChildProcessManagerActor {
             proc.wait()
                 .await
                 .into_diagnostic()
-                .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?;
+                .wrap_err_with(|| format!("error waiting for child process {cmd} to stop"))?;
         } else {
             warn!("Process was not running, nothing to stop.");
         }
@@ -302,7 +302,7 @@ async fn terminate(proc: &mut Child, cmd: &str) -> Result<()> {
         .terminate_wait()
         .await
         .into_diagnostic()
-        .wrap_err_with(|| format!("error waiting for child process {} to stop", cmd))?
+        .wrap_err_with(|| format!("error waiting for child process {cmd} to stop"))?
         .code()
     {
         Some(exit_code) => info!("Child process terminated with exit code {exit_code}."),

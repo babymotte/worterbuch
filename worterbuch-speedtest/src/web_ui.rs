@@ -36,7 +36,7 @@ use poem::{
     middleware::{AddData, Tracing},
     post,
     web::{
-        Data, Json,
+        Data, Json, WithHeader,
         sse::{Event, SSE},
     },
 };
@@ -119,16 +119,15 @@ async fn throughput_stop(Data(api): Data<&mpsc::Sender<throughput::Api>>) -> Res
 fn throughput_stats(
     Data(tx): Data<&broadcast::Sender<throughput::UiApi>>,
     Data(running): Data<&Arc<AtomicBool>>,
-) -> Result<impl IntoResponse> {
+) -> WithHeader<SSE> {
     let running = running.load(Ordering::Acquire);
     let rx = tx.subscribe();
-    if let Err(e) = if running {
+    if running {
         tx.send(throughput::UiApi::Running)
     } else {
         tx.send(throughput::UiApi::Stopped)
-    } {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
+    .ok();
     let stream = BroadcastStream::new(rx)
         .map(move |stat| {
             stat.ok()
@@ -136,9 +135,9 @@ fn throughput_stats(
                 .map(Event::message)
         })
         .filter_map(|it| it);
-    Ok(SSE::new(stream)
+    SSE::new(stream)
         .keep_alive(Duration::from_secs(5))
-        .with_header("Access-Control-Allow-Origin", "*"))
+        .with_header("Access-Control-Allow-Origin", "*")
 }
 
 #[handler]
@@ -166,16 +165,15 @@ async fn latency_stop(Data(api): Data<&mpsc::Sender<latency::Api>>) -> Result<Js
 fn latency_events(
     Data(tx): Data<&broadcast::Sender<latency::UiApi>>,
     Data(running): Data<&Arc<AtomicBool>>,
-) -> Result<impl IntoResponse> {
+) -> WithHeader<SSE> {
     let running = running.load(Ordering::Acquire);
     let rx = tx.subscribe();
-    if let Err(e) = if running {
+    if running {
         tx.send(latency::UiApi::Running)
     } else {
         tx.send(latency::UiApi::Stopped)
-    } {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
+    .ok();
     let stream = BroadcastStream::new(rx)
         .map(move |stat| {
             stat.ok()
@@ -183,9 +181,9 @@ fn latency_events(
                 .map(Event::message)
         })
         .filter_map(|it| it);
-    Ok(SSE::new(stream)
+    SSE::new(stream)
         .keep_alive(Duration::from_secs(5))
-        .with_header("Access-Control-Allow-Origin", "*"))
+        .with_header("Access-Control-Allow-Origin", "*")
 }
 
 pub async fn run_web_ui(
