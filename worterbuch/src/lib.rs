@@ -288,6 +288,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                 .connected(client_id, remote_addr, &protocol)
                 .await;
         }
+        WbFunction::ProtocolSwitched(client_id, protocol) => {
+            worterbuch.protocol_switched(client_id, protocol).await;
+        }
         WbFunction::Disconnected(client_id, remote_addr) => {
             worterbuch.disconnected(client_id, remote_addr).await.ok();
         }
@@ -392,6 +395,9 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
             worterbuch
                 .connected(client_id, remote_addr, &protocol)
                 .await;
+        }
+        WbFunction::ProtocolSwitched(client_id, protocol) => {
+            worterbuch.protocol_switched(client_id, protocol).await;
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
             worterbuch.disconnected(client_id, remote_addr).await.ok();
@@ -741,6 +747,7 @@ async fn forward_api_call(
         | WbFunction::Unsubscribe(_, _, _)
         | WbFunction::UnsubscribeLs(_, _, _)
         | WbFunction::Connected(_, _, _)
+        | WbFunction::ProtocolSwitched(_, _)
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)
         | WbFunction::Export(_, _)

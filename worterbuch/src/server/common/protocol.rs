@@ -74,6 +74,11 @@ impl Proto {
                 if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
                     info!("Switching protocol to v{}", protocol_switch_request.version);
                     if self.switch_protocol(protocol_switch_request.version) {
+                        self.latest
+                            .v0
+                            .worterbuch
+                            .protocol_switched(self.client_id(), protocol_switch_request.version)
+                            .await?;
                         let response = Ack { transaction_id: 0 };
                         trace!("Protocol switched, queuing Ack …");
                         let res = self.tx().send(ServerMessage::Ack(response)).await;

@@ -23,6 +23,7 @@ use crate::{
     store::{Node, PersistedStore, Store, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
+use chrono::prelude::{DateTime, Utc};
 use hashlink::LinkedHashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_str, json};
@@ -31,7 +32,7 @@ use std::{
     fmt::Display,
     net::SocketAddr,
     ops::Deref,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::{
     fs::File,
@@ -47,10 +48,12 @@ use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, tra
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, Protocol, RegularKeySegment, RequestPattern, SYSTEM_TOPIC_CLIENT_NAME,
-    SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, TransactionId,
+    PStateEvent, Path, Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern,
+    SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
+    SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
+    SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
+    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage,
+    StateEvent, TransactionId,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, topic,
 };
@@ -967,6 +970,8 @@ impl Worterbuch {
         remote_addr: Option<SocketAddr>,
         protocol: &Protocol,
     ) {
+        let now = SystemTime::now().into();
+
         self.clients.insert(client_id, remote_addr);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
@@ -986,6 +991,20 @@ impl Worterbuch {
         if let Err(e) = self.set_client_address(&client_id, remote_addr).await {
             error!("Error updating client address: {e}");
         }
+
+        if self.config.extended_monitoring {
+            if let Err(e) = self.set_client_timestamp(&client_id, now).await {
+                error!("Error updating client timestamp: {e}");
+            }
+        }
+    }
+
+    pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {
+        if self.clients.contains_key(&client_id) && self.config.extended_monitoring {
+            if let Err(e) = self.set_client_protocol_version(&client_id, protocol).await {
+                error!("Error updating client protocol version: {e}");
+            }
+        }
     }
 
     async fn set_client_protocol(
@@ -993,9 +1012,6 @@ impl Worterbuch {
         client_id: &Uuid,
         protocol: &Protocol,
     ) -> WorterbuchResult<()> {
-        let protocol = serde_json::to_value(protocol).map_err(|e| {
-            WorterbuchError::SerDeError(e, "could not convert protocol to value".to_owned())
-        })?;
         self.set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -1003,7 +1019,25 @@ impl Worterbuch {
                 client_id,
                 SYSTEM_TOPIC_CLIENTS_PROTOCOL
             ),
-            protocol,
+            json!(protocol),
+            INTERNAL_CLIENT_ID,
+        )
+        .await
+    }
+
+    async fn set_client_protocol_version(
+        &mut self,
+        client_id: &Uuid,
+        protocol_version: ProtocolMajorVersion,
+    ) -> WorterbuchResult<()> {
+        self.set(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION
+            ),
+            json!(protocol_version),
             INTERNAL_CLIENT_ID,
         )
         .await
@@ -1025,6 +1059,25 @@ impl Worterbuch {
                 SYSTEM_TOPIC_CLIENTS_ADDRESS
             ),
             remote_addr,
+            INTERNAL_CLIENT_ID,
+        )
+        .await
+    }
+
+    async fn set_client_timestamp(
+        &mut self,
+        client_id: &Uuid,
+        timestamp: DateTime<Utc>,
+    ) -> WorterbuchResult<()> {
+        let timestamp = json!(timestamp.format("%+").to_string());
+        self.set(
+            topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENTS_TIMESTAMP
+            ),
+            timestamp,
             INTERNAL_CLIENT_ID,
         )
         .await

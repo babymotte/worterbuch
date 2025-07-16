@@ -30,8 +30,8 @@ use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, MetaData, PStateEvent,
-    Protocol, RegularKeySegment, RequestPattern, StateEvent, TransactionId, UniqueFlag, Value,
-    error::WorterbuchResult,
+    Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern, StateEvent, TransactionId,
+    UniqueFlag, Value, error::WorterbuchResult,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +125,7 @@ pub enum WbFunction {
     ),
     ReleaseLock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
     Connected(Uuid, Option<SocketAddr>, Protocol),
+    ProtocolSwitched(Uuid, ProtocolMajorVersion),
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
     Export(oneshot::Sender<(Value, GraveGoods, LastWill)>, Span),
@@ -471,6 +472,17 @@ impl CloneableWbApi {
     ) -> WorterbuchResult<()> {
         self.tx
             .send(WbFunction::Connected(client_id, remote_addr, protocol))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn protocol_switched(
+        &self,
+        client_id: Uuid,
+        protocol: ProtocolMajorVersion,
+    ) -> WorterbuchResult<()> {
+        self.tx
+            .send(WbFunction::ProtocolSwitched(client_id, protocol))
             .await?;
         Ok(())
     }

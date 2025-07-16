@@ -56,6 +56,7 @@ opentelemetry_sdk = "0.29.0"
 tracing-opentelemetry = "0.30.0"
 tower-http = { version = "0.6.2", features = ["trace"] }
 tokio-metrics = "0.4.0"
+chrono = "0.4.41"
 
 [lints.rust]
 unsafe_code = "forbid"
