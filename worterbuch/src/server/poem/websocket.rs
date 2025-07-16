@@ -29,7 +29,7 @@ use futures::{
 use miette::{IntoDiagnostic, Result, miette};
 use poem::web::websocket::{Message, WebSocketStream};
 use std::{net::SocketAddr, time::Duration};
-use tokio::{select, spawn, sync::mpsc, time::sleep};
+use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
@@ -75,18 +75,11 @@ async fn serve_loop(
     let send_timeout = config.send_timeout;
     let mut authorized = None;
 
-    let (mut ws_tx, mut ws_rx) = websocket.split();
-    let (ws_send_tx, mut ws_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let (ws_tx, mut ws_rx) = websocket.split();
+    let (ws_send_tx, ws_send_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
-    spawn(async move {
-        while let Some(msg) = ws_send_rx.recv().await {
-            if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, client_id).await {
-                error!("Error sending WS message: {e}");
-                break;
-            }
-        }
-    });
+    spawn(send_loop(client_id, send_timeout, ws_tx, ws_send_rx));
 
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
@@ -138,6 +131,20 @@ async fn serve_loop(
     Ok(())
 }
 
+async fn send_loop(
+    client_id: Uuid,
+    send_timeout: Duration,
+    mut ws_tx: SplitSink<WebSocketStream, Message>,
+    mut ws_send_rx: mpsc::Receiver<ServerMessage>,
+) {
+    while let Some(msg) = ws_send_rx.recv().await {
+        if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, client_id).await {
+            error!("Error sending WS message: {e}");
+            break;
+        }
+    }
+}
+
 async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
@@ -147,15 +154,15 @@ async fn send_with_timeout(
     trace!("Sending with timeout {}s …", send_timeout.as_secs());
     let json = serde_json::to_string(&msg).into_diagnostic()?;
     let msg = Message::Text(json);
-    select! {
-        r = websocket.send(msg) => {
-            r.into_diagnostic()?;
-        },
-        _ = sleep(send_timeout) => {
+
+    match timeout(send_timeout, websocket.send(msg)).await {
+        Ok(r) => r.into_diagnostic()?,
+        Err(_) => {
             error!("Send timeout for client {client_id}");
             return Err(miette!("Send timeout for client {client_id}"));
-        },
+        }
     }
+
     trace!("Sending with timeout {}s done.", send_timeout.as_secs());
 
     Ok(())
