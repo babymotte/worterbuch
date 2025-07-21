@@ -362,16 +362,16 @@ pub async fn write_line_and_flush(
 ) -> ConnectionResult<()> {
     let mut json = serde_json::to_string(&msg)?;
     if json.contains('\n') {
-        return Err(ConnectionError::IoError(io::Error::new(
+        return Err(ConnectionError::IoError(Box::new(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid JSON: '{json}' contains line break"),
-        )));
+        ))));
     }
     if json.trim().is_empty() {
-        return Err(ConnectionError::IoError(io::Error::new(
+        return Err(ConnectionError::IoError(Box::new(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid JSON: '{json}' is empty"),
-        )));
+        ))));
     }
 
     json.push('\n');
@@ -386,9 +386,9 @@ pub async fn write_line_and_flush(
                 written += timeout(send_timeout, tx.write(&chunk[written..]))
                     .await
                     .map_err(|_| {
-                        ConnectionError::Timeout(format!(
+                        ConnectionError::Timeout(Box::new(format!(
                             "timeout while sending tcp message to {remote}"
-                        ))
+                        )))
                     })??;
             } else {
                 written += tx.write(&chunk[written..]).await?;
@@ -399,7 +399,9 @@ pub async fn write_line_and_flush(
     trace!("Flushing channel …");
     if let Some(send_timeout) = send_timeout {
         timeout(send_timeout, tx.flush()).await.map_err(|_| {
-            ConnectionError::Timeout(format!("timeout while sending tcp message to {remote}"))
+            ConnectionError::Timeout(Box::new(format!(
+                "timeout while sending tcp message to {remote}"
+            )))
         })??;
     } else {
         tx.flush().await?;

@@ -248,25 +248,25 @@ pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 
 #[derive(Debug, Diagnostic)]
 pub enum ConnectionError {
-    IoError(io::Error),
+    IoError(Box<io::Error>),
     SendError(Box<dyn std::error::Error + Send + Sync>),
     #[cfg(feature = "ws")]
-    WebsocketError(tungstenite::Error),
+    WebsocketError(Box<tungstenite::Error>),
     #[cfg(feature = "wasm")]
-    WebsocketError(tokio_tungstenite_wasm::Error),
+    WebsocketError(Box<tokio_tungstenite_wasm::Error>),
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
-    RecvError(oneshot::error::RecvError),
-    BcRecvError(broadcast::error::RecvError),
-    WorterbuchError(WorterbuchError),
-    ConfigError(ConfigError),
-    SerdeError(serde_json::Error),
-    AckError(broadcast::error::SendError<u64>),
-    Timeout(String),
+    RecvError(Box<oneshot::error::RecvError>),
+    BcRecvError(Box<broadcast::error::RecvError>),
+    WorterbuchError(Box<WorterbuchError>),
+    ConfigError(Box<ConfigError>),
+    SerdeError(Box<serde_json::Error>),
+    AckError(Box<broadcast::error::SendError<u64>>),
+    Timeout(Box<String>),
     #[cfg(feature = "ws")]
-    HttpError(tungstenite::http::Error),
-    AuthorizationError(String),
+    HttpError(Box<tungstenite::http::Error>),
+    AuthorizationError(Box<String>),
     NoServerAddressesConfigured,
-    ServerResponse(Err),
+    ServerResponse(Box<Err>),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -301,13 +301,13 @@ pub type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
 
 impl From<Err> for ConnectionError {
     fn from(value: Err) -> Self {
-        ConnectionError::ServerResponse(value)
+        ConnectionError::ServerResponse(Box::new(value))
     }
 }
 
 impl From<io::Error> for ConnectionError {
     fn from(e: io::Error) -> Self {
-        ConnectionError::IoError(e)
+        ConnectionError::IoError(Box::new(e))
     }
 }
 
@@ -320,57 +320,57 @@ impl<T: fmt::Debug + 'static + Send + Sync> From<SendError<T>> for ConnectionErr
 #[cfg(feature = "ws")]
 impl From<tungstenite::Error> for ConnectionError {
     fn from(e: tungstenite::Error) -> Self {
-        ConnectionError::WebsocketError(e)
+        ConnectionError::WebsocketError(Box::new(e))
     }
 }
 
 #[cfg(feature = "wasm")]
 impl From<tokio_tungstenite_wasm::Error> for ConnectionError {
     fn from(e: tokio_tungstenite_wasm::Error) -> Self {
-        ConnectionError::WebsocketError(e)
+        ConnectionError::WebsocketError(Box::new(e))
     }
 }
 
 impl From<oneshot::error::RecvError> for ConnectionError {
     fn from(e: oneshot::error::RecvError) -> Self {
-        ConnectionError::RecvError(e)
+        ConnectionError::RecvError(Box::new(e))
     }
 }
 
 impl From<broadcast::error::RecvError> for ConnectionError {
     fn from(e: broadcast::error::RecvError) -> Self {
-        ConnectionError::BcRecvError(e)
+        ConnectionError::BcRecvError(Box::new(e))
     }
 }
 
 impl From<ConfigError> for ConnectionError {
     fn from(e: ConfigError) -> Self {
-        ConnectionError::ConfigError(e)
+        ConnectionError::ConfigError(Box::new(e))
     }
 }
 
 impl From<serde_json::Error> for ConnectionError {
     fn from(e: serde_json::Error) -> Self {
-        Self::SerdeError(e)
+        Self::SerdeError(Box::new(e))
     }
 }
 
 impl From<broadcast::error::SendError<u64>> for ConnectionError {
     fn from(e: broadcast::error::SendError<u64>) -> Self {
-        Self::AckError(e)
+        Self::AckError(Box::new(e))
     }
 }
 
 impl From<mpsc::error::TrySendError<ClientMessage>> for ConnectionError {
     fn from(e: mpsc::error::TrySendError<ClientMessage>) -> Self {
-        Self::TrySendError(Box::new(e))
+        Self::TrySendError(Box::new(Box::new(e)))
     }
 }
 
 #[cfg(feature = "ws")]
 impl From<tungstenite::http::Error> for ConnectionError {
     fn from(e: tungstenite::http::Error) -> Self {
-        Self::HttpError(e)
+        Self::HttpError(Box::new(e))
     }
 }
 

@@ -920,7 +920,7 @@ impl Worterbuch {
         self.commands.send(Command::AcquireLock(key, tx)).await?;
         match rx.await? {
             Ok(_) => Ok(()),
-            Result::Err(e) => Err(ConnectionError::ServerResponse(e)),
+            Result::Err(e) => Err(ConnectionError::ServerResponse(Box::new(e))),
         }
     }
 
@@ -981,9 +981,9 @@ impl Worterbuch {
         counter: usize,
     ) -> ConnectionResult<()> {
         if counter >= 100 {
-            return Err(ConnectionError::Timeout(
+            return Err(ConnectionError::Timeout(Box::new(
                 "could not update, value keeps being changed by another instance".to_owned(),
-            ));
+            )));
         }
 
         let (new_val, version) = match self.cget::<T>(key.clone()).await? {
@@ -993,11 +993,7 @@ impl Worterbuch {
 
         if let Err(e) = self.cset(key.clone(), new_val, version).await {
             match e {
-                ConnectionError::ServerResponse(Err {
-                    transaction_id: _,
-                    error_code: ErrorCode::CasVersionMismatch,
-                    metadata: _,
-                }) => {
+                ConnectionError::ServerResponse(_) => {
                     tracing::debug!(
                         "value has changed in the mean time, re-fetching and trying again"
                     );
@@ -1270,31 +1266,31 @@ async fn connect_ws(
                     welcome
                 }
                 Ok(msg) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
+                    return Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("server sent invalid welcome message: {msg:?}"),
-                    )));
+                    ))));
                 }
                 Err(e) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
+                    return Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("error parsing welcome message '{data}': {e}"),
-                    )));
+                    ))));
                 }
             },
             Err(e) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("invalid welcome message '{msg:?}': {e}"),
-                )));
+                ))));
             }
         },
         Some(Err(e)) => return Err(e.into()),
         None => {
-            return Err(ConnectionError::IoError(io::Error::new(
+            return Err(ConnectionError::IoError(Box::new(io::Error::new(
                 io::ErrorKind::ConnectionAborted,
                 "connection closed before welcome message",
-            )));
+            ))));
         }
     };
 
@@ -1305,9 +1301,9 @@ async fn connect_ws(
     {
         v
     } else {
-        return Err(ConnectionError::WorterbuchError(
+        return Err(ConnectionError::WorterbuchError(Box::new(
             WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
-        ));
+        )));
     };
 
     debug!("Found compatible protocol version {proto_version}.");
@@ -1327,36 +1323,36 @@ async fn connect_ws(
                 }
                 Ok(SM::Err(e)) => {
                     error!("Protocol switch failed: {e}");
-                    return Err(ConnectionError::WorterbuchError(
+                    return Err(ConnectionError::WorterbuchError(Box::new(
                         WorterbuchError::ServerResponse(e),
-                    ));
+                    )));
                 }
                 Ok(msg) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
+                    return Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("server sent invalid protocol switch response: {msg:?}"),
-                    )));
+                    ))));
                 }
                 Err(e) => {
-                    return Err(ConnectionError::IoError(io::Error::new(
+                    return Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("error receiving protocol switch response: {e}"),
-                    )));
+                    ))));
                 }
             },
             msg => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("received unexpected message from server: {msg:?}"),
-                )));
+                ))));
             }
         },
         None => {
             warn!("Server closed the connection");
-            return Err(ConnectionError::IoError(io::Error::new(
+            return Err(ConnectionError::IoError(Box::new(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "connection closed before welcome message",
-            )));
+            ))));
         }
     }
 
@@ -1381,32 +1377,32 @@ async fn connect_ws(
                     }
                     Ok(SM::Err(e)) => {
                         error!("Authorization failed: {e}");
-                        Err(ConnectionError::WorterbuchError(
+                        Err(ConnectionError::WorterbuchError(Box::new(
                             WorterbuchError::ServerResponse(e),
-                        ))
+                        )))
                     }
-                    Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                    Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("server sent invalid authetication response: {msg:?}"),
-                    ))),
-                    Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                    )))),
+                    Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("error receiving authorization response: {e}"),
-                    ))),
+                    )))),
                 },
-                Some(Ok(msg)) => Err(ConnectionError::IoError(io::Error::new(
+                Some(Ok(msg)) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("received unexpected message from server: {msg:?}"),
-                ))),
-                None => Err(ConnectionError::IoError(io::Error::new(
+                )))),
+                None => Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before welcome message",
-                ))),
+                )))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(
+            Err(ConnectionError::AuthorizationError(Box::new(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            ))
+            )))
         }
     } else {
         connected(
@@ -1434,7 +1430,7 @@ async fn connect_tcp(
     let stream = select! {
         conn = TcpStream::connect(host_addr) => conn,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for TCP connection.".to_owned())));
         },
     }?;
     debug!("Connected to tcp://{host_addr}.");
@@ -1446,10 +1442,10 @@ async fn connect_tcp(
     let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
             Ok(None) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before welcome message",
-                )))
+                ))))
             }
             Ok(Some(line)) => {
                 let msg = json::from_str::<SM>(&line);
@@ -1459,23 +1455,23 @@ async fn connect_tcp(
                         welcome
                     }
                     Ok(msg) => {
-                        return Err(ConnectionError::IoError(io::Error::new(
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("server sent invalid welcome message: {msg:?}"),
-                        )))
+                        ))))
                     }
                     Err(e) => {
-                        return Err(ConnectionError::IoError(io::Error::new(
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("error parsing welcome message '{line}': {e}"),
-                        )))
+                        ))))
                     }
                 }
             }
-            Err(e) => return Err(ConnectionError::IoError(e)),
+            Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
         },
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
         },
     };
 
@@ -1486,9 +1482,9 @@ async fn connect_tcp(
     {
         v
     } else {
-        return Err(ConnectionError::WorterbuchError(
+        return Err(ConnectionError::WorterbuchError(Box::new(
             WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
-        ));
+        )));
     };
 
     debug!("Found compatible protocol version {proto_version}.");
@@ -1503,10 +1499,10 @@ async fn connect_tcp(
 
     match tcp_rx.next_line().await {
         Ok(None) => {
-            return Err(ConnectionError::IoError(io::Error::new(
+            return Err(ConnectionError::IoError(Box::new(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "connection closed before handshake",
-            )));
+            ))));
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
             Ok(SM::Ack(_)) => {
@@ -1514,26 +1510,26 @@ async fn connect_tcp(
             }
             Ok(SM::Err(e)) => {
                 error!("Protocol switch failed: {e}");
-                return Err(ConnectionError::WorterbuchError(
+                return Err(ConnectionError::WorterbuchError(Box::new(
                     WorterbuchError::ServerResponse(e),
-                ));
+                )));
             }
             Ok(msg) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid protocol switch response: {msg:?}"),
-                )));
+                ))));
             }
             Err(e) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("error receiving protocol switch response: {e}"),
-                )));
+                ))));
             }
         },
         Err(e) => {
             warn!("Server closed the connection");
-            return Err(ConnectionError::IoError(e));
+            return Err(ConnectionError::IoError(Box::new(e)));
         }
     }
 
@@ -1546,10 +1542,10 @@ async fn connect_tcp(
             tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.next_line().await {
-                Ok(None) => Err(ConnectionError::IoError(io::Error::new(
+                Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before handshake",
-                ))),
+                )))),
                 Ok(Some(line)) => {
                     let msg = json::from_str::<SM>(&line);
                     match msg {
@@ -1572,26 +1568,26 @@ async fn connect_tcp(
                         }
                         Ok(SM::Err(e)) => {
                             error!("Authorization failed: {e}");
-                            Err(ConnectionError::WorterbuchError(
+                            Err(ConnectionError::WorterbuchError(Box::new(
                                 WorterbuchError::ServerResponse(e),
-                            ))
+                            )))
                         }
-                        Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                        Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("server sent invalid authetication response: {msg:?}"),
-                        ))),
-                        Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                        )))),
+                        Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("error receiving authorization response: {e}"),
-                        ))),
+                        )))),
                     }
                 }
-                Err(e) => Err(ConnectionError::IoError(e)),
+                Err(e) => Err(ConnectionError::IoError(Box::new(e))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(
+            Err(ConnectionError::AuthorizationError(Box::new(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            ))
+            )))
         }
     } else {
         connected(
@@ -1627,7 +1623,7 @@ async fn connect_unix(
     let stream = select! {
         conn = UnixStream::connect(&path) => conn,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout("Timeout while waiting for TCP connection.".to_owned()));
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for TCP connection.".to_owned())));
         },
     }?;
     debug!("Connected to {path}.");
@@ -1639,10 +1635,10 @@ async fn connect_unix(
     let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {
             Ok(None) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before welcome message",
-                )))
+                ))))
             }
             Ok(Some(line)) => {
                 let msg = json::from_str::<SM>(&line);
@@ -1652,23 +1648,23 @@ async fn connect_unix(
                         welcome
                     }
                     Ok(msg) => {
-                        return Err(ConnectionError::IoError(io::Error::new(
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("server sent invalid welcome message: {msg:?}"),
-                        )))
+                        ))))
                     }
                     Err(e) => {
-                        return Err(ConnectionError::IoError(io::Error::new(
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("error parsing welcome message '{line}': {e}"),
-                        )))
+                        ))))
                     }
                 }
             }
-            Err(e) => return Err(ConnectionError::IoError(e)),
+            Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
         },
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
         },
     };
 
@@ -1679,9 +1675,9 @@ async fn connect_unix(
     {
         v
     } else {
-        return Err(ConnectionError::WorterbuchError(
+        return Err(ConnectionError::WorterbuchError(Box::new(
             WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
-        ));
+        )));
     };
 
     debug!("Found compatible protocol version {proto_version}.");
@@ -1696,10 +1692,10 @@ async fn connect_unix(
 
     match tcp_rx.next_line().await {
         Ok(None) => {
-            return Err(ConnectionError::IoError(io::Error::new(
+            return Err(ConnectionError::IoError(Box::new(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "connection closed before handshake",
-            )));
+            ))));
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
             Ok(SM::Ack(_)) => {
@@ -1707,26 +1703,26 @@ async fn connect_unix(
             }
             Ok(SM::Err(e)) => {
                 error!("Protocol switch failed: {e}");
-                return Err(ConnectionError::WorterbuchError(
+                return Err(ConnectionError::WorterbuchError(Box::new(
                     WorterbuchError::ServerResponse(e),
-                ));
+                )));
             }
             Ok(msg) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("server sent invalid protocol switch response: {msg:?}"),
-                )));
+                ))));
             }
             Err(e) => {
-                return Err(ConnectionError::IoError(io::Error::new(
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("error receiving protocol switch response: {e}"),
-                )));
+                ))));
             }
         },
         Err(e) => {
             warn!("Server closed the connection");
-            return Err(ConnectionError::IoError(e));
+            return Err(ConnectionError::IoError(Box::new(e)));
         }
     }
 
@@ -1739,10 +1735,10 @@ async fn connect_unix(
             tcp_tx.write_all(msg.as_bytes()).await?;
 
             match tcp_rx.next_line().await {
-                Ok(None) => Err(ConnectionError::IoError(io::Error::new(
+                Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before handshake",
-                ))),
+                )))),
                 Ok(Some(line)) => {
                     let msg = json::from_str::<SM>(&line);
                     match msg {
@@ -1764,26 +1760,26 @@ async fn connect_unix(
                         }
                         Ok(SM::Err(e)) => {
                             error!("Authorization failed: {e}");
-                            Err(ConnectionError::WorterbuchError(
+                            Err(ConnectionError::WorterbuchError(Box::new(
                                 WorterbuchError::ServerResponse(e),
-                            ))
+                            )))
                         }
-                        Ok(msg) => Err(ConnectionError::IoError(io::Error::new(
+                        Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("server sent invalid authetication response: {msg:?}"),
-                        ))),
-                        Err(e) => Err(ConnectionError::IoError(io::Error::new(
+                        )))),
+                        Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("error receiving authorization response: {e}"),
-                        ))),
+                        )))),
                     }
                 }
-                Err(e) => Err(ConnectionError::IoError(e)),
+                Err(e) => Err(ConnectionError::IoError(Box::new(e))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(
+            Err(ConnectionError::AuthorizationError(Box::new(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            ))
+            )))
         }
     } else {
         connected(
