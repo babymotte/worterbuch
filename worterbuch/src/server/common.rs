@@ -534,25 +534,18 @@ impl CloneableWbApi {
     }
 }
 
-pub fn init_server_socket(
-    bind_addr: IpAddr,
-    port: u16,
-    keepalive_time: Option<Duration>,
-    keepalive_interval: Option<Duration>,
-    keepalive_retries: Option<u32>,
-    send_timeout: Option<Duration>,
-) -> Result<TcpListener> {
+pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Result<TcpListener> {
     let addr = format!("{bind_addr}:{port}");
     let addr: SocketAddr = addr.parse().into_diagnostic()?;
 
     let mut tcp_keepalive = TcpKeepalive::new();
-    if let Some(keepalive) = keepalive_time {
+    if let Some(keepalive) = config.keepalive_time {
         tcp_keepalive = tcp_keepalive.with_time(keepalive);
     }
-    if let Some(keepalive) = keepalive_interval {
+    if let Some(keepalive) = config.keepalive_interval {
         tcp_keepalive = tcp_keepalive.with_interval(keepalive);
     }
-    if let Some(retries) = keepalive_retries {
+    if let Some(retries) = config.keepalive_retries {
         tcp_keepalive = tcp_keepalive.with_retries(retries);
     }
 
@@ -564,7 +557,7 @@ pub fn init_server_socket(
     socket.set_keepalive(true).into_diagnostic()?;
     socket.set_tcp_keepalive(&tcp_keepalive).into_diagnostic()?;
     socket
-        .set_tcp_user_timeout(send_timeout)
+        .set_tcp_user_timeout(config.send_timeout)
         .into_diagnostic()?;
     socket.set_tcp_nodelay(true).into_diagnostic()?;
     socket.bind(&SockAddr::from(addr)).into_diagnostic()?;

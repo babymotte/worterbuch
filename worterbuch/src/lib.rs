@@ -136,6 +136,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             track_stats(worterbuch_uptime, subsys)
         }));
 
+        let cfg = config.clone();
         let tcp_server = if let Some(Endpoint {
             tls: _,
             bind_addr,
@@ -147,16 +148,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             let port = port.to_owned();
             Some(
                 subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
-                    server::tcp::start(
-                        sapi,
-                        bind_addr,
-                        port,
-                        subsys,
-                        config.keepalive_time,
-                        config.keepalive_interval,
-                        config.keepalive_retries,
-                        config.send_timeout,
-                    )
+                    server::tcp::start(sapi, cfg, bind_addr, port, subsys)
                 })),
             )
         } else {

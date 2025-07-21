@@ -19,7 +19,7 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS,
+    Config, SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
     server::common::{CloneableWbApi, init_server_socket},
     stats::VERSION,
@@ -54,26 +54,16 @@ enum SocketEvent {
 
 pub async fn start(
     worterbuch: CloneableWbApi,
+    config: Config,
     bind_addr: IpAddr,
     port: u16,
     subsys: SubsystemHandle,
-    keepalive_time: Option<Duration>,
-    keepalive_interval: Option<Duration>,
-    keepalive_retries: Option<u32>,
-    send_timeout: Option<Duration>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
     info!("Serving TCP endpoint at {addr}");
 
-    let listener = init_server_socket(
-        bind_addr,
-        port,
-        keepalive_time,
-        keepalive_interval,
-        keepalive_retries,
-        send_timeout,
-    )?;
+    let listener = init_server_socket(bind_addr, port, config)?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
