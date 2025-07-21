@@ -248,7 +248,7 @@ async fn forward_messages_to_socket(
     mut unix_send_rx: mpsc::Receiver<ServerMessage>,
     mut unix_tx: OwnedWriteHalf,
     client_id: Uuid,
-    send_timeout: Duration,
+    send_timeout: Option<Duration>,
 ) -> Result<()> {
     loop {
         select! {

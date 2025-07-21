@@ -133,7 +133,7 @@ async fn serve_loop(
 
 async fn send_loop(
     client_id: Uuid,
-    send_timeout: Duration,
+    send_timeout: Option<Duration>,
     mut ws_tx: SplitSink<WebSocketStream, Message>,
     mut ws_send_rx: mpsc::Receiver<ServerMessage>,
 ) {
@@ -148,22 +148,27 @@ async fn send_loop(
 async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
-    send_timeout: Duration,
+    send_timeout: Option<Duration>,
     client_id: Uuid,
 ) -> Result<()> {
-    trace!("Sending with timeout {}s …", send_timeout.as_secs());
     let json = serde_json::to_string(&msg).into_diagnostic()?;
     let msg = Message::Text(json);
 
-    match timeout(send_timeout, websocket.send(msg)).await {
-        Ok(r) => r.into_diagnostic()?,
-        Err(_) => {
-            error!("Send timeout for client {client_id}");
-            return Err(miette!("Send timeout for client {client_id}"));
+    if let Some(send_timeout) = send_timeout {
+        trace!("Sending with timeout {}s …", send_timeout.as_secs());
+        match timeout(send_timeout, websocket.send(msg)).await {
+            Ok(r) => r.into_diagnostic()?,
+            Err(_) => {
+                error!("Send timeout for client {client_id}");
+                return Err(miette!("Send timeout for client {client_id}"));
+            }
         }
+    } else {
+        trace!("Sending without timeout …");
+        websocket.send(msg).await.into_diagnostic()?;
     }
 
-    trace!("Sending with timeout {}s done.", send_timeout.as_secs());
+    trace!("Sending done.");
 
     Ok(())
 }

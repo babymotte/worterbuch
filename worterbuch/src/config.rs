@@ -22,8 +22,10 @@ use crate::{
     telemetry,
 };
 use clap::Parser;
+use serde::Serialize;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
+use tracing::debug;
 use worterbuch_common::{
     AuthToken, Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
@@ -59,25 +61,25 @@ pub struct Args {
     instance_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Endpoint {
     pub tls: bool,
     pub bind_addr: IpAddr,
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WsEndpoint {
     pub endpoint: Endpoint,
     pub public_addr: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UnixEndpoint {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Config {
     pub ws_endpoint: Option<WsEndpoint>,
     pub tcp_endpoint: Option<Endpoint>,
@@ -88,7 +90,10 @@ pub struct Config {
     pub data_dir: Path,
     pub single_threaded: bool,
     pub web_root_path: Option<String>,
-    pub send_timeout: Duration,
+    pub keepalive_time: Option<Duration>,
+    pub keepalive_interval: Option<Duration>,
+    pub keepalive_retries: Option<u32>,
+    pub send_timeout: Option<Duration>,
     pub channel_buffer_size: usize,
     pub extended_monitoring: bool,
     pub auth_token: Option<AuthToken>,
@@ -175,9 +180,24 @@ impl Config {
             self.web_root_path = Some(val);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_TIME") {
+            let secs = val.parse().to_interval()?;
+            self.keepalive_time = Some(Duration::from_secs(secs));
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_INTERVAL") {
+            let secs = val.parse().to_interval()?;
+            self.keepalive_interval = Some(Duration::from_secs(secs));
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_KEEPALIVE_RETRIES") {
+            let val = val.parse().to_interval()?;
+            self.keepalive_retries = Some(val);
+        }
+
         if let Ok(val) = env::var(prefix.to_owned() + "_SEND_TIMEOUT") {
             let secs = val.parse().to_interval()?;
-            self.send_timeout = Duration::from_secs(secs);
+            self.send_timeout = Some(Duration::from_secs(secs));
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_SIZE") {
@@ -203,6 +223,11 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_DEFAULT_EXPORT_FILE_NAME") {
             self.default_export_file_name = Some(val);
         }
+
+        debug!(
+            "Config loaded from env:\n---\n{}",
+            serde_yaml::to_string(&self).expect("could not serialize config")
+        );
 
         Ok(())
     }
@@ -247,7 +272,10 @@ impl Config {
                     data_dir: "./data".into(),
                     single_threaded: false,
                     web_root_path: None,
-                    send_timeout: Duration::from_secs(5),
+                    keepalive_time: None,
+                    keepalive_interval: None,
+                    keepalive_retries: None,
+                    send_timeout: None,
                     channel_buffer_size: 1_000,
                     extended_monitoring: true,
                     auth_token: None,

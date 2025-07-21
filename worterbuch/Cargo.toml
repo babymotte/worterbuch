@@ -57,6 +57,7 @@ tracing-opentelemetry = "0.31.0"
 tower-http = { version = "0.6.2", features = ["trace"] }
 tokio-metrics = "0.4.0"
 chrono = "0.4.41"
+socket2 = { version = "0.6.0", features = ["all"] }
 
 [lints.rust]
 unsafe_code = "forbid"

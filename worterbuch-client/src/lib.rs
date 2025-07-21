@@ -156,7 +156,7 @@ enum ClientSocket {
 
 impl ClientSocket {
     #[instrument(skip(self), level = "trace", err)]
-    pub async fn send_msg(&mut self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
+    pub async fn send_msg(&mut self, msg: CM, wait: bool) -> ConnectionResult<()> {
         match self {
             #[cfg(feature = "tcp")]
             ClientSocket::Tcp(sock) => sock.send_msg(msg, wait).await,
@@ -1599,7 +1599,7 @@ async fn connect_tcp(
                 TcpClientSocket::new(
                     tcp_tx,
                     tcp_rx,
-                    config.connection_timeout,
+                    config.send_timeout,
                     config.channel_buffer_size,
                 )
                 .await,
@@ -1753,7 +1753,6 @@ async fn connect_unix(
                                     UnixClientSocket::new(
                                         tcp_tx,
                                         tcp_rx,
-                                        config.send_timeout,
                                         config.channel_buffer_size,
                                     )
                                     .await,
@@ -1789,13 +1788,7 @@ async fn connect_unix(
     } else {
         connected(
             ClientSocket::Unix(
-                UnixClientSocket::new(
-                    tcp_tx,
-                    tcp_rx,
-                    config.send_timeout,
-                    config.channel_buffer_size,
-                )
-                .await,
+                UnixClientSocket::new(tcp_tx, tcp_rx, config.channel_buffer_size).await,
             ),
             on_disconnect,
             config,
@@ -1860,9 +1853,9 @@ async fn run(
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
                     Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
                         if let Err(e) = client_socket.send_msg(msg, config.use_backpressure).await {
-                            error!("Error sending message to server: {e}");
-                            break;
-                        }
+                                error!("Error sending message to server: {e}");
+                                break;
+                            }
                     },
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {

@@ -357,7 +357,7 @@ impl ServerInfo {
 pub async fn write_line_and_flush(
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
-    send_timeout: Duration,
+    send_timeout: Option<Duration>,
     remote: impl Display,
 ) -> ConnectionResult<()> {
     let mut json = serde_json::to_string(&msg)?;
@@ -377,23 +377,33 @@ pub async fn write_line_and_flush(
     json.push('\n');
     let bytes = json.as_bytes();
 
-    debug!("Sending message: {json}");
+    debug!("Sending message with timeout {send_timeout:?}: {json}");
     trace!("Writing line …");
     for chunk in bytes.chunks(1024) {
         let mut written = 0;
         while written < chunk.len() {
-            written += timeout(send_timeout, tx.write(&chunk[written..]))
-                .await
-                .map_err(|_| {
-                    ConnectionError::Timeout(format!(
-                        "timeout while sending tcp message to {remote}"
-                    ))
-                })??;
+            if let Some(send_timeout) = send_timeout {
+                written += timeout(send_timeout, tx.write(&chunk[written..]))
+                    .await
+                    .map_err(|_| {
+                        ConnectionError::Timeout(format!(
+                            "timeout while sending tcp message to {remote}"
+                        ))
+                    })??;
+            } else {
+                written += tx.write(&chunk[written..]).await?;
+            }
         }
     }
     trace!("Writing line done.");
     trace!("Flushing channel …");
-    tx.flush().await?;
+    if let Some(send_timeout) = send_timeout {
+        timeout(send_timeout, tx.flush()).await.map_err(|_| {
+            ConnectionError::Timeout(format!("timeout while sending tcp message to {remote}"))
+        })??;
+    } else {
+        tx.flush().await?;
+    }
     trace!("Flushing channel done.");
 
     Ok(())

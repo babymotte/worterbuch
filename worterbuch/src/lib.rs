@@ -113,7 +113,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
     };
 
     if config.follower {
-        run_in_follower_mode(subsys, &mut worterbuch, api_rx, config, web_server).await?;
+        run_in_follower_mode(subsys, worterbuch, api_rx, config, web_server).await?;
     } else {
         worterbuch
             .set(
@@ -147,7 +147,16 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
             let port = port.to_owned();
             Some(
                 subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
-                    server::tcp::start(sapi, bind_addr, port, subsys)
+                    server::tcp::start(
+                        sapi,
+                        bind_addr,
+                        port,
+                        subsys,
+                        config.keepalive_time,
+                        config.keepalive_interval,
+                        config.keepalive_retries,
+                        config.send_timeout,
+                    )
                 })),
             )
         } else {
@@ -439,7 +448,7 @@ async fn run_in_regular_mode(
 
     shutdown(
         subsys,
-        &mut worterbuch,
+        worterbuch,
         config,
         web_server,
         tcp_server,
@@ -585,7 +594,7 @@ async fn run_in_leader_mode(
 
     shutdown(
         subsys,
-        &mut worterbuch,
+        worterbuch,
         config,
         web_server,
         tcp_server,
@@ -596,7 +605,7 @@ async fn run_in_leader_mode(
 
 async fn run_in_follower_mode(
     subsys: SubsystemHandle,
-    worterbuch: &mut Worterbuch,
+    mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
@@ -629,10 +638,10 @@ async fn run_in_follower_mode(
         recv = receive_msg(&mut lines) => match recv {
             Ok(Some(msg)) => {
                 if let LeaderSyncMessage::Init(state) = msg {
-                    initial_sync(state, worterbuch).await?;
+                    initial_sync(state, &mut worterbuch).await?;
                     PERSISTENCE_LOCKED.store(false, Ordering::Release);
                     persistence_interval.reset();
-                    persistence::synchronous(worterbuch, &config).await?;
+                    persistence::synchronous(&mut worterbuch, &config).await?;
                 } else {
                     return Err(miette!("first message from leader is supposed to be the initial sync, but it wasn't"));
                 }
@@ -649,7 +658,7 @@ async fn run_in_follower_mode(
     loop {
         select! {
             recv = receive_msg(&mut lines) => match recv {
-                Ok(Some(msg)) => process_leader_message(msg, worterbuch).await?,
+                Ok(Some(msg)) => process_leader_message(msg, &mut worterbuch).await?,
                 Ok(None) => break,
                 Err(e) => {
                     error!("Error receiving update from leader: {e}");
@@ -657,12 +666,12 @@ async fn run_in_follower_mode(
                 }
             },
             recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call_as_follower(worterbuch, function).await,
+                Some(function) => process_api_call_as_follower(&mut worterbuch, function).await,
                 None => break,
             },
             _ = persistence_interval.tick() => {
                 debug!("Follower persistence interval triggered");
-                persistence::synchronous(worterbuch, &config).await?;
+                persistence::synchronous(&mut worterbuch, &config).await?;
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -673,7 +682,7 @@ async fn run_in_follower_mode(
 
 async fn shutdown(
     subsys: SubsystemHandle,
-    worterbuch: &mut Worterbuch,
+    mut worterbuch: Worterbuch,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
@@ -689,7 +698,7 @@ async fn shutdown(
         info!("Applying grave goods and last wills …");
         worterbuch.apply_all_grave_goods_and_last_wills().await;
         info!("Waiting for persistence hook to complete …");
-        persistence::synchronous(worterbuch, &config).await?;
+        persistence::synchronous(&mut worterbuch, &config).await?;
         info!("Shutdown persistence hook complete.");
     }
 

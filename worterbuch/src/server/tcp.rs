@@ -19,7 +19,10 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    auth::JwtClaims,
+    server::common::{CloneableWbApi, init_server_socket},
+    stats::VERSION,
 };
 use miette::{IntoDiagnostic, Result};
 use std::{
@@ -32,7 +35,7 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     net::{
-        TcpListener, TcpSocket, TcpStream,
+        TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     select,
@@ -54,18 +57,23 @@ pub async fn start(
     bind_addr: IpAddr,
     port: u16,
     subsys: SubsystemHandle,
+    keepalive_time: Option<Duration>,
+    keepalive_interval: Option<Duration>,
+    keepalive_retries: Option<u32>,
+    send_timeout: Option<Duration>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
     info!("Serving TCP endpoint at {addr}");
-    let sock = TcpSocket::new_v4().into_diagnostic()?;
-    sock.set_keepalive(true).into_diagnostic()?;
-    sock.set_nodelay(true).into_diagnostic()?;
-    #[cfg(not(target_os = "windows"))]
-    sock.set_reuseaddr(true).into_diagnostic()?;
-    sock.bind(addr.parse().into_diagnostic()?)
-        .into_diagnostic()?;
-    let listener = sock.listen(1024).into_diagnostic()?;
+
+    let listener = init_server_socket(
+        bind_addr,
+        port,
+        keepalive_time,
+        keepalive_interval,
+        keepalive_retries,
+        send_timeout,
+    )?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
@@ -263,7 +271,7 @@ async fn forward_messages_to_socket(
     mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: Uuid,
-    send_timeout: Duration,
+    send_timeout: Option<Duration>,
 ) -> Result<()> {
     loop {
         select! {

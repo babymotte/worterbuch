@@ -41,7 +41,7 @@ impl TcpClientSocket {
     pub async fn new(
         tx: OwnedWriteHalf,
         rx: Lines<BufReader<OwnedReadHalf>>,
-        send_timeout: Duration,
+        send_timeout: Option<Duration>,
         buffer_size: usize,
     ) -> Self {
         let (send_tx, send_rx) = mpsc::channel(buffer_size);
@@ -79,7 +79,7 @@ impl TcpClientSocket {
 async fn forward_tcp_messages(
     mut tx: OwnedWriteHalf,
     mut send_rx: mpsc::Receiver<ClientMessage>,
-    timeout: Duration,
+    timeout: Option<Duration>,
     closed_tx: oneshot::Sender<()>,
 ) {
     while let Some(msg) = send_rx.recv().await {

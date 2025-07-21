@@ -20,11 +20,19 @@
 pub mod protocol;
 
 use crate::{Config, INTERNAL_CLIENT_ID, store::ValueEntry, subscribers::SubscriptionId};
+use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
-use std::{net::SocketAddr, time::Duration};
-use tokio::sync::{
-    mpsc::{self, Receiver},
-    oneshot,
+use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
+use tokio::{
+    net::TcpListener,
+    sync::{
+        mpsc::{self, Receiver},
+        oneshot,
+    },
 };
 use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
@@ -524,6 +532,46 @@ impl CloneableWbApi {
         self.tx.send(WbFunction::Len(tx)).await?;
         Ok(rx.await?)
     }
+}
+
+pub fn init_server_socket(
+    bind_addr: IpAddr,
+    port: u16,
+    keepalive_time: Option<Duration>,
+    keepalive_interval: Option<Duration>,
+    keepalive_retries: Option<u32>,
+    send_timeout: Option<Duration>,
+) -> Result<TcpListener> {
+    let addr = format!("{bind_addr}:{port}");
+    let addr: SocketAddr = addr.parse().into_diagnostic()?;
+
+    let mut tcp_keepalive = TcpKeepalive::new();
+    if let Some(keepalive) = keepalive_time {
+        tcp_keepalive = tcp_keepalive.with_time(keepalive);
+    }
+    if let Some(keepalive) = keepalive_interval {
+        tcp_keepalive = tcp_keepalive.with_interval(keepalive);
+    }
+    if let Some(retries) = keepalive_retries {
+        tcp_keepalive = tcp_keepalive.with_retries(retries);
+    }
+
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?;
+
+    #[cfg(not(target_os = "windows"))]
+    socket.set_reuse_address(true).into_diagnostic()?;
+    socket.set_nonblocking(true).into_diagnostic()?;
+    socket.set_keepalive(true).into_diagnostic()?;
+    socket.set_tcp_keepalive(&tcp_keepalive).into_diagnostic()?;
+    socket
+        .set_tcp_user_timeout(send_timeout)
+        .into_diagnostic()?;
+    socket.set_tcp_nodelay(true).into_diagnostic()?;
+    socket.bind(&SockAddr::from(addr)).into_diagnostic()?;
+    socket.listen(1024).into_diagnostic()?;
+    let listener = TcpListener::from_std(socket.into()).into_diagnostic()?;
+
+    Ok(listener)
 }
 
 #[derive(Serialize)]
