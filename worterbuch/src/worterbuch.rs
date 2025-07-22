@@ -75,6 +75,17 @@ impl Display for Stats {
     }
 }
 
+#[derive(Debug)]
+struct ClientInfo {
+    subscriptions: usize,
+}
+
+impl ClientInfo {
+    fn new() -> Self {
+        Self { subscriptions: 0 }
+    }
+}
+
 struct PStateAggregatorState {
     aggregate_duration: Duration,
     transaction_id: TransactionId,
@@ -251,7 +262,7 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
-    clients: HashMap<Uuid, Option<SocketAddr>>,
+    clients: HashMap<Uuid, ClientInfo>,
     spub_keys: HashMap<Uuid, HashMap<TransactionId, Key>>,
 }
 
@@ -431,6 +442,13 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
+
+        let mut client_subs = 0;
+        if let Some(client) = self.clients.get_mut(&client_id) {
+            client_subs = client.subscriptions.saturating_add(1);
+            client.subscriptions = client_subs;
+        }
+
         debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
@@ -464,19 +482,7 @@ impl Worterbuch {
             {
                 warn!("Error in subscription monitoring: {e}");
             }
-
-            let subs = self.ls(&Some(subs_key))?.len();
-            self.set(
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_SUBSCRIPTIONS
-                ),
-                json!(subs),
-                INTERNAL_CLIENT_ID,
-            )
-            .await?;
+            self.update_subscription_count(subs_key, client_subs).await;
         }
 
         Ok((rx, subscription))
@@ -508,6 +514,12 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.subscriptions.insert(subscription_id, path);
+        let mut client_subs = 0;
+        if let Some(client) = self.clients.get_mut(&client_id) {
+            client_subs = client.subscriptions.saturating_add(1);
+            client.subscriptions = client_subs;
+        }
+
         debug!("Total subscriptions: {}", self.subscriptions.len());
 
         if self.config.extended_monitoring
@@ -541,31 +553,23 @@ impl Worterbuch {
             {
                 warn!("Error in subscription monitoring: {e}");
             }
-            if let Err(e) = self.update_subscription_count(client_id, &subs_key).await {
-                warn!("Error in subscription monitoring: {e}");
-            }
+            self.update_subscription_count(subs_key, client_subs).await;
         }
 
         Ok((rx, subscription))
     }
 
-    async fn update_subscription_count(
-        &mut self,
-        client_id: Uuid,
-        subs_key: &str,
-    ) -> WorterbuchResult<()> {
-        let subs = self.sub_len(subs_key)?.unwrap_or(0);
-        self.set(
-            topic!(
-                SYSTEM_TOPIC_ROOT,
-                SYSTEM_TOPIC_CLIENTS,
-                client_id,
-                SYSTEM_TOPIC_SUBSCRIPTIONS
-            ),
-            json!(subs),
-            INTERNAL_CLIENT_ID,
-        )
-        .await
+    async fn update_subscription_count(&mut self, subs_key: String, client_subs: usize) {
+        if client_subs > 0 {
+            if let Err(e) = self
+                .set(topic!(subs_key), json!(client_subs), INTERNAL_CLIENT_ID)
+                .await
+            {
+                warn!("Error in subscription monitoring: {e}");
+            }
+        } else if let Err(e) = self.delete(topic!(subs_key), INTERNAL_CLIENT_ID).await {
+            warn!("Error in subscription monitoring: {e}");
+        }
     }
 
     pub async fn subscribe_ls(
@@ -686,17 +690,25 @@ impl Worterbuch {
         client_id: Uuid,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(subscription) {
+            let mut client_subs = 0;
+            if let Some(client) = self.clients.get_mut(&client_id) {
+                client_subs = client.subscriptions.saturating_sub(1);
+                client.subscriptions = client_subs;
+            }
             if self.config.extended_monitoring
                 && path[0] != KeySegment::MultiWildcard
                 && path[0].deref() != SYSTEM_TOPIC_ROOT
             {
+                let subs_key = topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_SUBSCRIPTIONS
+                );
                 if let Err(e) = self
                     .delete(
                         topic!(
-                            SYSTEM_TOPIC_ROOT,
-                            SYSTEM_TOPIC_CLIENTS,
-                            client_id,
-                            SYSTEM_TOPIC_SUBSCRIPTIONS,
+                            subs_key,
                             escape_wildcards(
                                 &path
                                     .iter()
@@ -714,6 +726,7 @@ impl Worterbuch {
                         _ => warn!("Error in subscription monitoring: {e}"),
                     }
                 }
+                self.update_subscription_count(subs_key, client_subs).await;
             }
             debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
@@ -960,10 +973,6 @@ impl Worterbuch {
         )
     }
 
-    fn sub_len(&self, subkey: &str) -> WorterbuchResult<Option<usize>> {
-        self.store.count_sub_entries(subkey)
-    }
-
     pub async fn connected(
         &mut self,
         client_id: Uuid,
@@ -972,7 +981,7 @@ impl Worterbuch {
     ) {
         let now = SystemTime::now().into();
 
-        self.clients.insert(client_id, remote_addr);
+        self.clients.insert(client_id, ClientInfo::new());
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
             .set(
@@ -1125,12 +1134,11 @@ impl Worterbuch {
         let last_wills = self.last_will_for_client(&client_id);
 
         let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
-        if self.config.extended_monitoring {
-            debug!("Deleting {pattern}");
-            if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
-                warn!("Error in subscription monitoring: {e}");
-            }
+        debug!("Deleting {pattern}");
+        if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
+            warn!("Error in subscription monitoring: {e}");
         }
+
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
@@ -1234,30 +1242,6 @@ impl Worterbuch {
                 warn!("Error in subscription monitoring: {e}");
             }
         }
-
-        self.delete(
-            topic!(
-                SYSTEM_TOPIC_ROOT,
-                SYSTEM_TOPIC_CLIENTS,
-                client_id,
-                SYSTEM_TOPIC_CLIENTS_PROTOCOL
-            ),
-            INTERNAL_CLIENT_ID,
-        )
-        .await
-        .ok();
-
-        self.delete(
-            topic!(
-                SYSTEM_TOPIC_ROOT,
-                SYSTEM_TOPIC_CLIENTS,
-                client_id,
-                SYSTEM_TOPIC_CLIENTS_ADDRESS
-            ),
-            INTERNAL_CLIENT_ID,
-        )
-        .await
-        .ok();
 
         Ok(())
     }
