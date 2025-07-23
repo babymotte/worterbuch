@@ -187,3 +187,6 @@ telemetry:
     # grpc: ""
     grpc: "http://quickwit.telemetry.svc.cluster.local:7281"
     http: ""
+
+cors:
+  allowedOrigins: http://localhost:5173,http://wbexplorer.local

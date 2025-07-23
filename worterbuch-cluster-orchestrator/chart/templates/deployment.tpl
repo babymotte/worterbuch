@@ -94,6 +94,10 @@ spec:
             - name: WORTERBUCH_AUTH_TOKEN
               value: "{{ . }}"
             {{- end }}
+            {{- with $.Values.cors.allowedOrigins }}
+            - name: WORTERBUCH_CORS_ALLOWED_ORIGINS
+              value: "{{ . }}"
+            {{- end }}
             - name: WORTERBUCH_SINGLE_THREADED
               value: "false"
             {{- with $.Values.telemetry.endpoint.grpc }}
