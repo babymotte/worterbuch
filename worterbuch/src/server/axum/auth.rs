@@ -43,10 +43,8 @@ pub async fn bearer_auth(
     let header_jwt = headers
         .typed_get::<Authorization<Bearer>>()
         .map(|it| it.token().to_owned());
-    eprintln!("header_jwt: {header_jwt:?}");
 
     let cookie_jwt = jar.get("worterbuch_auth_jwt").map(|c| c.value().to_owned());
-    eprintln!("cookie_jwt: {cookie_jwt:?}");
 
     let jwt = header_jwt.or(cookie_jwt);
 
