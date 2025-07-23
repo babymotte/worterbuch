@@ -21,7 +21,7 @@ use crate::{
     AuthCheckOwned, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
     RequestPattern, TransactionId, server::Err,
 };
-use axum::{http::StatusCode, response::IntoResponse};
+use http::StatusCode;
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
@@ -448,16 +448,23 @@ impl From<WorterbuchError> for (StatusCode, String) {
     }
 }
 
-impl IntoResponse for WorterbuchError {
-    fn into_response(self) -> axum::response::Response {
-        let err: (StatusCode, String) = self.into();
-        err.into_response()
-    }
-}
+#[cfg(feature = "axum-errors")]
+pub mod axum {
+    use crate::error::{AuthorizationError, WorterbuchError};
+    use axum::response::IntoResponse;
+    use http::StatusCode;
 
-impl IntoResponse for AuthorizationError {
-    fn into_response(self) -> axum::response::Response {
-        let err: WorterbuchError = self.into();
-        err.into_response()
+    impl IntoResponse for WorterbuchError {
+        fn into_response(self) -> axum::response::Response {
+            let err: (StatusCode, String) = self.into();
+            err.into_response()
+        }
+    }
+
+    impl IntoResponse for AuthorizationError {
+        fn into_response(self) -> axum::response::Response {
+            let err: WorterbuchError = self.into();
+            err.into_response()
+        }
     }
 }

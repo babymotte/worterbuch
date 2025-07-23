@@ -17,7 +17,9 @@ commercial = []
 default = ["jemalloc"]
 
 [dependencies]
-worterbuch-common = { version = "1.3.8-rc.0", path = "../worterbuch-common" }
+worterbuch-common = { version = "1.3.8-rc.0", path = "../worterbuch-common", features = [
+    "axum-errors",
+] }
 tokio = { version = "1.44.2", features = ["rt-multi-thread", "fs"] }
 tokio-graceful-shutdown = "0.16.0"
 dotenvy = "0.15.7"

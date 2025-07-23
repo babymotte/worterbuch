@@ -23,6 +23,7 @@ jemalloc = [
     "mappings",
     "regex",
 ]
+axum-errors = ["axum"]
 
 [dependencies]
 tokio = { version = "1.46.1", features = ["sync", "io-util", "time"] }
@@ -51,7 +52,8 @@ pprof_util = { version = "0.7.0", features = ["flamegraph"], optional = true }
 mappings = { version = "0.7.0", optional = true }
 regex = { version = "1.11.1", optional = true }
 opentelemetry-otlp = "0.30.0"
-axum = "0.8.4"
+http = "1.3.1"
+axum = { version = "0.8.4", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
