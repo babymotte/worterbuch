@@ -27,26 +27,21 @@ use axum::{
     middleware::Next,
     response::IntoResponse,
 };
-use axum_extra::extract::CookieJar;
-use headers::{Authorization, HeaderMapExt, authorization::Bearer};
+use axum_extra::{TypedHeader, extract::CookieJar};
+use headers::{Authorization, authorization::Bearer};
 use std::{convert::Infallible, future};
 use worterbuch_common::error::WorterbuchResult;
 
 pub async fn bearer_auth(
     State(config): State<Config>,
     jar: CookieJar,
+    header_jwt: Option<TypedHeader<Authorization<Bearer>>>,
     mut req: Request,
     next: Next,
 ) -> WorterbuchResult<impl IntoResponse> {
-    let headers = req.headers();
-
-    let header_jwt = headers
-        .typed_get::<Authorization<Bearer>>()
-        .map(|it| it.token().to_owned());
-
     let cookie_jwt = jar.get("worterbuch_auth_jwt").map(|c| c.value().to_owned());
 
-    let jwt = header_jwt.or(cookie_jwt);
+    let jwt = header_jwt.map(|h| h.token().to_owned()).or(cookie_jwt);
 
     match get_claims(jwt.as_deref(), &config) {
         Ok(claims) => {
