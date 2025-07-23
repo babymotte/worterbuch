@@ -199,3 +199,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsIm5hb
 
 POST http://localhost:8080/api/v1/login  HTTP/1.1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsIm5hbWUiOiJKb2huIERvZSIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjo0NTE2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbIiMiXSwid3JpdGUiOlsiIyJdLCJkZWxldGUiOlsiIyJdLCJwcm9maWxlIjp0cnVlfSwiY29ycyI6WyJodHRwOi8vbG9jYWxob3N0IiwiaHR0cDovL3diZXhwbG9yZXIubG9jYWwiXX0.wu8cZc9FM3oHWTpTRIHJEYx0Uau9OShA4F61v0SUKig
+
+### Unsuccessful web login: missing token
+
+POST http://localhost:8080/api/v1/login  HTTP/1.1
