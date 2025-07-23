@@ -23,35 +23,43 @@ mod websocket;
 use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
-    server::{common::CloneableWbApi, poem::auth::BearerAuth},
+    server::common::{CloneableWbApi, init_server_socket},
     stats::VERSION,
 };
+use axum::{
+    Json, Router,
+    extract::{ConnectInfo, Path, Query, Request, State, WebSocketUpgrade, ws::WebSocket},
+    http::{
+        HeaderValue, Method,
+        header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE},
+    },
+    middleware,
+    response::{
+        IntoResponse, Response,
+        sse::{Event, Sse},
+    },
+    routing::{delete, get, post},
+};
+use axum_extra::{
+    TypedHeader,
+    extract::{CookieJar, cookie::Cookie},
+};
+use axum_server::Handle;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use flate2::{
     Compression,
     write::{GzDecoder, GzEncoder},
 };
+use futures::Stream;
+use headers::{Authorization, ContentType, HeaderMapExt, authorization::Bearer};
+use http_body_util::BodyExt;
 use miette::IntoDiagnostic;
-use poem::{
-    Addr, Body, EndpointExt, IntoResponse, Request, Response, Route, delete,
-    endpoint::StaticFilesEndpoint,
-    get, handler,
-    listener::TcpListener,
-    middleware::{AddData, CookieJarManager, Cors, TokioMetrics},
-    post,
-    web::{
-        Data, Json, Path, Query, RemoteAddr,
-        cookie::Cookie,
-        headers::{self, HeaderMapExt, authorization::Bearer},
-        sse::{Event, SSE},
-        websocket::{WebSocket, WebSocketStream},
-    },
-};
 use serde_json::Value;
 use std::{
     collections::HashMap,
     io::{self, ErrorKind, Write},
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
     thread,
     time::Duration,
 };
@@ -60,7 +68,12 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{debug, debug_span, error, info, instrument};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    services::{ServeDir, ServeFile},
+    trace::TraceLayer,
+};
+use tracing::{debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
@@ -68,16 +81,13 @@ use worterbuch_common::{
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
 };
 
-#[handler]
-fn ws(
-    ws: WebSocket,
-    Data(ws_tx): Data<&mpsc::Sender<(WebSocketStream, SocketAddr)>>,
-    RemoteAddr(addr): &RemoteAddr,
-) -> WorterbuchResult<impl IntoResponse> {
+async fn ws(
+    ws: WebSocketUpgrade,
+    State(ws_tx): State<mpsc::Sender<(WebSocket, SocketAddr)>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Response> {
     info!("Client connected");
-    let remote = to_socket_addr(addr)?;
 
-    let ws_tx = ws_tx.clone();
     let callback = move |socket| async move {
         ws_tx.send((socket, remote)).await.ok();
     };
@@ -87,8 +97,7 @@ fn ws(
     Ok(res)
 }
 
-#[handler]
-async fn info(Data(wb): Data<&CloneableWbApi>) -> WorterbuchResult<Json<ServerInfo>> {
+async fn info(State(wb): State<CloneableWbApi>) -> WorterbuchResult<Json<ServerInfo>> {
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
     let config = wb.config().await?;
     let info = ServerInfo::new(
@@ -100,18 +109,17 @@ async fn info(Data(wb): Data<&CloneableWbApi>) -> WorterbuchResult<Json<ServerIn
     Ok(Json(info))
 }
 
-#[handler]
 #[instrument(skip(wb), err)]
 async fn export(
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    request: &Request,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    request: Request,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#"))?;
     }
 
-    let base64 = request.header("accept") == Some("text/plain");
+    let base64 = request.headers().get("accept") == Some(&HeaderValue::from_static("text/plain"));
 
     let config = wb.config().await?;
     let file_name = config
@@ -148,42 +156,45 @@ async fn export(
         }
     };
 
-    let mut response = compressed
-        .into_response()
-        .with_header(
-            "Content-Disposition",
-            format!(r#"attachment; filename={file_name}.gz"#),
-        )
-        .into_response();
+    let mut response = compressed.into_response();
+
+    let val = format!(r#"attachment; filename={file_name}.gz"#);
+    if let Ok(header) = HeaderValue::from_str(&val) {
+        response.headers_mut().insert(CONTENT_DISPOSITION, header);
+    } else {
+        warn!("Invalid Content-Disposition header value: {val}");
+    }
 
     if base64 {
-        response = response.set_content_type("text/plain");
+        response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
     }
 
     Ok(response)
 }
 
-#[handler]
+#[instrument(skip(wb), err)]
 async fn import(
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    data: Body,
-    request: &Request,
-) -> Response {
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    request: Request,
+) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         if let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#")) {
-            return WorterbuchError::from(e).into_response();
+            return Err(WorterbuchError::from(e));
         }
     }
 
-    let base64 = request.content_type() == Some("text/plain");
+    let base64 = request.headers().typed_get::<ContentType>() == Some(ContentType::text());
 
-    let data = match data.into_vec().await {
-        Ok(it) => it,
-        Err(e) => {
-            return poem::Error::from(e).into_response();
-        }
-    };
+    // this won't work if the body is an long running stream
+    let data = request
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| WorterbuchError::Other(Box::new(e), "failed to read body".to_owned()))?
+        .to_bytes();
 
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
@@ -194,26 +205,21 @@ async fn import(
     let json = match rx.await {
         Ok(Ok(it)) => it,
         Ok(Err(e)) => {
-            return WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            )
-            .into_response();
+            ));
         }
         Err(e) => {
-            return WorterbuchError::Other(
+            return Err(WorterbuchError::Other(
                 Box::new(e),
                 "error while decompressing exported data".to_owned(),
-            )
-            .into_response();
+            ));
         }
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    match wb.import(json).await {
-        Ok(_) => ().into_response(),
-        Err(e) => e.into_response(),
-    }
+    wb.import(json).await.map(|_| ().into_response())
 }
 
 fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
@@ -244,27 +250,28 @@ fn decompress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
     e.finish()
 }
 
-#[handler]
 async fn get_value(
-    req: &Request,
     Path(key): Path<Key>,
+    content_type: Option<TypedHeader<ContentType>>,
     Query(params): Query<HashMap<String, String>>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let pointer = params.get("pointer");
     let raw = params.get("raw");
-    let content_type = req.content_type().map(str::to_lowercase);
+
+    let content_type = content_type.map(|h| h.0);
+
     match wb.get(key.clone()).await {
         Ok(value) => {
             if let Some(pointer) = pointer {
                 let key = key + pointer;
                 let extracted = value.pointer(pointer);
                 if let Some(extracted) = extracted {
-                    if raw.is_some() || content_type.as_deref() == Some("text/plain") {
+                    if raw.is_some() || content_type == Some(ContentType::text()) {
                         if let Value::String(str) = extracted {
                             return Ok(str.to_owned().into_response());
                         }
@@ -274,7 +281,7 @@ async fn get_value(
                     Err(WorterbuchError::NoSuchValue(key))?
                 }
             } else {
-                if raw.is_some() || content_type.as_deref() == Some("text/plain") {
+                if raw.is_some() || content_type == Some(ContentType::text()) {
                     if let Value::String(str) = value {
                         return Ok(str.into_response());
                     }
@@ -286,11 +293,10 @@ async fn get_value(
     }
 }
 
-#[handler]
 async fn pget(
     Path(pattern): Path<Key>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
@@ -298,12 +304,11 @@ async fn pget(
     Ok(Json(wb.pget(pattern).await?))
 }
 
-#[handler]
 async fn set(
     Path(key): Path<Key>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
     Json(value): Json<Value>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
@@ -313,12 +318,11 @@ async fn set(
     Ok(Json("Ok"))
 }
 
-#[handler]
 async fn publish(
     Path(key): Path<Key>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
     Json(value): Json<Value>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
 ) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
@@ -327,11 +331,10 @@ async fn publish(
     Ok(Json("Ok"))
 }
 
-#[handler]
 async fn delete_value(
     Path(key): Path<Key>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<Value>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
@@ -340,11 +343,10 @@ async fn delete_value(
     Ok(Json(wb.delete(key, client_id).await?))
 }
 
-#[handler]
 async fn pdelete(
     Path(pattern): Path<Key>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
@@ -353,11 +355,10 @@ async fn pdelete(
     Ok(Json(wb.pdelete(pattern, client_id).await?))
 }
 
-#[handler]
 async fn ls(
     Path(parent): Path<Key>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
@@ -365,10 +366,9 @@ async fn ls(
     Ok(Json(wb.ls(Some(parent)).await?))
 }
 
-#[handler]
 async fn ls_root(
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
@@ -376,20 +376,18 @@ async fn ls_root(
     Ok(Json(wb.ls(None).await?))
 }
 
-#[handler]
 async fn subscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    RemoteAddr(addr): &RemoteAddr,
-) -> WorterbuchResult<SSE> {
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
-    let remote_addr = to_socket_addr(addr)?;
-    connected(wb, client_id, remote_addr).await?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
         .get("unique")
@@ -405,6 +403,8 @@ async fn subscribe(
         .subscribe(client_id, transaction_id, key, unique, live_only)
         .await?;
     let (sse_tx, sse_rx) = mpsc::channel(100);
+
+    // TODO listen for shutdown requests
     spawn(async move {
         'recv_loop: loop {
             select! {
@@ -414,7 +414,7 @@ async fn subscribe(
                         StateEvent::Value(value) => {
                             match serde_json::to_string(&value) {
                                 Ok(json) => {
-                                    if let Err(e) = sse_tx.send(Event::message(json)).await {
+                                    if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
                                         error!("Error forwarding state event: {e}");
                                         break 'recv_loop;
                                     }
@@ -426,7 +426,7 @@ async fn subscribe(
                             }
                         },
                         StateEvent::Deleted(_) => {
-                            if let Err(e) = sse_tx.send(Event::message("null")).await {
+                            if let Err(e) = sse_tx.send(Event::default().json_data("null")).await {
                                 error!("Error forwarding state event: {e}");
                                 break 'recv_loop;
                             }
@@ -444,25 +444,23 @@ async fn subscribe(
             error!("Error disconnecting client: {e}");
         }
     });
-    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
         sse_rx,
     )))
 }
 
-#[handler]
 async fn psubscribe(
     Path(key): Path<Key>,
     Query(params): Query<HashMap<String, String>>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    RemoteAddr(addr): &RemoteAddr,
-) -> WorterbuchResult<SSE> {
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
     let client_id = Uuid::new_v4();
-    let remote_addr = to_socket_addr(addr)?;
-    connected(wb, client_id, remote_addr).await?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
         .get("unique")
@@ -479,6 +477,8 @@ async fn psubscribe(
         .await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
+
+    // TODO listen for shutdown requests
     spawn(async move {
         'recv_loop: loop {
             select! {
@@ -486,7 +486,7 @@ async fn psubscribe(
                 recv = rx.recv() => if let Some(pstate) = recv {
                     match serde_json::to_string(&pstate) {
                         Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                            if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
                                 error!("Error forwarding state event: {e}");
                                 break 'recv_loop;
                             }
@@ -508,29 +508,29 @@ async fn psubscribe(
             error!("Error disconnecting client: {e}");
         }
     });
-    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
         sse_rx,
     )))
 }
 
-#[handler]
 async fn subscribels_root(
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    RemoteAddr(addr): &RemoteAddr,
-) -> WorterbuchResult<SSE> {
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
     let client_id = Uuid::new_v4();
-    let remote_addr = to_socket_addr(addr)?;
-    connected(wb, client_id, remote_addr).await?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
 
     let (mut rx, _) = wb.subscribe_ls(client_id, transaction_id, None).await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
+
+    // TODO listen for shutdown requests
     spawn(async move {
         'recv_loop: loop {
             select! {
@@ -538,7 +538,7 @@ async fn subscribels_root(
                 recv = rx.recv() => if let Some(children) = recv {
                     match serde_json::to_string(&children) {
                         Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                            if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
                                 error!("Error forwarding state event: {e}");
                                 break 'recv_loop;
                             }
@@ -560,24 +560,22 @@ async fn subscribels_root(
             error!("Error disconnecting client: {e}");
         }
     });
-    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
         sse_rx,
     )))
 }
 
-#[handler]
 async fn subscribels(
     Path(parent): Path<Key>,
-    Data(wb): Data<&CloneableWbApi>,
-    Data(privileges): Data<&Option<JwtClaims>>,
-    RemoteAddr(addr): &RemoteAddr,
-) -> WorterbuchResult<SSE> {
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
     let client_id = Uuid::new_v4();
-    let remote_addr = to_socket_addr(addr)?;
-    connected(wb, client_id, remote_addr).await?;
+    connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
 
@@ -586,6 +584,8 @@ async fn subscribels(
         .await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
+
+    // TODO listen for shutdown requests
     spawn(async move {
         'recv_loop: loop {
             select! {
@@ -593,7 +593,7 @@ async fn subscribels(
                 recv = rx.recv() => if let Some(children) = recv {
                     match serde_json::to_string(&children) {
                         Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::message(json)).await {
+                            if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
                                 error!("Error forwarding state event: {e}");
                                 break 'recv_loop;
                             }
@@ -615,17 +615,14 @@ async fn subscribels(
             error!("Error disconnecting client: {e}");
         }
     });
-    Ok(SSE::new(tokio_stream::wrappers::ReceiverStream::new(
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
         sse_rx,
     )))
 }
 
 #[cfg(feature = "jemalloc")]
 #[instrument(ret)]
-#[handler]
-async fn get_heap_files_list(
-    Data(privileges): Data<&Option<JwtClaims>>,
-) -> WorterbuchResult<Response> {
+async fn get_heap_files_list(privileges: Option<JwtClaims>) -> WorterbuchResult<Response> {
     use worterbuch_common::profiling::list_heap_profile_files;
 
     if let Some(privileges) = privileges {
@@ -639,8 +636,7 @@ async fn get_heap_files_list(
 
 #[cfg(feature = "jemalloc")]
 #[instrument(ret)]
-#[handler]
-async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<Response> {
+async fn get_live_heap(privileges: Option<JwtClaims>) -> WorterbuchResult<Response> {
     use worterbuch_common::profiling::get_live_heap_profile;
 
     if let Some(privileges) = privileges {
@@ -649,19 +645,18 @@ async fn get_live_heap(Data(privileges): Data<&Option<JwtClaims>>) -> Worterbuch
 
     let pprof = get_live_heap_profile().await?;
 
-    let response = pprof.into_response();
+    let mut response = pprof.into_response();
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=heap.pb.gz"),
+    );
 
-    Ok(response
-        .with_header("Content-Disposition", "attachment; filename=heap.pb.gz")
-        .into_response())
+    Ok(response)
 }
 
 #[cfg(feature = "jemalloc")]
 #[instrument(ret)]
-#[handler]
-async fn get_live_flamegraph(
-    Data(privileges): Data<&Option<JwtClaims>>,
-) -> WorterbuchResult<Response> {
+async fn get_live_flamegraph(privileges: Option<JwtClaims>) -> WorterbuchResult<Response> {
     use worterbuch_common::profiling::get_live_flamegraph;
 
     if let Some(privileges) = privileges {
@@ -670,21 +665,21 @@ async fn get_live_flamegraph(
 
     let pprof = get_live_flamegraph().await?;
 
-    let response = pprof.into_response();
+    let mut response = pprof.into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"));
 
-    Ok(response
-        .with_header("Content-Type", "image/svg+xml")
-        .into_response())
+    Ok(response)
 }
 
 #[cfg(feature = "jemalloc")]
 #[instrument(ret)]
-#[handler]
 async fn get_heap_file(
     Path(filename): Path<String>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Response> {
-    use poem::http::StatusCode;
+    use axum::http::StatusCode;
     use worterbuch_common::profiling::get_heap_profile_from_file;
 
     if let Some(privileges) = privileges {
@@ -693,14 +688,16 @@ async fn get_heap_file(
 
     match get_heap_profile_from_file(&filename).await? {
         Some(pprof) => {
-            let response = pprof.into_response();
+            let mut response = pprof.into_response();
+            if let Ok(header) =
+                HeaderValue::from_str(&format!("attachment; filename={filename}.gz"))
+            {
+                response.headers_mut().insert(CONTENT_DISPOSITION, header);
+            } else {
+                warn!("Invalid header value: attachment; filename={filename}.gz");
+            }
 
-            Ok(response
-                .with_header(
-                    "Content-Disposition",
-                    format!("attachment; filename={filename}.gz"),
-                )
-                .into_response())
+            Ok(response)
         }
         None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
     }
@@ -708,12 +705,11 @@ async fn get_heap_file(
 
 #[cfg(feature = "jemalloc")]
 #[instrument(ret, err)]
-#[handler]
 async fn get_flamegraph_file(
     Path(filename): Path<String>,
-    Data(privileges): Data<&Option<JwtClaims>>,
+    privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Response> {
-    use poem::http::StatusCode;
+    use axum::http::StatusCode;
     use worterbuch_common::profiling::get_flamegraph_from_file;
 
     if let Some(privileges) = privileges {
@@ -722,19 +718,23 @@ async fn get_flamegraph_file(
 
     match get_flamegraph_from_file(&filename).await? {
         Some(svg) => {
-            let response = svg.into_response();
+            let mut response = svg.into_response();
+            response
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"));
 
-            Ok(response
-                .with_header("Content-Type", "image/svg+xml")
-                .into_response())
+            Ok(response)
         }
         None => Ok((StatusCode::NOT_FOUND, "not found").into_response()),
     }
 }
 
 #[instrument(ret, err)]
-#[handler]
-async fn login(req: &Request, Data(privileges): Data<&Option<JwtClaims>>) -> WorterbuchResult<()> {
+async fn login(
+    privileges: Option<JwtClaims>,
+    header_jwt: Option<TypedHeader<Authorization<Bearer>>>,
+    jar: CookieJar,
+) -> WorterbuchResult<CookieJar> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::WebLogin, AuthCheck::Flag)?;
         privileges
@@ -742,31 +742,17 @@ async fn login(req: &Request, Data(privileges): Data<&Option<JwtClaims>>) -> Wor
         return Err(WorterbuchError::AlreadyAuthorized);
     };
 
-    let header_jwt = req
-        .headers()
-        .typed_get::<headers::Authorization<Bearer>>()
-        .map(|it| it.0.token().to_owned());
-
     if let Some(jwt) = header_jwt {
-        let mut cookie = Cookie::named("worterbuch_auth_jwt");
-        cookie.set_path("/api/v1/");
-        cookie.set_value_str(jwt);
-        cookie.set_http_only(true);
-        // cookie.set_same_site(Some(SameSite::Strict));
-        req.cookie().add(cookie);
-
-        Ok(())
+        Ok(jar.add(
+            Cookie::build(("worterbuch_auth_jwt", jwt.token().to_owned()))
+                .path("/api/v1/")
+                .http_only(true), // .same_site(SameSite::Strict),
+        ))
     } else {
         Err(WorterbuchError::Unauthorized(
             AuthorizationError::MissingToken,
         ))
     }
-}
-
-#[instrument(ret)]
-#[handler]
-async fn preflight(req: &Request) -> WorterbuchResult<()> {
-    Ok(())
 }
 
 pub async fn start(
@@ -781,9 +767,8 @@ pub async fn start(
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
 
-    let addr = format!("{bind_addr}:{port}");
-
-    let mut app = Route::new();
+    let mut app = Router::new();
+    let mut api = Router::new();
 
     let mut wsserver = None;
 
@@ -794,188 +779,123 @@ pub async fn start(
             run_ws_server(s, ws_stream_rx, wb)
         })));
         info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
-        app = app.at("/ws", get(ws.with(AddData::new(ws_stream_tx))));
+        app = app.route("/ws", get(ws).with_state(ws_stream_tx));
     }
 
     let config = worterbuch.config().await?;
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
     info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
-    app = app
-        .at(
-            format!("{rest_root}/get/*"),
-            get(get_value
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
+    api = api
+        .route(&format!("{rest_root}/get/{{*key}}"), get(get_value))
+        .route(&format!("{rest_root}/set/{{*key}}"), post(set))
+        .route(&format!("{rest_root}/pget/{{*pattern}}"), get(pget))
+        .route(&format!("{rest_root}/publish/{{*key}}"), post(publish))
+        .route(
+            &format!("{rest_root}/delete/{{*key}}"),
+            delete(delete_value),
         )
-        .at(
-            format!("{rest_root}/set/*"),
-            post(
-                set.with(BearerAuth::new(config.clone()))
-                    .with(AddData::new(worterbuch.clone())),
-            )
-            .options(preflight.with(cors())),
+        .route(
+            &format!("{rest_root}/pdelete/{{*pattern}}"),
+            delete(pdelete),
         )
-        .at(
-            format!("{rest_root}/pget/*"),
-            get(pget
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
+        .route(&format!("{rest_root}/ls"), get(ls_root))
+        .route(&format!("{rest_root}/ls/{{*parent}}"), get(ls))
+        .route(&format!("{rest_root}/subscribe/{{*key}}"), get(subscribe))
+        .route(
+            &format!("{rest_root}/psubscribe/{{*pattern}}"),
+            get(psubscribe),
         )
-        .at(
-            format!("{rest_root}/publish/*"),
-            post(
-                publish
-                    .with(BearerAuth::new(config.clone()))
-                    .with(AddData::new(worterbuch.clone())),
-            )
-            .options(preflight.with(cors())),
+        .route(&format!("{rest_root}/subscribels"), get(subscribels_root))
+        .route(
+            &format!("{rest_root}/subscribels/{{*parent}}"),
+            get(subscribels),
         )
-        .at(
-            format!("{rest_root}/delete/*"),
-            delete(
-                delete_value
-                    .with(BearerAuth::new(config.clone()))
-                    .with(AddData::new(worterbuch.clone())),
-            )
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/pdelete/*"),
-            delete(
-                pdelete
-                    .with(BearerAuth::new(config.clone()))
-                    .with(AddData::new(worterbuch.clone())),
-            )
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/ls"),
-            get(ls_root
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/ls/*"),
-            get(ls
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/subscribe/*"),
-            get(subscribe
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/psubscribe/*"),
-            get(psubscribe
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/subscribels"),
-            get(subscribels_root
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/subscribels/*"),
-            get(subscribels
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/export"),
-            get(export
-                .with(BearerAuth::new(config.clone()))
-                .with(AddData::new(worterbuch.clone())))
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/import"),
-            post(
-                import
-                    .with(BearerAuth::new(config.clone()))
-                    .with(AddData::new(worterbuch.clone())),
-            )
-            .options(preflight.with(cors())),
-        )
-        .at(
-            format!("{rest_root}/login"),
-            post(login.with(BearerAuth::new(config.clone()))).options(preflight.with(cors())),
-        );
+        .route(&format!("{rest_root}/export"), get(export))
+        .route(&format!("{rest_root}/import"), post(import))
+        .route(&format!("{rest_root}/login"), post(login));
 
     #[cfg(feature = "jemalloc")]
     if std::env::var("MALLOC_CONF")
         .unwrap_or("".into())
         .contains("prof_active:true")
     {
-        app = app
-            .at(
-                format!("{rest_root}/debug/heap/list"),
-                get(get_heap_files_list.with(BearerAuth::new(config.clone())))
-                    .options(preflight.with(cors())),
+        api = api
+            .route(
+                &format!("{rest_root}/debug/heap/list"),
+                get(get_heap_files_list),
             )
-            .at(
-                format!("{rest_root}/debug/heap/live"),
-                get(get_live_heap.with(BearerAuth::new(config.clone())))
-                    .options(preflight.with(cors())),
+            .route(&format!("{rest_root}/debug/heap/live"), get(get_live_heap))
+            .route(
+                &format!("{rest_root}/debug/heap/file/{{file}}"),
+                get(get_heap_file),
             )
-            .at(
-                format!("{rest_root}/debug/heap/file/:file"),
-                get(get_heap_file.with(BearerAuth::new(config.clone())))
-                    .options(preflight.with(cors())),
+            .route(
+                &format!("{rest_root}/debug/flamegraph/live"),
+                get(get_live_flamegraph),
             )
-            .at(
-                format!("{rest_root}/debug/flamegraph/live"),
-                get(get_live_flamegraph.with(BearerAuth::new(config.clone())))
-                    .options(preflight.with(cors())),
-            )
-            .at(
-                format!("{rest_root}/debug/flamegraph/file/:file"),
-                get(get_flamegraph_file.with(BearerAuth::new(config.clone())))
-                    .options(preflight.with(cors())),
+            .route(
+                &format!("{rest_root}/debug/flamegraph/file/{{file}}"),
+                get(get_flamegraph_file),
             )
     }
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
-    app = app.at("/info", get(info.with(AddData::new(worterbuch.clone()))));
+    app = app.route("/info", get(info).with_state(worterbuch.clone()));
 
-    let metrics = TokioMetrics::new();
+    // let metrics = TokioMetrics::new();
 
-    app = app.at("/metrics/tokio", metrics.exporter());
+    // app = app.route("/metrics/tokio", metrics.exporter());
 
     if let Some(web_root_path) = &config.web_root_path {
+        let web_root_path = PathBuf::from(web_root_path);
         info!(
-            "Serving custom web app from {web_root_path} at {rest_proto}://{public_addr}:{port}/"
+            "Serving custom web app from {web_root_path:?} at {rest_proto}://{public_addr}:{port}/"
         );
 
-        app = app.nest(
-            "/",
-            StaticFilesEndpoint::new(web_root_path)
-                .index_file("index.html")
-                .fallback_to_index()
-                .redirect_to_slash_directory(),
+        app = app.fallback_service(
+            ServeDir::new(&web_root_path)
+                .fallback(ServeFile::new(web_root_path.join("index.html"))),
         );
     }
 
-    poem::Server::new(TcpListener::bind(addr))
-        .run_with_graceful_shutdown(
-            app.with(CookieJarManager::new()).with(metrics),
-            subsys.on_shutdown_requested(),
-            Some(Duration::from_secs(1)),
-        )
-        .await
-        .into_diagnostic()?;
+    let handle = Handle::new();
+
+    let listener = init_server_socket(bind_addr, port, config.clone())?;
+    let mut server = axum_server::from_tcp(listener);
+    server.http_builder().http2().enable_connect_protocol();
+
+    let trace = TraceLayer::new_for_http();
+
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([SET_COOKIE, AUTHORIZATION])
+        .allow_credentials(true);
+
+    if let Some(origins) = &config.cors_allowed_origins {
+        cors = cors.allow_origin(AllowOrigin::list(
+            origins.iter().filter_map(|v| HeaderValue::from_str(v).ok()),
+        ));
+    }
+
+    let mut serve = Box::pin(
+        server.handle(handle.clone()).serve(
+            api.layer(middleware::from_fn_with_state(config, auth::bearer_auth))
+                .merge(app)
+                .with_state(worterbuch)
+                .layer(trace)
+                .layer(cors)
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        ),
+    );
+
+    select! {
+        res = &mut serve => res.into_diagnostic()?,
+        _ = subsys.on_shutdown_requested() => {
+            handle.graceful_shutdown(Some(Duration::from_secs(5)));
+            serve.await.into_diagnostic()?;
+        },
+    }
 
     if let Some(wsserver) = wsserver {
         wsserver.initiate_shutdown();
@@ -989,15 +909,9 @@ pub async fn start(
     Ok(())
 }
 
-fn cors() -> Cors {
-    Cors::new()
-        .allow_credentials(true)
-        .expose_header("Set-Cookie")
-}
-
 async fn run_ws_server(
     subsys: SubsystemHandle,
-    mut listener: mpsc::Receiver<(WebSocketStream, SocketAddr)>,
+    mut listener: mpsc::Receiver<(WebSocket, SocketAddr)>,
     worterbuch: CloneableWbApi,
 ) -> WorterbuchResult<()> {
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
@@ -1059,20 +973,6 @@ async fn run_ws_server(
     debug!("wsserver subsystem completed.");
 
     Ok(())
-}
-
-fn to_socket_addr(addr: &Addr) -> WorterbuchResult<SocketAddr> {
-    if let Addr::SocketAddr(it) = addr {
-        Ok(it.to_owned())
-    } else {
-        Err(WorterbuchError::IoError(
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "only network socket connections are supported",
-            ),
-            "only network socket connections are supported".to_owned(),
-        ))?
-    }
 }
 
 async fn connected(

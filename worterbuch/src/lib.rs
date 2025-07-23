@@ -105,7 +105,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
         let ws_enabled = !config.follower;
         Some(
             subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
-                server::poem::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
+                server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
             })),
         )
     } else {

@@ -63,7 +63,8 @@ pub async fn start(
 
     info!("Serving TCP endpoint at {addr}");
 
-    let listener = init_server_socket(bind_addr, port, config)?;
+    let listener =
+        TcpListener::from_std(init_server_socket(bind_addr, port, config)?).into_diagnostic()?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;

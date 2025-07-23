@@ -35,7 +35,6 @@ pub struct JwtClaims {
     pub name: String,
     pub exp: u64,
     pub worterbuch_privileges: Privileges,
-    pub cors: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

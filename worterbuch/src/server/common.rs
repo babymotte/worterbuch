@@ -24,15 +24,12 @@ use miette::{IntoDiagnostic, Result};
 use serde::Serialize;
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, SocketAddr, TcpListener},
     time::Duration,
 };
-use tokio::{
-    net::TcpListener,
-    sync::{
-        mpsc::{self, Receiver},
-        oneshot,
-    },
+use tokio::sync::{
+    mpsc::{self, Receiver},
+    oneshot,
 };
 use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
@@ -562,7 +559,7 @@ pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Resul
     socket.set_tcp_nodelay(true).into_diagnostic()?;
     socket.bind(&SockAddr::from(addr)).into_diagnostic()?;
     socket.listen(1024).into_diagnostic()?;
-    let listener = TcpListener::from_std(socket.into()).into_diagnostic()?;
+    let listener = socket.into();
 
     Ok(listener)
 }

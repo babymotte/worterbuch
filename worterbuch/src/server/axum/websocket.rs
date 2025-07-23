@@ -22,12 +22,12 @@ use crate::{
     server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
+use axum::extract::ws::{Message, WebSocket};
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, StreamExt},
 };
 use miette::{IntoDiagnostic, Result, miette};
-use poem::web::websocket::{Message, WebSocketStream};
 use std::{net::SocketAddr, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
@@ -38,7 +38,7 @@ pub(crate) async fn serve(
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
-    websocket: WebSocketStream,
+    websocket: WebSocket,
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
@@ -62,13 +62,13 @@ pub(crate) async fn serve(
     Ok(())
 }
 
-type WebSocketSender = SplitSink<WebSocketStream, poem::web::websocket::Message>;
+type WebSocketSender = SplitSink<WebSocket, Message>;
 
 async fn serve_loop(
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
-    websocket: WebSocketStream,
+    websocket: WebSocket,
 ) -> Result<()> {
     let config = worterbuch.config().await?;
     let authorization_required = config.auth_token.is_some();
@@ -134,7 +134,7 @@ async fn serve_loop(
 async fn send_loop(
     client_id: Uuid,
     send_timeout: Option<Duration>,
-    mut ws_tx: SplitSink<WebSocketStream, Message>,
+    mut ws_tx: SplitSink<WebSocket, Message>,
     mut ws_send_rx: mpsc::Receiver<ServerMessage>,
 ) {
     while let Some(msg) = ws_send_rx.recv().await {
@@ -152,7 +152,7 @@ async fn send_with_timeout(
     client_id: Uuid,
 ) -> Result<()> {
     let json = serde_json::to_string(&msg).into_diagnostic()?;
-    let msg = Message::Text(json);
+    let msg = Message::Text(json.into());
 
     if let Some(send_timeout) = send_timeout {
         trace!("Sending with timeout {}s …", send_timeout.as_secs());

@@ -21,9 +21,9 @@ use crate::{
     AuthCheckOwned, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
     RequestPattern, TransactionId, server::Err,
 };
+use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
-use poem::{IntoResponse, http::StatusCode};
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use thiserror::Error;
 use tokio::sync::{
@@ -405,37 +405,33 @@ impl From<&WorterbuchError> for ErrorCode {
     }
 }
 
-impl From<WorterbuchError> for poem::Error {
+impl From<WorterbuchError> for (StatusCode, String) {
     fn from(e: WorterbuchError) -> Self {
         match &e {
             WorterbuchError::IllegalMultiWildcard(_)
             | WorterbuchError::IllegalWildcard(_)
             | WorterbuchError::MultiWildcardAtIllegalPosition(_)
             | WorterbuchError::NotImplemented
-            | WorterbuchError::KeyIsNotLocked(_) => poem::Error::new(e, StatusCode::BAD_REQUEST),
+            | WorterbuchError::KeyIsNotLocked(_) => (StatusCode::BAD_REQUEST, e.to_string()),
 
             WorterbuchError::AlreadyAuthorized
             | WorterbuchError::NotSubscribed
             | WorterbuchError::FeatureDisabled(_)
-            | WorterbuchError::NoPubStream(_) => {
-                poem::Error::new(e, StatusCode::UNPROCESSABLE_ENTITY)
-            }
+            | WorterbuchError::NoPubStream(_) => (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
 
             WorterbuchError::KeyIsLocked(_)
             | WorterbuchError::Cas
-            | WorterbuchError::CasVersionMismatch => poem::Error::new(e, StatusCode::CONFLICT),
+            | WorterbuchError::CasVersionMismatch => (StatusCode::CONFLICT, e.to_string()),
 
-            WorterbuchError::ReadOnlyKey(_) => poem::Error::new(e, StatusCode::METHOD_NOT_ALLOWED),
+            WorterbuchError::ReadOnlyKey(_) => (StatusCode::METHOD_NOT_ALLOWED, e.to_string()),
 
-            WorterbuchError::AuthorizationRequired(_) => {
-                poem::Error::new(e, StatusCode::UNAUTHORIZED)
-            }
+            WorterbuchError::AuthorizationRequired(_) => (StatusCode::UNAUTHORIZED, e.to_string()),
 
-            WorterbuchError::NoSuchValue(_) => poem::Error::new(e, StatusCode::NOT_FOUND),
+            WorterbuchError::NoSuchValue(_) => (StatusCode::NOT_FOUND, e.to_string()),
 
             WorterbuchError::Unauthorized(ae) => match &ae {
-                AuthorizationError::MissingToken => poem::Error::new(e, StatusCode::UNAUTHORIZED),
-                _ => poem::Error::new(e, StatusCode::FORBIDDEN),
+                AuthorizationError::MissingToken => (StatusCode::UNAUTHORIZED, e.to_string()),
+                _ => (StatusCode::FORBIDDEN, e.to_string()),
             },
 
             WorterbuchError::IoError(_, _)
@@ -444,22 +440,24 @@ impl From<WorterbuchError> for poem::Error {
             | WorterbuchError::Other(_, _)
             | WorterbuchError::ServerResponse(_)
             | WorterbuchError::ProtocolNegotiationFailed(_) => {
-                poem::Error::new(e, StatusCode::INTERNAL_SERVER_ERROR)
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
 
-            WorterbuchError::NotLeader => poem::Error::new(e, StatusCode::NO_CONTENT),
+            WorterbuchError::NotLeader => (StatusCode::NO_CONTENT, e.to_string()),
         }
     }
 }
 
 impl IntoResponse for WorterbuchError {
-    fn into_response(self) -> poem::Response {
-        poem::Error::from(self).into_response()
+    fn into_response(self) -> axum::response::Response {
+        let err: (StatusCode, String) = self.into();
+        err.into_response()
     }
 }
 
-impl From<AuthorizationError> for poem::error::Error {
-    fn from(value: AuthorizationError) -> Self {
-        WorterbuchError::from(value).into()
+impl IntoResponse for AuthorizationError {
+    fn into_response(self) -> axum::response::Response {
+        let err: WorterbuchError = self.into();
+        err.into_response()
     }
 }

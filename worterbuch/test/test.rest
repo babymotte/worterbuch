@@ -4,6 +4,19 @@
 
 # Full access JWT: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsIm5hbWUiOiJKb2huIERvZSIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjo0NTE2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbIiMiXSwid3JpdGUiOlsiIyJdLCJkZWxldGUiOlsiIyJdLCJwcm9maWxlIjp0cnVlLCJ3ZWItbG9naW4iOnRydWV9LCJjb3JzIjpbImh0dHA6Ly9sb2NhbGhvc3Q6NTE3MyIsImh0dHA6Ly93YmV4cGxvcmVyLmxvY2FsIl19.0rtaIHcXpRJU3tObhlkeCXfu0_WwMSdcJjG8hQKQ-zM
 
+
+### Unauthorized, no JWT provided
+POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
+Content-Type: application/json
+
+"world"
+
+### Successful
+GET http://localhost:8080/info  HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MyIsIm5hbWUiOiJKb2huIERvZSIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjo0NTE2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbIiMiXSwid3JpdGUiOlsiIyJdLCJkZWxldGUiOlsiIyJdLCJwcm9maWxlIjp0cnVlLCJ3ZWItbG9naW4iOnRydWV9LCJjb3JzIjpbImh0dHA6Ly9sb2NhbGhvc3Q6NTE3MyIsImh0dHA6Ly93YmV4cGxvcmVyLmxvY2FsIl19.0rtaIHcXpRJU3tObhlkeCXfu0_WwMSdcJjG8hQKQ-zM
+Origin: http://localhost:5173
+
 ### Successful
 POST http://localhost:8080/api/v1/set/hello  HTTP/1.1
 Content-Type: application/json
@@ -155,6 +168,11 @@ H4sIAAAAAAAA/6tWSkksSVSyqlYqAREZqTk5+SBGmZKVUnl+UU6KUi0QAADLIvQ/JgAAAA==
 ### Successful Heap dump
 
 GET http://localhost:8080/api/v1/debug/heap/live HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXSwicHJvZmlsZSI6dHJ1ZX19.GKUvjiFsvYn6sd43PmkEWh98YqA4LzMT38cJ7wBQQA4
+
+### Successful Flamegraph
+
+GET http://localhost:8080/api/v1/debug/flamegraph/live HTTP/1.1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiZXhwIjo0MDA2MjM5MDIyLCJ3b3J0ZXJidWNoUHJpdmlsZWdlcyI6eyJyZWFkIjpbImhlbGxvIiwiaGVsbG8vIyIsIiRTWVMvIyJdLCJ3cml0ZSI6WyJoZWxsbyIsImhlbGxvLyMiXSwicHJvZmlsZSI6dHJ1ZX19.GKUvjiFsvYn6sd43PmkEWh98YqA4LzMT38cJ7wBQQA4
 
 ### Unauthorized Heap dump

@@ -14,9 +14,7 @@ use tracing::{Level, info, instrument};
 
 #[instrument(level=Level::DEBUG, err)]
 pub async fn get_live_heap_profile() -> WorterbuchResult<Vec<u8>> {
-    let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
-        it
-    } else {
+    let Some(prof_ctl) = jemalloc_pprof::PROF_CTL.as_ref() else {
         return Err(WorterbuchError::FeatureDisabled(
             "jemalloc profiling is not enabled".to_owned(),
         ))?;
@@ -36,9 +34,7 @@ pub async fn get_live_heap_profile() -> WorterbuchResult<Vec<u8>> {
 
 #[instrument(level=Level::DEBUG, err)]
 pub async fn get_live_flamegraph() -> WorterbuchResult<String> {
-    let prof_ctl = if let Some(it) = jemalloc_pprof::PROF_CTL.as_ref() {
-        it
-    } else {
+    let Some(prof_ctl) = jemalloc_pprof::PROF_CTL.as_ref() else {
         return Err(WorterbuchError::FeatureDisabled(
             "jemalloc profiling is not enabled".to_owned(),
         ))?;

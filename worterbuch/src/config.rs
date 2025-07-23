@@ -104,6 +104,7 @@ pub struct Config {
     pub sync_port: Option<u16>,
     pub leader_address: Option<String>,
     pub default_export_file_name: Option<String>,
+    pub cors_allowed_origins: Option<Vec<String>>,
 }
 
 impl Config {
@@ -224,6 +225,10 @@ impl Config {
             self.default_export_file_name = Some(val);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_CORS_ALLOWED_ORIGINS") {
+            self.cors_allowed_origins = Some(val.split(",").map(|v| v.trim().to_owned()).collect());
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -286,6 +291,7 @@ impl Config {
                     sync_port: args.sync_port,
                     leader_address: args.leader_address,
                     default_export_file_name: None,
+                    cors_allowed_origins: None,
                 };
                 config.load_env()?;
                 Ok(config)

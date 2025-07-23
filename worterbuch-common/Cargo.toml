@@ -39,7 +39,6 @@ tokio-tungstenite-wasm = { version = "0.6.0", optional = true }
 thiserror = "2.0.12"
 serde_yaml = "0.9.34"
 opentelemetry = "0.30.0"
-poem = "3.1.8"
 tikv-jemallocator = { version = "0.6.0", optional = true, features = [
     "profiling",
     "unprefixed_malloc_on_supported_platforms",
@@ -52,6 +51,7 @@ pprof_util = { version = "0.7.0", features = ["flamegraph"], optional = true }
 mappings = { version = "0.7.0", optional = true }
 regex = { version = "1.11.1", optional = true }
 opentelemetry-otlp = "0.30.0"
+axum = "0.8.4"
 
 [lints.rust]
 unsafe_code = "forbid"
