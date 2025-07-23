@@ -74,6 +74,12 @@ spec:
               value: "{{ $.Values.service.port.tcp }}"
             - name: WORTERBUCH_WS_SERVER_PORT
               value: "{{ $.Values.service.port.http }}"
+            - name: WORTERBUCH_KEEPALIVE_TIME
+              value: "{{ $.Values.keepalive.time }}"
+            - name: WORTERBUCH_KEEPALIVE_INTERVAL
+              value: "{{ $.Values.keepalive.interval }}"
+            - name: WORTERBUCH_KEEPALIVE_RETRIES
+              value: "{{ $.Values.keepalive.retries }}"
             - name: WORTERBUCH_SEND_TIMEOUT
               value: "{{ $.Values.timeouts.send }}"
             - name: WORTERBUCH_SHUTDOWN_TIMEOUT

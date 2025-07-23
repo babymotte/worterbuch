@@ -120,8 +120,13 @@ storage:
     size: 3Gi
     class: ""
 
+keepalive:
+  time: 5
+  interval: 2
+  retries: 3
+
 timeouts:
-  send: 10
+  send: 1
   shutdown: 20
 
 channelBufferSize: 10000
