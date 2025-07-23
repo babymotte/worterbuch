@@ -553,6 +553,7 @@ pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Resul
     socket.set_nonblocking(true).into_diagnostic()?;
     socket.set_keepalive(true).into_diagnostic()?;
     socket.set_tcp_keepalive(&tcp_keepalive).into_diagnostic()?;
+    #[cfg(target_os = "linux")]
     socket
         .set_tcp_user_timeout(config.send_timeout)
         .into_diagnostic()?;
