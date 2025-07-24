@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-speedtest"
-version = "1.3.8-rc.0"
+version = "1.3.8-rc.2"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
