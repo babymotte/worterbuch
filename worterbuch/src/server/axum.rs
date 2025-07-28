@@ -750,8 +750,7 @@ async fn login(
             Cookie::build(("worterbuch_auth_jwt", jwt.token().to_owned()))
                 .path("/api/v1/")
                 .http_only(true)
-                .same_site(SameSite::Strict)
-                .secure(true),
+                .same_site(SameSite::Strict),
         ))
     } else {
         Err(WorterbuchError::Unauthorized(
