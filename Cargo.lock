@@ -3321,7 +3321,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.3.8-rc.3"
+version = "1.3.8-rc.4"
 dependencies = [
  "axum",
  "axum-extra",
