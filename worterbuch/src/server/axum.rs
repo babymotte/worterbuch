@@ -42,7 +42,10 @@ use axum::{
 };
 use axum_extra::{
     TypedHeader,
-    extract::{CookieJar, cookie::Cookie},
+    extract::{
+        CookieJar,
+        cookie::{Cookie, SameSite},
+    },
 };
 use axum_server::Handle;
 use base64::{Engine, prelude::BASE64_STANDARD};
@@ -746,7 +749,9 @@ async fn login(
         Ok(jar.add(
             Cookie::build(("worterbuch_auth_jwt", jwt.token().to_owned()))
                 .path("/api/v1/")
-                .http_only(true), // .same_site(SameSite::Strict),
+                .http_only(true)
+                .same_site(SameSite::Strict)
+                .secure(true),
         ))
     } else {
         Err(WorterbuchError::Unauthorized(
