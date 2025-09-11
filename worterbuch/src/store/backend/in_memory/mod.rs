@@ -17,9 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
+use crate::{
+    store::{
+        AffectedLsSubscribers, Node, Tree, ValueEntry,
+        error::{StoreError, StoreResult},
+        lock::Lock,
+    },
+    subscribers::{LsSubscriber, Subscriber, SubscriptionId},
+};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
@@ -30,11 +37,8 @@ use worterbuch_common::{
     parse_segments,
 };
 
-type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 type CanDelete = bool;
-
-pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistedStore {
@@ -49,110 +53,6 @@ impl From<PersistedStore> for Store {
         };
         store.count_entries();
         store
-    }
-}
-
-struct Lock {
-    holder: Uuid,
-    candidates: VecDeque<(Uuid, Vec<oneshot::Sender<()>>)>,
-}
-
-impl Lock {
-    fn new(client_id: Uuid) -> Self {
-        Lock {
-            holder: client_id,
-            candidates: VecDeque::new(),
-        }
-    }
-
-    async fn release(&mut self, client_id: Uuid) -> (bool, bool) {
-        if client_id == self.holder {
-            if let Some((id, txs)) = self.candidates.pop_front() {
-                self.holder = id;
-                for tx in txs {
-                    tx.send(()).ok();
-                }
-                (true, false)
-            } else {
-                (true, true)
-            }
-        } else {
-            self.candidates.retain(|(c, _)| c != &client_id);
-            (false, false)
-        }
-    }
-
-    async fn queue(&mut self, client_id: Uuid, tx: oneshot::Sender<()>) {
-        if let Some((_, txs)) = self.candidates.iter_mut().find(|(id, _)| id == &client_id) {
-            txs.push(tx);
-        } else {
-            self.candidates.push_back((client_id, vec![tx]));
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ValueEntry {
-    Cas(Value, u64),
-    #[serde(untagged)]
-    Plain(Value),
-}
-
-impl AsRef<Value> for ValueEntry {
-    fn as_ref(&self) -> &Value {
-        match self {
-            ValueEntry::Plain(value) => value,
-            ValueEntry::Cas(value, _) => value,
-        }
-    }
-}
-
-impl From<ValueEntry> for Value {
-    fn from(value: ValueEntry) -> Self {
-        match value {
-            ValueEntry::Plain(value) => value,
-            ValueEntry::Cas(value, _) => value,
-        }
-    }
-}
-
-impl From<Value> for ValueEntry {
-    fn from(value: Value) -> Self {
-        ValueEntry::Plain(value)
-    }
-}
-
-#[derive(Debug)]
-pub enum StoreError {
-    IllegalMultiWildcard,
-}
-
-impl StoreError {
-    pub fn for_pattern(self, pattern: String) -> WorterbuchError {
-        match self {
-            StoreError::IllegalMultiWildcard => WorterbuchError::IllegalMultiWildcard(pattern),
-        }
-    }
-}
-
-pub type StoreResult<T> = Result<T, StoreError>;
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Node<V> {
-    #[serde(rename = "v")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    v: Option<V>,
-    #[serde(rename = "t")]
-    #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
-    t: Tree<V>,
-}
-
-impl Default for Node<ValueEntry> {
-    fn default() -> Self {
-        Self {
-            v: Default::default(),
-            t: Default::default(),
-        }
     }
 }
 

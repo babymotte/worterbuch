@@ -24,8 +24,9 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, TransactionId};
 
-type Subs = Vec<Subscriber>;
-type Tree = HashMap<KeySegment, Node>;
+pub type Subs = Vec<Subscriber>;
+pub type LsSubs = Vec<LsSubscriber>;
+pub type SubsTree = HashMap<KeySegment, Node>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SubscriptionId {
@@ -130,7 +131,8 @@ impl LsSubscriber {
 #[derive(Default)]
 pub struct Node {
     pub subscribers: Subs,
-    pub tree: Tree,
+    pub ls_subscribers: LsSubs,
+    pub tree: SubsTree,
 }
 
 #[derive(Default)]

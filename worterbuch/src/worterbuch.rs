@@ -20,7 +20,10 @@
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
-    store::{Node, PersistedStore, Store, StoreStats, ValueEntry},
+    store::{
+        Node, ValueEntry,
+        backend::in_memory::{PersistedStore, Store, StoreStats},
+    },
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
 use chrono::prelude::{DateTime, Utc};
