@@ -123,11 +123,10 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 subsys.request_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
-                if let Some(tid) = msg.transaction_id() {
-                    if tid > acked {
+                if let Some(tid) = msg.transaction_id()
+                    && tid > acked {
                         acked = tid;
                     }
-                }
                 print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {

@@ -125,11 +125,10 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
                 subsys.request_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
-                if let Some(tid) = msg.transaction_id() {
-                    if tid > acked {
+                if let Some(tid) = msg.transaction_id()
+                    && tid > acked {
                         acked = tid;
                     }
-                }
                 if raw {
                     print_del_event(&msg, json);
                 } else {

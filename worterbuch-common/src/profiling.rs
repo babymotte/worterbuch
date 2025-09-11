@@ -123,14 +123,13 @@ pub async fn list_heap_profile_files() -> Option<Vec<String>> {
     let mut content = fs::read_dir(dir).await.ok()?;
     while let Ok(Some(file)) = content.next_entry().await {
         info!("{:?}", file);
-        if let Ok(meta) = file.metadata().await {
-            if meta.is_file() {
+        if let Ok(meta) = file.metadata().await
+            && meta.is_file() {
                 let filename = file.file_name().to_string_lossy().to_string();
                 if filename.starts_with(&prefix) && filename.ends_with(".heap") {
                     files.push(filename);
                 }
             }
-        }
     }
     Some(files)
 }

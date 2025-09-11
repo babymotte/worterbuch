@@ -1847,12 +1847,11 @@ async fn run(
             },
             cmd = cmd_rx.recv() => {
                 match process_incoming_command(cmd, &mut callbacks, &mut transaction_ids).await {
-                    Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg {
-                        if let Err(e) = client_socket.send_msg(msg, config.use_backpressure).await {
+                    Ok(ControlFlow::Continue(msg)) => if let Some(msg) = msg
+                        && let Err(e) = client_socket.send_msg(msg, config.use_backpressure).await {
                                 error!("Error sending message to server: {e}");
                                 break;
-                            }
-                    },
+                            },
                     Ok(ControlFlow::Break(_)) => break,
                     Err(e) => {
                         error!("Error processing command: {e}");

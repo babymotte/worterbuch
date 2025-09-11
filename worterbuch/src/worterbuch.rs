@@ -730,8 +730,8 @@ impl Worterbuch {
             }
             debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
-            if self.config.extended_monitoring {
-                if let Err(e) = self
+            if self.config.extended_monitoring
+                && let Err(e) = self
                     .set(
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                         json!(self.subscriptions.len()),
@@ -741,7 +741,6 @@ impl Worterbuch {
                 {
                     warn!("Error in subscription monitoring: {e}");
                 }
-            }
             if self.subscribers.unsubscribe(&path, subscription) {
                 Ok(())
             } else {
@@ -1001,19 +1000,17 @@ impl Worterbuch {
             error!("Error updating client address: {e}");
         }
 
-        if self.config.extended_monitoring {
-            if let Err(e) = self.set_client_timestamp(&client_id, now).await {
+        if self.config.extended_monitoring
+            && let Err(e) = self.set_client_timestamp(&client_id, now).await {
                 error!("Error updating client timestamp: {e}");
             }
-        }
     }
 
     pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {
-        if self.clients.contains_key(&client_id) && self.config.extended_monitoring {
-            if let Err(e) = self.set_client_protocol_version(&client_id, protocol).await {
+        if self.clients.contains_key(&client_id) && self.config.extended_monitoring
+            && let Err(e) = self.set_client_protocol_version(&client_id, protocol).await {
                 error!("Error updating client protocol version: {e}");
             }
-        }
     }
 
     async fn set_client_protocol(
@@ -1230,8 +1227,8 @@ impl Worterbuch {
             );
         }
 
-        if self.config.extended_monitoring {
-            if let Err(e) = self
+        if self.config.extended_monitoring
+            && let Err(e) = self
                 .set(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
@@ -1241,7 +1238,6 @@ impl Worterbuch {
             {
                 warn!("Error in subscription monitoring: {e}");
             }
-        }
 
         Ok(())
     }
