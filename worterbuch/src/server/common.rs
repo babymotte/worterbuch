@@ -21,7 +21,6 @@ pub mod protocol;
 
 use crate::{Config, INTERNAL_CLIENT_ID, store::ValueEntry, subscribers::SubscriptionId};
 use miette::{IntoDiagnostic, Result};
-use serde::Serialize;
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
     net::{IpAddr, SocketAddr, TcpListener},
@@ -34,9 +33,9 @@ use tokio::sync::{
 use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
 use worterbuch_common::{
-    CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, MetaData, PStateEvent,
-    Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern, StateEvent, TransactionId,
-    UniqueFlag, Value, error::WorterbuchResult,
+    CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, PStateEvent, Protocol,
+    ProtocolMajorVersion, RegularKeySegment, RequestPattern, StateEvent, TransactionId, UniqueFlag,
+    Value, error::WorterbuchResult,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -563,19 +562,4 @@ pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Resul
     let listener = socket.into();
 
     Ok(listener)
-}
-
-#[derive(Serialize)]
-struct Meta {
-    cause: String,
-    meta: MetaData,
-}
-
-impl From<(&Box<dyn std::error::Error + Send + Sync>, MetaData)> for Meta {
-    fn from(e: (&Box<dyn std::error::Error + Send + Sync>, MetaData)) -> Self {
-        Meta {
-            cause: e.0.to_string(),
-            meta: e.1,
-        }
-    }
 }
