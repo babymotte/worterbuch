@@ -48,7 +48,7 @@ jemalloc_pprof = { version = "0.8.0", features = [
     "flamegraph",
 ], optional = true }
 inferno = { version = "0.12.2", optional = true }
-pprof_util = { version = "0.7.0", features = ["flamegraph"], optional = true }
+pprof_util = { version = "0.8.0", features = ["flamegraph"], optional = true }
 mappings = { version = "0.7.0", optional = true }
 regex = { version = "1.11.1", optional = true }
 opentelemetry-otlp = "0.30.0"
