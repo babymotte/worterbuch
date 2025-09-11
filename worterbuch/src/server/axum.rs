@@ -184,9 +184,10 @@ async fn import(
     request: Request,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges
-        && let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#")) {
-            return Err(WorterbuchError::from(e));
-        }
+        && let Err(e) = privileges.authorize(&Privilege::Write, AuthCheck::Pattern("#"))
+    {
+        return Err(WorterbuchError::from(e));
+    }
 
     let base64 = request.headers().typed_get::<ContentType>() == Some(ContentType::text());
 
@@ -274,18 +275,20 @@ async fn get_value(
                 let extracted = value.pointer(pointer);
                 if let Some(extracted) = extracted {
                     if (raw.is_some() || content_type == Some(ContentType::text()))
-                        && let Value::String(str) = extracted {
-                            return Ok(str.to_owned().into_response());
-                        }
+                        && let Value::String(str) = extracted
+                    {
+                        return Ok(str.to_owned().into_response());
+                    }
                     Ok(Json(extracted.to_owned()).into_response())
                 } else {
                     Err(WorterbuchError::NoSuchValue(key))?
                 }
             } else {
                 if (raw.is_some() || content_type == Some(ContentType::text()))
-                    && let Value::String(str) = value {
-                        return Ok(str.into_response());
-                    }
+                    && let Value::String(str) = value
+                {
+                    return Ok(str.into_response());
+                }
                 Ok(Json(value).into_response())
             }
         }

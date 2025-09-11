@@ -108,9 +108,10 @@ impl SendBuffer {
         sleep(self.delay).await;
         let value = self.set_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value
-            && let Err(e) = self.do_set_value(key, value).await {
-                error!("Error sending set message: {e}");
-            }
+            && let Err(e) = self.do_set_value(key, value).await
+        {
+            error!("Error sending set message: {e}");
+        }
     }
 
     async fn do_set_value(&self, key: Key, value: Value) -> ConnectionResult<()> {
@@ -124,9 +125,10 @@ impl SendBuffer {
         sleep(self.delay).await;
         let value = self.publish_buffer.lock().expect(LOCK_MSG).remove(&key);
         if let Some(value) = value
-            && let Err(e) = self.do_publish_value(key, value).await {
-                error!("Error sending publish message: {e}");
-            }
+            && let Err(e) = self.do_publish_value(key, value).await
+        {
+            error!("Error sending publish message: {e}");
+        }
     }
 
     async fn do_publish_value(&self, key: Key, value: Value) -> ConnectionResult<()> {

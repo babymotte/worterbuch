@@ -114,34 +114,40 @@ impl Config {
 
     pub fn load_env_with_prefix(&mut self, prefix: &str) -> ConfigResult<()> {
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_TLS")
-            && let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.tls = val.to_lowercase() == "true" || val == "1";
-            }
+            && let Some(ep) = &mut self.ws_endpoint
+        {
+            ep.endpoint.tls = val.to_lowercase() == "true" || val == "1";
+        }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_SERVER_PORT")
-            && let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.port = val.parse().to_port()?;
-            }
+            && let Some(ep) = &mut self.ws_endpoint
+        {
+            ep.endpoint.port = val.parse().to_port()?;
+        }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_BIND_ADDRESS")
-            && let Some(ep) = &mut self.ws_endpoint {
-                ep.endpoint.bind_addr = val.parse()?;
-            }
+            && let Some(ep) = &mut self.ws_endpoint
+        {
+            ep.endpoint.bind_addr = val.parse()?;
+        }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS")
-            && let Some(ep) = &mut self.ws_endpoint {
-                ep.public_addr = val;
-            }
+            && let Some(ep) = &mut self.ws_endpoint
+        {
+            ep.public_addr = val;
+        }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_SERVER_PORT")
-            && let Some(ep) = &mut self.tcp_endpoint {
-                ep.port = val.parse().to_port()?;
-            }
+            && let Some(ep) = &mut self.tcp_endpoint
+        {
+            ep.port = val.parse().to_port()?;
+        }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_BIND_ADDRESS")
-            && let Some(ep) = &mut self.tcp_endpoint {
-                ep.bind_addr = val.parse()?;
-            }
+            && let Some(ep) = &mut self.tcp_endpoint
+        {
+            ep.bind_addr = val.parse()?;
+        }
 
         #[cfg(target_family = "unix")]
         if let Ok(val) = env::var(prefix.to_owned() + "_UNIX_SOCKET_PATH") {

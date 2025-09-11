@@ -393,10 +393,11 @@ impl Store {
                 e.remove();
                 let new_children: Vec<String> = node.t.keys().map(ToOwned::to_owned).collect();
                 if let Some(subscribers) = subscribers.as_ref()
-                    && !subscribers.ls_subscribers.is_empty() {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, new_children));
-                    }
+                    && !subscribers.ls_subscribers.is_empty()
+                {
+                    let subscribers = subscribers.ls_subscribers.clone();
+                    ls_subscribers.push((subscribers, new_children));
+                }
             }
             Ok((val, node.v.is_none() && node.t.is_empty()))
         } else {
@@ -501,10 +502,11 @@ impl Store {
                 e.remove();
                 let new_children: Vec<String> = node.t.keys().map(ToOwned::to_owned).collect();
                 if let Some(subscribers) = subscribers.as_ref()
-                    && !subscribers.ls_subscribers.is_empty() {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, new_children));
-                    }
+                    && !subscribers.ls_subscribers.is_empty()
+                {
+                    let subscribers = subscribers.ls_subscribers.clone();
+                    ls_subscribers.push((subscribers, new_children));
+                }
             }
         }
 
@@ -553,10 +555,11 @@ impl Store {
                 for (key, node) in &node.t {
                     let new_children = Vec::new();
                     if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty() {
-                            let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, new_children));
-                        }
+                        && !subscribers.ls_subscribers.is_empty()
+                    {
+                        let subscribers = subscribers.ls_subscribers.clone();
+                        ls_subscribers.push((subscribers, new_children));
+                    }
                     let mut traversed_path = traversed_path.clone();
                     traversed_path.push(key);
                     Store::ncollect_matches(
@@ -573,10 +576,11 @@ impl Store {
                 for (key, node) in &node.t {
                     let new_children = Vec::new();
                     if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty() {
-                            let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, new_children));
-                        }
+                        && !subscribers.ls_subscribers.is_empty()
+                    {
+                        let subscribers = subscribers.ls_subscribers.clone();
+                        ls_subscribers.push((subscribers, new_children));
+                    }
                     let mut traversed_path = traversed_path.clone();
                     traversed_path.push(key);
                     Store::ncollect_matches(
@@ -634,10 +638,11 @@ impl Store {
                 for (key, node) in &node.t {
                     let new_children = Vec::new();
                     if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty() {
-                            let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, new_children));
-                        }
+                        && !subscribers.ls_subscribers.is_empty()
+                    {
+                        let subscribers = subscribers.ls_subscribers.clone();
+                        ls_subscribers.push((subscribers, new_children));
+                    }
                     let mut traversed_path = traversed_path.clone();
                     traversed_path.push(key);
                     Store::ncollect_matching_children(
@@ -699,10 +704,11 @@ impl Store {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => {
                     if let Some(subscribers) = current_subscribers
-                        && !subscribers.ls_subscribers.is_empty() {
-                            let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, &path[0..i]));
-                        }
+                        && !subscribers.ls_subscribers.is_empty()
+                    {
+                        let subscribers = subscribers.ls_subscribers.clone();
+                        ls_subscribers.push((subscribers, &path[0..i]));
+                    }
                     e.insert(Node::default())
                 }
             };

@@ -738,9 +738,9 @@ impl Worterbuch {
                         INTERNAL_CLIENT_ID,
                     )
                     .await
-                {
-                    warn!("Error in subscription monitoring: {e}");
-                }
+            {
+                warn!("Error in subscription monitoring: {e}");
+            }
             if self.subscribers.unsubscribe(&path, subscription) {
                 Ok(())
             } else {
@@ -1001,16 +1001,19 @@ impl Worterbuch {
         }
 
         if self.config.extended_monitoring
-            && let Err(e) = self.set_client_timestamp(&client_id, now).await {
-                error!("Error updating client timestamp: {e}");
-            }
+            && let Err(e) = self.set_client_timestamp(&client_id, now).await
+        {
+            error!("Error updating client timestamp: {e}");
+        }
     }
 
     pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {
-        if self.clients.contains_key(&client_id) && self.config.extended_monitoring
-            && let Err(e) = self.set_client_protocol_version(&client_id, protocol).await {
-                error!("Error updating client protocol version: {e}");
-            }
+        if self.clients.contains_key(&client_id)
+            && self.config.extended_monitoring
+            && let Err(e) = self.set_client_protocol_version(&client_id, protocol).await
+        {
+            error!("Error updating client protocol version: {e}");
+        }
     }
 
     async fn set_client_protocol(
@@ -1235,9 +1238,9 @@ impl Worterbuch {
                     INTERNAL_CLIENT_ID,
                 )
                 .await
-            {
-                warn!("Error in subscription monitoring: {e}");
-            }
+        {
+            warn!("Error in subscription monitoring: {e}");
+        }
 
         Ok(())
     }

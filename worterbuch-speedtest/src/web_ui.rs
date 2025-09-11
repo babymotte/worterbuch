@@ -70,14 +70,16 @@ async fn throughput_settings(
     Data(api): Data<&mpsc::Sender<throughput::Api>>,
 ) -> Result<Json<Value>> {
     if let Some(agents) = s.agents
-        && let Err(e) = api.send(throughput::Api::SetAgents(agents)).await {
-            return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-        }
+        && let Err(e) = api.send(throughput::Api::SetAgents(agents)).await
+    {
+        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
+    }
 
     if let Some(target_rate) = s.target_rate
-        && let Err(e) = api.send(throughput::Api::SetTargetRate(target_rate)).await {
-            return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-        }
+        && let Err(e) = api.send(throughput::Api::SetTargetRate(target_rate)).await
+    {
+        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
+    }
 
     Ok(Json(json!("Ok")))
 }
