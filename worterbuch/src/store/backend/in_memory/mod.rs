@@ -31,10 +31,10 @@ use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
 use worterbuch_common::{
-    CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
+    CasVersion, Key, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
     Value,
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments,
+    format_path, parse_segments,
 };
 
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
@@ -331,7 +331,10 @@ impl Store {
         match &head {
             KeySegment::MultiWildcard => {
                 if !tail.is_empty() {
-                    return Err(StoreError::IllegalMultiWildcard);
+                    return Err(StoreError::IllegalMultiWildcard(reconstruct_path(
+                        &traversed_path,
+                        relative_path,
+                    )));
                 }
                 Store::ncollect_matches(
                     node,
@@ -440,7 +443,10 @@ impl Store {
         match next {
             KeySegment::MultiWildcard => {
                 if !tail.is_empty() {
-                    return Err(StoreError::IllegalMultiWildcard);
+                    return Err(StoreError::IllegalMultiWildcard(reconstruct_path(
+                        &traversed_path,
+                        remaining_path,
+                    )));
                 }
 
                 if let Some(value) = &node.v {
@@ -532,7 +538,10 @@ impl Store {
 
         match next {
             KeySegment::MultiWildcard => {
-                return Err(StoreError::IllegalMultiWildcard);
+                return Err(StoreError::IllegalMultiWildcard(reconstruct_path(
+                    &traversed_path,
+                    remaining_path,
+                )));
             }
             KeySegment::Wildcard => {
                 for (key, node) in &node.t {
@@ -723,7 +732,7 @@ impl Store {
         self.len = Store::ncount_values(&self.data);
     }
 
-    pub fn count_sub_entries(&self, subkey: &str) -> WorterbuchResult<Option<usize>> {
+    pub fn count_sub_entries(&self, subkey: &Key) -> WorterbuchResult<Option<usize>> {
         let path = parse_segments(subkey)?;
         let node = self.get_node(&path);
         Ok(node.map(Store::ncount_values))
@@ -931,6 +940,11 @@ fn concat_key(path: &[&str], key: Option<&str>) -> String {
     string
 }
 
+fn reconstruct_path(traversed_path: &[&str], remaining_path: &[KeySegment]) -> String {
+    let remaining_path = format_path(remaining_path);
+    format!("{}/{}", traversed_path.join("/"), remaining_path)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -940,7 +954,7 @@ mod test {
     use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Box<[RegularKeySegment]> {
-        parse_segments(key).unwrap().into()
+        parse_segments(&key.into()).unwrap().into()
     }
 
     fn key_segs(key: &str) -> Vec<KeySegment> {

@@ -95,7 +95,7 @@ async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<(
 
 async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResult<()> {
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/uptime"),
+        topic!(SYSTEM_TOPIC_ROOT, "uptime"),
         json!(uptime.as_secs()),
         INTERNAL_CLIENT_ID.to_owned(),
     )
@@ -105,7 +105,7 @@ async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResul
 async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
     let len = wb.len().await?;
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/store/values/count"),
+        topic!(SYSTEM_TOPIC_ROOT, "store", "values", "count"),
         json!(len),
         INTERNAL_CLIENT_ID.to_owned(),
     )

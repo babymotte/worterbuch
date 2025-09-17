@@ -243,11 +243,11 @@ impl From<KeyValuePair> for Value {
 }
 
 impl KeyValuePair {
-    pub fn new(key: String, value: Value) -> Self {
+    pub fn new(key: Key, value: Value) -> Self {
         KeyValuePair { key, value }
     }
 
-    pub fn of<S: Serialize>(key: impl Into<String>, value: S) -> Self {
+    pub fn of(key: impl Into<String>, value: impl Serialize) -> Self {
         KeyValuePair::new(key.into(), json!(value))
     }
 }
@@ -270,27 +270,22 @@ impl<T: DeserializeOwned> TryFrom<KeyValuePair> for TypedKeyValuePair<T> {
     }
 }
 
-impl<S: Serialize> From<(String, S)> for KeyValuePair {
-    fn from((key, value): (String, S)) -> Self {
-        let value = json!(value);
-        KeyValuePair { key, value }
-    }
-}
-
-impl<S: Serialize> From<(&str, S)> for KeyValuePair {
-    fn from((key, value): (&str, S)) -> Self {
-        let value = json!(value);
+impl<K, V> From<(K, V)> for KeyValuePair
+where
+    K: Into<Key>,
+    V: Serialize,
+{
+    fn from(value: (K, V)) -> Self {
         KeyValuePair {
-            key: key.to_owned(),
-            value,
+            key: value.0.into(),
+            value: json!(value.1),
         }
     }
 }
-
 // #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Tags)]
 pub type RegularKeySegment = String;
 
-pub fn parse_segments(pattern: &str) -> WorterbuchResult<Vec<RegularKeySegment>> {
+pub fn parse_segments(pattern: &Key) -> WorterbuchResult<Vec<RegularKeySegment>> {
     let mut segments = Vec::new();
     for segment in pattern.split('/') {
         let ks: KeySegment = segment.into();
@@ -317,11 +312,26 @@ pub enum KeySegment {
     // RegexWildcard(String),
 }
 
-pub fn format_path(path: &[KeySegment]) -> String {
-    path.iter()
-        .map(|seg| format!("{seg}"))
-        .collect::<Vec<String>>()
-        .join("/")
+impl AsRef<str> for KeySegment {
+    fn as_ref(&self) -> &str {
+        match self {
+            KeySegment::Regular(segment) => segment.as_str(),
+            KeySegment::Wildcard => "?",
+            KeySegment::MultiWildcard => "#",
+        }
+    }
+}
+
+pub fn format_path(path: &[impl AsRef<str>]) -> String {
+    let mut path = path.iter().fold(String::new(), |mut a, b| {
+        let b = b.as_ref();
+        a.reserve(b.len() + 1);
+        a.push_str(b);
+        a.push('/');
+        a
+    });
+    path.pop();
+    path
 }
 
 impl From<RegularKeySegment> for KeySegment {

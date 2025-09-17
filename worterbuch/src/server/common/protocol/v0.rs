@@ -11,9 +11,9 @@ use tracing::{Level, debug, error, instrument, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     Ack, AuthCheck, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls,
-    LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub,
-    SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
-    Unsubscribe, UnsubscribeLs,
+    LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish,
+    RequestPattern, SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,
+    TransactionId, Unsubscribe, UnsubscribeLs,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 
@@ -845,7 +845,7 @@ impl V0 {
 async fn forward_loop(
     mut rx: mpsc::Receiver<PStateEvent>,
     transaction_id: TransactionId,
-    request_pattern: String,
+    request_pattern: RequestPattern,
     subscription: SubscriptionId,
     client_sub: mpsc::Sender<ServerMessage>,
 ) {

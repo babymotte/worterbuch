@@ -307,8 +307,8 @@ impl fmt::Display for LsState {
             self.children
                 .iter()
                 .map(escape_path_segment)
-                .reduce(|a, b| format!("{a}\t{b}"))
-                .unwrap_or("".to_owned())
+                .fold(String::new(), |a, b| a + &b + "\t")
+                .trim_end()
         )
     }
 }

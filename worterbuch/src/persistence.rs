@@ -22,11 +22,13 @@ mod v2;
 mod v3;
 
 use crate::{config::Config, server::common::CloneableWbApi, worterbuch::Worterbuch};
+use lazy_static::lazy_static;
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::{
     fs::{self, File, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -35,9 +37,6 @@ use tokio::{
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
 use worterbuch_common::{GraveGoods, LastWill};
-
-use lazy_static::lazy_static;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 lazy_static! {
     pub static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);

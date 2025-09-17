@@ -3,7 +3,10 @@ use crate::{
     subscribers::{self, LsSubs, Subs},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashMap},
+};
 use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, Value,
 };
@@ -99,9 +102,9 @@ pub trait Store {
         subs: &subscribers::Node,
     ) -> StoreResult<InsertionResult>;
 
-    fn get(&self, path: &[RegularKeySegment]) -> Option<&Value>;
+    fn get(&self, path: &[RegularKeySegment]) -> Option<Cow<'_, Value>>;
 
-    fn cget(&self, path: &[RegularKeySegment]) -> Option<(&Value, &CasVersion)>;
+    fn cget(&self, path: &[RegularKeySegment]) -> Option<(Cow<'_, Value>, CasVersion)>;
 
     fn pget(&self, path: &[KeySegment]) -> StoreResult<Vec<KeyValuePair>>;
 
@@ -109,9 +112,9 @@ pub trait Store {
 
     fn pdelete(&mut self, path: &[KeySegment]) -> StoreResult<DeletionResult>;
 
-    fn ls(&self, path: Option<&[impl AsRef<str>]>) -> StoreResult<Vec<RegularKeySegment>>;
+    fn ls(&self, path: Option<&[impl AsRef<str>]>) -> StoreResult<BTreeSet<RegularKeySegment>>;
 
-    fn pls(&self, path: &[KeySegment]) -> StoreResult<Vec<RegularKeySegment>>;
+    fn pls(&self, path: &[KeySegment]) -> StoreResult<BTreeSet<RegularKeySegment>>;
 
     fn export(&mut self) -> Node<ValueEntry>;
 

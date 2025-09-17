@@ -246,7 +246,7 @@ mod test {
     use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
-        parse_segments(key).unwrap()
+        parse_segments(&key.to_owned()).unwrap()
     }
 
     fn key_segs(key: &str) -> Vec<KeySegment> {

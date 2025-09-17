@@ -58,7 +58,7 @@ use worterbuch_common::{
     SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage,
     StateEvent, TransactionId,
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments, topic,
+    format_path, parse_segments, topic,
 };
 
 pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
@@ -72,7 +72,7 @@ pub struct Stats {
 }
 
 impl Display for Stats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let str = serde_json::to_string(self).expect("serialization cannot fail");
         write!(f, "{str}")
     }
@@ -176,7 +176,7 @@ impl PStateAggregatorState {
     async fn send_set_event(&mut self) -> WorterbuchResult<()> {
         let kvps: KeyValuePairs = self.set_buffer.drain().map(Into::into).collect();
         let event = PStateEvent::KeyValuePairs(kvps);
-        self.send_aggregated_pstate(event).await?;
+        self.send_aggregated_pstate(event.to_owned()).await?;
         Ok(())
     }
 
@@ -408,9 +408,7 @@ impl Worterbuch {
 
     pub fn pget(&self, pattern: &str) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<KeySegment> = KeySegment::parse(pattern);
-        self.store
-            .get_matches(&path)
-            .map_err(|e| e.for_pattern(pattern.to_owned()))
+        Ok(self.store.get_matches(&path)?)
     }
 
     pub async fn subscribe(
@@ -710,16 +708,7 @@ impl Worterbuch {
                 );
                 if let Err(e) = self
                     .delete(
-                        topic!(
-                            subs_key,
-                            escape_wildcards(
-                                &path
-                                    .iter()
-                                    .map(ToString::to_string)
-                                    .collect::<Vec<String>>()
-                                    .join("/")
-                            )
-                        ),
+                        topic!(subs_key, escape_wildcards(&format_path(&path))),
                         INTERNAL_CLIENT_ID,
                     )
                     .await
@@ -877,22 +866,15 @@ impl Worterbuch {
 
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
-        match self
-            .store
-            .delete_matches(&path)
-            .map_err(|e| e.for_pattern(pattern))
-        {
-            Ok((deleted, ls_subscribers)) => {
-                self.notify_ls_subscribers(ls_subscribers).await;
-                for kvp in &deleted {
-                    let path = parse_segments(&kvp.key)?;
-                    self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
-                        .await;
-                }
-                Ok(deleted)
-            }
-            Err(e) => Err(e),
+        let (deleted, ls_subscribers) = self.store.delete_matches(&path)?;
+
+        self.notify_ls_subscribers(ls_subscribers).await;
+        for kvp in &deleted {
+            let path = parse_segments(&kvp.key)?;
+            self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
+                .await;
         }
+        Ok(deleted)
     }
 
     pub fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
@@ -963,14 +945,7 @@ impl Worterbuch {
         };
 
         children.map_or_else(
-            |_| {
-                Err(WorterbuchError::IllegalMultiWildcard(
-                    path.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<String>>()
-                        .join("/"),
-                ))
-            },
+            |_| Err(WorterbuchError::IllegalMultiWildcard(format_path(path))),
             Result::Ok,
         )
     }
@@ -1335,7 +1310,7 @@ impl Worterbuch {
     }
 }
 
-fn check_for_read_only_key(key: &str, client_id: Uuid) -> WorterbuchResult<()> {
+fn check_for_read_only_key(key: &Key, client_id: Uuid) -> WorterbuchResult<()> {
     if client_id == INTERNAL_CLIENT_ID {
         // modification is made internally by the server, so everything is allowed
         return Ok(());
