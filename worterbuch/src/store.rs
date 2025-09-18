@@ -19,7 +19,10 @@
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+    mem,
+};
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
@@ -147,6 +150,13 @@ pub struct Node<V> {
     t: Tree<V>,
 }
 
+impl<V> Node<V> {
+    fn into_slim(mut self) -> Self {
+        self.t.remove(SYSTEM_TOPIC_ROOT);
+        self
+    }
+}
+
 impl Default for Node<ValueEntry> {
     fn default() -> Self {
         Self {
@@ -201,10 +211,9 @@ impl Store {
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> Node<ValueEntry> {
         debug!("Exporting slim copy of store with {} entries …", self.len);
-        let data = Node {
-            v: self.data.v.clone(),
-            t: self.slim_copy_top_level_children(),
-        };
+        let data_copy = self.data.clone();
+        let original_data = mem::replace(&mut self.data, data_copy);
+        let data = original_data.into_slim();
         debug!(
             "Exported slim copy with {} entries.",
             Store::ncount_values(&data)
@@ -216,17 +225,6 @@ impl Store {
     pub fn export_for_persistence(&mut self) -> PersistedStore {
         let data = self.export();
         PersistedStore { data }
-    }
-
-    #[instrument(level=Level::DEBUG, skip(self))]
-    fn slim_copy_top_level_children(&self) -> Tree<ValueEntry> {
-        let mut children = Tree::new();
-        for (k, v) in &self.data.t {
-            if k != SYSTEM_TOPIC_ROOT {
-                children.insert(k.to_owned(), v.to_owned());
-            }
-        }
-        children
     }
 
     pub fn len(&self) -> usize {
