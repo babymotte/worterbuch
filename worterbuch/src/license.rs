@@ -102,7 +102,7 @@ pub mod commercial {
     use std::{env, str};
     use tokio::fs;
 
-    pub const LICENSE_SECRET_KEY: &str = env!("WORTERBUCH_LICENSE_SECRET_KEY");
+    pub const LICENSE_PUBLIC_KEY: &str = env!("WORTERBUCH_LICENSE_PUBLIC_KEY");
 
     pub async fn load_license() -> miette::Result<License> {
         // TODO get from config
@@ -116,7 +116,7 @@ pub mod commercial {
             .wrap_err("Could not read license file")?;
 
         let validation = Validation::new(Algorithm::EdDSA);
-        let key = DecodingKey::from_ed_pem(LICENSE_SECRET_KEY.as_ref()).into_diagnostic()?;
+        let key = DecodingKey::from_ed_pem(LICENSE_PUBLIC_KEY.as_ref()).into_diagnostic()?;
 
         let token = decode::<License>(&license_file, &key, &validation)
             .into_diagnostic()

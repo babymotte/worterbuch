@@ -162,14 +162,14 @@ impl JwtClaims {
 }
 
 pub fn get_claims(jwt: Option<&str>, config: &Config) -> AuthorizationResult<JwtClaims> {
-    if let Some(secret) = &config.auth_token_secret {
+    if let Some(key) = &config.auth_token_key {
         if let Some(token) = jwt {
             let header = decode_header(token)?;
 
             let (alg, key) = match &header.alg {
-                Algorithm::ES256 => (header.alg, DecodingKey::from_ec_pem(secret.as_ref())?),
-                Algorithm::EdDSA => (header.alg, DecodingKey::from_ed_pem(secret.as_ref())?),
-                Algorithm::HS256 => (header.alg, DecodingKey::from_secret(secret.as_ref())),
+                Algorithm::ES256 => (header.alg, DecodingKey::from_ec_pem(key.as_ref())?),
+                Algorithm::EdDSA => (header.alg, DecodingKey::from_ed_pem(key.as_ref())?),
+                Algorithm::HS256 => (header.alg, DecodingKey::from_secret(key.as_ref())),
                 _ => {
                     return Err(AuthorizationError::UnsupportedEncryptionAlgorithm(
                         header.alg,

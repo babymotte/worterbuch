@@ -49,7 +49,7 @@ pub async fn bearer_auth(
             req.extensions_mut().insert(claims);
         }
         Err(e) => {
-            if config.auth_token_secret.is_some() {
+            if config.auth_token_key.is_some() {
                 return Err(e.into());
             }
         }
