@@ -18,7 +18,7 @@
  */
 
 use crate::Config;
-use jsonwebtoken::{DecodingKey, Validation, decode};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::{Deserialize, Serialize};
 use tracing::{Level, error, instrument};
 use worterbuch_common::{
@@ -162,14 +162,23 @@ impl JwtClaims {
 }
 
 pub fn get_claims(jwt: Option<&str>, config: &Config) -> AuthorizationResult<JwtClaims> {
-    if let Some(secret) = &config.auth_token {
+    if let Some(secret) = &config.auth_token_secret {
         if let Some(token) = jwt {
-            let token = decode::<JwtClaims>(
-                token,
-                &DecodingKey::from_secret(secret.as_ref()),
-                &Validation::default(),
-            )
-            .map_err(|e| AuthorizationError::TokenDecodeError(e.to_string()))?;
+            let header = decode_header(token)?;
+
+            let (alg, key) = match &header.alg {
+                Algorithm::ES256 => (header.alg, DecodingKey::from_ec_pem(secret.as_ref())?),
+                Algorithm::EdDSA => (header.alg, DecodingKey::from_ed_pem(secret.as_ref())?),
+                Algorithm::HS256 => (header.alg, DecodingKey::from_secret(secret.as_ref())),
+                _ => {
+                    return Err(AuthorizationError::UnsupportedEncryptionAlgorithm(
+                        header.alg,
+                    ));
+                }
+            };
+
+            let validation = Validation::new(alg);
+            let token = decode::<JwtClaims>(token, &key, &validation)?;
             Ok(token.claims)
         } else {
             Err(AuthorizationError::MissingToken)

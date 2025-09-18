@@ -106,7 +106,7 @@ async fn info(State(wb): State<CloneableWbApi>) -> WorterbuchResult<Json<ServerI
     let info = ServerInfo::new(
         VERSION.to_owned(),
         supported_protocol_versions,
-        config.auth_token.is_some(),
+        config.auth_token_secret.is_some(),
     );
 
     Ok(Json(info))

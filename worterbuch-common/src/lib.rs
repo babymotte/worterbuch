@@ -71,6 +71,7 @@ pub type GraveGoods = RequestPatterns;
 pub type UniqueFlag = bool;
 pub type LiveOnlyFlag = bool;
 pub type AuthToken = String;
+pub type AuthTokenSecret = String;
 pub type CasVersion = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -22,6 +22,7 @@ use crate::{
     RequestPattern, TransactionId, server::Err,
 };
 use http::StatusCode;
+use jsonwebtoken::Algorithm;
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
@@ -81,29 +82,22 @@ pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
 pub trait Context<T, E: std::error::Error> {
     fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError>;
 }
-#[derive(Debug, Clone, Diagnostic)]
+#[derive(Debug, Clone, Error, Diagnostic)]
 pub enum AuthorizationError {
+    #[error("Client lacks privilege '{0} {1}'")]
     InsufficientPrivileges(Privilege, AuthCheckOwned),
-    TokenDecodeError(String),
+    #[error("No JWT was included in the request")]
     MissingToken,
+    #[error("No JWT was configured")]
     MissingSecret,
+    // TODO should this not trigger a crash?
+    #[error("Incorrect check provided. This is a bug.")]
     InvalidCheck,
+    #[error("Unsupported encryption algorith: {0:?}")]
+    UnsupportedEncryptionAlgorithm(Algorithm),
+    #[error("JWT error: {0}")]
+    JwtError(#[from] jsonwebtoken::errors::Error),
 }
-
-impl fmt::Display for AuthorizationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AuthorizationError::InsufficientPrivileges(privilege, check) => {
-                write!(f, "Client lacks privilege '{privilege} {check}'")
-            }
-            AuthorizationError::TokenDecodeError(msg) => msg.fmt(f),
-            AuthorizationError::MissingToken => "No JWT was included in the request".fmt(f),
-            AuthorizationError::MissingSecret => "No JWT was configured".fmt(f),
-            AuthorizationError::InvalidCheck => "Incorrect check provided. This is a bug.".fmt(f),
-        }
-    }
-}
-impl std::error::Error for AuthorizationError {}
 
 pub type AuthorizationResult<T> = Result<T, AuthorizationError>;
 

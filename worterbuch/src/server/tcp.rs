@@ -209,7 +209,7 @@ async fn serve_loop(
     socket: TcpStream,
 ) -> Result<()> {
     let config = worterbuch.config().await?;
-    let authorization_required = config.auth_token.is_some();
+    let authorization_required = config.auth_token_secret.is_some();
     let send_timeout = config.send_timeout;
     let authorized = None;
 

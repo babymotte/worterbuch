@@ -3379,6 +3379,7 @@ dependencies = [
  "http",
  "inferno",
  "jemalloc_pprof",
+ "jsonwebtoken",
  "mappings",
  "miette",
  "opentelemetry",

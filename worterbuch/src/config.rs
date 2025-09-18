@@ -27,7 +27,7 @@ use std::{env, net::IpAddr, path::PathBuf, time::Duration};
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use tracing::debug;
 use worterbuch_common::{
-    AuthToken, Path,
+    AuthTokenSecret, Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
 };
 
@@ -96,7 +96,7 @@ pub struct Config {
     pub send_timeout: Option<Duration>,
     pub channel_buffer_size: usize,
     pub extended_monitoring: bool,
-    pub auth_token: Option<AuthToken>,
+    pub auth_token_secret: Option<AuthTokenSecret>,
     pub license: License,
     pub shutdown_timeout: Duration,
     pub leader: bool,
@@ -213,7 +213,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_AUTH_TOKEN") {
-            self.auth_token = Some(val);
+            self.auth_token_secret = Some(val);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_SHUTDOWN_TIMEOUT") {
@@ -283,7 +283,7 @@ impl Config {
                     send_timeout: None,
                     channel_buffer_size: 1_000,
                     extended_monitoring: true,
-                    auth_token: None,
+                    auth_token_secret: None,
                     license,
                     shutdown_timeout: Duration::from_secs(1),
                     follower: args.follower,
