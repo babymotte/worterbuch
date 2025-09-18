@@ -216,7 +216,7 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usi
         warn!(
             "The leader election quorum ({quorum}) is TOO LOW for the number of nodes ({node_count}). This makes your cluster susceptible to split brain scenarios (i.e. two leaders may be elected at the same time). THIS IS HIGHLY DISCOURAGED!"
         );
-    } else if node_count % 2 == 0 {
+    } else if node_count.is_multiple_of(2) {
         warn!(
             "An even number of nodes is generally discouraged, since it increases the probability of a tied leader election vote and does not provide any more fail safety than a cluster with one less node."
         );

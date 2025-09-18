@@ -71,7 +71,7 @@ pub struct ChildProcessManagerActor {
 
 pub struct ChildProcessManager {
     api_tx: mpsc::Sender<ChildProcessMessage>,
-    subsys: NestedSubsystem<Box<(dyn Error + Send + Sync + 'static)>>,
+    subsys: NestedSubsystem<Box<dyn Error + Send + Sync + 'static>>,
 }
 
 impl Drop for ChildProcessManager {
