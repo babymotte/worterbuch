@@ -97,14 +97,15 @@ pub async fn load_license() -> miette::Result<License> {
 pub mod commercial {
 
     use super::License;
-    use jsonwebtoken::{DecodingKey, Validation, decode};
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use miette::{Context, IntoDiagnostic};
     use std::{env, str};
     use tokio::fs;
 
-    pub const LICENSE_SECRET: &str = env!("WORTERBUCH_LICENSE_SECRET");
+    pub const LICENSE_SECRET_KEY: &str = env!("WORTERBUCH_LICENSE_SECRET_KEY");
 
     pub async fn load_license() -> miette::Result<License> {
+        // TODO get from config
         let license_file = env::var("WORTERBUCH_LICENSE_FILE")
             .into_diagnostic()
             .wrap_err("WORTERBUCH_LICENSE_FILE is not set")?;
@@ -114,13 +115,12 @@ pub mod commercial {
             .into_diagnostic()
             .wrap_err("Could not read license file")?;
 
-        let token = decode::<License>(
-            &license_file,
-            &DecodingKey::from_secret(LICENSE_SECRET.as_ref()),
-            &Validation::default(),
-        )
-        .into_diagnostic()
-        .wrap_err("Validity of license token could not be confirmed")?;
+        let validation = Validation::new(Algorithm::EdDSA);
+        let key = DecodingKey::from_ed_pem(LICENSE_SECRET_KEY.as_ref()).into_diagnostic()?;
+
+        let token = decode::<License>(&license_file, &key, &validation)
+            .into_diagnostic()
+            .wrap_err("Validity of license token could not be confirmed")?;
 
         Ok(token.claims)
     }
