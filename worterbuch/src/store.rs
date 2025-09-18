@@ -151,9 +151,8 @@ pub struct Node<V> {
 }
 
 impl<V> Node<V> {
-    fn into_slim(mut self) -> Self {
+    fn strip(&mut self) {
         self.t.remove(SYSTEM_TOPIC_ROOT);
-        self
     }
 }
 
@@ -212,13 +211,13 @@ impl Store {
     pub fn export(&mut self) -> Node<ValueEntry> {
         debug!("Exporting slim copy of store with {} entries …", self.len);
         let data_copy = self.data.clone();
-        let original_data = mem::replace(&mut self.data, data_copy);
-        let data = original_data.into_slim();
+        let mut original_data = mem::replace(&mut self.data, data_copy);
+        original_data.strip();
         debug!(
             "Exported slim copy with {} entries.",
-            Store::ncount_values(&data)
+            Store::ncount_values(&original_data)
         );
-        data
+        original_data
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
