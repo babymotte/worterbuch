@@ -161,17 +161,17 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Node<V> {
-    Leaf {
-        #[serde(rename = "v")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        value: Option<V>,
-    },
     Internal {
         #[serde(rename = "v")]
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<V>,
         #[serde(rename = "t")]
         tree: Tree<V>,
+    },
+    Leaf {
+        #[serde(rename = "v")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<V>,
     },
 }
 
@@ -945,6 +945,7 @@ impl Store {
     }
 
     pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, (ValueEntry, bool))> {
+        eprintln!("{:?}", other);
         let mut insertions = Vec::new();
         let path = Vec::new();
         Store::nmerge(&mut self.data, other, None, &mut insertions, &path);
