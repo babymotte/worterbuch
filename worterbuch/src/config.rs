@@ -17,10 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    license::{License, load_license},
-    telemetry,
-};
+use crate::license::{License, load_license};
+#[cfg(not(feature = "telemetry"))]
+use crate::logging;
+#[cfg(feature = "telemetry")]
+use crate::telemetry;
 use clap::Parser;
 use serde::Serialize;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
@@ -239,20 +240,27 @@ impl Config {
 
     pub async fn new() -> ConfigResult<Self> {
         let args = Args::parse();
-        let hostname = hostname::get()?;
-        let cluster_role = if args.leader {
-            Some("leader".to_owned())
-        } else if args.follower {
-            Some("follower".to_owned())
-        } else {
-            None
-        };
-        telemetry::init(
-            args.instance_name
-                .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
-            cluster_role,
-        )
-        .await?;
+
+        #[cfg(feature = "telemetry")]
+        {
+            let hostname = hostname::get()?;
+            let cluster_role = if args.leader {
+                Some("leader".to_owned())
+            } else if args.follower {
+                Some("follower".to_owned())
+            } else {
+                None
+            };
+            telemetry::init(
+                args.instance_name
+                    .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
+                cluster_role,
+            )
+            .await?;
+        }
+
+        #[cfg(not(feature = "telemetry"))]
+        logging::init()?;
 
         match load_license().await {
             Ok(license) => {

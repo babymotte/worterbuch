@@ -29,11 +29,14 @@ mod auth;
 mod config;
 mod leader_follower;
 pub mod license;
+#[cfg(not(feature = "telemetry"))]
+mod logging;
 mod persistence;
 mod server;
 mod stats;
 pub mod store;
 mod subscribers;
+#[cfg(feature = "telemetry")]
 mod telemetry;
 mod worterbuch;
 
