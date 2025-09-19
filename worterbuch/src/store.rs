@@ -945,7 +945,6 @@ impl Store {
     }
 
     pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, (ValueEntry, bool))> {
-        eprintln!("{:?}", other);
         let mut insertions = Vec::new();
         let path = Vec::new();
         Store::nmerge(&mut self.data, other, None, &mut insertions, &path);
