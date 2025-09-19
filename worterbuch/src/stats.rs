@@ -90,6 +90,8 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
 async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<()> {
     update_uptime(wb, start.elapsed()).await?;
     update_message_count(wb).await?;
+    #[cfg(feature = "jemalloc")]
+    update_jemalloc_stats(wb).await.ok();
     Ok(())
 }
 
@@ -110,4 +112,124 @@ async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await
+}
+
+#[cfg(feature = "jemalloc")]
+async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
+    use miette::IntoDiagnostic;
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    // Advance the epoch to refresh stats
+    epoch::advance().into_diagnostic()?;
+
+    let allocated = stats::allocated::read().into_diagnostic()?;
+    let resident = stats::resident::read().into_diagnostic()?;
+    let active = stats::active::read().into_diagnostic()?;
+    let mapped = stats::mapped::read().into_diagnostic()?;
+    let metadata = stats::metadata::read().into_diagnostic()?;
+    let retained = stats::retained::read().into_diagnostic()?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/allocated"),
+        json!(allocated),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/resident"),
+        json!(resident),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/active"),
+        json!(active),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/mapped"),
+        json!(mapped),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/retained"),
+        json!(retained),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/metadata"),
+        json!(metadata),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/allocated"),
+        json!(format_bytes(allocated)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/resident"),
+        json!(format_bytes(resident)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/active"),
+        json!(format_bytes(active)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/mapped"),
+        json!(format_bytes(mapped)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/retained"),
+        json!(format_bytes(retained)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    wb.set(
+        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/metadata"),
+        json!(format_bytes(metadata)),
+        INTERNAL_CLIENT_ID.to_owned(),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[cfg(feature = "jemalloc")]
+pub fn format_bytes(bytes: usize) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{:.0} {}", size, UNITS[unit]) // no decimals for plain bytes
+    } else {
+        format!("{:.1} {}", size, UNITS[unit]) // one decimal otherwise
+    }
 }

@@ -31,6 +31,7 @@ mod leader_follower;
 pub mod license;
 #[cfg(not(feature = "telemetry"))]
 mod logging;
+mod mem_tools;
 mod persistence;
 mod server;
 mod stats;

@@ -20,6 +20,7 @@
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
+    mem_tools,
     store::{Node, PersistedStore, Store, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
@@ -880,6 +881,9 @@ impl Worterbuch {
             self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
                 .await;
         }
+
+        mem_tools::schedule_trim();
+
         Ok(deleted)
     }
 
@@ -1232,6 +1236,8 @@ impl Worterbuch {
         {
             warn!("Error in subscription monitoring: {e}");
         }
+
+        mem_tools::schedule_trim();
 
         Ok(())
     }
