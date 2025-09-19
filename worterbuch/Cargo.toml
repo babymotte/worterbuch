@@ -58,6 +58,7 @@ axum-server = "0.7.2"
 headers = "0.4.1"
 axum-extra = { version = "0.10.1", features = ["cookie", "typed-header"] }
 http-body-util = "0.1.3"
+thiserror = "2.0.16"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -321,7 +321,7 @@ impl Worterbuch {
         let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
         match self.store.cget(&path) {
-            Some((value, version)) => Ok((value.to_owned(), *version)),
+            Some((value, version)) => Ok((value.to_owned(), version)),
             None => Err(WorterbuchError::NoSuchValue(key.to_owned())),
         }
     }
@@ -405,9 +405,7 @@ impl Worterbuch {
 
     pub fn pget(&self, pattern: &str) -> WorterbuchResult<KeyValuePairs> {
         let path: Vec<KeySegment> = KeySegment::parse(pattern);
-        self.store
-            .get_matches(&path)
-            .map_err(|e| e.for_pattern(pattern.to_owned()))
+        Ok(self.store.get_matches(&path)?)
     }
 
     pub async fn subscribe(
@@ -874,22 +872,15 @@ impl Worterbuch {
 
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
-        match self
-            .store
-            .delete_matches(&path)
-            .map_err(|e| e.for_pattern(pattern))
-        {
-            Ok((deleted, ls_subscribers)) => {
-                self.notify_ls_subscribers(ls_subscribers).await;
-                for kvp in &deleted {
-                    let path = parse_segments(&kvp.key)?;
-                    self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
-                        .await;
-                }
-                Ok(deleted)
-            }
-            Err(e) => Err(e),
+        let (deleted, ls_subscribers) = self.store.delete_matches(&path)?;
+
+        self.notify_ls_subscribers(ls_subscribers).await;
+        for kvp in &deleted {
+            let path = parse_segments(&kvp.key)?;
+            self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
+                .await;
         }
+        Ok(deleted)
     }
 
     pub fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {

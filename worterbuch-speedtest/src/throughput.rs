@@ -114,34 +114,13 @@ impl Stats {
     }
 
     fn summarize(&self) -> StatSummary {
-        let total_delta_sent_offsets = self
-            .delta_sent_offsets
-            .values()
-            .copied()
-            .reduce(|a, b| a + b)
-            .unwrap_or(0);
-        let total_delta_received_offsets = self
-            .delta_received_offsets
-            .values()
-            .copied()
-            .reduce(|a, b| a + b)
-            .unwrap_or(0);
-        let total_delta_t = self
-            .delta_ts
-            .values()
-            .copied()
-            .reduce(|a, b| a + b)
-            .map(|it| it.as_millis())
-            .unwrap_or(0);
+        let total_delta_sent_offsets = self.delta_sent_offsets.values().sum::<u64>();
+        let total_delta_received_offsets = self.delta_received_offsets.values().sum::<u64>();
+        let total_delta_t = self.delta_ts.values().sum::<Duration>().as_millis();
         let average_delta_t = total_delta_t as f64 / self.delta_ts.len().max(1) as f64;
         let total_send_rate = (1000.0 * total_delta_sent_offsets as f64) / average_delta_t;
         let total_receive_rate = (1000.0 * total_delta_received_offsets as f64) / average_delta_t;
-        let total_lag = self
-            .lags
-            .values()
-            .copied()
-            .reduce(|a, b| a + b)
-            .unwrap_or(0);
+        let total_lag = self.lags.values().sum::<u64>();
 
         // TODO evaluate severity
 

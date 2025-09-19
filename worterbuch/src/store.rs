@@ -20,9 +20,13 @@
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
-    mem,
+    collections::{
+        HashMap, HashSet, VecDeque,
+        hash_map::{Entry, Keys},
+    },
+    mem::{self},
 };
+use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
@@ -30,12 +34,11 @@ use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
     Value,
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments,
+    format_path, parse_segments,
 };
 
 type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
-type CanDelete = bool;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
@@ -125,52 +128,206 @@ impl From<Value> for ValueEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum StoreError {
-    IllegalMultiWildcard,
+    #[error("Illegal multi-level wildcard in key: {0}")]
+    IllegalMultiWildcard(String),
+    #[error("Could not serialize/deserialize JSON: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
+    #[error("CAS version mismatch")]
+    CasVersionMismatch,
+    #[error("Value is CAS protected")]
+    Cas,
 }
 
-impl StoreError {
-    pub fn for_pattern(self, pattern: String) -> WorterbuchError {
-        match self {
-            StoreError::IllegalMultiWildcard => WorterbuchError::IllegalMultiWildcard(pattern),
+impl From<StoreError> for WorterbuchError {
+    fn from(value: StoreError) -> Self {
+        match value {
+            StoreError::IllegalMultiWildcard(pattern) => {
+                WorterbuchError::IllegalMultiWildcard(pattern)
+            }
+            StoreError::CasVersionMismatch => WorterbuchError::CasVersionMismatch,
+            StoreError::Cas => WorterbuchError::Cas,
+            StoreError::SerdeJsonError(e) => WorterbuchError::SerDeError(
+                e,
+                "Could not serialize/deserialize JSON from/to persistence".to_owned(),
+            ),
         }
     }
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Node<V> {
-    #[serde(rename = "v")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    v: Option<V>,
-    #[serde(rename = "t")]
-    #[serde(skip_serializing_if = "Tree::is_empty", default = "Tree::default")]
-    t: Tree<V>,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Node<V> {
+    Leaf {
+        #[serde(rename = "v")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<V>,
+    },
+    Internal {
+        #[serde(rename = "v")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<V>,
+        #[serde(rename = "t")]
+        tree: Tree<V>,
+    },
 }
 
 impl<V> Node<V> {
+    fn into_sub_tree(self) -> Option<Tree<V>> {
+        match self {
+            Node::Leaf { value: _ } => None,
+            Node::Internal { value: _, tree: t } => Some(t),
+        }
+    }
+
+    fn sub_tree(&self) -> Option<&Tree<V>> {
+        match self {
+            Node::Leaf { value: _ } => None,
+            Node::Internal { value: _, tree: t } => Some(t),
+        }
+    }
+
     fn strip(&mut self) {
-        self.t.remove(SYSTEM_TOPIC_ROOT);
+        if let Node::Internal { value: _, tree: t } = self {
+            t.remove(SYSTEM_TOPIC_ROOT);
+        }
     }
-}
 
-impl Default for Node<ValueEntry> {
-    fn default() -> Self {
-        Self {
-            v: Default::default(),
-            t: Default::default(),
+    fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<V>> {
+        match self {
+            Node::Leaf { value: _ } => None,
+            Node::Internal { value: _, tree: t } => t.get(key.as_ref()),
+        }
+    }
+
+    fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<V>> {
+        match self {
+            Node::Leaf { value: _ } => None,
+            Node::Internal { value: _, tree: t } => t.get_mut(key.as_ref()),
+        }
+    }
+
+    fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<V>, bool) {
+        match self {
+            Node::Leaf { value: v } => {
+                let v = mem::take(v);
+                let mut t = Tree::new();
+                t.insert(key.clone(), Node::default());
+                *self = Node::Internal { value: v, tree: t };
+                (self.get_or_create_child(key).0, true)
+            }
+            Node::Internal { value: _, tree: t } => match t.entry(key) {
+                Entry::Occupied(occupied_entry) => (occupied_entry.into_mut(), false),
+                Entry::Vacant(vacant_entry) => (vacant_entry.insert(Node::default()), true),
+            },
+        }
+    }
+
+    fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<V>>> {
+        match self {
+            Node::Leaf { value: _ } => None,
+            Node::Internal { value: _, tree: t } => Some(t.keys()),
+        }
+    }
+
+    fn ls_owned(&self) -> Vec<RegularKeySegment> {
+        if let Some(keys) = self.ls() {
+            keys.map(ToOwned::to_owned).collect()
+        } else {
+            vec![]
+        }
+    }
+
+    /// Removes any obsolete children
+    fn trim(&mut self) -> bool {
+        let mut removed = false;
+        if let Node::Internal { value: v, tree: t } = self {
+            t.retain(|_, child| {
+                let obsolete = child.is_obsolete();
+                removed |= obsolete;
+                !obsolete
+            });
+            if t.is_empty() {
+                let v = mem::take(v);
+                *self = Node::Leaf { value: v };
+            }
+        }
+        self.is_obsolete()
+    }
+
+    /// Test if a node is obsolete. A leaf node is obsolete, if it has no value, an internal node is obsolete if it has no value and no children.
+    /// Note that this does not recursively check children for obsolescence, for a recursive check use `is_clean()`
+    fn is_obsolete(&self) -> bool {
+        match self {
+            Node::Leaf { value: v } => v.is_none(),
+            Node::Internal { value: v, tree: t } => v.is_none() && t.is_empty(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Node::Leaf { value: _ } => true,
+            Node::Internal { value: _, tree: t } => t.is_empty(),
+        }
+    }
+
+    /// Recursively check if this node's subtree contains any obsolete children
+    fn is_clean(&self) -> bool {
+        match self {
+            Node::Leaf { value: v } => v.is_some(),
+            Node::Internal { value: v, tree: t } => {
+                if v.is_none() && t.is_empty() {
+                    false
+                } else {
+                    t.iter().all(|(_, v)| v.is_clean())
+                }
+            }
+        }
+    }
+
+    fn value(&self) -> Option<&V> {
+        match self {
+            Node::Leaf { value: v } => v.as_ref(),
+            Node::Internal { value: v, tree: _ } => v.as_ref(),
+        }
+    }
+
+    fn value_mut(&mut self) -> Option<&mut V> {
+        match self {
+            Node::Leaf { value: v } => v.as_mut(),
+            Node::Internal { value: v, tree: _ } => v.as_mut(),
+        }
+    }
+
+    fn take_value(&mut self) -> Option<V> {
+        match self {
+            Node::Leaf { value: v } => v.take(),
+            Node::Internal { value: v, tree: _ } => v.take(),
+        }
+    }
+
+    fn set_value(&mut self, value: V) {
+        match self {
+            Node::Leaf { value: v } => *v = Some(value),
+            Node::Internal { value: v, tree: _ } => *v = Some(value),
+        }
+    }
+
+    fn drop_children(&mut self) {
+        if let Node::Internal { value: v, tree: t } = self {
+            t.clear();
+            let v = mem::take(v);
+            *self = Node::Leaf { value: v };
         }
     }
 }
 
-impl Default for Node<Lock> {
+impl<T> Default for Node<T> {
     fn default() -> Self {
-        Self {
-            v: Default::default(),
-            t: Default::default(),
-        }
+        Self::Leaf { value: None }
     }
 }
 
@@ -208,6 +365,12 @@ impl Store {
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
+    pub fn defragment(&mut self) {
+        let data_copy = self.data.clone();
+        self.data = data_copy;
+    }
+
+    #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> Node<ValueEntry> {
         debug!("Exporting slim copy of store with {} entries …", self.len);
         let data_copy = self.data.clone();
@@ -236,19 +399,14 @@ impl Store {
 
     /// retrieve a value for a non-wildcard key
     pub fn get(&self, path: &[RegularKeySegment]) -> Option<&Value> {
-        let node = self.get_node(path)?;
-        match node.v.as_ref()? {
-            ValueEntry::Plain(value) => Some(value),
-            ValueEntry::Cas(value, _) => Some(value),
-        }
+        self.get_node(path)?.value().map(AsRef::as_ref)
     }
 
     /// retrieve a value and its version for a non-wildcard key
-    pub fn cget(&self, path: &[RegularKeySegment]) -> Option<(&Value, &CasVersion)> {
-        let node = self.get_node(path)?;
-        match node.v.as_ref()? {
-            ValueEntry::Plain(value) => Some((value, &0)),
-            ValueEntry::Cas(value, version) => Some((value, version)),
+    pub fn cget(&self, path: &[RegularKeySegment]) -> Option<(&Value, CasVersion)> {
+        match self.get_node(path)?.value()? {
+            ValueEntry::Cas(value, version) => Some((value, *version)),
+            ValueEntry::Plain(value) => Some((value, 0)),
         }
     }
 
@@ -256,11 +414,7 @@ impl Store {
         let mut current = &self.data;
 
         for elem in path {
-            if let Some(node) = current.t.get(elem) {
-                current = node;
-            } else {
-                return None;
-            }
+            current = current.get_child(elem)?;
         }
 
         Some(current)
@@ -270,10 +424,7 @@ impl Store {
         let mut current = &mut self.locks;
 
         for elem in path {
-            current = match current.t.entry(elem) {
-                Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
-                Entry::Vacant(vacant_entry) => vacant_entry.insert(Node::default()),
-            }
+            current = current.get_or_create_child(elem).0;
         }
 
         current
@@ -282,42 +433,39 @@ impl Store {
     pub fn delete(
         &mut self,
         path: &[RegularKeySegment],
-    ) -> WorterbuchResult<Option<(Value, Vec<AffectedLsSubscribers>)>> {
+    ) -> StoreResult<Option<(Value, Vec<AffectedLsSubscribers>)>> {
         let mut ls_subscribers = Vec::new();
         let removed = Store::ndelete(
             &mut self.data,
             path,
             Some(&self.subscribers),
             &mut ls_subscribers,
-        )?
-        .0;
+        )?;
         if removed.is_some() {
             self.len -= 1;
         }
+        debug_assert!(self.data.is_empty() || self.data.is_clean());
         Ok(removed.map(|it| (it, ls_subscribers)))
     }
 
     pub fn delete_lock_node(&mut self, path: &[RegularKeySegment]) {
         Store::ndelete_lock_nodes(&mut self.locks, path);
+        debug_assert!(self.locks.is_empty() || self.locks.is_clean());
     }
 
-    fn ndelete_lock_nodes(node: &mut Node<Lock>, relative_path: &[RegularKeySegment]) -> CanDelete {
+    fn ndelete_lock_nodes(node: &mut Node<Lock>, relative_path: &[RegularKeySegment]) {
         if relative_path.is_empty() {
-            node.v.take();
-            return node.t.is_empty();
+            node.take_value();
+            return;
         }
 
         let head = &relative_path[0];
         let tail = &relative_path[1..];
 
-        if let Entry::Occupied(mut e) = node.t.entry(head.to_owned()) {
-            let next = e.get_mut();
-            let can_delete = Store::ndelete_lock_nodes(next, tail);
-            if can_delete {
-                e.remove();
-            }
+        if let Some(next) = node.get_child_mut(head) {
+            Store::ndelete_lock_nodes(next, tail);
+            node.trim();
         }
-        node.v.is_none() && node.t.is_empty()
     }
 
     /// retrieve values for a key containing at least one single-level wildcard and possibly a multi-level wildcard
@@ -355,7 +503,7 @@ impl Store {
         } else {
             self.len -= matches.len();
         }
-        // TODO notify subscribers
+        debug_assert!(self.data.is_empty() || self.data.is_clean());
         Ok((matches, ls_subscribers))
     }
 
@@ -364,31 +512,23 @@ impl Store {
         relative_path: &[RegularKeySegment],
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
-    ) -> WorterbuchResult<(Option<Value>, CanDelete)> {
+    ) -> StoreResult<Option<Value>> {
         if relative_path.is_empty() {
-            match node.v.take() {
-                Some(v) => match v {
-                    ValueEntry::Plain(value) => return Ok((Some(value), node.t.is_empty())),
-                    ValueEntry::Cas(value, _) => return Ok((Some(value), node.t.is_empty())),
-                },
-                None => return Ok((None, node.t.is_empty())),
-            }
+            return Ok(node.take_value().map(Value::from));
         }
 
         let head = &relative_path[0];
         let tail = &relative_path[1..];
 
-        if let Entry::Occupied(mut e) = node.t.entry(head.to_owned()) {
-            let next = e.get_mut();
-            let (val, can_delete) = Store::ndelete(
+        if let Some(next) = node.get_child_mut(head) {
+            let val = Store::ndelete(
                 next,
                 tail,
                 subscribers.and_then(|s| s.tree.get(head)),
                 ls_subscribers,
             )?;
-            if can_delete {
-                e.remove();
-                let new_children: Vec<String> = node.t.keys().map(ToOwned::to_owned).collect();
+            if node.trim() {
+                let new_children = node.ls_owned();
                 if let Some(subscribers) = subscribers.as_ref()
                     && !subscribers.ls_subscribers.is_empty()
                 {
@@ -396,9 +536,9 @@ impl Store {
                     ls_subscribers.push((subscribers, new_children));
                 }
             }
-            Ok((val, node.v.is_none() && node.t.is_empty()))
+            Ok(val)
         } else {
-            Ok((None, node.v.is_none() && node.t.is_empty()))
+            Ok(None)
         }
     }
 
@@ -409,17 +549,13 @@ impl Store {
         relative_path: &[KeySegment],
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
-    ) -> StoreResult<CanDelete> {
+    ) -> StoreResult<()> {
         if relative_path.is_empty() {
-            if let Some(value) = node.v.take() {
+            if let Some(value) = node.take_value() {
                 let key = traversed_path.join("/");
-                let value = match value {
-                    ValueEntry::Plain(it) => it,
-                    ValueEntry::Cas(it, _) => it,
-                };
-                matches.push(KeyValuePair::new(key, value));
+                matches.push(KeyValuePair::new(key, value.into()));
             }
-            return Ok(node.t.is_empty());
+            return Ok(());
         }
 
         let head = &relative_path[0];
@@ -428,7 +564,12 @@ impl Store {
         match &head {
             KeySegment::MultiWildcard => {
                 if !tail.is_empty() {
-                    return Err(StoreError::IllegalMultiWildcard);
+                    return Err(StoreError::IllegalMultiWildcard(format!(
+                        "{}/{}/{}",
+                        &format_path(&traversed_path),
+                        head.as_ref(),
+                        &format_path(tail),
+                    )));
                 }
                 Store::ncollect_matches(
                     node,
@@ -438,15 +579,10 @@ impl Store {
                     subscribers,
                     ls_subscribers,
                 )?;
-                node.t.clear();
+                node.drop_children();
             }
             KeySegment::Wildcard => {
-                for id in node
-                    .t
-                    .keys()
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<RegularKeySegment>>()
-                {
+                for id in node.ls_owned() {
                     let traversed_path = traversed_path.clone();
                     Store::ndelete_child_matches(
                         node,
@@ -471,8 +607,9 @@ impl Store {
                 )?;
             }
         }
+        node.trim();
 
-        Ok(node.v.is_none() && node.t.is_empty())
+        Ok(())
     }
 
     fn ndelete_child_matches<'a>(
@@ -485,9 +622,9 @@ impl Store {
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) -> StoreResult<()> {
         traversed_path.push(id);
-        if let Entry::Occupied(mut e) = node.t.entry(id.to_owned()) {
-            let child = e.get_mut();
-            let can_delete = Store::ndelete_matches(
+
+        if let Some(child) = node.get_child_mut(id) {
+            Store::ndelete_matches(
                 child,
                 traversed_path,
                 matches,
@@ -495,9 +632,8 @@ impl Store {
                 subscribers.and_then(|s| s.tree.get(id)),
                 ls_subscribers,
             )?;
-            if can_delete {
-                e.remove();
-                let new_children: Vec<String> = node.t.keys().map(ToOwned::to_owned).collect();
+            if node.trim() {
+                let new_children = node.ls_owned();
                 if let Some(subscribers) = subscribers.as_ref()
                     && !subscribers.ls_subscribers.is_empty()
                 {
@@ -519,12 +655,8 @@ impl Store {
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) -> StoreResult<()> {
         if remaining_path.is_empty() {
-            if let Some(value) = &node.v {
+            if let Some(value) = node.value().map(AsRef::as_ref) {
                 let key = traversed_path.join("/");
-                let value = match value {
-                    ValueEntry::Plain(it) => it,
-                    ValueEntry::Cas(it, _) => it,
-                };
                 matches.push(KeyValuePair::new(key, value.to_owned()));
             }
 
@@ -537,62 +669,67 @@ impl Store {
         match next {
             KeySegment::MultiWildcard => {
                 if !tail.is_empty() {
-                    return Err(StoreError::IllegalMultiWildcard);
+                    return Err(StoreError::IllegalMultiWildcard(format!(
+                        "{}/{}/{}",
+                        &format_path(&traversed_path),
+                        next.as_ref(),
+                        &format_path(tail),
+                    )));
                 }
 
-                if let Some(value) = &node.v {
+                if let Some(value) = node.value().map(AsRef::as_ref) {
                     let key = traversed_path.join("/");
-                    let value = match value {
-                        ValueEntry::Plain(it) => it,
-                        ValueEntry::Cas(it, _) => it,
-                    };
                     matches.push(KeyValuePair::new(key, value.to_owned()));
                 }
 
-                for (key, node) in &node.t {
-                    let new_children = Vec::new();
-                    if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty()
-                    {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, new_children));
+                if let Some(tree) = node.sub_tree() {
+                    for (key, node) in tree {
+                        let new_children = vec![];
+                        if let Some(subscribers) = subscribers.as_ref()
+                            && !subscribers.ls_subscribers.is_empty()
+                        {
+                            let subscribers = subscribers.ls_subscribers.clone();
+                            ls_subscribers.push((subscribers, new_children));
+                        }
+                        let mut traversed_path = traversed_path.clone();
+                        traversed_path.push(key);
+                        Store::ncollect_matches(
+                            node,
+                            traversed_path,
+                            &[KeySegment::MultiWildcard],
+                            matches,
+                            subscribers.and_then(|s| s.tree.get(key)),
+                            ls_subscribers,
+                        )?;
                     }
-                    let mut traversed_path = traversed_path.clone();
-                    traversed_path.push(key);
-                    Store::ncollect_matches(
-                        node,
-                        traversed_path,
-                        &[KeySegment::MultiWildcard],
-                        matches,
-                        subscribers.and_then(|s| s.tree.get(key)),
-                        ls_subscribers,
-                    )?;
                 }
             }
             KeySegment::Wildcard => {
-                for (key, node) in &node.t {
-                    let new_children = Vec::new();
-                    if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty()
-                    {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, new_children));
+                if let Some(tree) = node.sub_tree() {
+                    for (key, node) in tree {
+                        let new_children = vec![];
+                        if let Some(subscribers) = subscribers.as_ref()
+                            && !subscribers.ls_subscribers.is_empty()
+                        {
+                            let subscribers = subscribers.ls_subscribers.clone();
+                            ls_subscribers.push((subscribers, new_children));
+                        }
+                        let mut traversed_path = traversed_path.clone();
+                        traversed_path.push(key);
+                        Store::ncollect_matches(
+                            node,
+                            traversed_path,
+                            tail,
+                            matches,
+                            subscribers.and_then(|s| s.tree.get(key)),
+                            ls_subscribers,
+                        )?;
                     }
-                    let mut traversed_path = traversed_path.clone();
-                    traversed_path.push(key);
-                    Store::ncollect_matches(
-                        node,
-                        traversed_path,
-                        tail,
-                        matches,
-                        subscribers.and_then(|s| s.tree.get(key)),
-                        ls_subscribers,
-                    )?;
                 }
             }
             KeySegment::Regular(elem) => {
                 traversed_path.push(elem);
-                if let Some(child) = node.t.get(elem) {
+                if let Some(child) = node.get_child(elem) {
                     Store::ncollect_matches(
                         child,
                         traversed_path,
@@ -617,10 +754,7 @@ impl Store {
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
     ) -> StoreResult<()> {
         if remaining_path.is_empty() {
-            for key in node.t.keys() {
-                children.insert(key.clone());
-            }
-
+            children.extend(node.ls_owned());
             return Ok(());
         }
 
@@ -629,32 +763,39 @@ impl Store {
 
         match next {
             KeySegment::MultiWildcard => {
-                return Err(StoreError::IllegalMultiWildcard);
+                return Err(StoreError::IllegalMultiWildcard(format!(
+                    "{}/{}/{}",
+                    &format_path(&traversed_path),
+                    next.as_ref(),
+                    &format_path(tail),
+                )));
             }
             KeySegment::Wildcard => {
-                for (key, node) in &node.t {
-                    let new_children = Vec::new();
-                    if let Some(subscribers) = subscribers.as_ref()
-                        && !subscribers.ls_subscribers.is_empty()
-                    {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, new_children));
+                if let Some(tree) = node.sub_tree() {
+                    for (key, node) in tree {
+                        let new_children = vec![];
+                        if let Some(subscribers) = subscribers.as_ref()
+                            && !subscribers.ls_subscribers.is_empty()
+                        {
+                            let subscribers = subscribers.ls_subscribers.clone();
+                            ls_subscribers.push((subscribers, new_children));
+                        }
+                        let mut traversed_path = traversed_path.clone();
+                        traversed_path.push(key);
+                        Store::ncollect_matching_children(
+                            node,
+                            traversed_path,
+                            tail,
+                            children,
+                            subscribers.and_then(|s| s.tree.get(key)),
+                            ls_subscribers,
+                        )?;
                     }
-                    let mut traversed_path = traversed_path.clone();
-                    traversed_path.push(key);
-                    Store::ncollect_matching_children(
-                        node,
-                        traversed_path,
-                        tail,
-                        children,
-                        subscribers.and_then(|s| s.tree.get(key)),
-                        ls_subscribers,
-                    )?;
                 }
             }
             KeySegment::Regular(elem) => {
                 traversed_path.push(elem);
-                if let Some(child) = node.t.get(elem) {
+                if let Some(child) = node.get_child(elem) {
                     Store::ncollect_matching_children(
                         child,
                         traversed_path,
@@ -674,7 +815,7 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
-    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
         self.insert(path, ValueEntry::Plain(value))
     }
 
@@ -683,7 +824,7 @@ impl Store {
         path: &[RegularKeySegment],
         value: Value,
         version: u64,
-    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
         self.insert(path, ValueEntry::Cas(value, version))
     }
 
@@ -691,72 +832,67 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: ValueEntry,
-    ) -> WorterbuchResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
         let mut ls_subscribers = Vec::new();
         let mut current_node = &mut self.data;
         let mut current_subscribers = Some(&self.subscribers);
 
         for (i, elem) in path.iter().enumerate() {
-            current_node = match current_node.t.entry(elem.to_owned()) {
-                Entry::Occupied(e) => e.into_mut(),
-                Entry::Vacant(e) => {
-                    if let Some(subscribers) = current_subscribers
-                        && !subscribers.ls_subscribers.is_empty()
-                    {
-                        let subscribers = subscribers.ls_subscribers.clone();
-                        ls_subscribers.push((subscribers, &path[0..i]));
-                    }
-                    e.insert(Node::default())
-                }
-            };
+            let (child, created) = current_node.get_or_create_child(elem.to_owned());
+            current_node = child;
+            if created
+                && let Some(subscribers) = current_subscribers
+                && !subscribers.ls_subscribers.is_empty()
+            {
+                let subscribers = subscribers.ls_subscribers.clone();
+                ls_subscribers.push((subscribers, &path[0..i]));
+            }
 
             current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
         }
 
-        let mut value = value;
-
-        let (inserted, changed) = if let Some(val) = &current_node.v {
-            // value already exists
-
-            if let ValueEntry::Cas(_, version) = val {
-                // existing value is cas
-
-                if let ValueEntry::Cas(new_val, prev_version) = value {
-                    if prev_version != *version {
-                        return Err(WorterbuchError::CasVersionMismatch);
-                    }
-                    value = ValueEntry::Cas(new_val, prev_version + 1);
-                } else {
-                    return Err(WorterbuchError::Cas);
-                }
-            } else {
-                // existing value is plain
-
-                if let ValueEntry::Cas(new_val, prev_version) = value {
-                    if prev_version != 0 {
-                        return Err(WorterbuchError::CasVersionMismatch);
-                    }
-                    value = ValueEntry::Cas(new_val, 1);
-                }
+        let (value_existed, value_changed, value) = match (current_node.value(), value) {
+            (None, ValueEntry::Plain(v)) => {
+                // no value present, we can insert plain value
+                (false, true, ValueEntry::Plain(v))
             }
-
-            (false, val != &value)
-        } else {
-            // value doesn't exist yet
-
-            if let ValueEntry::Cas(new_val, prev_version) = value {
-                if prev_version != 0 {
-                    return Err(WorterbuchError::CasVersionMismatch);
-                }
-                value = ValueEntry::Cas(new_val, 1);
+            (None, ValueEntry::Cas(value, 0)) => {
+                // no value present, we can insert cas value if version is 0
+                (false, true, ValueEntry::Cas(value, 1))
             }
-
-            (true, true)
+            (None, ValueEntry::Cas(_, _)) => {
+                // no value present, we cannot insert cas value if version != 0
+                return Err(StoreError::CasVersionMismatch);
+            }
+            (Some(ValueEntry::Plain(current)), ValueEntry::Plain(val)) => {
+                // plain value present, we can insert plain value
+                (true, current != &val, ValueEntry::Plain(val))
+            }
+            (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, 0)) => {
+                // plain value present, we can insert cas value if version is 0
+                (true, current != &val, ValueEntry::Cas(val, 1))
+            }
+            (Some(ValueEntry::Plain(_)), ValueEntry::Cas(_, _)) => {
+                // plain value present, we cannot insert cas value if version != 0
+                return Err(StoreError::CasVersionMismatch);
+            }
+            (Some(ValueEntry::Cas(_, _)), ValueEntry::Plain(_)) => {
+                // cas value present, we cannot insert plain value
+                return Err(StoreError::Cas);
+            }
+            (Some(ValueEntry::Cas(current, v_curr)), ValueEntry::Cas(val, v)) if v_curr == &v => {
+                // cas value present, we can insert new cas value if the version matches
+                (true, current != &val, ValueEntry::Cas(val, v + 1))
+            }
+            (Some(ValueEntry::Cas(_, _)), ValueEntry::Cas(_, _)) => {
+                // cas value present, we cannot insert cas value with mismatched version
+                return Err(StoreError::CasVersionMismatch);
+            }
         };
 
-        current_node.v = Some(value);
+        current_node.set_value(value);
 
-        if inserted {
+        if !value_existed {
             self.len += 1;
         }
 
@@ -774,7 +910,7 @@ impl Store {
             })
             .collect();
 
-        Ok((changed, ls_subscribers))
+        Ok((value_changed, ls_subscribers))
     }
 
     pub fn ls(&self, path: &[impl AsRef<str>]) -> Option<Vec<RegularKeySegment>> {
@@ -784,14 +920,14 @@ impl Store {
         let mut current = &self.data;
 
         for elem in path {
-            current = current.t.get(elem.as_ref())?;
+            current = current.get_child(elem.as_ref())?;
         }
 
-        Some(current.t.keys().map(ToOwned::to_owned).collect())
+        Some(current.ls_owned())
     }
 
     pub fn ls_root(&self) -> Vec<RegularKeySegment> {
-        self.data.t.keys().map(ToOwned::to_owned).collect()
+        self.data.ls_owned()
     }
 
     pub fn pls(&self, path: &[KeySegment]) -> StoreResult<Vec<RegularKeySegment>> {
@@ -828,14 +964,14 @@ impl Store {
 
     fn nmerge(
         node: &mut Node<ValueEntry>,
-        other: Node<ValueEntry>,
+        mut other: Node<ValueEntry>,
         key: Option<&str>,
         insertions: &mut Vec<(String, (ValueEntry, bool))>,
         path: &[&str],
     ) {
-        if let Some(v) = other.v {
-            let changed = node.v.as_ref() != Some(&v);
-            node.v = Some(v.clone());
+        if let Some(v) = other.take_value() {
+            let changed = node.value() != Some(&v);
+            node.set_value(v.clone());
             let key = concat_key(path, key);
             debug!("Imported {} = {:?}", key, v);
             insertions.push((key, (v, changed)));
@@ -846,19 +982,20 @@ impl Store {
             path.push(key);
         }
 
-        for (key, other_node) in other.t {
-            let own_node = match node.t.entry(key.clone()) {
-                Entry::Occupied(e) => e.into_mut(),
-                Entry::Vacant(e) => e.insert(Node::default()),
-            };
-            Store::nmerge(own_node, other_node, Some(&key), insertions, &path);
+        if let Some(tree) = other.into_sub_tree() {
+            for (key, other_node) in tree {
+                let own_node = node.get_or_create_child(key.to_owned()).0;
+                Store::nmerge(own_node, other_node, Some(&key), insertions, &path);
+            }
         }
     }
 
     fn ncount_values<V>(node: &Node<V>) -> usize {
-        let mut count = if node.v.is_some() { 1 } else { 0 };
-        for child in node.t.values() {
-            count += Store::ncount_values(child);
+        let mut count = if node.value().is_some() { 1 } else { 0 };
+        if let Some(tree) = node.sub_tree() {
+            for child in tree.values() {
+                count += Store::ncount_values(child);
+            }
         }
         count
     }
@@ -928,7 +1065,7 @@ impl Store {
         path: Box<[RegularKeySegment]>,
     ) -> WorterbuchResult<()> {
         let node = self.get_or_create_lock_node(path.clone());
-        match &mut node.v {
+        match &mut node.value() {
             Some(lock) => {
                 if client_id == lock.holder {
                     debug!("Client {client_id} already holds the lock on {path:?}");
@@ -937,11 +1074,8 @@ impl Store {
                 }
             }
             None => {
-                node.v = Some(Lock::new(client_id));
-                let paths = match self.locked_keys.entry(client_id) {
-                    Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
-                    Entry::Vacant(vacant_entry) => vacant_entry.insert(Vec::new()),
-                };
+                node.set_value(Lock::new(client_id));
+                let paths = self.locked_keys.entry(client_id).or_default();
                 paths.push(path);
             }
         }
@@ -956,7 +1090,7 @@ impl Store {
     ) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
         let node = self.get_or_create_lock_node(path.clone());
-        match &mut node.v {
+        match &mut node.value_mut() {
             Some(lock) => {
                 if client_id == lock.holder {
                     debug!("Client {client_id} already holds the lock on {path:?}");
@@ -966,15 +1100,12 @@ impl Store {
                 }
             }
             None => {
-                node.v = Some(Lock::new(client_id));
+                node.set_value(Lock::new(client_id));
                 tx.send(()).ok();
             }
         }
 
-        let paths = match self.locked_keys.entry(client_id) {
-            Entry::Occupied(occupied_entry) => occupied_entry.into_mut(),
-            Entry::Vacant(vacant_entry) => vacant_entry.insert(Vec::new()),
-        };
+        let paths = self.locked_keys.entry(client_id).or_default();
         paths.push(path);
 
         rx
@@ -995,7 +1126,7 @@ impl Store {
     ) -> WorterbuchResult<()> {
         let node = self.get_or_create_lock_node(path.clone());
 
-        if let Some(lock) = &mut node.v {
+        if let Some(lock) = node.value_mut() {
             let (was_holder, is_now_unlocked) = lock.release(client_id).await;
             if !was_holder {
                 return Err(WorterbuchError::KeyIsLocked(path.join("/")));
@@ -1348,9 +1479,9 @@ mod test {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert_eq!(store.cget(&path), Some((&json!(0), &1)));
+        assert_eq!(store.cget(&path), Some((&json!(0), 1)));
         assert!(store.insert_cas(&path, json!(1), 1).is_ok());
-        assert_eq!(store.cget(&path), Some((&json!(1), &2)));
+        assert_eq!(store.cget(&path), Some((&json!(1), 2)));
     }
 
     #[test]
@@ -1358,7 +1489,7 @@ mod test {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert_eq!(store.cget(&path), Some((&json!(0), &1)));
+        assert_eq!(store.cget(&path), Some((&json!(0), 1)));
         assert!(store.insert_plain(&path, json!(1)).is_err());
     }
 

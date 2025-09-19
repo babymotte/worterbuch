@@ -318,11 +318,26 @@ pub enum KeySegment {
     // RegexWildcard(String),
 }
 
-pub fn format_path(path: &[KeySegment]) -> String {
-    path.iter()
-        .map(|seg| format!("{seg}"))
-        .collect::<Vec<String>>()
-        .join("/")
+impl AsRef<str> for KeySegment {
+    fn as_ref(&self) -> &str {
+        match self {
+            KeySegment::Regular(segment) => segment.as_str(),
+            KeySegment::Wildcard => "?",
+            KeySegment::MultiWildcard => "#",
+        }
+    }
+}
+
+pub fn format_path(path: &[impl AsRef<str>]) -> String {
+    let mut path = path.iter().fold(String::new(), |mut a, b| {
+        let b = b.as_ref();
+        a.reserve(b.len() + 1);
+        a.push_str(b);
+        a.push('/');
+        a
+    });
+    path.pop();
+    path
 }
 
 impl From<RegularKeySegment> for KeySegment {

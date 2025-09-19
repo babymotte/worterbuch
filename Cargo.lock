@@ -3322,6 +3322,7 @@ dependencies = [
  "sha2",
  "socket2",
  "supports-color",
+ "thiserror",
  "tokio",
  "tokio-graceful-shutdown",
  "tokio-metrics",
