@@ -159,78 +159,50 @@ impl From<StoreError> for WorterbuchError {
 pub type StoreResult<T> = Result<T, StoreError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Node<V> {
-    Internal {
-        #[serde(rename = "v")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        value: Option<V>,
-        #[serde(rename = "t")]
-        tree: Tree<V>,
-    },
-    Leaf {
-        #[serde(rename = "v")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        value: Option<V>,
-    },
+pub struct Node<V> {
+    #[serde(rename = "v")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<V>,
+    #[serde(rename = "t")]
+    tree: Option<Tree<V>>,
 }
 
 impl<V> Node<V> {
     fn into_sub_tree(self) -> Option<Tree<V>> {
-        match self {
-            Node::Leaf { value: _ } => None,
-            Node::Internal { value: _, tree: t } => Some(t),
-        }
+        self.tree
     }
 
     fn sub_tree(&self) -> Option<&Tree<V>> {
-        match self {
-            Node::Leaf { value: _ } => None,
-            Node::Internal { value: _, tree: t } => Some(t),
-        }
+        self.tree.as_ref()
     }
 
     fn strip(&mut self) {
-        if let Node::Internal { value: _, tree: t } = self {
+        if let Some(t) = &mut self.tree {
             t.remove(SYSTEM_TOPIC_ROOT);
         }
     }
 
     fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<V>> {
-        match self {
-            Node::Leaf { value: _ } => None,
-            Node::Internal { value: _, tree: t } => t.get(key.as_ref()),
-        }
+        self.tree.as_ref()?.get(key.as_ref())
     }
 
     fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<V>> {
-        match self {
-            Node::Leaf { value: _ } => None,
-            Node::Internal { value: _, tree: t } => t.get_mut(key.as_ref()),
-        }
+        self.tree.as_mut()?.get_mut(key.as_ref())
     }
 
     fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<V>, bool) {
-        match self {
-            Node::Leaf { value: v } => {
-                let v = mem::take(v);
-                let mut t = Tree::new();
-                t.insert(key.clone(), Node::default());
-                *self = Node::Internal { value: v, tree: t };
-                (self.get_or_create_child(key).0, true)
-            }
-            Node::Internal { value: _, tree: t } => match t.entry(key) {
-                Entry::Occupied(occupied_entry) => (occupied_entry.into_mut(), false),
-                Entry::Vacant(vacant_entry) => (vacant_entry.insert(Node::default()), true),
-            },
+        if self.tree.is_none() {
+            self.tree = Some(Tree::new());
+        }
+
+        match self.tree.as_mut().expect("connot be None").entry(key) {
+            Entry::Occupied(e) => (e.into_mut(), false),
+            Entry::Vacant(e) => (e.insert(Node::default()), true),
         }
     }
 
     fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<V>>> {
-        match self {
-            Node::Leaf { value: _ } => None,
-            Node::Internal { value: _, tree: t } => Some(t.keys()),
-        }
+        self.tree.as_ref().map(|t| t.keys())
     }
 
     fn ls_owned(&self) -> Vec<RegularKeySegment> {
@@ -244,15 +216,14 @@ impl<V> Node<V> {
     /// Removes any obsolete children
     fn trim(&mut self) -> bool {
         let mut removed = false;
-        if let Node::Internal { value: v, tree: t } = self {
+        if let Some(t) = self.tree.as_mut() {
             t.retain(|_, child| {
                 let obsolete = child.is_obsolete();
                 removed |= obsolete;
                 !obsolete
             });
             if t.is_empty() {
-                let v = mem::take(v);
-                *self = Node::Leaf { value: v };
+                self.tree = None;
             }
         }
         self.is_obsolete()
@@ -261,25 +232,19 @@ impl<V> Node<V> {
     /// Test if a node is obsolete. A leaf node is obsolete, if it has no value, an internal node is obsolete if it has no value and no children.
     /// Note that this does not recursively check children for obsolescence, for a recursive check use `is_clean()`
     fn is_obsolete(&self) -> bool {
-        match self {
-            Node::Leaf { value: v } => v.is_none(),
-            Node::Internal { value: v, tree: t } => v.is_none() && t.is_empty(),
-        }
+        self.value.is_none() && self.is_empty()
     }
 
     fn is_empty(&self) -> bool {
-        match self {
-            Node::Leaf { value: _ } => true,
-            Node::Internal { value: _, tree: t } => t.is_empty(),
-        }
+        self.tree.as_ref().map(Tree::is_empty).unwrap_or(true)
     }
 
     /// Recursively check if this node's subtree contains any obsolete children
     fn is_clean(&self) -> bool {
-        match self {
-            Node::Leaf { value: v } => v.is_some(),
-            Node::Internal { value: v, tree: t } => {
-                if v.is_none() && t.is_empty() {
+        match self.tree.as_ref() {
+            None => self.value.is_some(),
+            Some(t) => {
+                if self.value.is_none() && t.is_empty() {
                     false
                 } else {
                     t.iter().all(|(_, v)| v.is_clean())
@@ -289,45 +254,32 @@ impl<V> Node<V> {
     }
 
     fn value(&self) -> Option<&V> {
-        match self {
-            Node::Leaf { value: v } => v.as_ref(),
-            Node::Internal { value: v, tree: _ } => v.as_ref(),
-        }
+        self.value.as_ref()
     }
 
     fn value_mut(&mut self) -> Option<&mut V> {
-        match self {
-            Node::Leaf { value: v } => v.as_mut(),
-            Node::Internal { value: v, tree: _ } => v.as_mut(),
-        }
+        self.value.as_mut()
     }
 
     fn take_value(&mut self) -> Option<V> {
-        match self {
-            Node::Leaf { value: v } => v.take(),
-            Node::Internal { value: v, tree: _ } => v.take(),
-        }
+        self.value.take()
     }
 
     fn set_value(&mut self, value: V) {
-        match self {
-            Node::Leaf { value: v } => *v = Some(value),
-            Node::Internal { value: v, tree: _ } => *v = Some(value),
-        }
+        self.value = Some(value)
     }
 
     fn drop_children(&mut self) {
-        if let Node::Internal { value: v, tree: t } = self {
-            t.clear();
-            let v = mem::take(v);
-            *self = Node::Leaf { value: v };
-        }
+        self.tree = None
     }
 }
 
 impl<T> Default for Node<T> {
     fn default() -> Self {
-        Self::Leaf { value: None }
+        Self {
+            value: None,
+            tree: None,
+        }
     }
 }
 
