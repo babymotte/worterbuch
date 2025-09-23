@@ -18,12 +18,14 @@
  */
 
 use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{
         HashMap, HashSet, VecDeque,
         hash_map::{Entry, Keys},
     },
+    hash::Hash,
+    marker::PhantomData,
     mem::{self},
 };
 use thiserror::Error;
@@ -37,14 +39,17 @@ use worterbuch_common::{
     format_path, parse_segments,
 };
 
-type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
+type Tree<K, V> = HashMap<RegularKeySegment, Node<K, V>>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
+pub type StoreNode = Node<RegularKeySegment, ValueEntry>;
+type LockNode = Node<RegularKeySegment, Lock>;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistedStore {
-    pub data: Node<ValueEntry>,
+    pub data: StoreNode,
 }
 
 impl From<PersistedStore> for Store {
@@ -159,20 +164,27 @@ impl From<StoreError> for WorterbuchError {
 pub type StoreResult<T> = Result<T, StoreError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Node<V> {
+pub struct Node<K, V>
+where
+    K: Eq + Hash,
+{
     #[serde(rename = "v")]
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<V>,
     #[serde(rename = "t")]
-    tree: Option<Tree<V>>,
+    tree: Option<Tree<K, V>>,
+    _phantom: PhantomData<K>,
 }
 
-impl<V> Node<V> {
-    fn into_sub_tree(self) -> Option<Tree<V>> {
+impl<K, V> Node<K, V>
+where
+    K: DeserializeOwned + Eq + Hash,
+{
+    fn into_sub_tree(self) -> Option<Tree<K, V>> {
         self.tree
     }
 
-    fn sub_tree(&self) -> Option<&Tree<V>> {
+    fn sub_tree(&self) -> Option<&Tree<K, V>> {
         self.tree.as_ref()
     }
 
@@ -182,15 +194,15 @@ impl<V> Node<V> {
         }
     }
 
-    fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<V>> {
+    fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<K, V>> {
         self.tree.as_ref()?.get(key.as_ref())
     }
 
-    fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<V>> {
+    fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<K, V>> {
         self.tree.as_mut()?.get_mut(key.as_ref())
     }
 
-    fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<V>, bool) {
+    fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<K, V>, bool) {
         if self.tree.is_none() {
             self.tree = Some(Tree::new());
         }
@@ -201,7 +213,7 @@ impl<V> Node<V> {
         }
     }
 
-    fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<V>>> {
+    fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<K, V>>> {
         self.tree.as_ref().map(|t| t.keys())
     }
 
@@ -274,11 +286,15 @@ impl<V> Node<V> {
     }
 }
 
-impl<T> Default for Node<T> {
+impl<K, T> Default for Node<K, T>
+where
+    K: DeserializeOwned + Eq + Hash,
+{
     fn default() -> Self {
         Self {
             value: None,
             tree: None,
+            _phantom: PhantomData::default(),
         }
     }
 }
@@ -297,15 +313,15 @@ pub struct StoreStats {
 
 #[derive(Default)]
 pub struct Store {
-    data: Node<ValueEntry>,
+    data: StoreNode,
     len: usize,
     subscribers: SubscribersNode,
     locked_keys: HashMap<Uuid, Vec<Box<[RegularKeySegment]>>>,
-    locks: Node<Lock>,
+    locks: LockNode,
 }
 
 impl Store {
-    pub fn with_data(data: Node<ValueEntry>) -> Self {
+    pub fn with_data(data: StoreNode) -> Self {
         let mut store = Self {
             data,
             ..Default::default()
@@ -323,7 +339,7 @@ impl Store {
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
-    pub fn export(&mut self) -> Node<ValueEntry> {
+    pub fn export(&mut self) -> StoreNode {
         debug!("Exporting slim copy of store with {} entries …", self.len);
         let data_copy = self.data.clone();
         let mut original_data = mem::replace(&mut self.data, data_copy);
@@ -362,7 +378,7 @@ impl Store {
         }
     }
 
-    fn get_node(&self, path: &[RegularKeySegment]) -> Option<&Node<ValueEntry>> {
+    fn get_node(&self, path: &[RegularKeySegment]) -> Option<&StoreNode> {
         let mut current = &self.data;
 
         for elem in path {
@@ -372,7 +388,7 @@ impl Store {
         Some(current)
     }
 
-    fn get_or_create_lock_node(&mut self, path: Box<[RegularKeySegment]>) -> &mut Node<Lock> {
+    fn get_or_create_lock_node(&mut self, path: Box<[RegularKeySegment]>) -> &mut LockNode {
         let mut current = &mut self.locks;
 
         for elem in path {
@@ -405,7 +421,7 @@ impl Store {
         debug_assert!(self.locks.is_empty() || self.locks.is_clean());
     }
 
-    fn ndelete_lock_nodes(node: &mut Node<Lock>, relative_path: &[RegularKeySegment]) {
+    fn ndelete_lock_nodes(node: &mut LockNode, relative_path: &[RegularKeySegment]) {
         if relative_path.is_empty() {
             node.take_value();
             return;
@@ -460,7 +476,7 @@ impl Store {
     }
 
     fn ndelete(
-        node: &mut Node<ValueEntry>,
+        node: &mut StoreNode,
         relative_path: &[RegularKeySegment],
         subscribers: Option<&SubscribersNode>,
         ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
@@ -495,7 +511,7 @@ impl Store {
     }
 
     fn ndelete_matches(
-        node: &mut Node<ValueEntry>,
+        node: &mut StoreNode,
         traversed_path: Vec<&str>,
         matches: &mut KeyValuePairs,
         relative_path: &[KeySegment],
@@ -565,7 +581,7 @@ impl Store {
     }
 
     fn ndelete_child_matches<'a>(
-        node: &mut Node<ValueEntry>,
+        node: &mut StoreNode,
         id: &'a RegularKeySegment,
         mut traversed_path: Vec<&'a str>,
         matches: &mut KeyValuePairs,
@@ -599,7 +615,7 @@ impl Store {
     }
 
     fn ncollect_matches<'p>(
-        node: &Node<ValueEntry>,
+        node: &StoreNode,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &'p [KeySegment],
         matches: &mut Vec<KeyValuePair>,
@@ -698,7 +714,7 @@ impl Store {
     }
 
     fn ncollect_matching_children<'p>(
-        node: &Node<ValueEntry>,
+        node: &StoreNode,
         mut traversed_path: Vec<&'p str>,
         remaining_path: &'p [KeySegment],
         children: &mut HashSet<RegularKeySegment>,
@@ -896,7 +912,7 @@ impl Store {
         Ok(children.into_iter().collect())
     }
 
-    pub fn merge(&mut self, other: Node<ValueEntry>) -> Vec<(String, (ValueEntry, bool))> {
+    pub fn merge(&mut self, other: StoreNode) -> Vec<(String, (ValueEntry, bool))> {
         let mut insertions = Vec::new();
         let path = Vec::new();
         Store::nmerge(&mut self.data, other, None, &mut insertions, &path);
@@ -915,8 +931,8 @@ impl Store {
     }
 
     fn nmerge(
-        node: &mut Node<ValueEntry>,
-        mut other: Node<ValueEntry>,
+        node: &mut StoreNode,
+        mut other: StoreNode,
         key: Option<&str>,
         insertions: &mut Vec<(String, (ValueEntry, bool))>,
         path: &[&str],
@@ -942,7 +958,7 @@ impl Store {
         }
     }
 
-    fn ncount_values<V>(node: &Node<V>) -> usize {
+    fn ncount_values(node: &StoreNode) -> usize {
         let mut count = if node.value().is_some() { 1 } else { 0 };
         if let Some(tree) = node.sub_tree() {
             for child in tree.values() {
@@ -1093,7 +1109,7 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn reset(&mut self, data: Node<ValueEntry>) {
+    pub(crate) fn reset(&mut self, data: StoreNode) {
         self.data = data;
         self.count_entries();
     }

@@ -17,10 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    Config, INTERNAL_CLIENT_ID, Worterbuch,
-    store::{Node, ValueEntry},
-};
+use crate::{Config, INTERNAL_CLIENT_ID, Worterbuch, store::StoreNode};
 use miette::{Error, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -66,7 +63,7 @@ pub enum ClientWriteCommand {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StateSync(pub Node<ValueEntry>, pub GraveGoods, pub LastWill);
+pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
 
 pub async fn run_cluster_sync_port(
     subsys: SubsystemHandle,

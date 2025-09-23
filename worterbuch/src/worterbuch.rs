@@ -21,7 +21,7 @@ use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
     mem_tools,
-    store::{Node, PersistedStore, Store, StoreStats, ValueEntry},
+    store::{PersistedStore, Store, StoreNode, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
 use chrono::prelude::{DateTime, Utc};
@@ -595,7 +595,7 @@ impl Worterbuch {
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
-    pub fn export(&mut self) -> (Node<ValueEntry>, GraveGoods, LastWill) {
+    pub fn export(&mut self) -> (StoreNode, GraveGoods, LastWill) {
         let store = self.store.export();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
@@ -1257,7 +1257,7 @@ impl Worterbuch {
             .map(ToOwned::to_owned)
     }
 
-    pub(crate) fn reset_store(&mut self, data: Node<ValueEntry>) {
+    pub(crate) fn reset_store(&mut self, data: StoreNode) {
         self.store.reset(data);
     }
 
