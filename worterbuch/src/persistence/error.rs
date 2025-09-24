@@ -17,8 +17,6 @@ pub enum PersistenceError {
     WorterbuchError(#[from] WorterbuchError),
     #[error("Written data is different from data to be written")]
     DataMismatch,
-    #[error("Persistence is disabled.")]
-    PersistenceDisabled,
 }
 
 pub type PersistenceResult<T> = Result<T, PersistenceError>;

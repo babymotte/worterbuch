@@ -41,18 +41,17 @@ mod subscribers;
 mod telemetry;
 mod worterbuch;
 
-use crate::stats::track_stats;
 pub use crate::worterbuch::*;
+use crate::{persistence::unlock_persistence, stats::track_stats};
 pub use config::*;
 use leader_follower::{
     ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, initial_sync, process_leader_message,
     run_cluster_sync_port, shutdown_on_stdin_close,
 };
 use miette::{IntoDiagnostic, Result, miette};
-use persistence::PERSISTENCE_LOCKED;
 use serde_json::{Value, json};
 use server::common::{CloneableWbApi, WbFunction};
-use std::{error::Error, sync::atomic::Ordering};
+use std::error::Error;
 use store::ValueEntry;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -77,20 +76,11 @@ pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
 
 pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<()> {
-    let config_pers = config.clone();
-
     let channel_buffer_size = config.channel_buffer_size;
-
-    let use_persistence = config.use_persistence;
-
-    let mut worterbuch = if use_persistence && !config.follower {
-        persistence::load(&config).await?
-    } else {
-        Worterbuch::with_config(config.clone())
-    };
-
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
     let api = CloneableWbApi::new(api_tx);
+
+    let mut worterbuch = persistence::restore(&subsys, &config, &api).await?;
 
     let web_server = if let Some(WsEndpoint {
         endpoint: Endpoint {
@@ -127,13 +117,6 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
                 INTERNAL_CLIENT_ID,
             )
             .await?;
-
-        if use_persistence {
-            let worterbuch_pers = api.clone();
-            subsys.start(SubsystemBuilder::new("persistence", |subsys| {
-                persistence::periodic(worterbuch_pers, config_pers, subsys)
-            }));
-        }
 
         let worterbuch_uptime = api.clone();
         subsys.start(SubsystemBuilder::new("stats", |subsys| {
@@ -635,9 +618,9 @@ async fn run_in_follower_mode(
             Ok(Some(msg)) => {
                 if let LeaderSyncMessage::Init(state) = msg {
                     initial_sync(state, &mut worterbuch).await?;
-                    PERSISTENCE_LOCKED.store(false, Ordering::Release);
+                    unlock_persistence();
                     persistence_interval.reset();
-                    persistence::synchronous(&mut worterbuch, &config).await?;
+                    worterbuch.flush().await?;
                 } else {
                     return Err(miette!("first message from leader is supposed to be the initial sync, but it wasn't"));
                 }
@@ -667,7 +650,7 @@ async fn run_in_follower_mode(
             },
             _ = persistence_interval.tick() => {
                 debug!("Follower persistence interval triggered");
-                persistence::synchronous(&mut worterbuch, &config).await?;
+                worterbuch.flush().await?;
             },
             _ = subsys.on_shutdown_requested() => break,
         }
@@ -694,7 +677,7 @@ async fn shutdown(
         info!("Applying grave goods and last wills …");
         worterbuch.apply_all_grave_goods_and_last_wills().await;
         info!("Waiting for persistence hook to complete …");
-        persistence::synchronous(&mut worterbuch, &config).await?;
+        worterbuch.flush().await?;
         info!("Shutdown persistence hook complete.");
     }
 

@@ -21,6 +21,7 @@ use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
     mem_tools,
+    persistence::{PersistentStorage, PersistentStorageImpl, error::PersistenceResult},
     store::{PersistedStore, Store, StoreNode, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
@@ -31,6 +32,7 @@ use serde_json::{Value, from_str, json};
 use std::{
     collections::{HashMap, hash_map::Entry},
     fmt::Display,
+    io, mem,
     net::SocketAddr,
     ops::Deref,
     time::{Duration, SystemTime},
@@ -265,6 +267,7 @@ pub struct Worterbuch {
     subscribers: Subscribers,
     clients: HashMap<Uuid, ClientInfo>,
     spub_keys: HashMap<Uuid, HashMap<TransactionId, Key>>,
+    persistent_storage: PersistentStorageImpl,
 }
 
 impl Worterbuch {
@@ -281,6 +284,7 @@ impl Worterbuch {
             subscribers: Default::default(),
             subscriptions: Default::default(),
             spub_keys: Default::default(),
+            persistent_storage: Default::default(),
         }
     }
 
@@ -298,6 +302,7 @@ impl Worterbuch {
             subscribers: Default::default(),
             subscriptions: Default::default(),
             spub_keys: Default::default(),
+            persistent_storage: Default::default(),
         })
     }
 
@@ -335,6 +340,15 @@ impl Worterbuch {
 
         let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone())?;
 
+        self.persistent_storage
+            .update_value(&key, &value)
+            .map_err(|e| {
+                WorterbuchError::IoError(
+                    io::Error::other(e),
+                    "Failed to insert value into persistent storage".to_owned(),
+                )
+            })?;
+
         trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
         trace!("Notifying ls subscribers done.");
@@ -358,6 +372,15 @@ impl Worterbuch {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
         let (changed, ls_subscribers) = self.store.insert_cas(&path, value.clone(), version)?;
+
+        self.persistent_storage
+            .update_value(&key, &value)
+            .map_err(|e| {
+                WorterbuchError::IoError(
+                    io::Error::other(e),
+                    "Failed to insert value into persistent storage".to_owned(),
+                )
+            })?;
 
         trace!("Notifying ls subscribers …");
         self.notify_ls_subscribers(ls_subscribers).await;
@@ -636,6 +659,17 @@ impl Worterbuch {
         let imported_values = self.store.merge(store.data);
 
         for (key, (val, changed)) in &imported_values {
+            if *changed {
+                self.persistent_storage
+                    .update_value(key, val.as_ref())
+                    .map_err(|e| {
+                        WorterbuchError::IoError(
+                            io::Error::other(e),
+                            "Failed to insert value into persistent storage".to_owned(),
+                        )
+                    })?;
+            }
+
             let path: Vec<RegularKeySegment> = parse_segments(key)?;
             self.notify_subscribers(&path, key, val.as_ref(), *changed, false)
                 .await;
@@ -844,6 +878,13 @@ impl Worterbuch {
 
         match self.store.delete(&path)? {
             Some((value, ls_subscribers)) => {
+                self.persistent_storage.delete_value(&key).map_err(|e| {
+                    WorterbuchError::IoError(
+                        io::Error::other(e),
+                        "Failed to remove value from persistent storage".to_owned(),
+                    )
+                })?;
+
                 self.notify_ls_subscribers(ls_subscribers).await;
                 self.notify_subscribers(&path, &key, &value, true, true)
                     .await;
@@ -875,12 +916,21 @@ impl Worterbuch {
 
         let (deleted, ls_subscribers) = self.store.delete_matches(&path)?;
 
-        self.notify_ls_subscribers(ls_subscribers).await;
         for kvp in &deleted {
+            self.persistent_storage
+                .delete_value(&kvp.key)
+                .map_err(|e| {
+                    WorterbuchError::IoError(
+                        io::Error::other(e),
+                        "Failed to remove value from persistent storage".to_owned(),
+                    )
+                })?;
+
             let path = parse_segments(&kvp.key)?;
             self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
                 .await;
         }
+        self.notify_ls_subscribers(ls_subscribers).await;
 
         mem_tools::schedule_trim();
 
@@ -1257,8 +1307,15 @@ impl Worterbuch {
             .map(ToOwned::to_owned)
     }
 
-    pub(crate) fn reset_store(&mut self, data: StoreNode) {
+    pub(crate) async fn reset_store(&mut self, data: StoreNode) -> WorterbuchResult<()> {
         self.store.reset(data);
+        self.persistent_storage.clear().map_err(|e| {
+            WorterbuchError::IoError(io::Error::other(e), "Failed to clear storage".to_owned())
+        })?;
+        self.flush().await.map_err(|e| {
+            WorterbuchError::IoError(io::Error::other(e), "Failed to flush storage".to_owned())
+        })?;
+        Ok(())
     }
 
     pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self) {
@@ -1326,6 +1383,17 @@ impl Worterbuch {
         for lw in last_wills {
             self.set(lw.key, lw.value, INTERNAL_CLIENT_ID).await.ok();
         }
+    }
+
+    pub(crate) fn set_persistent_storage(&mut self, persistent_storage: PersistentStorageImpl) {
+        self.persistent_storage = persistent_storage;
+    }
+
+    pub(crate) async fn flush(&mut self) -> PersistenceResult<()> {
+        let storage = mem::replace(&mut self.persistent_storage, PersistentStorageImpl::Noop);
+        let res = storage.flush(self).await;
+        let _ = mem::replace(&mut self.persistent_storage, storage);
+        Ok(res?)
     }
 }
 

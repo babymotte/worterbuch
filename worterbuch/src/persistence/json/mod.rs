@@ -24,7 +24,7 @@ mod v3;
 use crate::{
     config::Config,
     persistence::{
-        PersistentStorage,
+        PersistentStorage, PersistentStorageImpl,
         error::{PersistenceError, PersistenceResult},
     },
     server::common::CloneableWbApi,
@@ -39,16 +39,9 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     select,
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, info, instrument, warn};
-use worterbuch_common::{GraveGoods, LastWill};
-
-use lazy_static::lazy_static;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-lazy_static! {
-    pub static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
-}
+use worterbuch_common::{GraveGoods, Key, LastWill, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {
@@ -89,31 +82,31 @@ pub(crate) async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
             }
         }
     };
-    PERSISTENCE_LOCKED.store(false, Ordering::Release);
     Ok(wb?)
 }
 
+#[derive(PartialEq)]
 pub struct PersistentJsonStorage {
     config: Config,
 }
 
 impl PersistentJsonStorage {
-    pub fn new(config: Config) -> Self {
+    pub fn new(subsys: &SubsystemHandle, config: Config, api: CloneableWbApi) -> Self {
+        let config_pers = config.clone();
+        subsys.start(SubsystemBuilder::new("json-persistence", |subsys| {
+            periodic(api, config_pers, subsys)
+        }));
         Self { config }
     }
 }
 
 impl PersistentStorage for PersistentJsonStorage {
-    fn update_value(
-        &self,
-        _: worterbuch_common::Key,
-        _: worterbuch_common::Value,
-    ) -> PersistenceResult<()> {
+    fn update_value(&self, _: &Key, _: &Value) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
 
-    fn dalete_value(&self, _: worterbuch_common::Key) -> PersistenceResult<()> {
+    fn delete_value(&self, _: &Key) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
@@ -122,7 +115,14 @@ impl PersistentStorage for PersistentJsonStorage {
         synchronous(worterbuch, &self.config).await
     }
 
-    async fn load(&self) -> PersistenceResult<Worterbuch> {
-        load(&self.config).await
+    async fn load(self, _: &Config) -> PersistenceResult<Worterbuch> {
+        let mut wb = load(&self.config).await?;
+        wb.set_persistent_storage(PersistentStorageImpl::Json(self));
+        Ok(wb)
+    }
+
+    fn clear(&self) -> PersistenceResult<()> {
+        // does nothing
+        Ok(())
     }
 }

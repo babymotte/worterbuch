@@ -174,7 +174,7 @@ async fn run_main(
     Ok(())
 }
 
-const TIMESTAMP_FILE_NAME: &str = "last-presisted";
+const TIMESTAMP_FILE_NAME: &str = "last-persisted";
 
 #[instrument(ret)]
 pub async fn load_millis_since_active(path: &Path) -> Option<i64> {

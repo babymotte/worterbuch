@@ -17,6 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::persistence::is_persistence_locked;
+
 use super::*;
 use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
@@ -50,7 +52,7 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Persisten
     // checking AFTER export, since the interval may tick before the initial load is complete, but PERSISTENCE_LOCKED
     // is only set to false after the initial load. Export will however never complete before the initial load is done,
     // so this prevents random Errors
-    if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
+    if is_persistence_locked() {
         return Err(PersistenceError::StoreLocked);
     }
 
@@ -86,7 +88,7 @@ pub(crate) async fn synchronous(
     worterbuch: &mut Worterbuch,
     config: &Config,
 ) -> PersistenceResult<()> {
-    if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
+    if is_persistence_locked() {
         return Err(PersistenceError::StoreLocked);
     }
 
@@ -304,7 +306,7 @@ pub(crate) async fn file_paths(
         grave_goods_last_will_path.push("gglw.b.json");
         grave_goods_last_will_path_checksum.push("gglw.b.json.sha256");
     }
-    last_persisted.push("last-presisted");
+    last_persisted.push("last-persisted");
 
     Ok((
         store_path,

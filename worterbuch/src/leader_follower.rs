@@ -203,7 +203,7 @@ async fn forward_events_to_follower(
 }
 
 pub async fn initial_sync(state_sync: StateSync, worterbuch: &mut Worterbuch) -> Result<()> {
-    worterbuch.reset_store(state_sync.0);
+    worterbuch.reset_store(state_sync.0).await?;
     worterbuch
         .set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
