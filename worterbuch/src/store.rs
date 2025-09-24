@@ -173,6 +173,7 @@ where
     value: Option<V>,
     #[serde(rename = "t")]
     tree: Option<Tree<K, V>>,
+    #[serde(skip, default)]
     _phantom: PhantomData<K>,
 }
 

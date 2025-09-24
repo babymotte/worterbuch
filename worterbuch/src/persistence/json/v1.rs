@@ -20,7 +20,7 @@
 use super::*;
 
 #[instrument(skip(config) fields(version=1), err)]
-pub async fn load(config: &Config) -> Result<Worterbuch> {
+pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
     let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(config);
 
     if !json_path.exists() && !json_temp_path.exists() {
@@ -43,9 +43,13 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
     }
 }
 
-async fn try_load(json_path: &PathBuf, sha_path: &PathBuf, config: &Config) -> Result<Worterbuch> {
-    let json = fs::read_to_string(json_path).await.into_diagnostic()?;
-    let sha = fs::read_to_string(sha_path).await.into_diagnostic()?;
+async fn try_load(
+    json_path: &PathBuf,
+    sha_path: &PathBuf,
+    config: &Config,
+) -> PersistenceResult<Worterbuch> {
+    let json = fs::read_to_string(json_path).await?;
+    let sha = fs::read_to_string(sha_path).await?;
 
     let mut hasher = Sha256::new();
     hasher.update(&json);
@@ -53,7 +57,7 @@ async fn try_load(json_path: &PathBuf, sha_path: &PathBuf, config: &Config) -> R
     let loaded_sha = hex::encode(result);
 
     if sha != loaded_sha {
-        Err(miette!("checksums did not match"))
+        Err(PersistenceError::ChecksumMismatch)
     } else {
         let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
         Ok(worterbuch)

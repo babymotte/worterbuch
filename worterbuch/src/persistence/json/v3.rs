@@ -25,7 +25,7 @@ pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
     subsys: SubsystemHandle,
-) -> Result<()> {
+) -> PersistenceResult<()> {
     let mut interval = config.persistence_interval();
 
     loop {
@@ -41,7 +41,7 @@ pub(crate) async fn periodic(
 }
 
 #[instrument("persist_asynchronously", skip_all)]
-async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()> {
+async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> PersistenceResult<()> {
     let span = debug_span!("export");
     debug!("Exporting database state …");
     let (json, grave_goods, last_will) = worterbuch.export(span).await?;
@@ -51,7 +51,7 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
     // is only set to false after the initial load. Export will however never complete before the initial load is done,
     // so this prevents random Errors
     if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
-        return Err(miette!("store is locked"));
+        return Err(PersistenceError::StoreLocked);
     }
 
     let (
@@ -68,8 +68,7 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
     let json = serde_json::to_string(&GraveGoodsLastWill {
         grave_goods,
         last_will,
-    })
-    .into_diagnostic()?;
+    })?;
     write_and_check(
         json.as_bytes(),
         &grave_goods_last_will_path,
@@ -77,15 +76,18 @@ async fn asynchronous(worterbuch: &CloneableWbApi, config: &Config) -> Result<()
     )
     .await?;
 
-    File::create(&last_persisted).await.into_diagnostic()?;
+    File::create(&last_persisted).await?;
 
     Ok(())
 }
 
 #[instrument("persist_synchronously", level=Level::DEBUG, skip(worterbuch, config), err)]
-pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) -> Result<()> {
+pub(crate) async fn synchronous(
+    worterbuch: &mut Worterbuch,
+    config: &Config,
+) -> PersistenceResult<()> {
     if PERSISTENCE_LOCKED.load(Ordering::Acquire) {
-        return Err(miette!("store is locked"));
+        return Err(PersistenceError::StoreLocked);
     }
 
     let (
@@ -106,8 +108,7 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
     let json = serde_json::to_string(&GraveGoodsLastWill {
         grave_goods,
         last_will,
-    })
-    .into_diagnostic()?;
+    })?;
     write_and_check(
         json.as_bytes(),
         &grave_goods_last_will_path,
@@ -115,13 +116,17 @@ pub(crate) async fn synchronous(worterbuch: &mut Worterbuch, config: &Config) ->
     )
     .await?;
 
-    File::create(&last_persisted).await.into_diagnostic()?;
+    File::create(&last_persisted).await?;
 
     Ok(())
 }
 
 #[instrument(level=Level::DEBUG, skip(data), err)]
-async fn write_and_check(data: &[u8], file_path: &Path, checksum_file_path: &Path) -> Result<()> {
+async fn write_and_check(
+    data: &[u8],
+    file_path: &Path,
+    checksum_file_path: &Path,
+) -> PersistenceResult<()> {
     let file_path = file_path;
     let checksum_file_path = checksum_file_path;
 
@@ -134,54 +139,40 @@ async fn write_and_check(data: &[u8], file_path: &Path, checksum_file_path: &Pat
 }
 
 #[instrument(level=Level::DEBUG, skip(data), err)]
-async fn write_to_disk(data: &[u8], path: &Path) -> Result<()> {
+async fn write_to_disk(data: &[u8], path: &Path) -> PersistenceResult<()> {
     debug!("Writing file {} …", path.to_string_lossy());
     let tmp_file = format!("{}.tmp", path.to_string_lossy());
     write_file(&tmp_file, data).await?;
     validate_file_content(&tmp_file, data).await?;
     fs::rename(tmp_file, path)
         .instrument(debug_span!("rename"))
-        .await
-        .into_diagnostic()
-        .wrap_err("moving temp file to actual file failed")?;
+        .await?;
     debug!("Writing file {} done.", path.to_string_lossy());
 
     Ok(())
 }
 
 #[instrument(level=Level::DEBUG, skip(data), err)]
-async fn write_file<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> Result<()> {
-    let mut file = File::create(&path)
-        .await
-        .into_diagnostic()
-        .wrap_err_with(|| format!("creating file {path:?} failed"))?;
-    file.write_all(data)
-        .await
-        .into_diagnostic()
-        .wrap_err("writing backup checksum file failed")?;
-    file.flush()
-        .await
-        .into_diagnostic()
-        .wrap_err("failed to flush file")?;
+async fn write_file<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> PersistenceResult<()> {
+    let mut file = File::create(&path).await?;
+    file.write_all(data).await?;
+    file.flush().await?;
     Ok(())
 }
 
 #[instrument(level=Level::DEBUG, skip(data), err)]
-async fn validate_file_content<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> Result<()> {
+async fn validate_file_content<P: AsRef<Path> + Debug>(
+    path: P,
+    data: &[u8],
+) -> PersistenceResult<()> {
     let path = path.as_ref();
     debug!("Validating content of file {} …", path.to_string_lossy());
     let mut written_data = vec![];
-    let mut file = File::open(path).await.into_diagnostic()?;
-    file.read_to_end(&mut written_data)
-        .await
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to read written file {file:?}"))?;
+    let mut file = File::open(path).await?;
+    file.read_to_end(&mut written_data).await?;
 
     if written_data != data {
-        Err(miette!(
-            "writing file {} failed: written data and actual data don't match",
-            path.to_string_lossy()
-        ))?;
+        Err(PersistenceError::DataMismatch)?;
     }
 
     debug!("Content of file {} is OK.", path.to_string_lossy());
@@ -190,7 +181,7 @@ async fn validate_file_content<P: AsRef<Path> + Debug>(path: P, data: &[u8]) -> 
 }
 
 #[instrument(skip(config) fields(version=3), err)]
-pub async fn load(config: &Config) -> Result<Worterbuch> {
+pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
     let (
         store_path,
         store_path_checksum,
@@ -248,7 +239,7 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
     Ok(wb)
 }
 
-async fn try_load(path: &Path, checksum: &Path, config: &Config) -> Result<Worterbuch> {
+async fn try_load(path: &Path, checksum: &Path, config: &Config) -> PersistenceResult<Worterbuch> {
     let json = read_json_from_file(path, checksum).await?;
     let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
     info!("Wörterbuch successfully restored form persistence.");
@@ -259,29 +250,27 @@ async fn try_load(path: &Path, checksum: &Path, config: &Config) -> Result<Worte
 async fn try_load_grave_goods_last_will(
     path: &Path,
     checksum: &Path,
-) -> Result<GraveGoodsLastWill> {
+) -> PersistenceResult<GraveGoodsLastWill> {
     let json = read_json_from_file(path, checksum).await?;
-    let grave_goods_last_will = serde_json::from_str(&json).into_diagnostic()?;
+    let grave_goods_last_will = serde_json::from_str(&json)?;
     info!("Grave goods and last will successfully restored form persistence.");
     Ok(grave_goods_last_will)
 }
 
 #[instrument(level=Level::DEBUG, err)]
-async fn read_json_from_file(path: &Path, checksum: &Path) -> Result<String, miette::Error> {
+async fn read_json_from_file(path: &Path, checksum: &Path) -> PersistenceResult<String> {
     let json = fs::read_to_string(path)
         .instrument(debug_span!(
             "read_to_string",
             path = path.to_string_lossy().to_string()
         ))
-        .await
-        .into_diagnostic()?;
+        .await?;
     let checksum = fs::read_to_string(checksum)
         .instrument(debug_span!(
             "read_to_string",
             path = checksum.to_string_lossy().to_string()
         ))
-        .await
-        .into_diagnostic()?;
+        .await?;
     validate_checksum(json.as_bytes(), &checksum)?;
     Ok(json)
 }
@@ -290,7 +279,7 @@ async fn read_json_from_file(path: &Path, checksum: &Path) -> Result<String, mie
 pub(crate) async fn file_paths(
     config: &Config,
     write: bool,
-) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
+) -> PersistenceResult<(PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
     let dir = PathBuf::from(&config.data_dir);
 
     let mut toggle_path = dir.clone();
@@ -327,7 +316,7 @@ pub(crate) async fn file_paths(
 }
 
 #[instrument(level=Level::DEBUG, ret, err)]
-async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
+async fn toggle_alternating_files(path: &Path, write: bool) -> PersistenceResult<bool> {
     if write {
         if remove_file(path).await.is_ok() {
             debug!(
@@ -336,7 +325,7 @@ async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
             );
             Ok(false)
         } else {
-            File::create(path).await.into_diagnostic()?;
+            File::create(path).await?;
             debug!(
                 "toggle file {} created, writing to main",
                 path.to_string_lossy()
@@ -367,11 +356,11 @@ fn compute_checksum(data: &[u8]) -> String {
 }
 
 #[instrument(level=Level::DEBUG, skip(data), ret, err)]
-fn validate_checksum(data: &[u8], checksum: &str) -> Result<()> {
+fn validate_checksum(data: &[u8], checksum: &str) -> PersistenceResult<()> {
     let sum = compute_checksum(data);
     if sum == checksum {
         Ok(())
     } else {
-        Err(miette!("checksum did not match"))
+        Err(PersistenceError::ChecksumMismatch)
     }
 }

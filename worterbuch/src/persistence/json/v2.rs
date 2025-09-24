@@ -20,7 +20,7 @@
 use super::*;
 
 #[instrument(skip(config) fields(version=2), err)]
-pub async fn load(config: &Config) -> Result<Worterbuch> {
+pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
     let (store_path, grave_goods_last_will_path) = file_paths(config, false).await?;
 
     let mut wb = match try_load(&store_path, config).await {
@@ -64,21 +64,21 @@ pub async fn load(config: &Config) -> Result<Worterbuch> {
     Ok(wb)
 }
 
-async fn try_load(path: &Path, config: &Config) -> Result<Worterbuch> {
-    let json = fs::read_to_string(path).await.into_diagnostic()?;
+async fn try_load(path: &Path, config: &Config) -> PersistenceResult<Worterbuch> {
+    let json = fs::read_to_string(path).await?;
     let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }
 
-async fn try_load_grave_goods_last_will(path: &Path) -> Result<GraveGoodsLastWill> {
-    let json = fs::read_to_string(path).await.into_diagnostic()?;
-    let grave_goods_last_will = serde_json::from_str(&json).into_diagnostic()?;
+async fn try_load_grave_goods_last_will(path: &Path) -> PersistenceResult<GraveGoodsLastWill> {
+    let json = fs::read_to_string(path).await?;
+    let grave_goods_last_will = serde_json::from_str(&json)?;
     info!("Grave goods and last will successfully restored form persistence.");
     Ok(grave_goods_last_will)
 }
 
-async fn file_paths(config: &Config, write: bool) -> Result<(PathBuf, PathBuf)> {
+async fn file_paths(config: &Config, write: bool) -> PersistenceResult<(PathBuf, PathBuf)> {
     let dir = PathBuf::from(&config.data_dir);
 
     let mut toggle_path = dir.clone();
@@ -100,7 +100,7 @@ async fn file_paths(config: &Config, write: bool) -> Result<(PathBuf, PathBuf)> 
     Ok((store_path, grave_goods_last_will_path))
 }
 
-pub(crate) async fn toggle_alternating_files(path: &Path, write: bool) -> Result<bool> {
+pub(crate) async fn toggle_alternating_files(path: &Path, write: bool) -> PersistenceResult<bool> {
     if write {
         if remove_file(path).await.is_ok() {
             debug!(
@@ -109,7 +109,7 @@ pub(crate) async fn toggle_alternating_files(path: &Path, write: bool) -> Result
             );
             Ok(false)
         } else {
-            File::create(path).await.into_diagnostic()?;
+            File::create(path).await?;
             debug!(
                 "toggle file {} created, writing to main",
                 path.to_string_lossy()

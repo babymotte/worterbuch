@@ -55,6 +55,8 @@ pub enum ConfigError {
     YamlError(#[from] serde_yaml::Error),
     #[error("error setting up telemetry: {0}")]
     ExporterBuildError(#[from] ExporterBuildError),
+    #[error("Parse error: {0}")]
+    ParseError(#[from] serde_json::Error),
 }
 
 pub trait ConfigIntContext<I> {

@@ -84,7 +84,7 @@ pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<(
     let use_persistence = config.use_persistence;
 
     let mut worterbuch = if use_persistence && !config.follower {
-        persistence::load(config.clone()).await?
+        persistence::load(&config).await?
     } else {
         Worterbuch::with_config(config.clone())
     };

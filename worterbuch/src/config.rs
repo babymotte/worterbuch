@@ -17,11 +17,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::license::{License, load_license};
 #[cfg(not(feature = "telemetry"))]
 use crate::logging;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
+use crate::{
+    license::{License, load_license},
+    persistence::PersistenceMode,
+};
 use clap::Parser;
 use serde::Serialize;
 use std::{env, net::IpAddr, path::PathBuf, time::Duration};
@@ -88,6 +91,7 @@ pub struct Config {
     pub unix_endpoint: Option<UnixEndpoint>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
+    pub persistence_mode: PersistenceMode,
     pub data_dir: Path,
     pub single_threaded: bool,
     pub web_root_path: Option<String>,
@@ -168,6 +172,10 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_PERSISTENCE_INTERVAL") {
             let secs = val.parse().to_interval()?;
             self.persistence_interval = Duration::from_secs(secs);
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_PERSISTENCE_MODE") {
+            self.persistence_mode = serde_json::from_str(&val)?;
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_DATA_DIR") {
@@ -282,6 +290,7 @@ impl Config {
                     unix_endpoint: None,
                     use_persistence: false,
                     persistence_interval: Duration::from_secs(30),
+                    persistence_mode: PersistenceMode::Json,
                     data_dir: "./data".into(),
                     single_threaded: false,
                     web_root_path: None,
