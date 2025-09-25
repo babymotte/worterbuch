@@ -59,7 +59,8 @@ async fn try_load(
     if sha != loaded_sha {
         Err(PersistenceError::ChecksumMismatch)
     } else {
-        let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
+        let store = serde_json::from_str(&json)?;
+        let worterbuch = Worterbuch::from_persistence(store, config.to_owned());
         Ok(worterbuch)
     }
 }

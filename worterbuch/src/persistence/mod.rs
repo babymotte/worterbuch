@@ -1,15 +1,20 @@
 pub mod error;
 mod json;
+mod redb;
 
 use crate::{
     Config, Worterbuch,
-    persistence::{error::PersistenceResult, json::PersistentJsonStorage},
+    persistence::{
+        error::PersistenceResult, json::PersistentJsonStorage, redb::PersistentRedbStore,
+    },
     server::common::CloneableWbApi,
 };
 use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use strum::EnumString;
 use tokio_graceful_shutdown::SubsystemHandle;
+use tracing::{info, warn};
 use worterbuch_common::{Key, Value};
 
 lazy_static! {
@@ -24,8 +29,8 @@ pub fn unlock_persistence() {
     PERSISTENCE_LOCKED.store(false, Ordering::Release);
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize, EnumString)]
+// #[serde(rename_all = "camelCase")]
 pub enum PersistenceMode {
     Json,
     ReDB,
@@ -38,59 +43,67 @@ pub trait PersistentStorage {
 
     fn delete_value(&self, key: &Key) -> PersistenceResult<()>;
 
-    async fn flush(&self, worterbuch: &mut Worterbuch) -> PersistenceResult<()>;
+    async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()>;
 
-    async fn load(self, config: &Config) -> PersistenceResult<Worterbuch>;
+    async fn load(&self, config: &Config) -> PersistenceResult<Worterbuch>;
 
     fn clear(&self) -> PersistenceResult<()>;
 }
 
-#[derive(PartialEq)]
+#[derive(Default)]
 pub enum PersistentStorageImpl {
-    Json(PersistentJsonStorage),
+    Json(Box<PersistentJsonStorage>),
+    ReDB(Box<PersistentRedbStore>),
+    #[default]
     Noop,
 }
 
-impl Default for PersistentStorageImpl {
-    fn default() -> Self {
-        PersistentStorageImpl::Noop
-    }
-}
-
-impl PersistentStorage for PersistentStorageImpl {
-    fn update_value(&self, key: &Key, value: &Value) -> PersistenceResult<()> {
+impl PersistentStorageImpl {
+    pub fn update_value(&self, key: &Key, value: &Value) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.update_value(key, value),
+            PersistentStorageImpl::ReDB(s) => s.update_value(key, value),
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
 
-    fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
+    pub fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.delete_value(key),
+            PersistentStorageImpl::ReDB(s) => s.delete_value(key),
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
 
-    async fn flush(&self, worterbuch: &mut Worterbuch) -> PersistenceResult<()> {
+    pub async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.flush(worterbuch).await,
+            PersistentStorageImpl::ReDB(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
 
-    async fn load(self, config: &Config) -> PersistenceResult<Worterbuch> {
+    pub async fn load(&self, config: &Config) -> Worterbuch {
         let res = match self {
             PersistentStorageImpl::Json(s) => s.load(config).await,
+            PersistentStorageImpl::ReDB(s) => s.load(config).await,
             PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
         };
-        unlock_persistence();
-        res
+
+        match res {
+            Ok(it) => it,
+            Err(e) => {
+                warn!("Could not restore worterbuch from persistence: {e}");
+                info!("Starting empty instace.");
+                Worterbuch::with_config(config.clone())
+            }
+        }
     }
 
-    fn clear(&self) -> PersistenceResult<()> {
+    pub fn clear(&self) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.clear(),
+            PersistentStorageImpl::ReDB(s) => s.clear(),
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -101,25 +114,31 @@ pub(crate) async fn restore(
     config: &Config,
     api: &CloneableWbApi,
 ) -> PersistenceResult<Worterbuch> {
-    let persistent_storage = get_storage_instance(subsys, config, api);
-    persistent_storage.load(&config).await
+    let persistent_storage = get_storage_instance(subsys, config, api).await?;
+    let mut wb = persistent_storage.load(config).await;
+    wb.set_persistent_storage(persistent_storage);
+    unlock_persistence();
+    Ok(wb)
 }
 
-fn get_storage_instance(
+async fn get_storage_instance(
     subsys: &SubsystemHandle,
     config: &Config,
     api: &CloneableWbApi,
-) -> PersistentStorageImpl {
+) -> PersistenceResult<PersistentStorageImpl> {
     if !config.use_persistence || config.follower {
-        return PersistentStorageImpl::Noop;
+        return Ok(PersistentStorageImpl::Noop);
     }
 
-    match config.persistence_mode {
-        PersistenceMode::Json => PersistentStorageImpl::Json(PersistentJsonStorage::new(
-            subsys,
-            config.clone(),
-            api.clone(),
-        )),
-        PersistenceMode::ReDB => todo!(),
-    }
+    let storage =
+        match config.persistence_mode {
+            PersistenceMode::Json => PersistentStorageImpl::Json(Box::new(
+                PersistentJsonStorage::new(subsys, config.clone(), api.clone()),
+            )),
+            PersistenceMode::ReDB => {
+                PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(config).await?))
+            }
+        };
+
+    Ok(storage)
 }

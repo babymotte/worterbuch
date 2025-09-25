@@ -27,7 +27,7 @@ use crate::{
 };
 use clap::Parser;
 use serde::Serialize;
-use std::{env, net::IpAddr, path::PathBuf, time::Duration};
+use std::{env, net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use tracing::debug;
 use worterbuch_common::{
@@ -175,7 +175,8 @@ impl Config {
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_PERSISTENCE_MODE") {
-            self.persistence_mode = serde_json::from_str(&val)?;
+            self.persistence_mode =
+                PersistenceMode::from_str(&val).unwrap_or(PersistenceMode::Json);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_DATA_DIR") {

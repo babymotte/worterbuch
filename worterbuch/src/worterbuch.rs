@@ -21,7 +21,7 @@ use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
     mem_tools,
-    persistence::{PersistentStorage, PersistentStorageImpl, error::PersistenceResult},
+    persistence::{PersistentStorageImpl, error::PersistenceResult},
     store::{PersistedStore, Store, StoreNode, StoreStats, ValueEntry},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers, SubscriptionId},
 };
@@ -288,13 +288,11 @@ impl Worterbuch {
         }
     }
 
-    #[instrument(skip(json, config), err)]
-    pub fn from_json(json: &str, config: Config) -> WorterbuchResult<Worterbuch> {
-        let store: PersistedStore = from_str(json)
-            .map_err(|e| WorterbuchError::SerDeError(e, "Error parsing store JSON".to_owned()))?;
+    #[instrument(skip(store, config))]
+    pub fn from_persistence(store: PersistedStore, config: Config) -> Worterbuch {
         let store: Store = store.into();
         debug!("Loaded persisted store with {} entries.", store.len());
-        Ok(Worterbuch {
+        Worterbuch {
             config,
             store,
             clients: Default::default(),
@@ -303,7 +301,22 @@ impl Worterbuch {
             subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
-        })
+        }
+    }
+
+    #[instrument(skip(store, config))]
+    pub fn with_store(store: Store, config: Config) -> Worterbuch {
+        debug!("Loaded persisted store with {} entries.", store.len());
+        Worterbuch {
+            config,
+            store,
+            clients: Default::default(),
+            ls_subscriptions: Default::default(),
+            subscribers: Default::default(),
+            subscriptions: Default::default(),
+            spub_keys: Default::default(),
+            persistent_storage: Default::default(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -1390,10 +1403,10 @@ impl Worterbuch {
     }
 
     pub(crate) async fn flush(&mut self) -> PersistenceResult<()> {
-        let storage = mem::replace(&mut self.persistent_storage, PersistentStorageImpl::Noop);
+        let mut storage = mem::replace(&mut self.persistent_storage, PersistentStorageImpl::Noop);
         let res = storage.flush(self).await;
         let _ = mem::replace(&mut self.persistent_storage, storage);
-        Ok(res?)
+        res
     }
 }
 

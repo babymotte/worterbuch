@@ -24,7 +24,7 @@ mod v3;
 use crate::{
     config::Config,
     persistence::{
-        PersistentStorage, PersistentStorageImpl,
+        PersistentStorage,
         error::{PersistenceError, PersistenceResult},
     },
     server::common::CloneableWbApi,
@@ -67,7 +67,7 @@ pub(crate) async fn synchronous(
 #[instrument(skip(config), err)]
 pub(crate) async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
     info!("Trying to load v3 persistence file …");
-    let wb = match v3::load(config).await {
+    match v3::load(config).await {
         Ok(wb) => Ok(wb),
         Err(e) => {
             warn!("Could not load persistence file: {e}");
@@ -81,8 +81,7 @@ pub(crate) async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
                 }
             }
         }
-    };
-    Ok(wb?)
+    }
 }
 
 #[derive(PartialEq)]
@@ -92,6 +91,7 @@ pub struct PersistentJsonStorage {
 
 impl PersistentJsonStorage {
     pub fn new(subsys: &SubsystemHandle, config: Config, api: CloneableWbApi) -> Self {
+        info!("Using JSON file persistence.");
         let config_pers = config.clone();
         subsys.start(SubsystemBuilder::new("json-persistence", |subsys| {
             periodic(api, config_pers, subsys)
@@ -111,14 +111,12 @@ impl PersistentStorage for PersistentJsonStorage {
         Ok(())
     }
 
-    async fn flush(&self, worterbuch: &mut Worterbuch) -> PersistenceResult<()> {
+    async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()> {
         synchronous(worterbuch, &self.config).await
     }
 
-    async fn load(self, _: &Config) -> PersistenceResult<Worterbuch> {
-        let mut wb = load(&self.config).await?;
-        wb.set_persistent_storage(PersistentStorageImpl::Json(self));
-        Ok(wb)
+    async fn load(&self, _: &Config) -> PersistenceResult<Worterbuch> {
+        load(&self.config).await
     }
 
     fn clear(&self) -> PersistenceResult<()> {

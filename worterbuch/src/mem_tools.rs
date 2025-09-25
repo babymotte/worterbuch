@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 use tokio::{spawn, time::sleep};
-use tracing::info;
+use tracing::{error, info};
 
 lazy_static! {
     static ref TRIM_TIMER: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
@@ -16,7 +16,10 @@ pub fn schedule_trim() {
     info!("Scheduling trim …");
     let timer_arc = TRIM_TIMER.clone();
 
-    let mut guard = timer_arc.lock().unwrap();
+    let Ok(mut guard) = timer_arc.lock() else {
+        error!("trim schedule mutex guard is poisoned");
+        return;
+    };
 
     // Cancel existing timer if any
     if let Some(handle) = guard.take() {

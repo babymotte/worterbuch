@@ -17,9 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::persistence::is_persistence_locked;
-
 use super::*;
+use crate::persistence::is_persistence_locked;
 use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
 
@@ -243,7 +242,8 @@ pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
 
 async fn try_load(path: &Path, checksum: &Path, config: &Config) -> PersistenceResult<Worterbuch> {
     let json = read_json_from_file(path, checksum).await?;
-    let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
+    let store = serde_json::from_str(&json)?;
+    let worterbuch = Worterbuch::from_persistence(store, config.to_owned());
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }

@@ -172,9 +172,10 @@ where
     #[serde(skip_serializing_if = "Option::is_none")]
     value: Option<V>,
     #[serde(rename = "t")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     tree: Option<Tree<K, V>>,
     #[serde(skip, default)]
-    _phantom: PhantomData<K>,
+    _key_type: PhantomData<K>,
 }
 
 impl<K, V> Node<K, V>
@@ -295,7 +296,7 @@ where
         Self {
             value: None,
             tree: None,
-            _phantom: PhantomData::default(),
+            _key_type: PhantomData,
         }
     }
 }

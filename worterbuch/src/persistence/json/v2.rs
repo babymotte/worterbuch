@@ -66,7 +66,8 @@ pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
 
 async fn try_load(path: &Path, config: &Config) -> PersistenceResult<Worterbuch> {
     let json = fs::read_to_string(path).await?;
-    let worterbuch = Worterbuch::from_json(&json, config.to_owned())?;
+    let store = serde_json::from_str(&json)?;
+    let worterbuch = Worterbuch::from_persistence(store, config.to_owned());
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }

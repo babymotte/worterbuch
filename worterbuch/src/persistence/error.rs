@@ -1,7 +1,12 @@
 use miette::Diagnostic;
+use redb::{
+    CommitError, CompactionError, DatabaseError, StorageError, TableError, TransactionError,
+};
 use std::io;
 use thiserror::Error;
 use worterbuch_common::error::WorterbuchError;
+
+use crate::store::StoreError;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum PersistenceError {
@@ -17,6 +22,20 @@ pub enum PersistenceError {
     WorterbuchError(#[from] WorterbuchError),
     #[error("Written data is different from data to be written")]
     DataMismatch,
+    #[error("redb database error: {0}")]
+    RedbDatabaseBError(#[from] DatabaseError),
+    #[error("redb transaction error: {0}")]
+    RedbTransactioneError(#[from] TransactionError),
+    #[error("redb table error: {0}")]
+    RedbTableError(#[from] TableError),
+    #[error("redb storage error: {0}")]
+    RedbStorageError(#[from] StorageError),
+    #[error("redb compaction error: {0}")]
+    RedbCompactionError(#[from] CompactionError),
+    #[error("redb commit error: {0}")]
+    RedbCommitError(#[from] CommitError),
+    #[error("store error: {0}")]
+    StoreError(#[from] StoreError),
 }
 
 pub type PersistenceResult<T> = Result<T, PersistenceError>;
