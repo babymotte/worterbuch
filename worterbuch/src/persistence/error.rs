@@ -4,6 +4,7 @@ use redb::{
 };
 use std::io;
 use thiserror::Error;
+use tokio::sync::oneshot;
 use worterbuch_common::error::WorterbuchError;
 
 use crate::store::StoreError;
@@ -36,6 +37,8 @@ pub enum PersistenceError {
     RedbCommitError(#[from] CommitError),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
+    #[error("internal api error")]
+    ApiError(#[from] oneshot::error::RecvError),
 }
 
 pub type PersistenceResult<T> = Result<T, PersistenceError>;

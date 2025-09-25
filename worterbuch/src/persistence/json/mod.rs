@@ -102,12 +102,12 @@ impl PersistentJsonStorage {
 }
 
 impl PersistentStorage for PersistentJsonStorage {
-    fn update_value(&self, _: &Key, _: &ValueEntry) -> PersistenceResult<()> {
+    async fn update_value(&self, _: &Key, _: &ValueEntry) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
 
-    fn delete_value(&self, _: &Key) -> PersistenceResult<()> {
+    async fn delete_value(&self, _: &Key) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
@@ -120,7 +120,7 @@ impl PersistentStorage for PersistentJsonStorage {
         load(&self.config).await
     }
 
-    fn clear(&self) -> PersistenceResult<()> {
+    async fn clear(&self) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }

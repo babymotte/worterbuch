@@ -40,15 +40,15 @@ pub enum PersistenceMode {
 }
 
 pub trait PersistentStorage {
-    fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()>;
+    async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()>;
 
-    fn delete_value(&self, key: &Key) -> PersistenceResult<()>;
+    async fn delete_value(&self, key: &Key) -> PersistenceResult<()>;
 
     async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()>;
 
     async fn load(&self, config: &Config) -> PersistenceResult<Worterbuch>;
 
-    fn clear(&self) -> PersistenceResult<()>;
+    async fn clear(&self) -> PersistenceResult<()>;
 }
 
 #[derive(Default)]
@@ -60,18 +60,18 @@ pub enum PersistentStorageImpl {
 }
 
 impl PersistentStorageImpl {
-    pub fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
+    pub async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
         match self {
-            PersistentStorageImpl::Json(s) => s.update_value(key, value),
-            PersistentStorageImpl::ReDB(s) => s.update_value(key, value),
+            PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
+            PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
 
-    pub fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
+    pub async fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
         match self {
-            PersistentStorageImpl::Json(s) => s.delete_value(key),
-            PersistentStorageImpl::ReDB(s) => s.delete_value(key),
+            PersistentStorageImpl::Json(s) => s.delete_value(key).await,
+            PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -101,10 +101,10 @@ impl PersistentStorageImpl {
         }
     }
 
-    pub fn clear(&self) -> PersistenceResult<()> {
+    pub async fn clear(&self) -> PersistenceResult<()> {
         match self {
-            PersistentStorageImpl::Json(s) => s.clear(),
-            PersistentStorageImpl::ReDB(s) => s.clear(),
+            PersistentStorageImpl::Json(s) => s.clear().await,
+            PersistentStorageImpl::ReDB(s) => s.clear().await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }

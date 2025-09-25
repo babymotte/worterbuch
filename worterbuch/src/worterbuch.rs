@@ -355,6 +355,7 @@ impl Worterbuch {
 
         self.persistent_storage
             .update_value(&key, &ValueEntry::Plain(value.clone()))
+            .await
             .map_err(|e| {
                 WorterbuchError::IoError(
                     io::Error::other(e),
@@ -388,6 +389,7 @@ impl Worterbuch {
 
         self.persistent_storage
             .update_value(&key, &ValueEntry::Cas(value.clone(), version))
+            .await
             .map_err(|e| {
                 WorterbuchError::IoError(
                     io::Error::other(e),
@@ -675,6 +677,7 @@ impl Worterbuch {
             if *changed {
                 self.persistent_storage
                     .update_value(key, val)
+                    .await
                     .map_err(|e| {
                         WorterbuchError::IoError(
                             io::Error::other(e),
@@ -891,12 +894,15 @@ impl Worterbuch {
 
         match self.store.delete(&path)? {
             Some((value, ls_subscribers)) => {
-                self.persistent_storage.delete_value(&key).map_err(|e| {
-                    WorterbuchError::IoError(
-                        io::Error::other(e),
-                        "Failed to remove value from persistent storage".to_owned(),
-                    )
-                })?;
+                self.persistent_storage
+                    .delete_value(&key)
+                    .await
+                    .map_err(|e| {
+                        WorterbuchError::IoError(
+                            io::Error::other(e),
+                            "Failed to remove value from persistent storage".to_owned(),
+                        )
+                    })?;
 
                 self.notify_ls_subscribers(ls_subscribers).await;
                 self.notify_subscribers(&path, &key, &value, true, true)
@@ -932,6 +938,7 @@ impl Worterbuch {
         for kvp in &deleted {
             self.persistent_storage
                 .delete_value(&kvp.key)
+                .await
                 .map_err(|e| {
                     WorterbuchError::IoError(
                         io::Error::other(e),
@@ -1322,7 +1329,7 @@ impl Worterbuch {
 
     pub(crate) async fn reset_store(&mut self, data: StoreNode) -> WorterbuchResult<()> {
         self.store.reset(data);
-        self.persistent_storage.clear().map_err(|e| {
+        self.persistent_storage.clear().await.map_err(|e| {
             WorterbuchError::IoError(io::Error::other(e), "Failed to clear storage".to_owned())
         })?;
         self.flush().await.map_err(|e| {
@@ -1405,7 +1412,7 @@ impl Worterbuch {
     pub(crate) async fn flush(&mut self) -> PersistenceResult<()> {
         let mut storage = mem::replace(&mut self.persistent_storage, PersistentStorageImpl::Noop);
         let res = storage.flush(self).await;
-        let _ = mem::replace(&mut self.persistent_storage, storage);
+        _ = mem::replace(&mut self.persistent_storage, storage);
         res
     }
 }

@@ -394,7 +394,7 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
             tx.send(worterbuch.config().clone()).ok();
         }
         WbFunction::Export(tx, span) => {
-            let _ = span.enter();
+            _ = span.enter();
             worterbuch.export_for_persistence(tx);
         }
         WbFunction::Import(_, tx) => {
