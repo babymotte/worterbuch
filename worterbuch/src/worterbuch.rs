@@ -354,7 +354,7 @@ impl Worterbuch {
         let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone())?;
 
         self.persistent_storage
-            .update_value(&key, &value)
+            .update_value(&key, &ValueEntry::Plain(value.clone()))
             .map_err(|e| {
                 WorterbuchError::IoError(
                     io::Error::other(e),
@@ -387,7 +387,7 @@ impl Worterbuch {
         let (changed, ls_subscribers) = self.store.insert_cas(&path, value.clone(), version)?;
 
         self.persistent_storage
-            .update_value(&key, &value)
+            .update_value(&key, &ValueEntry::Cas(value.clone(), version))
             .map_err(|e| {
                 WorterbuchError::IoError(
                     io::Error::other(e),
@@ -674,7 +674,7 @@ impl Worterbuch {
         for (key, (val, changed)) in &imported_values {
             if *changed {
                 self.persistent_storage
-                    .update_value(key, val.as_ref())
+                    .update_value(key, val)
                     .map_err(|e| {
                         WorterbuchError::IoError(
                             io::Error::other(e),

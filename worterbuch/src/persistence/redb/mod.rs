@@ -26,23 +26,19 @@ impl PersistentRedbStore {
 }
 
 impl PersistentStorage for PersistentRedbStore {
-    fn update_value(
-        &self,
-        key: &worterbuch_common::Key,
-        value: &worterbuch_common::Value,
-    ) -> PersistenceResult<()> {
+    fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
         // TODO move to background task and batch operations
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(TABLE)?;
-            let value = value.to_string();
+            let value = serde_json::to_string(value)?;
             table.insert(key, value)?;
         }
         write_txn.commit()?;
         Ok(())
     }
 
-    fn delete_value(&self, key: &worterbuch_common::Key) -> PersistenceResult<()> {
+    fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
         // TODO move to background task and batch operations
         let write_txn = self.db.begin_write()?;
         {

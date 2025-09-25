@@ -8,6 +8,7 @@ use crate::{
         error::PersistenceResult, json::PersistentJsonStorage, redb::PersistentRedbStore,
     },
     server::common::CloneableWbApi,
+    store::ValueEntry,
 };
 use lazy_static::lazy_static;
 use serde::Serialize;
@@ -15,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use strum::EnumString;
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
-use worterbuch_common::{Key, Value};
+use worterbuch_common::Key;
 
 lazy_static! {
     static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
@@ -39,7 +40,7 @@ pub enum PersistenceMode {
 }
 
 pub trait PersistentStorage {
-    fn update_value(&self, key: &Key, value: &Value) -> PersistenceResult<()>;
+    fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()>;
 
     fn delete_value(&self, key: &Key) -> PersistenceResult<()>;
 
@@ -59,7 +60,7 @@ pub enum PersistentStorageImpl {
 }
 
 impl PersistentStorageImpl {
-    pub fn update_value(&self, key: &Key, value: &Value) -> PersistenceResult<()> {
+    pub fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.update_value(key, value),
             PersistentStorageImpl::ReDB(s) => s.update_value(key, value),

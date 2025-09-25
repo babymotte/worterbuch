@@ -28,6 +28,7 @@ use crate::{
         error::{PersistenceError, PersistenceResult},
     },
     server::common::CloneableWbApi,
+    store::ValueEntry,
     worterbuch::Worterbuch,
 };
 use serde::{Deserialize, Serialize};
@@ -41,7 +42,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, info, instrument, warn};
-use worterbuch_common::{GraveGoods, Key, LastWill, Value};
+use worterbuch_common::{GraveGoods, Key, LastWill};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {
@@ -101,7 +102,7 @@ impl PersistentJsonStorage {
 }
 
 impl PersistentStorage for PersistentJsonStorage {
-    fn update_value(&self, _: &Key, _: &Value) -> PersistenceResult<()> {
+    fn update_value(&self, _: &Key, _: &ValueEntry) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
