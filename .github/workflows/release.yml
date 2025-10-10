@@ -213,7 +213,7 @@ jobs:
             args: "--no-default-features"
             target-path: ""
           - target: x86_64-apple-darwin
-            image: macos-13
+            image: macos-15-intel
             ext: ""
             args: "--no-default-features"
 
