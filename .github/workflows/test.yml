@@ -44,10 +44,10 @@ jobs:
         run: cargo fmt --check
       - name: Run linter
         env:
-          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_LICENSE_PUBLIC_KEY }}
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
         run: cargo clippy --no-default-features --features=${{ matrix.features }} -- --deny warnings
       - name: Run tests
         env:
-          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_LICENSE_PUBLIC_KEY }}
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
           WORTERBUCH_LICENSE_FILE: ./test/license
         run: cargo test --no-default-features --features=${{ matrix.features }}
