@@ -25,7 +25,6 @@ use std::{
     ops::Deref,
     time::Duration,
 };
-
 use tracing::{debug, error, instrument};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +103,13 @@ impl Config {
         if let Ok(val) = env::var("WORTERBUCH_USE_BACKPRESSURE") {
             let val = val.to_lowercase() == "true";
             self.use_backpressure = val;
+        }
+
+        #[cfg(target_family = "unix")]
+        {
+            if let Ok(val) = env::var("WORTERBUCH_UNIX_SOCKET_PATH") {
+                self.socket_path = Some(PathBuf::from(val));
+            }
         }
     }
 }
