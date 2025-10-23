@@ -13,7 +13,7 @@ use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
-use worterbuch_common::{Key, ValueEntry};
+use worterbuch_common::{Key, SYSTEM_TOPIC_ROOT_PREFIX, ValueEntry};
 
 lazy_static! {
     static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
@@ -49,6 +49,10 @@ pub enum PersistentStorageImpl {
 
 impl PersistentStorageImpl {
     pub async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
+        if key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+            return Ok(());
+        }
+
         match self {
             PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
             PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
@@ -57,6 +61,10 @@ impl PersistentStorageImpl {
     }
 
     pub async fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
+        if key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
+            return Ok(());
+        }
+
         match self {
             PersistentStorageImpl::Json(s) => s.delete_value(key).await,
             PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
