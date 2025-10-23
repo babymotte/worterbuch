@@ -27,32 +27,43 @@
 
 mod auth;
 mod config;
+pub mod error;
 mod leader_follower;
-pub mod license;
+pub(crate) mod license;
 #[cfg(not(feature = "telemetry"))]
-mod logging;
+pub mod logging;
 mod mem_tools;
 mod persistence;
-mod server;
+pub mod server;
 mod stats;
-pub mod store;
+pub(crate) mod store;
 mod subscribers;
 #[cfg(feature = "telemetry")]
-mod telemetry;
+pub mod telemetry;
 mod worterbuch;
 
-pub use crate::worterbuch::*;
-use crate::{persistence::unlock_persistence, stats::track_stats};
 pub use config::*;
+pub use worterbuch_common as common;
+
+use crate::{
+    error::{WorterbuchAppError, WorterbuchAppResult},
+    persistence::unlock_persistence,
+    server::{CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
+    stats::track_stats,
+    worterbuch::Worterbuch,
+};
+use common::{
+    KeySegment, PStateEvent, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Value, error::WorterbuchError, receive_msg, topic,
+};
 use leader_follower::{
     ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, initial_sync, process_leader_message,
     run_cluster_sync_port, shutdown_on_stdin_close,
 };
-use miette::{IntoDiagnostic, Result, miette};
-use serde_json::{Value, json};
-use server::common::{CloneableWbApi, WbFunction};
+use serde_json::json;
+use server::common::WbFunction;
 use std::error::Error;
-use store::ValueEntry;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
@@ -61,24 +72,39 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{Instrument, Level, debug, error, info, span};
-use uuid::Uuid;
-use worterbuch_common::{
-    KeySegment, PStateEvent, ProtocolVersion, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
-    SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, error::WorterbuchError, receive_msg, topic,
-};
-
-pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
-    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 1)];
-
-pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
+use worterbuch_common::{INTERNAL_CLIENT_ID, ValueEntry};
 
 type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
 
-pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> Result<()> {
+pub async fn spawn_worterbuch(
+    subsys: &SubsystemHandle,
+    config: Config,
+) -> WorterbuchAppResult<CloneableWbApi> {
+    let (api_tx, api_rx) = oneshot::channel();
+    subsys.start(SubsystemBuilder::new("worterbuch", |s| async move {
+        do_run_worterbuch(&s, config, Some(api_tx)).await?;
+        Ok::<(), WorterbuchAppError>(())
+    }));
+    Ok(api_rx.await?)
+}
+
+pub async fn run_worterbuch(subsys: &SubsystemHandle, config: Config) -> WorterbuchAppResult<()> {
+    do_run_worterbuch(subsys, config, None).await?;
+    Ok(())
+}
+
+async fn do_run_worterbuch(
+    subsys: &SubsystemHandle,
+    config: Config,
+    tx: Option<oneshot::Sender<CloneableWbApi>>,
+) -> WorterbuchAppResult<()> {
     let channel_buffer_size = config.channel_buffer_size;
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
-    let api = CloneableWbApi::new(api_tx);
+    let api = CloneableWbApi::new(api_tx, config.clone());
+
+    if let Some(tx) = tx {
+        tx.send(api.clone()).ok();
+    }
 
     let mut worterbuch = persistence::restore(&subsys, &config, &api).await?;
 
@@ -407,14 +433,14 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
 }
 
 async fn run_in_regular_mode(
-    subsys: SubsystemHandle,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
     unix_socket: Option<ServerSubsystem>,
-) -> Result<()> {
+) -> WorterbuchAppResult<()> {
     loop {
         select! {
             recv = api_rx.recv() => match recv {
@@ -437,14 +463,14 @@ async fn run_in_regular_mode(
 }
 
 async fn run_in_leader_mode(
-    subsys: SubsystemHandle,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
     unix_socket: Option<ServerSubsystem>,
-) -> Result<()> {
+) -> WorterbuchAppResult<()> {
     info!("Running in LEADER mode.");
 
     shutdown_on_stdin_close(&subsys);
@@ -537,7 +563,7 @@ async fn run_in_leader_mode(
                 Some(WbFunction::Import(json, tx)) => {
                     let (tx_int, rx_int) = oneshot::channel();
                     process_api_call(&mut worterbuch, WbFunction::Import(json, tx_int)).await;
-                    let imported_values = rx_int.await.into_diagnostic()??;
+                    let imported_values = rx_int.await??;
 
                     for (key, (value, changed))  in &imported_values {
                         if *changed {
@@ -583,20 +609,22 @@ async fn run_in_leader_mode(
 }
 
 async fn run_in_follower_mode(
-    subsys: SubsystemHandle,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<ServerSubsystem>,
-) -> Result<()> {
+) -> WorterbuchAppResult<()> {
     let leader_addr = if let Some(it) = &config.leader_address {
         it
     } else {
-        return Err(miette!("No valid leader address configured."));
+        return Err(WorterbuchAppError::ConfigError(
+            "No valid leader address configured.".to_owned(),
+        ));
     };
     info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
 
-    shutdown_on_stdin_close(&subsys);
+    shutdown_on_stdin_close(subsys);
 
     worterbuch
         .set(
@@ -608,7 +636,7 @@ async fn run_in_follower_mode(
 
     let mut persistence_interval = config.persistence_interval();
 
-    let stream = TcpStream::connect(leader_addr).await.into_diagnostic()?;
+    let stream = TcpStream::connect(leader_addr).await?;
 
     let mut lines = BufReader::new(stream).lines();
 
@@ -622,15 +650,15 @@ async fn run_in_follower_mode(
                     persistence_interval.reset();
                     worterbuch.flush().await?;
                 } else {
-                    return Err(miette!("first message from leader is supposed to be the initial sync, but it wasn't"));
+                    return Err(WorterbuchAppError::ClusterError("first message from leader is supposed to be the initial sync, but it wasn't".to_owned()));
                 }
             },
-            Ok(None) => return Err(miette!("connection to leader closed before initial sync")),
+            Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
             Err(e) => {
-                return Err(miette!("error receiving update from leader: {e}"));
+                return Err(WorterbuchAppError::ClusterError(format!("error receiving update from leader: {e}")));
             }
         },
-        _ = subsys.on_shutdown_requested() => return Err(miette!("shut down before initial sync")),
+        _ = subsys.on_shutdown_requested() => return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned())),
     }
     info!("Successfully synced with leader.");
 
@@ -660,13 +688,13 @@ async fn run_in_follower_mode(
 }
 
 async fn shutdown(
-    subsys: SubsystemHandle,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     config: Config,
     web_server: Option<ServerSubsystem>,
     tcp_server: Option<ServerSubsystem>,
     unix_socket: Option<ServerSubsystem>,
-) -> Result<()> {
+) -> WorterbuchAppResult<()> {
     info!("Shutdown sequence triggered");
 
     subsys.request_shutdown();

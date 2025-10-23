@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{INTERNAL_CLIENT_ID, server::common::CloneableWbApi};
+use crate::{INTERNAL_CLIENT_ID, server::CloneableWbApi};
 use serde_json::json;
 use std::time::Duration;
 use tokio::{
@@ -29,7 +29,8 @@ use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
-    SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION, error::WorterbuchResult, topic,
+    SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION, WbApi, error::WorterbuchResult,
+    topic,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

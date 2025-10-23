@@ -31,11 +31,16 @@ use error::WorterbuchResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_repr::*;
 use sha2::{Digest, Sha256};
-use std::{fmt, ops::Deref};
+use std::{fmt, net::SocketAddr, ops::Deref};
+use tokio::sync::{mpsc, oneshot};
+use tracing::Span;
+use uuid::Uuid;
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
 #[cfg(feature = "jemalloc")]
 pub mod profiling;
+
+pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
@@ -73,6 +78,37 @@ pub type LiveOnlyFlag = bool;
 pub type AuthToken = String;
 pub type AuthTokenKey = String;
 pub type CasVersion = u64;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ValueEntry {
+    Cas(Value, u64),
+    #[serde(untagged)]
+    Plain(Value),
+}
+
+impl AsRef<Value> for ValueEntry {
+    fn as_ref(&self) -> &Value {
+        match self {
+            ValueEntry::Plain(value) => value,
+            ValueEntry::Cas(value, _) => value,
+        }
+    }
+}
+
+impl From<ValueEntry> for Value {
+    fn from(value: ValueEntry) -> Self {
+        match value {
+            ValueEntry::Plain(value) => value,
+            ValueEntry::Cas(value, _) => value,
+        }
+    }
+}
+
+impl From<Value> for ValueEntry {
+    fn from(value: Value) -> Self {
+        ValueEntry::Plain(value)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -402,6 +438,173 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
         hasher.update(salted.as_bytes());
         format!("{:x}", hasher.finalize())
     })
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct SubscriptionId {
+    pub client_id: Uuid,
+    pub transaction_id: TransactionId,
+}
+
+impl SubscriptionId {
+    pub fn new(client_id: Uuid, transaction_id: TransactionId) -> Self {
+        SubscriptionId {
+            client_id,
+            transaction_id,
+        }
+    }
+}
+
+pub trait WbApi {
+    fn supported_protocol_versions(&self) -> Vec<ProtocolVersion>;
+
+    fn version(&self) -> &str;
+
+    fn get(&self, key: Key) -> impl Future<Output = WorterbuchResult<Value>> + Send;
+
+    fn cget(&self, key: Key) -> impl Future<Output = WorterbuchResult<(Value, CasVersion)>> + Send;
+
+    fn pget(
+        &self,
+        pattern: RequestPattern,
+    ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
+
+    fn set(
+        &self,
+        key: Key,
+        value: Value,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn cset(
+        &self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn lock(&self, key: Key, client_id: Uuid) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn acquire_lock(
+        &self,
+        key: Key,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<oneshot::Receiver<()>>> + Send;
+
+    fn release_lock(
+        &self,
+        key: Key,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn spub_init(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn spub(
+        &self,
+        transaction_id: TransactionId,
+        value: Value,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn publish(&self, key: Key, value: Value) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn ls(
+        &self,
+        parent: Option<Key>,
+    ) -> impl Future<Output = WorterbuchResult<Vec<RegularKeySegment>>> + Send;
+
+    fn pls(
+        &self,
+        parent: Option<RequestPattern>,
+    ) -> impl Future<Output = WorterbuchResult<Vec<RegularKeySegment>>> + Send;
+
+    fn subscribe(
+        &self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+        key: Key,
+        unique: bool,
+        live_only: bool,
+    ) -> impl Future<Output = WorterbuchResult<(mpsc::Receiver<StateEvent>, SubscriptionId)>> + Send;
+
+    fn psubscribe(
+        &self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+        pattern: RequestPattern,
+        unique: bool,
+        live_only: bool,
+    ) -> impl Future<Output = WorterbuchResult<(mpsc::Receiver<PStateEvent>, SubscriptionId)>> + Send;
+
+    fn subscribe_ls(
+        &self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+        parent: Option<Key>,
+    ) -> impl Future<
+        Output = WorterbuchResult<(mpsc::Receiver<Vec<RegularKeySegment>>, SubscriptionId)>,
+    > + Send;
+
+    fn unsubscribe(
+        &self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn unsubscribe_ls(
+        &self,
+        client_id: Uuid,
+        transaction_id: TransactionId,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn delete(
+        &self,
+        key: Key,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<Value>> + Send;
+
+    fn pdelete(
+        &self,
+        pattern: RequestPattern,
+        client_id: Uuid,
+    ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
+
+    fn connected(
+        &self,
+        client_id: Uuid,
+        remote_addr: Option<SocketAddr>,
+        protocol: Protocol,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn protocol_switched(
+        &self,
+        client_id: Uuid,
+        protocol: ProtocolMajorVersion,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn disconnected(
+        &self,
+        client_id: Uuid,
+        remote_addr: Option<SocketAddr>,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+
+    fn export(
+        &self,
+        span: Span,
+    ) -> impl Future<Output = WorterbuchResult<(Value, GraveGoods, LastWill)>> + Send;
+
+    fn import(
+        &self,
+        json: String,
+    ) -> impl Future<Output = WorterbuchResult<Vec<(String, (ValueEntry, bool))>>> + Send;
+
+    fn len(&self) -> impl Future<Output = WorterbuchResult<usize>> + Send;
 }
 
 #[cfg(test)]

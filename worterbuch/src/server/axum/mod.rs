@@ -23,7 +23,8 @@ mod websocket;
 use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
-    server::common::{CloneableWbApi, init_server_socket},
+    error::WorterbuchAppResult,
+    server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
 use axum::{
@@ -81,6 +82,7 @@ use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
     AuthCheck, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
+    WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
 };
 
@@ -102,7 +104,7 @@ async fn ws(
 
 async fn info(State(wb): State<CloneableWbApi>) -> WorterbuchResult<Json<ServerInfo>> {
     let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
-    let config = wb.config().await?;
+    let config = wb.config();
     let info = ServerInfo::new(
         VERSION.to_owned(),
         supported_protocol_versions,
@@ -124,9 +126,10 @@ async fn export(
 
     let base64 = request.headers().get("accept") == Some(&HeaderValue::from_static("text/plain"));
 
-    let config = wb.config().await?;
+    let config = wb.config();
     let file_name = config
         .default_export_file_name
+        .to_owned()
         .unwrap_or_else(|| "export".to_owned())
         + ".json";
     let span = debug_span!("export");
@@ -759,7 +762,7 @@ async fn login(
     }
 }
 
-pub async fn start(
+pub(crate) async fn start(
     worterbuch: CloneableWbApi,
     tls: bool,
     bind_addr: IpAddr,
@@ -768,28 +771,66 @@ pub async fn start(
     subsys: SubsystemHandle,
     ws_enabled: bool,
 ) -> miette::Result<()> {
+    let config = worterbuch.config().to_owned();
+
+    let router =
+        build_worterbuch_router(&subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
+
+    let handle = Handle::new();
+
+    let listener = init_server_socket(bind_addr, port, config.clone())?;
+    let mut server = axum_server::from_tcp(listener);
+    server.http_builder().http2().enable_connect_protocol();
+
+    let mut serve = Box::pin(
+        server
+            .handle(handle.clone())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>()),
+    );
+
+    select! {
+        res = &mut serve => res.into_diagnostic()?,
+        _ = subsys.on_shutdown_requested() => {
+            handle.graceful_shutdown(Some(Duration::from_secs(5)));
+            serve.await.into_diagnostic()?;
+        },
+    }
+
+    debug!("webserver subsystem completed.");
+
+    Ok(())
+}
+
+pub async fn build_worterbuch_router(
+    subsys: &SubsystemHandle,
+    worterbuch: CloneableWbApi,
+    tls: bool,
+    port: u16,
+    public_addr: String,
+    ws_enabled: bool,
+) -> WorterbuchAppResult<Router> {
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
 
     let mut app = Router::new();
     let mut api = Router::new();
 
-    let mut wsserver = None;
-
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
         let wb = worterbuch.clone();
-        wsserver = Some(subsys.start(SubsystemBuilder::new("wsserver", |s| {
+        subsys.start(SubsystemBuilder::new("wsserver", |s| {
             run_ws_server(s, ws_stream_rx, wb)
-        })));
+        }));
         info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
         app = app.route("/ws", get(ws).with_state(ws_stream_tx));
     }
 
-    let config = worterbuch.config().await?;
+    let config = worterbuch.config();
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
+
     info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
+
     api = api
         .route(&format!("{rest_root}/get/{{*key}}"), get(get_value))
         .route(&format!("{rest_root}/set/{{*key}}"), post(set))
@@ -845,11 +886,8 @@ pub async fn start(
     }
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
+
     app = app.route("/info", get(info).with_state(worterbuch.clone()));
-
-    // let metrics = TokioMetrics::new();
-
-    // app = app.route("/metrics/tokio", metrics.exporter());
 
     if let Some(web_root_path) = &config.web_root_path {
         let web_root_path = PathBuf::from(web_root_path);
@@ -862,12 +900,6 @@ pub async fn start(
                 .fallback(ServeFile::new(web_root_path.join("index.html"))),
         );
     }
-
-    let handle = Handle::new();
-
-    let listener = init_server_socket(bind_addr, port, config.clone())?;
-    let mut server = axum_server::from_tcp(listener);
-    server.http_builder().http2().enable_connect_protocol();
 
     let trace = TraceLayer::new_for_http();
 
@@ -882,35 +914,17 @@ pub async fn start(
         ));
     }
 
-    let mut serve = Box::pin(
-        server.handle(handle.clone()).serve(
-            api.layer(middleware::from_fn_with_state(config, auth::bearer_auth))
-                .merge(app)
-                .with_state(worterbuch)
-                .layer(trace)
-                .layer(cors)
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        ),
-    );
+    let router = api
+        .layer(middleware::from_fn_with_state(
+            config.clone(),
+            auth::bearer_auth,
+        ))
+        .merge(app)
+        .with_state(worterbuch)
+        .layer(trace)
+        .layer(cors);
 
-    select! {
-        res = &mut serve => res.into_diagnostic()?,
-        _ = subsys.on_shutdown_requested() => {
-            handle.graceful_shutdown(Some(Duration::from_secs(5)));
-            serve.await.into_diagnostic()?;
-        },
-    }
-
-    if let Some(wsserver) = wsserver {
-        wsserver.initiate_shutdown();
-        if let Err(e) = wsserver.join().await {
-            error!("Error waiting for ws server to shut down: {e}");
-        }
-    }
-
-    debug!("webserver subsystem completed.");
-
-    Ok(())
+    Ok(router)
 }
 
 async fn run_ws_server(

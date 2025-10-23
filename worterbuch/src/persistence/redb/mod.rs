@@ -1,7 +1,7 @@
 use crate::{
     Config, Worterbuch,
     persistence::{PersistentStorage, error::PersistenceResult},
-    store::{Store, ValueEntry},
+    store::Store,
 };
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tracing::{error, info};
-use worterbuch_common::Key;
+use worterbuch_common::{Key, ValueEntry};
 
 const TABLE: TableDefinition<Key, String> = TableDefinition::new("worterbuch");
 

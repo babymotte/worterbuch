@@ -6,7 +6,7 @@ use uuid::Uuid;
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    Ack, ClientMessage, ProtocolVersionSegment, ServerMessage,
+    Ack, ClientMessage, ProtocolVersionSegment, ServerMessage, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 

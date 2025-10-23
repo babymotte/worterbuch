@@ -20,6 +20,7 @@
 pub mod buffer;
 pub mod config;
 pub mod error;
+pub mod local;
 #[cfg(feature = "tcp")]
 pub mod tcp;
 #[cfg(all(target_family = "unix", feature = "unix"))]
@@ -27,7 +28,7 @@ pub mod unix;
 #[cfg(any(feature = "ws", feature = "wasm"))]
 pub mod ws;
 
-use crate::config::Config;
+use crate::{config::Config, local::LocalClientSocket};
 use buffer::SendBuffer;
 use error::SubscriptionError;
 use futures_util::FutureExt;
@@ -152,6 +153,7 @@ enum ClientSocket {
     Ws(WsClientSocket),
     #[cfg(all(target_family = "unix", feature = "unix"))]
     Unix(UnixClientSocket),
+    Local(LocalClientSocket),
 }
 
 impl ClientSocket {
@@ -164,6 +166,7 @@ impl ClientSocket {
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.send_msg(msg).await,
+            ClientSocket::Local(sock) => sock.send_msg(msg).await,
         }
     }
 
@@ -176,6 +179,7 @@ impl ClientSocket {
             ClientSocket::Ws(sock) => sock.receive_msg().await,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.receive_msg().await,
+            ClientSocket::Local(sock) => sock.receive_msg().await,
         }
     }
 
@@ -188,6 +192,7 @@ impl ClientSocket {
             ClientSocket::Ws(ws_client_socket) => ws_client_socket.close().await?,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(unix_client_socket) => unix_client_socket.close().await?,
+            ClientSocket::Local(unix_client_socket) => unix_client_socket.close().await?,
         }
         Ok(())
     }
@@ -1171,6 +1176,36 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
         Err(e)
     } else {
         Err(ConnectionError::NoServerAddressesConfigured)
+    }
+}
+
+pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbuch {
+    let (commands_tx, cmd_rx) = mpsc::channel(1);
+    let (stop_tx, stop_rx) = mpsc::channel(1);
+    let (disco_tx, disco_rx) = oneshot::channel();
+
+    let (ctx, crx) = mpsc::channel(1);
+    let (stx, srx) = mpsc::channel(1);
+
+    LocalClientSocket::spawn_api_forward_loop(api, crx, stx);
+
+    let local_socket = LocalClientSocket::new(ctx, srx, disco_rx);
+    let client_socket = ClientSocket::Local(local_socket);
+    let config = Config::new();
+
+    spawn(async move {
+        if let Err(e) = run(cmd_rx, client_socket, stop_rx, config).await {
+            error!("Connection closed with error: {e}");
+        } else {
+            debug!("Connection closed.");
+        }
+        disco_tx.send(()).ok();
+    });
+
+    Worterbuch {
+        client_id: "internal".to_owned(),
+        commands: commands_tx,
+        stop: stop_tx,
     }
 }
 

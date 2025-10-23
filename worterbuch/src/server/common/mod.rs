@@ -19,24 +19,24 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, store::ValueEntry, subscribers::SubscriptionId};
+use crate::{Config, INTERNAL_CLIENT_ID, server::CloneableWbApi, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
     net::{IpAddr, SocketAddr, TcpListener},
     time::Duration,
 };
-use tokio::sync::{
-    mpsc::{self, Receiver},
-    oneshot,
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, instrument, trace};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, PStateEvent, Protocol,
-    ProtocolMajorVersion, RegularKeySegment, RequestPattern, StateEvent, TransactionId, UniqueFlag,
-    Value, error::WorterbuchResult,
+    ProtocolMajorVersion, ProtocolVersion, RegularKeySegment, RequestPattern, StateEvent,
+    SubscriptionId, TransactionId, UniqueFlag, Value, ValueEntry, WbApi, error::WorterbuchResult,
 };
+
+pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
+    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 1)];
 
 #[derive(Debug, Clone, PartialEq)]
 struct SubscriptionInfo {
@@ -97,7 +97,7 @@ pub enum WbFunction {
         Key,
         UniqueFlag,
         LiveOnlyFlag,
-        oneshot::Sender<WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(mpsc::Receiver<StateEvent>, SubscriptionId)>>,
     ),
     PSubscribe(
         Uuid,
@@ -105,13 +105,13 @@ pub enum WbFunction {
         RequestPattern,
         UniqueFlag,
         LiveOnlyFlag,
-        oneshot::Sender<WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(mpsc::Receiver<PStateEvent>, SubscriptionId)>>,
     ),
     SubscribeLs(
         Uuid,
         TransactionId,
         Option<Key>,
-        oneshot::Sender<WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)>>,
+        oneshot::Sender<WorterbuchResult<(mpsc::Receiver<Vec<RegularKeySegment>>, SubscriptionId)>>,
     ),
     Unsubscribe(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
     UnsubscribeLs(Uuid, TransactionId, oneshot::Sender<WorterbuchResult<()>>),
@@ -137,36 +137,45 @@ pub enum WbFunction {
     Len(oneshot::Sender<usize>),
 }
 
-#[derive(Clone)]
-pub struct CloneableWbApi {
-    tx: mpsc::Sender<WbFunction>,
-}
-
 impl CloneableWbApi {
-    pub fn new(tx: mpsc::Sender<WbFunction>) -> Self {
-        CloneableWbApi { tx }
+    pub fn new(tx: mpsc::Sender<WbFunction>, config: Config) -> Self {
+        CloneableWbApi { tx, config }
     }
 
-    pub async fn get(&self, key: Key) -> WorterbuchResult<Value> {
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+}
+
+impl WbApi for CloneableWbApi {
+    fn supported_protocol_versions(&self) -> Vec<ProtocolVersion> {
+        SUPPORTED_PROTOCOL_VERSIONS.into()
+    }
+
+    fn version(&self) -> &str {
+        VERSION
+    }
+
+    async fn get(&self, key: Key) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Get(key, tx)).await?;
         rx.await?
     }
 
-    pub async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
+    async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::CGet(key, tx)).await?;
         rx.await?
     }
 
-    pub async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
+    async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::PGet(pattern, tx)).await?;
         rx.await?
     }
 
     #[instrument(level=Level::TRACE, skip(self))]
-    pub async fn set(&self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
+    async fn set(&self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
 
         trace!("Sending set request to core system …");
@@ -182,7 +191,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn cset(
+    async fn cset(
         &self,
         key: Key,
         value: Value,
@@ -212,7 +221,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+    async fn lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
@@ -233,7 +242,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn acquire_lock(
+    async fn acquire_lock(
         &self,
         key: Key,
         client_id: Uuid,
@@ -261,7 +270,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn release_lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+    async fn release_lock(&self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
@@ -285,7 +294,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn spub_init(
+    async fn spub_init(
         &self,
         transaction_id: TransactionId,
         key: Key,
@@ -314,7 +323,7 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn spub(
+    async fn spub(
         &self,
         transaction_id: TransactionId,
         value: Value,
@@ -343,19 +352,19 @@ impl CloneableWbApi {
         res?
     }
 
-    pub async fn publish(&self, key: Key, value: Value) -> WorterbuchResult<()> {
+    async fn publish(&self, key: Key, value: Value) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Publish(key, value, tx)).await?;
         rx.await?
     }
 
-    pub async fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
+    async fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Ls(parent, tx)).await?;
         rx.await?
     }
 
-    pub async fn pls(
+    async fn pls(
         &self,
         parent: Option<RequestPattern>,
     ) -> WorterbuchResult<Vec<RegularKeySegment>> {
@@ -364,14 +373,14 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn subscribe(
+    async fn subscribe(
         &self,
         client_id: Uuid,
         transaction_id: TransactionId,
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(mpsc::Receiver<StateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::Subscribe(
@@ -386,14 +395,14 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn psubscribe(
+    async fn psubscribe(
         &self,
         client_id: Uuid,
         transaction_id: TransactionId,
         pattern: RequestPattern,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
+    ) -> WorterbuchResult<(mpsc::Receiver<PStateEvent>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::PSubscribe(
@@ -408,12 +417,12 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn subscribe_ls(
+    async fn subscribe_ls(
         &self,
         client_id: Uuid,
         transaction_id: TransactionId,
         parent: Option<Key>,
-    ) -> WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)> {
+    ) -> WorterbuchResult<(mpsc::Receiver<Vec<RegularKeySegment>>, SubscriptionId)> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(WbFunction::SubscribeLs(
@@ -426,7 +435,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn unsubscribe(
+    async fn unsubscribe(
         &self,
         client_id: Uuid,
         transaction_id: TransactionId,
@@ -438,7 +447,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn unsubscribe_ls(
+    async fn unsubscribe_ls(
         &self,
         client_id: Uuid,
         transaction_id: TransactionId,
@@ -450,13 +459,13 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn delete(&self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
+    async fn delete(&self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Delete(key, client_id, tx)).await?;
         rx.await?
     }
 
-    pub async fn pdelete(
+    async fn pdelete(
         &self,
         pattern: RequestPattern,
         client_id: Uuid,
@@ -468,7 +477,7 @@ impl CloneableWbApi {
         rx.await?
     }
 
-    pub async fn connected(
+    async fn connected(
         &self,
         client_id: Uuid,
         remote_addr: Option<SocketAddr>,
@@ -480,7 +489,7 @@ impl CloneableWbApi {
         Ok(())
     }
 
-    pub async fn protocol_switched(
+    async fn protocol_switched(
         &self,
         client_id: Uuid,
         protocol: ProtocolMajorVersion,
@@ -491,7 +500,7 @@ impl CloneableWbApi {
         Ok(())
     }
 
-    pub async fn disconnected(
+    async fn disconnected(
         &self,
         client_id: Uuid,
         remote_addr: Option<SocketAddr>,
@@ -502,28 +511,19 @@ impl CloneableWbApi {
         Ok(())
     }
 
-    pub async fn config(&self) -> WorterbuchResult<Config> {
-        let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Config(tx)).await?;
-        Ok(rx.await?)
-    }
-
-    pub async fn export(&self, span: Span) -> WorterbuchResult<(Value, GraveGoods, LastWill)> {
+    async fn export(&self, span: Span) -> WorterbuchResult<(Value, GraveGoods, LastWill)> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Export(tx, span)).await?;
         Ok(rx.await?)
     }
 
-    pub async fn import(
-        &self,
-        json: String,
-    ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
+    async fn import(&self, json: String) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Import(json, tx)).await?;
         rx.await?
     }
 
-    pub async fn len(&self) -> WorterbuchResult<usize> {
+    async fn len(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Len(tx)).await?;
         Ok(rx.await?)

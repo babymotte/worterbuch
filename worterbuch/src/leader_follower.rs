@@ -17,8 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{Config, INTERNAL_CLIENT_ID, Worterbuch, store::StoreNode};
-use miette::{Error, IntoDiagnostic, Result, miette};
+use crate::{Config, INTERNAL_CLIENT_ID, Worterbuch, error::WorterbuchAppResult, store::StoreNode};
+use miette::{Error, IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -202,7 +202,10 @@ async fn forward_events_to_follower(
     info!("TCP connection to follower {} closed.", follower);
 }
 
-pub async fn initial_sync(state_sync: StateSync, worterbuch: &mut Worterbuch) -> Result<()> {
+pub async fn initial_sync(
+    state_sync: StateSync,
+    worterbuch: &mut Worterbuch,
+) -> WorterbuchAppResult<()> {
     worterbuch.reset_store(state_sync.0).await?;
     worterbuch
         .set(
@@ -217,11 +220,15 @@ pub async fn initial_sync(state_sync: StateSync, worterbuch: &mut Worterbuch) ->
 pub async fn process_leader_message(
     msg: LeaderSyncMessage,
     worterbuch: &mut Worterbuch,
-) -> Result<()> {
+) -> WorterbuchAppResult<()> {
     trace!("Received leader sync message: {msg:?}");
 
     match msg {
-        LeaderSyncMessage::Init(_) => return Err(miette!("already synced")),
+        LeaderSyncMessage::Init(_) => {
+            return Err(crate::error::WorterbuchAppError::ClusterError(
+                "already synced".to_owned(),
+            ));
+        }
         LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
             ClientWriteCommand::Set(key, value) => {
                 worterbuch.set(key, value, INTERNAL_CLIENT_ID).await?;

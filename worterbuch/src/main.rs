@@ -56,12 +56,37 @@ async fn start() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let config = Config::new().await?;
+    let args = config.args.clone();
+
+    #[cfg(feature = "telemetry")]
+    {
+        use worterbuch::telemetry;
+
+        let hostname = hostname::get().into_diagnostic()?;
+        let cluster_role = if args.leader {
+            Some("leader".to_owned())
+        } else if args.follower {
+            Some("follower".to_owned())
+        } else {
+            None
+        };
+        telemetry::init(
+            args.instance_name
+                .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
+            cluster_role,
+        )
+        .await?;
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    logging::init()?;
 
     let cfg = config.clone();
 
     Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new("worterbuch", move |s| {
-            run_worterbuch(s, config)
+        s.start(SubsystemBuilder::new("worterbuch", move |s| async move {
+            run_worterbuch(&s, config).await?;
+            Ok::<(), miette::ErrReport>(())
         }));
     })
     .catch_signals()

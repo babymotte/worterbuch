@@ -17,17 +17,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "telemetry")]
+use crate::license::{License, load_license};
 #[cfg(not(feature = "telemetry"))]
 use crate::logging;
-#[cfg(feature = "telemetry")]
-use crate::telemetry;
-use crate::{
-    license::{License, load_license},
-    persistence::PersistenceMode,
-};
 use clap::Parser;
 use serde::Serialize;
 use std::{env, net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
+use strum::EnumString;
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use tracing::debug;
 use worterbuch_common::{
@@ -35,7 +32,16 @@ use worterbuch_common::{
     error::{ConfigError, ConfigIntContext, ConfigResult},
 };
 
-#[derive(Parser)]
+#[derive(Debug, Clone, PartialEq, Serialize, EnumString)]
+// #[serde(rename_all = "camelCase")]
+pub enum PersistenceMode {
+    Json,
+    ReDB,
+    // RocksDB,
+    // Sqlite
+}
+
+#[derive(Parser, Debug, Clone, PartialEq, Serialize)]
 #[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
 pub struct Args {
     /// Start server in leader mode (requires --sync-port)
@@ -45,7 +51,7 @@ pub struct Args {
         requires = "sync_port",
         default_value_t = false
     )]
-    leader: bool,
+    pub leader: bool,
     /// Start server in follower mode (requires --leader_address)
     #[arg(
         long,
@@ -53,16 +59,16 @@ pub struct Args {
         requires = "leader_address",
         default_value_t = false
     )]
-    follower: bool,
+    pub follower: bool,
     /// Port at which to listen for cluster peer sync connections (only with --leader)
     #[arg(long, short)]
-    sync_port: Option<u16>,
+    pub sync_port: Option<u16>,
     /// Socket address of the leader node to sync to in the form <IP or hostname>:<port> (only with --follower)
     #[arg(long, short)]
-    leader_address: Option<String>,
+    pub leader_address: Option<String>,
     /// Instance name
     #[arg(short = 'n', long, env = "WORTERBUCH_INSTANCE_NAME")]
-    instance_name: Option<String>,
+    pub instance_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -85,6 +91,7 @@ pub struct UnixEndpoint {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Config {
+    pub args: Args,
     pub ws_endpoint: Option<WsEndpoint>,
     pub tcp_endpoint: Option<Endpoint>,
     #[cfg(target_family = "unix")]
@@ -250,27 +257,6 @@ impl Config {
     pub async fn new() -> ConfigResult<Self> {
         let args = Args::parse();
 
-        #[cfg(feature = "telemetry")]
-        {
-            let hostname = hostname::get()?;
-            let cluster_role = if args.leader {
-                Some("leader".to_owned())
-            } else if args.follower {
-                Some("follower".to_owned())
-            } else {
-                None
-            };
-            telemetry::init(
-                args.instance_name
-                    .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
-                cluster_role,
-            )
-            .await?;
-        }
-
-        #[cfg(not(feature = "telemetry"))]
-        logging::init()?;
-
         match load_license().await {
             Ok(license) => {
                 let mut config = Config {
@@ -307,9 +293,10 @@ impl Config {
                     follower: args.follower,
                     leader: args.leader,
                     sync_port: args.sync_port,
-                    leader_address: args.leader_address,
+                    leader_address: args.leader_address.clone(),
                     default_export_file_name: None,
                     cors_allowed_origins: None,
+                    args,
                 };
                 config.load_env()?;
                 Ok(config)

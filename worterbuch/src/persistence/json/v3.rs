@@ -21,6 +21,7 @@ use super::*;
 use crate::persistence::is_persistence_locked;
 use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
+use worterbuch_common::WbApi;
 
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,

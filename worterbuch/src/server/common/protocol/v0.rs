@@ -1,8 +1,8 @@
 use crate::{
-    Config, PStateAggregator,
+    Config,
     auth::{JwtClaims, get_claims},
     server::common::{CloneableWbApi, SubscriptionInfo},
-    subscribers::SubscriptionId,
+    worterbuch::PStateAggregator,
 };
 use serde_json::json;
 use std::time::Duration;
@@ -12,8 +12,8 @@ use uuid::Uuid;
 use worterbuch_common::{
     Ack, AuthCheck, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls,
     LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub,
-    SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId,
-    Unsubscribe, UnsubscribeLs,
+    SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, SubscriptionId,
+    TransactionId, Unsubscribe, UnsubscribeLs, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 
@@ -562,7 +562,7 @@ impl V0 {
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
 
-        let channel_buffer_size = self.worterbuch.config().await?.channel_buffer_size;
+        let channel_buffer_size = self.worterbuch.config().channel_buffer_size;
 
         let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
         if let Some(aggregate_duration) = aggregate_events {

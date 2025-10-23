@@ -27,8 +27,7 @@ use crate::{
         PersistentStorage,
         error::{PersistenceError, PersistenceResult},
     },
-    server::common::CloneableWbApi,
-    store::ValueEntry,
+    server::CloneableWbApi,
     worterbuch::Worterbuch,
 };
 use serde::{Deserialize, Serialize};
@@ -42,7 +41,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, info, instrument, warn};
-use worterbuch_common::{GraveGoods, Key, LastWill};
+use worterbuch_common::{GraveGoods, Key, LastWill, ValueEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {

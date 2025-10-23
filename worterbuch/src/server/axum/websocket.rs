@@ -19,7 +19,7 @@
 
 use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
-    server::common::{CloneableWbApi, protocol::Proto},
+    server::{CloneableWbApi, common::protocol::Proto},
     stats::VERSION,
 };
 use axum::extract::ws::{Message, WebSocket};
@@ -32,7 +32,7 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome};
+use worterbuch_common::{Protocol, ServerInfo, ServerMessage, WbApi, Welcome};
 
 pub(crate) async fn serve(
     client_id: Uuid,
@@ -70,7 +70,7 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
 ) -> Result<()> {
-    let config = worterbuch.config().await?;
+    let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
     let send_timeout = config.send_timeout;
     let mut authorized = None;

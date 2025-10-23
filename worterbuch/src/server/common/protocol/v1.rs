@@ -4,7 +4,7 @@ use tokio::spawn;
 use tracing::{Level, debug, instrument, trace};
 use worterbuch_common::{
     Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, ErrorCode, Get, Lock, Privilege,
-    ServerMessage,
+    ServerMessage, WbApi,
     error::{Context, WorterbuchResult},
 };
 

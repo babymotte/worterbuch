@@ -17,8 +17,17 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub(crate) mod axum;
+pub mod axum;
 pub(crate) mod common;
 pub(crate) mod tcp;
 #[cfg(target_family = "unix")]
 pub(crate) mod unix;
+
+use crate::{Config, server::common::WbFunction};
+use tokio::sync::mpsc;
+
+#[derive(Clone)]
+pub struct CloneableWbApi {
+    config: Config,
+    tx: mpsc::Sender<WbFunction>,
+}

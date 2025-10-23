@@ -21,7 +21,7 @@ use super::common::protocol::Proto;
 use crate::{
     Config, SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
-    server::common::{CloneableWbApi, init_server_socket},
+    server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
 use miette::{IntoDiagnostic, Result};
@@ -44,7 +44,9 @@ use tokio::{
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, write_line_and_flush};
+use worterbuch_common::{
+    Protocol, ServerInfo, ServerMessage, WbApi, Welcome, write_line_and_flush,
+};
 
 enum SocketEvent {
     Disconnected(Option<Uuid>),
@@ -208,7 +210,7 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     socket: TcpStream,
 ) -> Result<()> {
-    let config = worterbuch.config().await?;
+    let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
     let send_timeout = config.send_timeout;
     let authorized = None;

@@ -21,26 +21,10 @@ use miette::{IntoDiagnostic, Result, miette};
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
-use uuid::Uuid;
-use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, TransactionId};
+use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, SubscriptionId};
 
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<KeySegment, Node>;
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct SubscriptionId {
-    pub client_id: Uuid,
-    pub transaction_id: TransactionId,
-}
-
-impl SubscriptionId {
-    pub fn new(client_id: Uuid, transaction_id: TransactionId) -> Self {
-        SubscriptionId {
-            client_id,
-            transaction_id,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum EventSender {
@@ -241,6 +225,7 @@ fn add_all_children(node: &Node, all_subscribers: &mut Vec<Subscriber>) {
 mod test {
     use super::*;
     use tokio::sync::mpsc::channel;
+    use uuid::Uuid;
     use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {

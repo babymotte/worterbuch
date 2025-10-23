@@ -3,20 +3,17 @@ mod json;
 mod redb;
 
 use crate::{
-    Config, Worterbuch,
+    Config, PersistenceMode, Worterbuch,
     persistence::{
         error::PersistenceResult, json::PersistentJsonStorage, redb::PersistentRedbStore,
     },
-    server::common::CloneableWbApi,
-    store::ValueEntry,
+    server::CloneableWbApi,
 };
 use lazy_static::lazy_static;
-use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use strum::EnumString;
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
-use worterbuch_common::Key;
+use worterbuch_common::{Key, ValueEntry};
 
 lazy_static! {
     static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
@@ -28,15 +25,6 @@ pub fn is_persistence_locked() -> bool {
 
 pub fn unlock_persistence() {
     PERSISTENCE_LOCKED.store(false, Ordering::Release);
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, EnumString)]
-// #[serde(rename_all = "camelCase")]
-pub enum PersistenceMode {
-    Json,
-    ReDB,
-    // RocksDB,
-    // Sqlite
 }
 
 pub trait PersistentStorage {

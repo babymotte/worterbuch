@@ -18,9 +18,7 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
-};
+use crate::{SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::CloneableWbApi, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
@@ -35,7 +33,9 @@ use tokio::{
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, Welcome, write_line_and_flush};
+use worterbuch_common::{
+    Protocol, ServerInfo, ServerMessage, WbApi, Welcome, write_line_and_flush,
+};
 
 enum SocketEvent {
     Disconnected(Option<Uuid>),
@@ -53,6 +53,10 @@ pub async fn start(
         bind_addr.to_string_lossy()
     );
     tokio::fs::remove_file(&bind_addr).await.ok();
+    if let Some(parent) = bind_addr.parent() {
+        tokio::fs::create_dir_all(parent).await.into_diagnostic()?;
+    }
+
     let listener = UnixListener::bind(bind_addr.clone()).into_diagnostic()?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
@@ -194,7 +198,7 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     socket: UnixStream,
 ) -> Result<()> {
-    let config = worterbuch.config().await?;
+    let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
     let send_timeout = config.send_timeout;
     let authorized = None;

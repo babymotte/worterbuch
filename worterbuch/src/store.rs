@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::subscribers::{LsSubscriber, Subscriber, SubscriptionId};
+use crate::subscribers::{LsSubscriber, Subscriber};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{
@@ -34,7 +34,7 @@ use tracing::{Level, debug, instrument, warn};
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
-    Value,
+    SubscriptionId, Value, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path, parse_segments,
 };
@@ -99,37 +99,6 @@ impl Lock {
         } else {
             self.candidates.push_back((client_id, vec![tx]));
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ValueEntry {
-    Cas(Value, u64),
-    #[serde(untagged)]
-    Plain(Value),
-}
-
-impl AsRef<Value> for ValueEntry {
-    fn as_ref(&self) -> &Value {
-        match self {
-            ValueEntry::Plain(value) => value,
-            ValueEntry::Cas(value, _) => value,
-        }
-    }
-}
-
-impl From<ValueEntry> for Value {
-    fn from(value: ValueEntry) -> Self {
-        match value {
-            ValueEntry::Plain(value) => value,
-            ValueEntry::Cas(value, _) => value,
-        }
-    }
-}
-
-impl From<Value> for ValueEntry {
-    fn from(value: Value) -> Self {
-        ValueEntry::Plain(value)
     }
 }
 
