@@ -471,6 +471,7 @@ impl Worterbuch {
         if self.config.extended_monitoring
             && key != SYSTEM_TOPIC_ROOT
             && !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
+            && client_id != INTERNAL_CLIENT_ID
         {
             if let Err(e) = self
                 .set(
@@ -543,6 +544,7 @@ impl Worterbuch {
             && pattern != "#"
             && pattern != SYSTEM_TOPIC_ROOT
             && !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
+            && client_id != INTERNAL_CLIENT_ID
         {
             if let Err(e) = self
                 .set(
@@ -697,6 +699,7 @@ impl Worterbuch {
             if self.config.extended_monitoring
                 && path[0] != KeySegment::MultiWildcard
                 && path[0].deref() != SYSTEM_TOPIC_ROOT
+                && client_id != INTERNAL_CLIENT_ID
             {
                 let subs_key = topic!(
                     SYSTEM_TOPIC_ROOT,
@@ -730,6 +733,7 @@ impl Worterbuch {
             debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
             if self.config.extended_monitoring
+                && client_id != INTERNAL_CLIENT_ID
                 && let Err(e) = self
                     .set(
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
@@ -993,6 +997,8 @@ impl Worterbuch {
         remote_addr: Option<SocketAddr>,
         protocol: &Protocol,
     ) {
+        debug_assert!(client_id != INTERNAL_CLIENT_ID);
+
         let now = SystemTime::now().into();
 
         self.clients.insert(client_id, ClientInfo::new());
@@ -1016,6 +1022,7 @@ impl Worterbuch {
         }
 
         if self.config.extended_monitoring
+            && client_id != INTERNAL_CLIENT_ID
             && let Err(e) = self.set_client_timestamp(&client_id, now).await
         {
             error!("Error updating client timestamp: {e}");
@@ -1025,6 +1032,7 @@ impl Worterbuch {
     pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {
         if self.clients.contains_key(&client_id)
             && self.config.extended_monitoring
+            && client_id != INTERNAL_CLIENT_ID
             && let Err(e) = self.set_client_protocol_version(&client_id, protocol).await
         {
             error!("Error updating client protocol version: {e}");
@@ -1134,6 +1142,8 @@ impl Worterbuch {
         client_id: Uuid,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
+        debug_assert!(client_id != INTERNAL_CLIENT_ID);
+
         if let Some(spubs) = self.spub_keys.remove(&client_id) {
             info!(
                 "Dropping {} pub stream(s) of client {}.",
