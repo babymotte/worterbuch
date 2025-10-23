@@ -56,11 +56,12 @@ async fn start() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let config = Config::new().await?;
-    let args = config.args.clone();
 
     #[cfg(feature = "telemetry")]
     {
         use worterbuch::telemetry;
+
+        let args = config.args.clone();
 
         let hostname = hostname::get().into_diagnostic()?;
         let cluster_role = if args.leader {
@@ -79,7 +80,11 @@ async fn start() -> Result<()> {
     }
 
     #[cfg(not(feature = "telemetry"))]
-    logging::init()?;
+    {
+        use worterbuch::logging;
+
+        logging::init()?;
+    }
 
     let cfg = config.clone();
 

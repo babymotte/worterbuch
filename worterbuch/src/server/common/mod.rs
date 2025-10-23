@@ -523,7 +523,7 @@ impl WbApi for CloneableWbApi {
         rx.await?
     }
 
-    async fn len(&self) -> WorterbuchResult<usize> {
+    async fn entries(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Len(tx)).await?;
         Ok(rx.await?)

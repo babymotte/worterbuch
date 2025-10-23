@@ -36,7 +36,7 @@ use worterbuch_common::{
     CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
     SubscriptionId, Value, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
-    format_path, parse_segments,
+    format_path,
 };
 
 type Tree<K, V> = HashMap<RegularKeySegment, Node<K, V>>;
@@ -277,11 +277,6 @@ pub struct SubscribersNode {
     pub tree: SubscribersTree,
 }
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct StoreStats {
-    num_entries: usize,
-}
-
 #[derive(Default)]
 pub struct Store {
     data: StoreNode,
@@ -292,23 +287,6 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn with_data(data: StoreNode) -> Self {
-        let mut store = Self {
-            data,
-            ..Default::default()
-        };
-
-        store.count_entries();
-
-        store
-    }
-
-    #[instrument(level=Level::DEBUG, skip(self))]
-    pub fn defragment(&mut self) {
-        let data_copy = self.data.clone();
-        self.data = data_copy;
-    }
-
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> StoreNode {
         debug!("Exporting slim copy of store with {} entries …", self.len);
@@ -330,10 +308,6 @@ impl Store {
 
     pub fn len(&self) -> usize {
         self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
     }
 
     /// retrieve a value for a non-wildcard key
@@ -893,12 +867,6 @@ impl Store {
 
     pub fn count_entries(&mut self) {
         self.len = Store::ncount_values(&self.data);
-    }
-
-    pub fn count_sub_entries(&self, subkey: &str) -> WorterbuchResult<Option<usize>> {
-        let path = parse_segments(subkey)?;
-        let node = self.get_node(&path);
-        Ok(node.map(Store::ncount_values))
     }
 
     fn nmerge(

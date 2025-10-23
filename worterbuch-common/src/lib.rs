@@ -604,7 +604,7 @@ pub trait WbApi {
         json: String,
     ) -> impl Future<Output = WorterbuchResult<Vec<(String, (ValueEntry, bool))>>> + Send;
 
-    fn len(&self) -> impl Future<Output = WorterbuchResult<usize>> + Send;
+    fn entries(&self) -> impl Future<Output = WorterbuchResult<usize>> + Send;
 }
 
 #[cfg(test)]

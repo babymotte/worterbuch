@@ -22,24 +22,20 @@ use crate::{
     config::Config,
     mem_tools,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
-    store::{PersistedStore, Store, StoreNode, StoreStats},
+    store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
 use chrono::prelude::{DateTime, Utc};
 use hashlink::LinkedHashMap;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_str, json};
 use std::{
     collections::{HashMap, hash_map::Entry},
-    fmt::Display,
     io, mem,
     net::SocketAddr,
     ops::Deref,
     time::{Duration, SystemTime},
 };
 use tokio::{
-    fs::File,
-    io::AsyncReadExt,
     select, spawn,
     sync::{
         mpsc::{self, Receiver, channel},
@@ -51,7 +47,7 @@ use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, tra
 use uuid::Uuid;
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
-    PStateEvent, Path, Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern,
+    PStateEvent, Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern,
     SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
     SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
     SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
@@ -65,18 +61,6 @@ pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
 
 type Map<K, V> = LinkedHashMap<K, V>;
-
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Stats {
-    store_stats: StoreStats,
-}
-
-impl Display for Stats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = serde_json::to_string(self).expect("serialization cannot fail");
-        write!(f, "{str}")
-    }
-}
 
 #[derive(Debug)]
 struct ClientInfo {
@@ -321,10 +305,6 @@ impl Worterbuch {
 
     pub fn len(&self) -> usize {
         self.store.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.store.is_empty()
     }
 
     pub fn get(&self, key: &Key) -> WorterbuchResult<Value> {
@@ -692,36 +672,6 @@ impl Worterbuch {
         }
 
         Ok(imported_values)
-    }
-
-    // pub async fn export_to_file(&mut self, file: &mut File) -> WorterbuchResult<()> {
-    //     debug!("Exporting to {file:?} …");
-
-    //     let (tx, rx) = oneshot::channel();
-    //     self.export(tx);
-    //     let json = rx.await?.to_string();
-    //     let json_bytes = json.as_bytes();
-
-    //     file.write_all(json_bytes)
-    //         .await
-    //         .context(|| format!("Error writing to file {file:?}"))?;
-    //     debug!("Done.");
-    //     Ok(())
-    // }
-
-    pub async fn import_from_file(&mut self, path: &Path) -> WorterbuchResult<()> {
-        info!("Importing from {path} …");
-        let mut file = File::open(path)
-            .await
-            .map_err(|e| WorterbuchError::IoError(e, format!("Error opening file {path:?}")))?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)
-            .await
-            .map_err(|e| WorterbuchError::IoError(e, format!("Error reading file {path:?}")))?;
-        let json = String::from_utf8_lossy(&contents).to_string();
-        self.import(&json).await?;
-        info!("Done.");
-        Ok(())
     }
 
     pub async fn unsubscribe(

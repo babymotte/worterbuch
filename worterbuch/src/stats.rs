@@ -61,7 +61,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
     #[cfg(feature = "commercial")]
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "data"),
-        json!(wb.config().await?.license),
+        json!(wb.config().license),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
@@ -106,7 +106,7 @@ async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResul
 }
 
 async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
-    let len = wb.len().await?;
+    let len = wb.entries().await?;
     wb.set(
         format!("{SYSTEM_TOPIC_ROOT}/store/values/count"),
         json!(len),

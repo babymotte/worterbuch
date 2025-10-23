@@ -106,7 +106,7 @@ async fn do_run_worterbuch(
         tx.send(api.clone()).ok();
     }
 
-    let mut worterbuch = persistence::restore(&subsys, &config, &api).await?;
+    let mut worterbuch = persistence::restore(subsys, &config, &api).await?;
 
     let web_server = if let Some(WsEndpoint {
         endpoint: Endpoint {
@@ -473,7 +473,7 @@ async fn run_in_leader_mode(
 ) -> WorterbuchAppResult<()> {
     info!("Running in LEADER mode.");
 
-    shutdown_on_stdin_close(&subsys);
+    shutdown_on_stdin_close(subsys);
 
     worterbuch
         .set(

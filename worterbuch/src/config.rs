@@ -17,10 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#[cfg(feature = "telemetry")]
 use crate::license::{License, load_license};
-#[cfg(not(feature = "telemetry"))]
-use crate::logging;
 use clap::Parser;
 use serde::Serialize;
 use std::{env, net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
