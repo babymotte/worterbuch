@@ -128,7 +128,12 @@ pub enum WbFunction {
         oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>,
     ),
     ReleaseLock(Key, Uuid, oneshot::Sender<WorterbuchResult<()>>),
-    Connected(Uuid, Option<SocketAddr>, Protocol),
+    Connected(
+        Uuid,
+        Option<SocketAddr>,
+        Protocol,
+        oneshot::Sender<WorterbuchResult<()>>,
+    ),
     ProtocolSwitched(Uuid, ProtocolMajorVersion),
     Disconnected(Uuid, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
@@ -483,10 +488,11 @@ impl WbApi for CloneableWbApi {
         remote_addr: Option<SocketAddr>,
         protocol: Protocol,
     ) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
         self.tx
-            .send(WbFunction::Connected(client_id, remote_addr, protocol))
+            .send(WbFunction::Connected(client_id, remote_addr, protocol, tx))
             .await?;
-        Ok(())
+        rx.await?
     }
 
     async fn protocol_switched(

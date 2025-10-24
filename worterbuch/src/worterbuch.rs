@@ -996,8 +996,12 @@ impl Worterbuch {
         client_id: Uuid,
         remote_addr: Option<SocketAddr>,
         protocol: &Protocol,
-    ) {
+    ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
+
+        if self.clients.contains_key(&client_id) {
+            return Err(WorterbuchError::ClientIdCollision(client_id));
+        }
 
         let now = SystemTime::now().into();
 
@@ -1027,6 +1031,8 @@ impl Worterbuch {
         {
             error!("Error updating client timestamp: {e}");
         }
+
+        Ok(())
     }
 
     pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {

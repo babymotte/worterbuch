@@ -297,10 +297,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::ReleaseLock(key, client_id, tx) => {
             tx.send(worterbuch.release_lock(key, client_id).await).ok();
         }
-        WbFunction::Connected(client_id, remote_addr, protocol) => {
-            worterbuch
+        WbFunction::Connected(client_id, remote_addr, protocol, tx) => {
+            let res = worterbuch
                 .connected(client_id, remote_addr, &protocol)
                 .await;
+            tx.send(res).ok();
         }
         WbFunction::ProtocolSwitched(client_id, protocol) => {
             worterbuch.protocol_switched(client_id, protocol).await;
@@ -405,10 +406,11 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
         WbFunction::PDelete(_, _, tx) => {
             tx.send(Err(WorterbuchError::NotLeader)).ok();
         }
-        WbFunction::Connected(client_id, remote_addr, protocol) => {
-            worterbuch
+        WbFunction::Connected(client_id, remote_addr, protocol, tx) => {
+            let res = worterbuch
                 .connected(client_id, remote_addr, &protocol)
                 .await;
+            tx.send(res).ok();
         }
         WbFunction::ProtocolSwitched(client_id, protocol) => {
             worterbuch.protocol_switched(client_id, protocol).await;
@@ -762,7 +764,7 @@ async fn forward_api_call(
         | WbFunction::SubscribeLs(_, _, _, _)
         | WbFunction::Unsubscribe(_, _, _)
         | WbFunction::UnsubscribeLs(_, _, _)
-        | WbFunction::Connected(_, _, _)
+        | WbFunction::Connected(_, _, _, _)
         | WbFunction::ProtocolSwitched(_, _)
         | WbFunction::Disconnected(_, _)
         | WbFunction::Config(_)

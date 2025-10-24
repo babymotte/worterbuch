@@ -32,6 +32,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
 };
+use uuid::Uuid;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum ConfigError {
@@ -128,6 +129,7 @@ pub enum WorterbuchError {
     KeyIsLocked(Key),
     KeyIsNotLocked(Key),
     FeatureDisabled(MetaData),
+    ClientIdCollision(Uuid),
 }
 
 impl fmt::Display for WorterbuchError {
@@ -204,6 +206,9 @@ impl fmt::Display for WorterbuchError {
                 write!(f, "Key {key} is not locked",)
             }
             WorterbuchError::FeatureDisabled(m) => m.fmt(f),
+            WorterbuchError::ClientIdCollision(id) => {
+                write!(f, "Client ID collision: {id} already exists",)
+            }
         }
     }
 }
@@ -396,6 +401,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::KeyIsLocked(_) => ErrorCode::KeyIsLocked,
             WorterbuchError::KeyIsNotLocked(_) => ErrorCode::KeyIsNotLocked,
             WorterbuchError::FeatureDisabled(_) => ErrorCode::KeyIsNotLocked,
+            WorterbuchError::ClientIdCollision(_) => ErrorCode::ClientIDCollision,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }
@@ -435,7 +441,8 @@ impl From<WorterbuchError> for (StatusCode, String) {
             | WorterbuchError::InvalidServerResponse(_)
             | WorterbuchError::Other(_, _)
             | WorterbuchError::ServerResponse(_)
-            | WorterbuchError::ProtocolNegotiationFailed(_) => {
+            | WorterbuchError::ProtocolNegotiationFailed(_)
+            | WorterbuchError::ClientIdCollision(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
 
