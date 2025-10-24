@@ -1184,8 +1184,8 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
     let (stop_tx, stop_rx) = mpsc::channel(1);
     let (disco_tx, disco_rx) = oneshot::channel();
 
-    let (ctx, crx) = mpsc::channel(1);
-    let (stx, srx) = mpsc::channel(1);
+    let (ctx, crx) = mpsc::unbounded_channel();
+    let (stx, srx) = mpsc::unbounded_channel();
 
     LocalClientSocket::spawn_api_forward_loop(api, crx, stx);
 
