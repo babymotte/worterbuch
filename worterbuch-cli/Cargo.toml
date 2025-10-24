@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-cli"
-version = "1.4.0-rc.1"
+version = "1.4.0-rc.2"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Command line clients for Wörterbuch."
@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 
 [dependencies]
-worterbuch-client = { version = "1.4.0-rc.1", path = "../worterbuch-client" }
+worterbuch-client = { version = "1.4.0-rc.2", path = "../worterbuch-client" }
 tokio = { version = "1.44.2", features = ["rt", "macros", "io-std", "time"] }
 tokio-graceful-shutdown = { version = "0.18.0", features = ["tracing"] }
 dotenvy = "0.15.7"
