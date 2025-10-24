@@ -26,7 +26,7 @@ default = ["jemalloc", "telemetry"]
 tikv-jemalloc-ctl = ["dep:tikv-jemalloc-ctl"]
 
 [dependencies]
-worterbuch-common = { version = "1.4.0-rc.0", path = "../worterbuch-common", features = [
+worterbuch-common = { version = "1.4.0-rc.1", path = "../worterbuch-common", features = [
     "axum-errors",
 ] }
 tokio = { version = "1.44.2", features = ["rt-multi-thread", "fs"] }

@@ -9,10 +9,6 @@ members = [
 ]
 resolver = "3"
 
-[patch.crates-io]
-worterbuch-common = { path = "./worterbuch-common" }
-worterbuch-client = { path = "./worterbuch-client" }
-
 [profile.release]
 lto = "fat"
 codegen-units = 1
