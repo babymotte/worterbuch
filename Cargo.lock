@@ -742,7 +742,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2384,7 +2384,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2734,7 +2734,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3707,7 +3707,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "worterbuch"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "axum",
  "axum-extra",
@@ -3757,7 +3757,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "clap",
  "dotenvy",
@@ -3773,7 +3773,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "axum",
  "clap",
@@ -3824,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "axum",
  "http",
@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-speedtest"
-version = "1.4.0-rc.0"
+version = "1.4.0-rc.1"
 dependencies = [
  "clap",
  "dotenvy",
