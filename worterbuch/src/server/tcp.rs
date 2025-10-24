@@ -21,6 +21,7 @@ use super::common::protocol::Proto;
 use crate::{
     Config, SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
+    print_endpoint,
     server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
@@ -65,8 +66,13 @@ pub async fn start(
 
     info!("Serving TCP endpoint at {addr}");
 
-    let listener =
-        TcpListener::from_std(init_server_socket(bind_addr, port, config)?).into_diagnostic()?;
+    let listener = init_server_socket(bind_addr, port, config.clone())?;
+
+    if config.print_endpoints {
+        print_endpoint(&listener, true)?;
+    }
+
+    let listener = TcpListener::from_std(listener).into_diagnostic()?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;

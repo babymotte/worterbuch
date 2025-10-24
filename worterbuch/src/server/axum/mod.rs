@@ -24,6 +24,7 @@ use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
     error::WorterbuchAppResult,
+    print_endpoint,
     server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
@@ -779,6 +780,11 @@ pub(crate) async fn start(
     let handle = Handle::new();
 
     let listener = init_server_socket(bind_addr, port, config.clone())?;
+
+    if config.print_endpoints {
+        print_endpoint(&listener, false)?;
+    }
+
     let mut server = axum_server::from_tcp(listener);
     server.http_builder().http2().enable_connect_protocol();
 

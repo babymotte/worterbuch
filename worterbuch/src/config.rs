@@ -19,8 +19,16 @@
 
 use crate::license::{License, load_license};
 use clap::Parser;
+use miette::IntoDiagnostic;
 use serde::Serialize;
-use std::{env, net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
+use serde_json::json;
+use std::{
+    env,
+    net::{IpAddr, TcpListener},
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
 use strum::EnumString;
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use tracing::debug;
@@ -114,6 +122,7 @@ pub struct Config {
     pub leader_address: Option<String>,
     pub default_export_file_name: Option<String>,
     pub cors_allowed_origins: Option<Vec<String>>,
+    pub print_endpoints: bool,
 }
 
 impl Config {
@@ -243,6 +252,12 @@ impl Config {
             self.cors_allowed_origins = Some(val.split(",").map(|v| v.trim().to_owned()).collect());
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_PRINT_ENDPOINTS") {
+            let enabled = val.to_lowercase();
+            let enabled = enabled.trim();
+            self.print_endpoints = enabled == "true" || enabled == "1";
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -293,6 +308,7 @@ impl Config {
                     leader_address: args.leader_address.clone(),
                     default_export_file_name: None,
                     cors_allowed_origins: None,
+                    print_endpoints: false,
                     args,
                 };
                 config.load_env()?;
@@ -310,4 +326,28 @@ impl Config {
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         interval
     }
+}
+
+#[derive(Serialize)]
+enum EndpointAddress {
+    Tcp { ip: IpAddr, port: u16 },
+    Ws { ip: IpAddr, port: u16 },
+}
+
+pub fn print_endpoint(listener: &TcpListener, tcp: bool) -> Result<(), miette::Error> {
+    let addr = listener.local_addr().into_diagnostic()?;
+    let addr = if tcp {
+        EndpointAddress::Tcp {
+            ip: addr.ip(),
+            port: addr.port(),
+        }
+    } else {
+        EndpointAddress::Ws {
+            ip: addr.ip(),
+            port: addr.port(),
+        }
+    };
+    let json = json!(addr);
+    println!("{json}");
+    Ok(())
 }
