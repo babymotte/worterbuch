@@ -81,20 +81,23 @@ pub async fn spawn_worterbuch(
     config: Config,
 ) -> WorterbuchAppResult<CloneableWbApi> {
     let (api_tx, api_rx) = oneshot::channel();
-    subsys.start(SubsystemBuilder::new("worterbuch", |s| async move {
-        do_run_worterbuch(&s, config, Some(api_tx)).await?;
-        Ok::<(), WorterbuchAppError>(())
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "worterbuch",
+        async |s: &mut SubsystemHandle| do_run_worterbuch(s, config, Some(api_tx)).await,
+    ));
     Ok(api_rx.await?)
 }
 
-pub async fn run_worterbuch(subsys: &SubsystemHandle, config: Config) -> WorterbuchAppResult<()> {
+pub async fn run_worterbuch(
+    subsys: &mut SubsystemHandle,
+    config: Config,
+) -> WorterbuchAppResult<()> {
     do_run_worterbuch(subsys, config, None).await?;
     Ok(())
 }
 
 async fn do_run_worterbuch(
-    subsys: &SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     config: Config,
     tx: Option<oneshot::Sender<CloneableWbApi>>,
 ) -> WorterbuchAppResult<()> {
@@ -123,11 +126,13 @@ async fn do_run_worterbuch(
         let port = port.to_owned();
         let public_addr = public_addr.to_owned();
         let ws_enabled = !config.follower;
-        Some(
-            subsys.start(SubsystemBuilder::new("webserver", move |subsys| {
+        Some(subsys.start(SubsystemBuilder::new(
+            "webserver",
+            async move |subsys: &mut SubsystemHandle| {
                 server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
-            })),
-        )
+                    .await
+            },
+        )))
     } else {
         None
     };
@@ -145,9 +150,10 @@ async fn do_run_worterbuch(
             .await?;
 
         let worterbuch_uptime = api.clone();
-        subsys.start(SubsystemBuilder::new("stats", |subsys| {
-            track_stats(worterbuch_uptime, subsys)
-        }));
+        subsys.start(SubsystemBuilder::new(
+            "stats",
+            async |subsys: &mut SubsystemHandle| track_stats(worterbuch_uptime, subsys).await,
+        ));
 
         let cfg = config.clone();
         let tcp_server = if let Some(Endpoint {
@@ -159,11 +165,12 @@ async fn do_run_worterbuch(
             let sapi = api.clone();
             let bind_addr = bind_addr.to_owned();
             let port = port.to_owned();
-            Some(
-                subsys.start(SubsystemBuilder::new("tcpserver", move |subsys| {
-                    server::tcp::start(sapi, cfg, bind_addr, port, subsys)
-                })),
-            )
+            Some(subsys.start(SubsystemBuilder::new(
+                "tcpserver",
+                async move |subsys: &mut SubsystemHandle| {
+                    server::tcp::start(sapi, cfg, bind_addr, port, subsys).await
+                },
+            )))
         } else {
             None
         };
@@ -172,11 +179,12 @@ async fn do_run_worterbuch(
         let unix_socket = if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
             let sapi = api.clone();
             let path = path.clone();
-            Some(
-                subsys.start(SubsystemBuilder::new("unixsocket", move |subsys| {
-                    server::unix::start(sapi, path, subsys)
-                })),
-            )
+            Some(subsys.start(SubsystemBuilder::new(
+                "unixsocket",
+                async move |subsys: &mut SubsystemHandle| {
+                    server::unix::start(sapi, path, subsys).await
+                },
+            )))
         } else {
             None
         };
@@ -494,9 +502,12 @@ async fn run_in_leader_mode(
     let mut dead = vec![];
 
     let cfg = config.clone();
-    subsys.start(SubsystemBuilder::new("cluster_sync_port", move |s| {
-        run_cluster_sync_port(s, cfg, follower_connected_tx)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "cluster_sync_port",
+        async move |s: &mut SubsystemHandle| {
+            run_cluster_sync_port(s, cfg, follower_connected_tx).await
+        },
+    ));
 
     let (mut grave_goods_rx, _) = worterbuch
         .psubscribe(

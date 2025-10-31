@@ -58,8 +58,8 @@ impl fmt::Display for CommandDefinition {
     }
 }
 
-pub struct ChildProcessManagerActor {
-    subsys: SubsystemHandle,
+pub struct ChildProcessManagerActor<'a> {
+    subsys: &'a mut SubsystemHandle,
     api_rx: mpsc::Receiver<ChildProcessMessage>,
     command: Option<CommandDefinition>,
     process: Option<(Child, String)>,
@@ -85,7 +85,7 @@ enum ChildProcessMessage {
     Restart(CommandDefinition),
 }
 
-impl ChildProcessManagerActor {
+impl<'a> ChildProcessManagerActor<'a> {
     async fn run_process_manager(mut self) -> Result<()> {
         let mut crash_counter = 0;
         let mut interval = interval(Duration::from_secs(10));
@@ -258,19 +258,22 @@ impl ChildProcessManager {
     pub fn new(subsys: &SubsystemHandle, name: &str, restart: bool) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
-        let subsys = subsys.start(SubsystemBuilder::new(name, move |s| async move {
-            let actor = ChildProcessManagerActor {
-                subsys: s,
-                api_rx,
-                process: None,
-                stdin: None,
-                command: None,
-                started: false,
-                stopped: false,
-                restart,
-            };
-            actor.run_process_manager().await
-        }));
+        let subsys = subsys.start(SubsystemBuilder::new(
+            name,
+            async move |s: &mut SubsystemHandle| {
+                let actor = ChildProcessManagerActor {
+                    subsys: s,
+                    api_rx,
+                    process: None,
+                    stdin: None,
+                    command: None,
+                    started: false,
+                    stopped: false,
+                    restart,
+                };
+                actor.run_process_manager().await
+            },
+        ));
 
         ChildProcessManager { api_tx, subsys }
     }

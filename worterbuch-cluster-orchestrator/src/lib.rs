@@ -124,13 +124,13 @@ impl PeerInfo {
     }
 }
 
-pub async fn instrument_and_run_main(subsys: SubsystemHandle) -> Result<()> {
-    let (config, peers_rx) = instrument_and_load_config(&subsys).await?;
+pub async fn instrument_and_run_main(subsys: &mut SubsystemHandle) -> Result<()> {
+    let (config, peers_rx) = instrument_and_load_config(subsys).await?;
     run_main(subsys, config, peers_rx).await
 }
 
 async fn run_main(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     mut config: config::Config,
     mut peers_rx: tokio::sync::mpsc::Receiver<config::Peers>,
 ) -> std::result::Result<(), miette::Error> {

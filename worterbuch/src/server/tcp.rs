@@ -60,7 +60,7 @@ pub async fn start(
     config: Config,
     bind_addr: IpAddr,
     port: u16,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
@@ -110,7 +110,7 @@ pub async fn start(
                             let worterbuch = worterbuch.clone();
                             let conn_closed_tx = conn_closed_tx.clone();
 
-                            let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), move |s| async move {
+                            let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), async move |s: &mut SubsystemHandle|  {
                             select! {
                                 s = serve(&s, id, remote_addr, worterbuch, socket) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
@@ -226,7 +226,9 @@ async fn serve_loop(
     let (tcp_send_tx, tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
     subsys.start(SubsystemBuilder::new(
         "forward_messages_to_socket",
-        move |s| forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout),
+        async move |s: &mut SubsystemHandle| {
+            forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout).await
+        },
     ));
 
     let tcp_rx = BufReader::new(tcp_rx);
@@ -266,7 +268,7 @@ async fn serve_loop(
 }
 
 async fn forward_messages_to_socket(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: Uuid,

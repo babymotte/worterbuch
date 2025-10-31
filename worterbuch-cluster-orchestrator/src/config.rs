@@ -384,15 +384,18 @@ async fn load_config(
     let config_path = args.config_path.into();
     let scan_interval = Duration::from_secs(args.config_scan_interval);
     let node_id = args.node_id;
-    subsys.start(SubsystemBuilder::new("config-file-watcher", move |s| {
-        watch_config_file(s, config_path, tx, scan_interval, config_file, node_id)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "config-file-watcher",
+        async move |s: &mut SubsystemHandle| {
+            watch_config_file(s, config_path, tx, scan_interval, config_file, node_id).await
+        },
+    ));
 
     Ok((config, rx))
 }
 
 async fn watch_config_file(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     path: PathBuf,
     tx: mpsc::Sender<Peers>,
     scan_interval: Duration,

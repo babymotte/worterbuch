@@ -187,7 +187,7 @@ fn latency_events(
 }
 
 pub async fn run_web_ui(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     mut throughput_backend_events: mpsc::Receiver<throughput::UiApi>,
     mut latency_backend_events: mpsc::Receiver<latency::UiApi>,
     throughput_api: mpsc::Sender<throughput::Api>,

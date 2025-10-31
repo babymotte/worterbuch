@@ -184,15 +184,16 @@ pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result
 
     StatsActor::start_stats_actor(subsys, evt_rx, api_rx);
 
-    subsys.start(SubsystemBuilder::new("stats-endpoint", move |s| {
-        run_server(s, api_tx, port)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "stats-endpoint",
+        async move |s: &mut SubsystemHandle| run_server(s, api_tx, port).await,
+    ));
 
     Ok(StatsSender(evt_tx))
 }
 
 async fn run_server(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     api_tx: mpsc::Sender<StatsApiMessage>,
     port: u16,
 ) -> Result<()> {
@@ -236,10 +237,13 @@ async fn run_server(
         .into_diagnostic()
         .wrap_err_with(|| format!("stats endpoint could not bind to socket address {addr}"))?;
 
+    let shutdown_token = subsys.create_cancellation_token();
+    let signal = async move {
+        shutdown_token.cancelled().await;
+    };
+
     axum::serve(listener, app.with_state(server))
-        .with_graceful_shutdown(async move {
-            subsys.on_shutdown_requested().await;
-        })
+        .with_graceful_shutdown(signal)
         .await
         .into_diagnostic()
         .wrap_err("error starting stats endpoint web server")?;
@@ -255,28 +259,31 @@ fn cors() -> CorsLayer {
     // .expose_headers([header::SET_COOKIE])
 }
 
-struct StatsActor {
-    subsys: SubsystemHandle,
+struct StatsActor<'a> {
+    subsys: &'a mut SubsystemHandle,
     stats_rx: mpsc::Receiver<StatsEvent>,
     api_rx: mpsc::Receiver<StatsApiMessage>,
     election_state: ElectionState,
 }
 
-impl StatsActor {
+impl<'a> StatsActor<'a> {
     fn start_stats_actor(
         subsys: &SubsystemHandle,
         stats_rx: mpsc::Receiver<StatsEvent>,
         api_rx: mpsc::Receiver<StatsApiMessage>,
     ) {
-        subsys.start(SubsystemBuilder::new("stats-actor", |s| async {
-            let actor = StatsActor {
-                subsys: s,
-                stats_rx,
-                api_rx,
-                election_state: ElectionState::Candidate,
-            };
-            actor.run_stats_actor().await
-        }));
+        subsys.start(SubsystemBuilder::new(
+            "stats-actor",
+            async |s: &mut SubsystemHandle| {
+                let actor = StatsActor {
+                    subsys: s,
+                    stats_rx,
+                    api_rx,
+                    election_state: ElectionState::Candidate,
+                };
+                actor.run_stats_actor().await
+            },
+        ));
     }
 
     async fn run_stats_actor(mut self) -> Result<()> {

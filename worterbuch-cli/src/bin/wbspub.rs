@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Toplevel::new(|s| async move {
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
         s.start(SubsystemBuilder::new("wbspub", run));
     })
     .catch_signals()
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: &mut SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 
@@ -105,7 +105,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(1);
     subsys.start(SubsystemBuilder::new(
         "provide_values",
-        move |s| async move {
+        async move |s: &mut SubsystemHandle| {
             provide_values(json, s, tx);
             Ok(()) as Result<()>
         },

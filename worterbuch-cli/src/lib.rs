@@ -43,7 +43,11 @@ pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
     }
 }
 
-pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc::Sender<String>) {
+pub fn provide_keys(
+    keys: Option<Vec<String>>,
+    subsys: &mut SubsystemHandle,
+    tx: mpsc::Sender<String>,
+) {
     if let Some(keys) = keys {
         spawn(async move {
             for key in keys {
@@ -54,7 +58,40 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
             drop(tx);
         });
     } else {
-        subsys.start(SubsystemBuilder::new("read-stdin", |s| async move {
+        subsys.start(SubsystemBuilder::new(
+            "read-stdin",
+            async move |s: &mut SubsystemHandle| {
+                let (lines_tx, mut lines_rx) = mpsc::channel(1);
+                thread::spawn(move || {
+                    let mut lines = BufReader::new(std::io::stdin()).lines();
+                    while let Some(Ok(line)) = lines.next() {
+                        if let Err(e) = lines_tx.blocking_send(line) {
+                            error!("Could not forward line from stdin: {e}");
+                        }
+                    }
+                });
+                loop {
+                    select! {
+                        _ = s.on_shutdown_requested() => break,
+                        recv = lines_rx.recv() => if let Some(key) = recv {
+                            if tx.send(key).await.is_err() {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Ok(()) as Result<()>
+            },
+        ));
+    }
+}
+
+pub fn provide_values(json: bool, subsys: &mut SubsystemHandle, tx: mpsc::Sender<Value>) {
+    subsys.start(SubsystemBuilder::new(
+        "read-stdin",
+        async move |s: &mut SubsystemHandle| {
             let (lines_tx, mut lines_rx) = mpsc::channel(1);
             thread::spawn(move || {
                 let mut lines = BufReader::new(std::io::stdin()).lines();
@@ -67,8 +104,19 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
             loop {
                 select! {
                     _ = s.on_shutdown_requested() => break,
-                    recv = lines_rx.recv() => if let Some(key) = recv {
-                        if tx.send(key).await.is_err() {
+                    recv = lines_rx.recv() => if let Some(line) = recv {
+                        if json {
+                            match serde_json::from_str::<Value>(&line) {
+                                Ok(value) => {
+                                    if tx.send(value).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Error parsing json: {e}");
+                                }
+                            }
+                        } else if tx.send(json!(line)).await.is_err() {
                             break;
                         }
                     } else {
@@ -77,52 +125,14 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc
                 }
             }
             Ok(()) as Result<()>
-        }));
-    }
-}
-
-pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Value>) {
-    subsys.start(SubsystemBuilder::new("read-stdin", move |s| async move {
-        let (lines_tx, mut lines_rx) = mpsc::channel(1);
-        thread::spawn(move || {
-            let mut lines = BufReader::new(std::io::stdin()).lines();
-            while let Some(Ok(line)) = lines.next() {
-                if let Err(e) = lines_tx.blocking_send(line) {
-                    error!("Could not forward line from stdin: {e}");
-                }
-            }
-        });
-        loop {
-            select! {
-                _ = s.on_shutdown_requested() => break,
-                recv = lines_rx.recv() => if let Some(line) = recv {
-                    if json {
-                        match serde_json::from_str::<Value>(&line) {
-                            Ok(value) => {
-                                if tx.send(value).await.is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error parsing json: {e}");
-                            }
-                        }
-                    } else if tx.send(json!(line)).await.is_err() {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-        }
-        Ok(()) as Result<()>
-    }));
+        },
+    ));
 }
 
 pub fn provide_key_value_pairs(
     key_value_pairs: Option<Vec<String>>,
     json: bool,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     tx: mpsc::Sender<(Key, Value)>,
 ) {
     if let Some(key_value_pairs) = key_value_pairs {
@@ -143,7 +153,7 @@ pub fn provide_key_value_pairs(
                 }
             }
         });
-        subsys.start(SubsystemBuilder::new("read-stdin", move|s| async move {
+        subsys.start(SubsystemBuilder::new("read-stdin", async move |s: &mut SubsystemHandle| {
             loop {
                 select! {
                     _ = s.on_shutdown_requested() => break,

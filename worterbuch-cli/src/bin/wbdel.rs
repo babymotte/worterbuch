@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Toplevel::new(|s| async move {
+    Toplevel::new(async move |s: &mut SubsystemHandle<_>| {
         s.start(SubsystemBuilder::new("wbdel", run));
     })
     .catch_signals()
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: &mut SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 
@@ -103,10 +103,13 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut acked = 0;
 
     let (tx, mut rx) = mpsc::channel(1);
-    subsys.start(SubsystemBuilder::new("provide_keys", |s| async move {
-        provide_keys(keys, s, tx);
-        Ok(()) as Result<()>
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "provide_keys",
+        async move |s: &mut SubsystemHandle| {
+            provide_keys(keys, s, tx);
+            Ok(()) as Result<()>
+        },
+    ));
     let mut done = false;
 
     loop {

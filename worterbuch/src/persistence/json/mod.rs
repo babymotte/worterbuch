@@ -52,7 +52,7 @@ struct GraveGoodsLastWill {
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
 ) -> PersistenceResult<()> {
     v3::periodic(worterbuch, config, subsys).await
 }
@@ -93,9 +93,10 @@ impl PersistentJsonStorage {
     pub fn new(subsys: &SubsystemHandle, config: Config, api: CloneableWbApi) -> Self {
         info!("Using JSON file persistence.");
         let config_pers = config.clone();
-        subsys.start(SubsystemBuilder::new("json-persistence", |subsys| {
-            periodic(api, config_pers, subsys)
-        }));
+        subsys.start(SubsystemBuilder::new(
+            "json-persistence",
+            async |subsys: &mut SubsystemHandle| periodic(api, config_pers, subsys).await,
+        ));
         Self { config }
     }
 }

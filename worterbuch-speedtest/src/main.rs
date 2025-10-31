@@ -38,7 +38,7 @@ async fn main() -> miette::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Toplevel::new(|s| async move {
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
         s.start(SubsystemBuilder::new(
             "worterbuch-speedtest",
             run_speedtests_with_ui,
@@ -52,27 +52,37 @@ async fn main() -> miette::Result<()> {
     Ok(())
 }
 
-async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
+async fn run_speedtests_with_ui(subsys: &mut SubsystemHandle) -> miette::Result<()> {
     let (throughput_api_tx, throughput_api_rx) = mpsc::channel(1);
     let (latency_api_tx, latency_api_rx) = mpsc::channel(1);
     let (throughput_ui_tx, throughput_ui_rx) = mpsc::channel(1);
     let (latency_ui_tx, latency_ui_rx) = mpsc::channel(1);
 
-    subsys.start(SubsystemBuilder::new("speedtest-web-ui", |s| {
-        run_web_ui(
-            s,
-            throughput_ui_rx,
-            latency_ui_rx,
-            throughput_api_tx,
-            latency_api_tx,
-        )
-    }));
-    subsys.start(SubsystemBuilder::new("throughput", move |s| {
-        start_throughput_test(s, throughput_ui_tx, throughput_api_rx)
-    }));
-    subsys.start(SubsystemBuilder::new("latency", move |s| {
-        start_latency_test(s, latency_ui_tx, latency_api_rx)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "speedtest-web-ui",
+        async |s: &mut SubsystemHandle| {
+            run_web_ui(
+                s,
+                throughput_ui_rx,
+                latency_ui_rx,
+                throughput_api_tx,
+                latency_api_tx,
+            )
+            .await
+        },
+    ));
+    subsys.start(SubsystemBuilder::new(
+        "throughput",
+        async move |s: &mut SubsystemHandle| {
+            start_throughput_test(s, throughput_ui_tx, throughput_api_rx).await
+        },
+    ));
+    subsys.start(SubsystemBuilder::new(
+        "latency",
+        async move |s: &mut SubsystemHandle| {
+            start_latency_test(s, latency_ui_tx, latency_api_rx).await
+        },
+    ));
 
     Ok(())
 }

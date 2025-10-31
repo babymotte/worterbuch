@@ -166,7 +166,7 @@ pub enum UiApi {
 }
 
 pub async fn start_throughput_test(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     ui_tx: mpsc::Sender<UiApi>,
     mut api_rx: mpsc::Receiver<Api>,
 ) -> miette::Result<()> {
@@ -197,7 +197,7 @@ pub async fn start_throughput_test(
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
                             debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
+                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), async move |s: &mut SubsystemHandle | client(i, result_tx, agent_rx, s, conn_tx).await));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
@@ -246,7 +246,7 @@ pub async fn start_throughput_test(
                             let result_tx = status_tx.clone();
                             let (conn_tx, mut conn_rx) = mpsc::channel(1);
                             debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), move |s| client(i, result_tx, agent_rx, s, conn_tx)));
+                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), async move |s: &mut SubsystemHandle | client(i, result_tx, agent_rx, s, conn_tx).await));
                             agent_apis.push(agent_tx);
                             'inner: loop {
                                 select! {
@@ -319,7 +319,7 @@ async fn client(
     id: usize,
     result_tx: mpsc::Sender<Status>,
     mut api: mpsc::Receiver<AgentApi>,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     on_connected: mpsc::Sender<()>,
 ) -> miette::Result<()> {
     let (wb, _on_disconnect, _) = worterbuch_client::connect_with_default_config()

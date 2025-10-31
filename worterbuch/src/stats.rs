@@ -41,7 +41,7 @@ pub const LICENSE: &str = "COMMERCIAL";
 #[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
-pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: CloneableWbApi, subsys: &mut SubsystemHandle) -> WorterbuchResult<()> {
     let start = Instant::now();
 
     wb.set(

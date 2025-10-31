@@ -17,13 +17,13 @@
 
 use miette::Result;
 use std::time::Duration;
-use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    Toplevel::new(|s| async move {
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
         s.start(SubsystemBuilder::new(
             "cluster-orchestrator",
             instrument_and_run_main,

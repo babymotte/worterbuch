@@ -66,7 +66,7 @@ pub enum ClientWriteCommand {
 pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
 
 pub async fn run_cluster_sync_port(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     config: Config,
     on_follower_connected: mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -130,7 +130,7 @@ async fn serve(
 
     subsys.start(SubsystemBuilder::new(
         client.1.to_string(),
-        move |s| async move {
+        async move |s: &mut SubsystemHandle| {
             forward_events_to_follower(s, client.0, client.1, sync_rx, config).await;
             Ok::<(), Error>(())
         },
@@ -138,7 +138,7 @@ async fn serve(
 }
 
 async fn forward_events_to_follower(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     mut tcp_stream: TcpStream,
     follower: SocketAddr,
     sync_rx: oneshot::Receiver<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -255,15 +255,18 @@ pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
 
     let (tx, rx) = oneshot::channel();
 
-    subsys.start(SubsystemBuilder::new("stdin-monitor", |s| async move {
-        select! {
-            _ = rx => (),
-            _ = s.on_shutdown_requested() => (),
-        }
-        info!("Shutting down …");
-        s.request_shutdown();
-        Ok::<(), miette::Error>(())
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "stdin-monitor",
+        async |s: &mut SubsystemHandle| {
+            select! {
+                _ = rx => (),
+                _ = s.on_shutdown_requested() => (),
+            }
+            info!("Shutting down …");
+            s.request_shutdown();
+            Ok::<(), miette::Error>(())
+        },
+    ));
 
     thread::spawn(move || {
         let stdin = io::stdin();
