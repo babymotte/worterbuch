@@ -99,7 +99,7 @@ impl<T: DeserializeOwned> TryFrom<PStateEvent> for TypedPStateEvent<T> {
             PStateEvent::KeyValuePairs(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
                 try_to_typed_key_value_pairs(kvps)?,
             )),
-            PStateEvent::Deleted(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
+            PStateEvent::Deleted(kvps) => Ok(TypedPStateEvent::Deleted(
                 try_to_typed_key_value_pairs(kvps)?,
             )),
         }
