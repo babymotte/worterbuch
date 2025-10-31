@@ -97,7 +97,7 @@ pub async fn run_cluster_sync_port(
         select! {
             client = listener.accept() => match client {
                 // TODO reject connections from clients that are not cluster peers
-                Ok(client) => serve(&subsys, client, &on_follower_connected, config.clone()).await,
+                Ok(client) => serve(subsys, client, &on_follower_connected, config.clone()).await,
                 Err(e) => {
                     error!("Error accepting follower connections: {e}");
                     break;

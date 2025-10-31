@@ -141,14 +141,14 @@ async fn run_main(
 
     let mut socket = init_socket(&config).await?;
 
-    let stats = start_stats_endpoint(&subsys, config.stats_port).await?;
+    let stats = start_stats_endpoint(subsys, config.stats_port).await?;
 
     while !subsys.is_shutdown_requested() {
         let prio = config.priority().await;
 
         stats.candidate().await;
         let outcome = select! {
-            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
+            res = elect_leader(subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
             _ = subsys.on_shutdown_requested() => break,
         };
 
@@ -156,14 +156,14 @@ async fn run_main(
             ElectionOutcome::Leader => {
                 stats.leader().await;
                 select! {
-                    it = lead(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => it?,
+                    it = lead(subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => it?,
                     _ = subsys.on_shutdown_requested() => break,
                 }
             }
             ElectionOutcome::Follower(heartbeat) => {
                 stats.follower().await;
                 select! {
-                    it = follow(&subsys, &mut socket,  &config, &peers, heartbeat) => it?,
+                    it = follow(subsys, &mut socket,  &config, &peers, heartbeat) => it?,
                     _ = subsys.on_shutdown_requested() => break,
                 }
             }

@@ -66,7 +66,7 @@ pub async fn start(
 
     loop {
         let evt = next_socket_event(
-            &subsys,
+            subsys,
             &mut conn_closed_rx,
             &listener,
             waiting_for_free_connections,
@@ -98,7 +98,7 @@ pub async fn start(
 
                             let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), async move |s:&mut SubsystemHandle| {
                             select! {
-                                s = serve(&s, id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                s = serve(s, id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
                                 _ = s.on_shutdown_requested() => (),

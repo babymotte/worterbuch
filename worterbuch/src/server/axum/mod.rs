@@ -775,7 +775,7 @@ pub(crate) async fn start(
     let config = worterbuch.config().to_owned();
 
     let router =
-        build_worterbuch_router(&subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
+        build_worterbuch_router(subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
 
     let handle = Handle::new();
 

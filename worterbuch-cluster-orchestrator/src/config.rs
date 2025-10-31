@@ -408,7 +408,7 @@ async fn watch_config_file(
 
     loop {
         select! {
-            _ = interval.tick() => config_file = reload_config(&subsys, &path, config_file, &node_id, &tx).await?,
+            _ = interval.tick() => config_file = reload_config(subsys, &path, config_file, &node_id, &tx).await?,
             _ = subsys.on_shutdown_requested() => break,
         }
     }
