@@ -22,6 +22,8 @@ use crate::{
     RequestPattern, TransactionId, server::Err,
 };
 use http::StatusCode;
+#[cfg(feature = "ws")]
+use http::header::InvalidHeaderValue;
 use jsonwebtoken::Algorithm;
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
@@ -268,6 +270,8 @@ pub enum ConnectionError {
     AuthorizationError(Box<String>),
     NoServerAddressesConfigured,
     ServerResponse(Box<Err>),
+    #[cfg(feature = "ws")]
+    InvalidHeaderValue(Box<InvalidHeaderValue>),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -294,6 +298,8 @@ impl fmt::Display for ConnectionError {
                 fmt::Display::fmt("no server addresses configured", f)
             }
             Self::ServerResponse(e) => e.fmt(f),
+            #[cfg(feature = "ws")]
+            Self::InvalidHeaderValue(e) => e.fmt(f),
         }
     }
 }
@@ -372,6 +378,13 @@ impl From<mpsc::error::TrySendError<ClientMessage>> for ConnectionError {
 impl From<tungstenite::http::Error> for ConnectionError {
     fn from(e: tungstenite::http::Error) -> Self {
         Self::HttpError(Box::new(e))
+    }
+}
+
+#[cfg(feature = "ws")]
+impl From<InvalidHeaderValue> for ConnectionError {
+    fn from(e: InvalidHeaderValue) -> Self {
+        Self::InvalidHeaderValue(Box::new(e))
     }
 }
 

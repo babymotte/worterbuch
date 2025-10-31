@@ -62,10 +62,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 #[cfg(feature = "ws")]
-use tokio_tungstenite::{
-    connect_async_with_config,
-    tungstenite::{Message, handshake::client::generate_key, http::Request},
-};
+use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 #[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
 use tracing::{Level, debug, error, info, instrument, trace, warn};
@@ -1252,7 +1249,7 @@ pub async fn try_connect(
         #[cfg(not(any(feature = "ws", feature = "wasm")))]
         panic!("websocket not supported, binary was compiled without the ws feature flag");
         #[cfg(any(feature = "ws", feature = "wasm"))]
-        connect_ws(url, disco_tx, config).await?
+        connect_ws(url, host_addr, disco_tx, config).await?
     };
 
     let disconnected = OnDisconnect { rx: disco_rx };
@@ -1264,6 +1261,7 @@ pub async fn try_connect(
 #[instrument(skip(config, on_disconnect), level = Level::INFO)]
 async fn connect_ws(
     url: String,
+    host: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
 ) -> Result<Worterbuch, ConnectionError> {
@@ -1271,16 +1269,15 @@ async fn connect_ws(
 
     #[cfg(feature = "ws")]
     let mut websocket = {
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue};
+
         let auth_token = config.auth_token.clone();
-        let mut request = Request::builder()
-            .uri(url)
-            .header("Sec-WebSocket-Protocol", "worterbuch".to_owned())
-            .header("Sec-WebSocket-Key", generate_key());
+        let mut request = url.into_client_request()?;
 
         if let Some(auth_token) = auth_token {
-            request = request.header("Authorization", format!("Bearer {auth_token}"));
+            let header_value = HeaderValue::from_str(&format!("Bearer {auth_token}"))?;
+            request.headers_mut().insert("Authorization", header_value);
         }
-        let request: Request<()> = request.body(())?;
 
         #[cfg(feature = "ws")]
         let (websocket, _) = connect_async_with_config(request, None, true).await?;
