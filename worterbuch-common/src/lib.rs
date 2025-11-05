@@ -49,6 +49,7 @@ pub const SYSTEM_TOPIC_VERSION: &str = "version";
 pub const SYSTEM_TOPIC_LICENSE: &str = "license";
 pub const SYSTEM_TOPIC_SOURCES: &str = "source-code";
 pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
+pub const SYSTEM_TOPIC_LOCKS: &str = "locks";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
 pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION: &str = "protocolVersion";
 pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";

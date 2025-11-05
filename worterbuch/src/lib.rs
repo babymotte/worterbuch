@@ -297,7 +297,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.pdelete(pattern, client_id).await).ok();
         }
         WbFunction::Lock(key, client_id, tx) => {
-            tx.send(worterbuch.lock(key, client_id)).ok();
+            tx.send(worterbuch.lock(key, client_id).await).ok();
         }
         WbFunction::AcquireLock(key, client_id, tx) => {
             tx.send(worterbuch.acquire_lock(key, client_id).await).ok();

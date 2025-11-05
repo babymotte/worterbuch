@@ -76,20 +76,20 @@ impl Lock {
         }
     }
 
-    async fn release(&mut self, client_id: Uuid) -> (bool, bool) {
+    async fn release(&mut self, client_id: Uuid) -> (bool, Option<Uuid>) {
         if client_id == self.holder {
             if let Some((id, txs)) = self.candidates.pop_front() {
                 self.holder = id;
                 for tx in txs {
                     tx.send(()).ok();
                 }
-                (true, false)
+                (true, Some(self.holder))
             } else {
-                (true, true)
+                (true, None)
             }
         } else {
             self.candidates.retain(|(c, _)| c != &client_id);
-            (false, false)
+            (false, Some(self.holder))
         }
     }
 
@@ -994,58 +994,65 @@ impl Store {
         &mut self,
         client_id: Uuid,
         path: Box<[RegularKeySegment]>,
-    ) -> oneshot::Receiver<()> {
+    ) -> (oneshot::Receiver<()>, Option<Uuid>) {
         let (tx, rx) = oneshot::channel();
         let node = self.get_or_create_lock_node(path.clone());
-        match &mut node.value_mut() {
+        let holder = match &mut node.value_mut() {
             Some(lock) => {
                 if client_id == lock.holder {
                     debug!("Client {client_id} already holds the lock on {path:?}");
                     tx.send(()).ok();
+                    Some(client_id)
                 } else {
                     lock.queue(client_id, tx).await;
+                    Some(lock.holder)
                 }
             }
             None => {
                 node.set_value(Lock::new(client_id));
                 tx.send(()).ok();
+                Some(client_id)
             }
-        }
+        };
 
         let paths = self.locked_keys.entry(client_id).or_default();
         paths.push(path);
 
-        rx
+        (rx, holder)
     }
 
-    pub async fn unlock_all(&mut self, client_id: Uuid) {
+    pub async fn unlock_all(&mut self, client_id: Uuid) -> Option<Vec<(String, Option<Uuid>)>> {
         if let Some(paths) = self.locked_keys.remove(&client_id) {
+            let mut out = vec![];
             for path in paths {
-                self.unlock(client_id, path).await.ok();
+                let client_id = self.unlock(client_id, &path).await.ok().flatten();
+                out.push((path.join("/"), client_id));
             }
+            Some(out)
+        } else {
+            None
         }
     }
 
     pub async fn unlock(
         &mut self,
         client_id: Uuid,
-        path: Box<[RegularKeySegment]>,
-    ) -> WorterbuchResult<()> {
-        let node = self.get_or_create_lock_node(path.clone());
+        path: &[RegularKeySegment],
+    ) -> WorterbuchResult<Option<Uuid>> {
+        let node = self.get_or_create_lock_node(path.into());
 
         if let Some(lock) = node.value_mut() {
-            let (was_holder, is_now_unlocked) = lock.release(client_id).await;
+            let (was_holder, new_holder) = lock.release(client_id).await;
             if !was_holder {
                 return Err(WorterbuchError::KeyIsLocked(path.join("/")));
-            } else if is_now_unlocked {
-                self.delete_lock_node(&path);
+            } else if new_holder.is_none() {
+                self.delete_lock_node(path);
             }
+            Ok(new_holder)
         } else {
             warn!("Node {path:?} is not locked.");
-            return Err(WorterbuchError::KeyIsNotLocked(path.join("/")));
+            Err(WorterbuchError::KeyIsNotLocked(path.join("/")))
         }
-
-        Ok(())
     }
 
     pub(crate) fn reset(&mut self, data: StoreNode) {
@@ -1426,7 +1433,7 @@ mod test {
         let client_2 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path.clone()).is_err());
-        store.unlock(client_1, path.clone()).await.unwrap();
+        store.unlock(client_1, &path).await.unwrap();
         assert!(store.lock(client_2, path).is_ok());
     }
 
@@ -1459,7 +1466,7 @@ mod test {
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone()).await.unwrap();
+        store.unlock(client_1, &path).await.unwrap();
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
 
@@ -1471,7 +1478,7 @@ mod test {
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path2, json!("hello")).is_ok());
-        store.unlock(client_1, path.clone()).await.unwrap();
+        store.unlock(client_1, &path).await.unwrap();
         assert_eq!(store.get(&path2), Some(&json!("hello")));
     }
 

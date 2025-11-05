@@ -51,8 +51,8 @@ use worterbuch_common::{
     SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
     SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
     SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage,
-    StateEvent, SubscriptionId, TransactionId, ValueEntry,
+    SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS,
+    ServerMessage, StateEvent, SubscriptionId, TransactionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments, topic,
 };
@@ -911,10 +911,12 @@ impl Worterbuch {
         Ok(deleted)
     }
 
-    pub fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+    pub async fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         self.store.lock(client_id, path)?;
+
+        self.locked(Some(client_id), &key).await;
 
         Ok(())
     }
@@ -926,15 +928,48 @@ impl Worterbuch {
     ) -> WorterbuchResult<oneshot::Receiver<()>> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
-        let rx = self.store.acquire_lock(client_id, path).await;
+        let (rx, client_id) = self.store.acquire_lock(client_id, path).await;
+
+        self.locked(client_id, &key).await;
 
         Ok(rx)
+    }
+
+    async fn locked(&mut self, client_id: Option<Uuid>, key: &str) {
+        if self.config.extended_monitoring {
+            if let Some(client_id) = client_id {
+                if let Err(e) = self
+                    .set(
+                        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LOCKS, escape_wildcards(key)),
+                        json!(client_id),
+                        INTERNAL_CLIENT_ID,
+                    )
+                    .await
+                {
+                    error!("Error updating client locks: {e}");
+                };
+            } else if let Err(e) = self
+                .delete(
+                    topic!(
+                        SYSTEM_TOPIC_ROOT,
+                        SYSTEM_TOPIC_LOCKS,
+                        escape_wildcards(key)
+                    ),
+                    INTERNAL_CLIENT_ID,
+                )
+                .await
+            {
+                error!("Error updating client locks: {e}");
+            }
+        }
     }
 
     pub async fn release_lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
-        self.store.unlock(client_id, path).await?;
+        let client_id = self.store.unlock(client_id, &path).await?;
+
+        self.locked(client_id, &key).await;
 
         Ok(())
     }
@@ -1159,7 +1194,13 @@ impl Worterbuch {
         }
 
         info!("Dropping locks of client {}.", client_id);
-        self.store.unlock_all(client_id).await;
+        if let Some(keys) = self.store.unlock_all(client_id).await
+            && self.config.extended_monitoring
+        {
+            for (key, client_id) in keys {
+                self.locked(client_id, &key).await;
+            }
+        }
 
         let grave_goods = self.grave_goods_for_client(&client_id);
         let last_wills = self.last_will_for_client(&client_id);
