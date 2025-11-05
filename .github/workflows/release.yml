@@ -35,10 +35,17 @@ jobs:
           override: true
 
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          shared-key: wb-${{ runner.os }}-cargo-${{ matrix.features }}
-          key: wb-${{ runner.os }}-cargo-${{ matrix.features }}
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Run format check
         run: cargo fmt --check
@@ -68,10 +75,17 @@ jobs:
           override: true
 
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          shared-key: wb-${{ runner.os }}-cargo-publish
-          key: wb-${{ runner.os }}-cargo-publish
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Publish to crates.io
         run: ./publish.sh
@@ -229,10 +243,17 @@ jobs:
           override: true
 
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          shared-key: wb-${{ runner.os }}-cargo-release
-          key: wb-${{ runner.os }}-cargo-release
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Build
         run: cargo build --release ${{ matrix.args }}
