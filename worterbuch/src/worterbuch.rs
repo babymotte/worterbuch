@@ -950,11 +950,7 @@ impl Worterbuch {
                 };
             } else if let Err(e) = self
                 .delete(
-                    topic!(
-                        SYSTEM_TOPIC_ROOT,
-                        SYSTEM_TOPIC_LOCKS,
-                        escape_wildcards(key)
-                    ),
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LOCKS, escape_wildcards(key)),
                     INTERNAL_CLIENT_ID,
                 )
                 .await
