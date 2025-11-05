@@ -1,0 +1,225 @@
+name: Update Cache
+
+on:
+  push:
+    branches: ["main"]
+    tags-ignore:
+      - "v*.*.*"
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - features: ""
+          - features: "jemalloc"
+          - features: "commercial"
+          - features: "tcp"
+          - features: "unix"
+          - features: "ws"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run format check
+        run: cargo fmt --check
+      - name: Run linter
+        env:
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+        run: cargo clippy --no-default-features --features=${{ matrix.features }} -- --deny warnings
+      - name: Run tests
+        env:
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+          WORTERBUCH_LICENSE_FILE: ./test/license
+        run: cargo test --no-default-features --features=${{ matrix.features }}
+
+  docker-wb:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            babymotte/worterbuch
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: "lab:latest"
+          driver: cloud
+          endpoint: "babymotte/default"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./worterbuch/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64/v8
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: ${{ 'type=cacheonly' }}
+          push: false
+
+  docker-wbco:
+    needs: docker-wb
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Worterbuch version from git tag
+        run: echo "WORTERBUCH_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            babymotte/worterbuch-cluster-orchestrator
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: "lab:latest"
+          driver: cloud
+          endpoint: "babymotte/default"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./worterbuch-cluster-orchestrator/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64/v8
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            WORTERBUCH_VERSION=${{ env.WORTERBUCH_VERSION }}
+          outputs: ${{ 'type=cacheonly' }}
+          push: false
+
+  release:
+    needs: test
+    runs-on: ${{ matrix.image }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: ""
+          - target: aarch64-unknown-linux-gnu
+            image: ubuntu-24.04-arm
+            ext: ""
+            args: "--no-default-features"
+          - target: arm-unknown-linux-gnueabihf
+            image: ubuntu-24.04-arm
+            ext: ""
+            args: "--no-default-features"
+          - target: armv7-unknown-linux-gnueabihf
+            image: ubuntu-24.04-arm
+            ext: ""
+            args: "--no-default-features"
+          - target: x86_64-pc-windows-msvc
+            image: windows-2022
+            ext: ".exe"
+            args: "--no-default-features"
+          - target: aarch64-apple-darwin
+            image: macos-15
+            ext: ""
+            args: "--no-default-features"
+            target-path: ""
+          - target: x86_64-apple-darwin
+            image: macos-15-intel
+            ext: ""
+            args: "--no-default-features"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --release ${{ matrix.args }}
