@@ -81,9 +81,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-release-x86_64-unknown-linux-gnu-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-release-x86_64-unknown-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-release-x86_64-unknown-linux-gnu-
+            cargo-release-x86_64-unknown-linux-gnu-
 
       - name: Publish to crates.io
         run: ./publish.sh
@@ -203,31 +203,52 @@ jobs:
             image: ubuntu-24.04
             ext: ""
             args: ""
+            label: ""
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--no-default-features"
+            label: "-embedded"
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--features=commercial"
+            label: "-commercial"
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--no-default-features--features=commercial"
+            label: "-embedded-commercial"
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
             ext: ""
             args: "--no-default-features"
+            label: ""
           - target: arm-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
             args: "--no-default-features"
+            label: ""
           - target: armv7-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
             args: "--no-default-features"
+            label: ""
           - target: x86_64-pc-windows-msvc
             image: windows-2022
             ext: ".exe"
             args: "--no-default-features"
+            label: ""
           - target: aarch64-apple-darwin
             image: macos-15
             ext: ""
             args: "--no-default-features"
-            target-path: ""
+            label: ""
           - target: x86_64-apple-darwin
             image: macos-15-intel
             ext: ""
             args: "--no-default-features"
+            label: ""
 
     steps:
       - name: Checkout
@@ -248,11 +269,13 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-release-${{ matrix.target }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-release${{ matrix.label }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-release-${{ matrix.target }}-
+            cargo-release${{ matrix.label }}-${{ matrix.target }}-
 
       - name: Build
+        env:
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_LICENSE_PUBLIC_KEY }}
         run: cargo build --release ${{ matrix.args }}
 
       - name: Package Binaries
