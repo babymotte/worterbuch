@@ -186,7 +186,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
-            args: "--no-default-features--features=commercial"
+            args: "--no-default-features --features=commercial"
             label: "-embedded-commercial"
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
