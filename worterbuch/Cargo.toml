@@ -23,7 +23,6 @@ telemetry = [
 ]
 commercial = []
 default = ["jemalloc", "telemetry"]
-tikv-jemalloc-ctl = ["dep:tikv-jemalloc-ctl"]
 
 [dependencies]
 worterbuch-common = { version = "1.4.0-rc.8", path = "../worterbuch-common", features = [

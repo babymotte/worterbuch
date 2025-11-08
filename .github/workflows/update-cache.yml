@@ -15,17 +15,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - features: ""
-          - features: "jemalloc"
-          - features: "commercial"
-          - features: "tcp"
-          - features: "unix"
-          - features: "ws"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -45,21 +34,40 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: cargo-test-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+          key: x86_64-unknown-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-test-
+            x86_64-unknown-linux-gnu-
 
       - name: Run format check
         run: cargo fmt --check
-      - name: Run linter
+
+      - name: Run linter and tests (default)
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-        run: cargo clippy --no-default-features --features=${{ matrix.features }} -- --deny warnings
-      - name: Run tests
+        run: |
+          cargo clippy -- --deny warnings &&
+            cargo test
+
+      - name: Run linter and tests (embedded)
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-          WORTERBUCH_LICENSE_FILE: ./test/license
-        run: cargo test --no-default-features --features=${{ matrix.features }}
+        run: |
+          cargo clippy --no-default-features -- --deny warnings &&
+            cargo test --no-default-features
+
+      - name: Run linter and tests (commercial)
+        env:
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+        run: |
+          cargo clippy --features=commercial -- --deny warnings &&
+            cargo test --features=commercial
+
+      - name: Run linter and tests (embedded commercial)
+        env:
+          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+        run: |
+          cargo clippy --no-default-features --features=commercial -- --deny warnings &&
+            cargo test --no-default-features--features=commercial 
 
   docker-wb:
     needs: test
@@ -177,17 +185,17 @@ jobs:
             image: ubuntu-24.04
             ext: ""
             args: "--no-default-features"
-            label: "-embedded"
+            label: "embedded-"
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
             args: "--features=commercial"
-            label: "-commercial"
+            label: "commercial-"
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
             args: "--no-default-features --features=commercial"
-            label: "-embedded-commercial"
+            label: "embedded-commercial-"
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
             ext: ""
@@ -238,9 +246,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: cargo-release${{ matrix.label }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.label }}${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-release${{ matrix.label }}-${{ matrix.target }}-
+            ${{ matrix.label }}${{ matrix.target }}-
 
       - name: Build
         env:
