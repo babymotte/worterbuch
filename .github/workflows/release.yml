@@ -297,4 +297,4 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: worterbuch-${{ matrix.target }}.zip
+          files: worterbuch-${{matrix.label}}${{ matrix.target }}.zip
