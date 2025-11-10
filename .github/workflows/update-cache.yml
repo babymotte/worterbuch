@@ -71,7 +71,7 @@ jobs:
           cargo clippy --no-default-features --features=commercial -- --deny warnings &&
             cargo test --no-default-features --features=commercial
 
-  release:
+  release-dryrun:
     needs: test
     runs-on: ${{ matrix.image }}
 
