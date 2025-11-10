@@ -58,6 +58,7 @@ jobs:
       - name: Run linter and tests (commercial)
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+          WORTERBUCH_LICENSE_FILE: ./test/license
         run: |
           cargo clippy --features=commercial -- --deny warnings &&
             cargo test --features=commercial
@@ -65,9 +66,10 @@ jobs:
       - name: Run linter and tests (embedded commercial)
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
+          WORTERBUCH_LICENSE_FILE: ./test/license
         run: |
           cargo clippy --no-default-features --features=commercial -- --deny warnings &&
-            cargo test --no-default-features --features=commercial 
+            cargo test --no-default-features --features=commercial
 
   docker-wb:
     needs: test
