@@ -19,8 +19,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Mount target directory
-        run: mkdir -p /mnt/target && ln -s /mnt/target .
+      - name: Manage disk space
+        run: df -Th
+        
+      - run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo docker builder prune -a
+      - run: df -Th
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
