@@ -4,12 +4,12 @@ use crate::{
     store::Store,
 };
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 use tokio::{
     fs, spawn,
     sync::{mpsc, oneshot},
 };
-use tracing::{error, info};
+use tracing::{debug, error, info, trace};
 use worterbuch_common::{Key, ValueEntry};
 
 const TABLE: TableDefinition<Key, String> = TableDefinition::new("worterbuch");
@@ -20,6 +20,18 @@ enum StoreAction {
     Flush(oneshot::Sender<()>),
     Clear,
     Load(oneshot::Sender<Worterbuch>),
+}
+
+impl fmt::Debug for StoreAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StoreAction::Update(key, _) => f.debug_tuple("Update").field(key).finish(),
+            StoreAction::Delete(key) => f.debug_tuple("Delete").field(key).finish(),
+            StoreAction::Flush(_) => f.debug_tuple("Flush").finish(),
+            StoreAction::Clear => f.debug_tuple("Clear").finish(),
+            StoreAction::Load(_) => f.debug_tuple("Load").finish(),
+        }
+    }
 }
 
 pub struct PersistentRedbStore {
@@ -57,9 +69,12 @@ impl PersistentStorage for PersistentRedbStore {
     }
 
     async fn flush(&mut self, _: &mut Worterbuch) -> PersistenceResult<()> {
+        trace!("Triggering ReDB flush …");
         let (tx, rx) = oneshot::channel();
         self.tx.send(StoreAction::Flush(tx)).await.ok();
+        trace!("Flush requested.");
         rx.await.ok();
+        trace!("ReDB flushed.");
         Ok(())
     }
 
@@ -79,9 +94,24 @@ async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Conf
     let mut next_action = None;
 
     loop {
-        let Some(action) = next_action.take().or(rx.recv().await) else {
-            break;
+        let action = if let Some(action) = next_action.take() {
+            trace!("Next action already scheduled, running it …");
+            action
+        } else {
+            trace!("No action scheduled yet, waiting to receive one …");
+            match rx.recv().await {
+                Some(action) => {
+                    trace!("Received store action {action:?}");
+                    action
+                }
+                None => {
+                    debug!("Store action channel closed.");
+                    break;
+                }
+            }
         };
+
+        trace!("Processing store action {action:?} …");
 
         if let Err(e) = match action {
             StoreAction::Update(key, value) => {
@@ -92,9 +122,13 @@ async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Conf
             StoreAction::Clear => clear(&mut db),
             StoreAction::Load(tx) => load(&mut db, config.clone(), tx),
         } {
-            error!("Error in redb persistence: {e}");
+            error!("Error in ReDB persistence: {e}");
         }
+
+        trace!("Store action processed.");
     }
+
+    info!("ReDB closed.");
 }
 
 fn update_value(
@@ -132,7 +166,9 @@ fn delete_value(
 }
 
 fn flush(db: &mut Database, tx: oneshot::Sender<()>) -> PersistenceResult<()> {
+    trace!("Compacting ReDB …");
     db.compact()?;
+    trace!("ReDB compacted.");
     tx.send(()).ok();
     Ok(())
 }
