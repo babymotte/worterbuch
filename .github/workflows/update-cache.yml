@@ -16,17 +16,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Manage disk space
-        run: df -Th
         
-      - run: |
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force
           sudo docker builder prune -a
-      - run: df -Th
+          df -Th
+
+      - name: Checkout
+        uses: actions/checkout@v3
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
@@ -140,12 +140,17 @@ jobs:
             label: ""
 
     steps:
+        
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo docker builder prune -a
+          df -Th
+
       - name: Checkout
         uses: actions/checkout@v3
-
-      - name: Mount target directory
-        if: runner.os == 'Linux'
-        run: mkdir -p /mnt/target && ln -s /mnt/target .
 
       - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
