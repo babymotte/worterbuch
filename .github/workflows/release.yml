@@ -10,17 +10,34 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.image }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: ""
+            label: ""
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--no-default-features"
+            label: "embedded-"
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--features=commercial"
+            label: "commercial-"
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-24.04
+            ext: ""
+            args: "--no-default-features --features=commercial"
+            label: "embedded-commercial-"
 
     steps:
-        
-      - name: Free disk space
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          sudo docker builder prune -a
-          df -Th
 
       - name: Checkout
         uses: actions/checkout@v3
@@ -40,42 +57,22 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: x86_64-unknown-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            x86_64-unknown-linux-gnu-
+          key: ${{ matrix.label }}${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run format check
         run: cargo fmt --check
 
-      - name: Run linter and tests (default)
-        env:
-          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-        run: |
-          cargo clippy -- --deny warnings &&
-            cargo test
-
-      - name: Run linter and tests (embedded)
-        env:
-          WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-        run: |
-          cargo clippy --no-default-features -- --deny warnings &&
-            cargo test --no-default-features
-
-      - name: Run linter and tests (commercial)
+      - name: Run linter
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
           WORTERBUCH_LICENSE_FILE: ./test/license
-        run: |
-          cargo clippy --features=commercial -- --deny warnings &&
-            cargo test --features=commercial
+        run: cargo clippy ${{ matrix.args }} -- --deny warnings
 
-      - name: Run linter and tests (embedded commercial)
+      - name: Run tests
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
           WORTERBUCH_LICENSE_FILE: ./test/license
-        run: |
-          cargo clippy --no-default-features --features=commercial -- --deny warnings &&
-            cargo test --no-default-features --features=commercial
+        run: cargo test ${{ matrix.args }}
 
   publish:
     needs: test
@@ -101,8 +98,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: x86_64-unknown-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            x86_64-unknown-linux-gnu-
 
       - name: Publish to crates.io
         run: ./publish.sh
@@ -271,14 +266,6 @@ jobs:
 
     steps:
         
-      - name: Free disk space
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          sudo docker builder prune -a
-          df -Th
-          
       - name: Checkout
         uses: actions/checkout@v3
 
@@ -298,8 +285,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ matrix.label }}${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.label }}${{ matrix.target }}-
 
       - name: Build
         env:
