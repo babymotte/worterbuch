@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-common"
-version = "1.4.0-rc.8"
+version = "1.4.0-rc.9"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Client library for Wörterbuch."
