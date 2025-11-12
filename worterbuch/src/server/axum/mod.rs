@@ -21,7 +21,7 @@ mod auth;
 mod websocket;
 
 use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS,
+    SUPPORTED_PROTOCOL_VERSIONS, WsEndpoint,
     auth::JwtClaims,
     error::WorterbuchAppResult,
     print_endpoint,
@@ -63,7 +63,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     io::{self, ErrorKind, Write},
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     path::PathBuf,
     thread,
     time::Duration,
@@ -447,7 +447,10 @@ async fn subscribe(
         if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, remote_addr.to_string())
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -511,7 +514,10 @@ async fn psubscribe(
         if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, remote_addr.to_string())
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -563,7 +569,10 @@ async fn subscribels_root(
         if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, remote_addr.to_string())
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -618,7 +627,10 @@ async fn subscribels(
         if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, remote_addr.to_string())
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -764,22 +776,33 @@ async fn login(
 }
 
 pub(crate) async fn start(
-    worterbuch: CloneableWbApi,
-    tls: bool,
-    bind_addr: IpAddr,
-    port: u16,
-    public_addr: String,
     subsys: &mut SubsystemHandle,
+    worterbuch: CloneableWbApi,
+    endpoint: WsEndpoint,
     ws_enabled: bool,
+    #[cfg(feature = "socket_io")] socket_io_enabled: bool,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
 
-    let router =
-        build_worterbuch_router(subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
+    let router = build_worterbuch_router(
+        subsys,
+        worterbuch,
+        endpoint.endpoint.tls,
+        endpoint.endpoint.port,
+        endpoint.public_addr,
+        ws_enabled,
+        #[cfg(feature = "socket_io")]
+        socket_io_enabled,
+    )
+    .await?;
 
     let handle = Handle::new();
 
-    let listener = init_server_socket(bind_addr, port, config.clone())?;
+    let listener = init_server_socket(
+        endpoint.endpoint.bind_addr,
+        endpoint.endpoint.port,
+        config.clone(),
+    )?;
 
     if config.print_endpoints {
         print_endpoint(&listener, false)?;
@@ -814,6 +837,7 @@ pub async fn build_worterbuch_router(
     port: u16,
     public_addr: String,
     ws_enabled: bool,
+    #[cfg(feature = "socket_io")] socket_io_enabled: bool,
 ) -> WorterbuchAppResult<Router> {
     let proto = if tls { "wss" } else { "ws" };
     let rest_proto = if tls { "https" } else { "http" };
@@ -927,9 +951,23 @@ pub async fn build_worterbuch_router(
             auth::bearer_auth,
         ))
         .merge(app)
-        .with_state(worterbuch)
+        .with_state(worterbuch.clone())
         .layer(trace)
         .layer(cors);
+
+    #[cfg(feature = "socket_io")]
+    let router = if socket_io_enabled {
+        use crate::server::socket_io::init_socket_io;
+        use socketioxide::SocketIo;
+
+        let (layer, io) = SocketIo::new_layer();
+
+        init_socket_io(io, worterbuch);
+
+        router.layer(layer)
+    } else {
+        router
+    };
 
     Ok(router)
 }
@@ -1006,7 +1044,7 @@ async fn connected(
     remote_addr: SocketAddr,
 ) -> WorterbuchResult<()> {
     if let Err(e) = wb
-        .connected(client_id, Some(remote_addr), Protocol::HTTP)
+        .connected(client_id, remote_addr.to_string(), Protocol::HTTP)
         .await
     {
         error!("Error adding client {client_id} ({remote_addr}): {e}");

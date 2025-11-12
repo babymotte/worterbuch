@@ -43,7 +43,7 @@ pub(crate) async fn serve(
     info!("New client connected: {client_id} ({remote_addr})");
 
     if let Err(e) = worterbuch
-        .connected(client_id, Some(remote_addr), Protocol::WS)
+        .connected(client_id, remote_addr.to_string(), Protocol::WebSocket)
         .await
     {
         error!("Error while adding new client: {e}");
@@ -56,7 +56,7 @@ pub(crate) async fn serve(
     }
 
     worterbuch
-        .disconnected(client_id, Some(remote_addr))
+        .disconnected(client_id, remote_addr.to_string())
         .await?;
 
     Ok(())
@@ -110,7 +110,7 @@ async fn serve_loop(
                     trace!("Processing incoming message …");
                     if let Message::Text(text) = incoming_msg {
                         let msg_processed = proto
-                            .process_incoming_message(&text, &mut authorized)
+                            .process_incoming_message_str(&text, &mut authorized)
                             .await?;
                         if !msg_processed {
                             break;

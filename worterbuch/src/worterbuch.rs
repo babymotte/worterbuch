@@ -31,7 +31,6 @@ use serde_json::{Value, from_str, json};
 use std::{
     collections::{HashMap, hash_map::Entry},
     io, mem,
-    net::SocketAddr,
     ops::Deref,
     time::{Duration, SystemTime},
 };
@@ -1025,7 +1024,7 @@ impl Worterbuch {
     pub async fn connected(
         &mut self,
         client_id: Uuid,
-        remote_addr: Option<SocketAddr>,
+        remote_addr: String,
         protocol: &Protocol,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
@@ -1052,7 +1051,7 @@ impl Worterbuch {
             error!("Error updating client protocol: {e}");
         };
 
-        if let Err(e) = self.set_client_address(&client_id, remote_addr).await {
+        if let Err(e) = self.set_client_address(&client_id, &remote_addr).await {
             error!("Error updating client address: {e}");
         }
 
@@ -1115,7 +1114,7 @@ impl Worterbuch {
     async fn set_client_address(
         &mut self,
         client_id: &Uuid,
-        remote_addr: Option<SocketAddr>,
+        remote_addr: &str,
     ) -> WorterbuchResult<()> {
         let remote_addr = serde_json::to_value(remote_addr).map_err(|e| {
             WorterbuchError::SerDeError(e, "could not convert remote address to value".to_owned())
@@ -1177,7 +1176,7 @@ impl Worterbuch {
     pub async fn disconnected(
         &mut self,
         client_id: Uuid,
-        remote_addr: Option<SocketAddr>,
+        remote_addr: &str,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
@@ -1230,8 +1229,6 @@ impl Worterbuch {
             "Removing {} subscription(s) of client {client_id} ({}).",
             subscription_keys.len(),
             remote_addr
-                .map(|it| it.to_string())
-                .unwrap_or_else(|| "<unknown>".to_owned())
         );
         for subscription in subscription_keys {
             if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
@@ -1243,59 +1240,38 @@ impl Worterbuch {
             info!(
                 "Burying grave goods of client {client_id} ({}).",
                 remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
             );
 
             for grave_good in grave_goods {
                 debug!(
                     "Deleting grave good key of client {client_id} ({}): {} ",
-                    remote_addr
-                        .map(|it| it.to_string())
-                        .unwrap_or_else(|| "<unknown>".to_owned()),
-                    grave_good
+                    remote_addr, grave_good
                 );
                 if let Err(e) = self.pdelete(grave_good, client_id).await {
                     error!("Error burying grave goods for client {client_id}: {e}");
                 }
             }
         } else {
-            info!(
-                "Client {client_id} ({}) has no grave goods.",
-                remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
-            );
+            info!("Client {client_id} ({}) has no grave goods.", remote_addr);
         }
 
         if let Some(last_wills) = last_wills {
             info!(
                 "Publishing last will of client {client_id} ({}).",
                 remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
             );
 
             for last_will in last_wills {
                 debug!(
                     "Setting last will of client {client_id} ({}): {} = {}",
-                    remote_addr
-                        .map(|it| it.to_string())
-                        .unwrap_or_else(|| "<unknown>".to_owned()),
-                    last_will.key,
-                    last_will.value
+                    remote_addr, last_will.key, last_will.value
                 );
                 if let Err(e) = self.set(last_will.key, last_will.value, client_id).await {
                     error!("Error setting last will of client {client_id}: {e}");
                 }
             }
         } else {
-            info!(
-                "Client {client_id} ({}) has no last will.",
-                remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
-            );
+            info!("Client {client_id} ({}) has no last will.", remote_addr);
         }
 
         if self.config.extended_monitoring

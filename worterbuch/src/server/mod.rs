@@ -19,6 +19,8 @@
 
 pub mod axum;
 pub(crate) mod common;
+#[cfg(feature = "socket_io")]
+pub(crate) mod socket_io;
 pub(crate) mod tcp;
 #[cfg(target_family = "unix")]
 pub(crate) mod unix;

@@ -60,7 +60,7 @@ impl Proto {
     }
 
     #[instrument(level=Level::TRACE, skip(self), fields(client_id=%self.client_id()))]
-    pub async fn process_incoming_message(
+    pub async fn process_incoming_message_str(
         &mut self,
         msg: &str,
         authorized: &mut Option<JwtClaims>,
@@ -70,41 +70,7 @@ impl Proto {
             .instrument(trace_span!("from_str"))
             .await;
         match deserialized {
-            Ok(Some(msg)) => {
-                if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
-                    info!("Switching protocol to v{}", protocol_switch_request.version);
-                    if self.switch_protocol(protocol_switch_request.version) {
-                        self.latest
-                            .v0
-                            .worterbuch
-                            .protocol_switched(self.client_id(), protocol_switch_request.version)
-                            .await?;
-                        let response = Ack { transaction_id: 0 };
-                        trace!("Protocol switched, queuing Ack …");
-                        let res = self.tx().send(ServerMessage::Ack(response)).await;
-                        trace!("Protocol switched, queuing Ack done.");
-                        res.context(|| {
-                            "Error sending ACK message for transaction ID 0".to_owned()
-                        })?;
-                    } else {
-                        return Err(WorterbuchError::ProtocolNegotiationFailed(
-                            protocol_switch_request.version,
-                        ));
-                    }
-                    return Ok(true);
-                } else {
-                    match &self.handler {
-                        ProtocolHandler::V0(v0) => {
-                            v0.process_incoming_message(msg, authorized).await?;
-                        }
-                        ProtocolHandler::V1(v1) => {
-                            v1.process_incoming_message(msg, authorized).await?;
-                        }
-                    }
-                }
-
-                Ok(true)
-            }
+            Ok(Some(msg)) => self.process_incoming_message(msg, authorized).await,
             Ok(None) => {
                 // client disconnected
                 Ok(false)
@@ -114,6 +80,51 @@ impl Proto {
                 Ok(false)
             }
         }
+    }
+
+    #[instrument(level=Level::TRACE, skip(self), fields(client_id=%self.client_id()))]
+    pub async fn process_incoming_message(
+        &mut self,
+        msg: ClientMessage,
+        authorized: &mut Option<JwtClaims>,
+    ) -> WorterbuchResult<bool> {
+        debug!(
+            "Received message from client {}: {:?}",
+            self.client_id(),
+            msg
+        );
+
+        if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
+            info!("Switching protocol to v{}", protocol_switch_request.version);
+            if self.switch_protocol(protocol_switch_request.version) {
+                self.latest
+                    .v0
+                    .worterbuch
+                    .protocol_switched(self.client_id(), protocol_switch_request.version)
+                    .await?;
+                let response = Ack { transaction_id: 0 };
+                trace!("Protocol switched, queuing Ack …");
+                let res = self.tx().send(ServerMessage::Ack(response)).await;
+                trace!("Protocol switched, queuing Ack done.");
+                res.context(|| "Error sending ACK message for transaction ID 0".to_owned())?;
+            } else {
+                return Err(WorterbuchError::ProtocolNegotiationFailed(
+                    protocol_switch_request.version,
+                ));
+            }
+            return Ok(true);
+        } else {
+            match &self.handler {
+                ProtocolHandler::V0(v0) => {
+                    v0.process_incoming_message(msg, authorized).await?;
+                }
+                ProtocolHandler::V1(v1) => {
+                    v1.process_incoming_message(msg, authorized).await?;
+                }
+            }
+        }
+
+        Ok(true)
     }
 
     fn client_id(&self) -> Uuid {

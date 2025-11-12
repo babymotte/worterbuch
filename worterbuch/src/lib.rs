@@ -111,26 +111,23 @@ async fn do_run_worterbuch(
 
     let mut worterbuch = persistence::restore(subsys, &config, &api).await?;
 
-    let web_server = if let Some(WsEndpoint {
-        endpoint: Endpoint {
-            tls,
-            bind_addr,
-            port,
-        },
-        public_addr,
-    }) = &config.ws_endpoint
-    {
+    let web_server = if let Some(endpoint) = config.ws_endpoint.clone() {
         let sapi = api.clone();
-        let tls = tls.to_owned();
-        let bind_addr = bind_addr.to_owned();
-        let port = port.to_owned();
-        let public_addr = public_addr.to_owned();
         let ws_enabled = !config.follower;
+        #[cfg(feature = "socket_io")]
+        let socket_io_enabled = !config.follower;
         Some(subsys.start(SubsystemBuilder::new(
             "webserver",
             async move |subsys: &mut SubsystemHandle| {
-                server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
-                    .await
+                server::axum::start(
+                    subsys,
+                    sapi,
+                    endpoint,
+                    ws_enabled,
+                    #[cfg(feature = "socket_io")]
+                    socket_io_enabled,
+                )
+                .await
             },
         )))
     } else {
@@ -315,7 +312,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             worterbuch.protocol_switched(client_id, protocol).await;
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
-            worterbuch.disconnected(client_id, remote_addr).await.ok();
+            worterbuch.disconnected(client_id, &remote_addr).await.ok();
         }
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();
@@ -424,7 +421,7 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
             worterbuch.protocol_switched(client_id, protocol).await;
         }
         WbFunction::Disconnected(client_id, remote_addr) => {
-            worterbuch.disconnected(client_id, remote_addr).await.ok();
+            worterbuch.disconnected(client_id, &remote_addr).await.ok();
         }
         WbFunction::Config(tx) => {
             tx.send(worterbuch.config().clone()).ok();

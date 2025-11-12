@@ -31,7 +31,7 @@ use error::WorterbuchResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_repr::*;
 use sha2::{Digest, Sha256};
-use std::{fmt, net::SocketAddr, ops::Deref};
+use std::{fmt, ops::Deref};
 use tokio::sync::{mpsc, oneshot};
 use tracing::Span;
 use uuid::Uuid;
@@ -251,9 +251,10 @@ impl fmt::Display for ProtocolVersion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
 pub enum Protocol {
     TCP,
-    WS,
+    WebSocket,
     HTTP,
-    UNIX,
+    Unix,
+    SocketIO,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -580,7 +581,7 @@ pub trait WbApi {
     fn connected(
         &self,
         client_id: Uuid,
-        remote_addr: Option<SocketAddr>,
+        remote_addr: String,
         protocol: Protocol,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
@@ -593,7 +594,7 @@ pub trait WbApi {
     fn disconnected(
         &self,
         client_id: Uuid,
-        remote_addr: Option<SocketAddr>,
+        remote_addr: String,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn export(

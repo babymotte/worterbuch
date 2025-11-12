@@ -167,7 +167,10 @@ async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr:?})");
 
-    if let Err(e) = worterbuch.connected(client_id, None, Protocol::UNIX).await {
+    if let Err(e) = worterbuch
+        .connected(client_id, format!("{remote_addr:?}"), Protocol::Unix)
+        .await
+    {
         error!("Error while adding new client: {e}");
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
@@ -178,7 +181,9 @@ async fn serve(
         }
     }
 
-    worterbuch.disconnected(client_id, None).await?;
+    worterbuch
+        .disconnected(client_id, format!("{remote_addr:?}"))
+        .await?;
 
     Ok(())
 }
@@ -302,7 +307,7 @@ impl ServeLoop<'_> {
         trace!("Processing incoming message …");
         let msg_processed = self
             .proto
-            .process_incoming_message(&json, &mut self.authorized)
+            .process_incoming_message_str(&json, &mut self.authorized)
             .await?;
         if !msg_processed {
             return Ok(ControlFlow::Break(()));
