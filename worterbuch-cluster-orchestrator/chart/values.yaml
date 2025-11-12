@@ -132,7 +132,9 @@ timeouts:
 channelBufferSize: 10000
 extendedMonitoring: 1
 
-persistenceInterval: 5
+persistence:
+  interval: 5
+  mode: "ReDB"
 
 service:
   type: NodePort

@@ -89,7 +89,9 @@ spec:
             - name: WORTERBUCH_EXTENDED_MONITORING
               value: "{{ $.Values.extendedMonitoring }}"
             - name: WORTERBUCH_PERSISTENCE_INTERVAL
-              value: "{{ $.Values.persistenceInterval }}"
+              value: "{{ $.Values.persistence.interval }}"
+            - name: WORTERBUCH_PERSISTENCE_MODE
+              value: "{{ $.Values.persistence.mode }}"
             {{- with $.Values.authToken }}
             - name: WORTERBUCH_AUTH_TOKEN
               value: "{{ . }}"
