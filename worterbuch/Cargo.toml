@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "A message broker / database hybrid."
@@ -25,7 +25,7 @@ commercial = []
 default = ["jemalloc", "telemetry"]
 
 [dependencies]
-worterbuch-common = { version = "1.4.0-rc.9", path = "../worterbuch-common", features = [
+worterbuch-common = { version = "1.4.0-rc.10", path = "../worterbuch-common", features = [
     "axum-errors",
 ] }
 tokio = { version = "1.44.2", features = ["rt-multi-thread", "fs"] }

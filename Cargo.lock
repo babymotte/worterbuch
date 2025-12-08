@@ -3489,7 +3489,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "worterbuch"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 dependencies = [
  "axum",
  "axum-extra",
@@ -3539,7 +3539,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 dependencies = [
  "clap",
  "dotenvy",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -3575,7 +3575,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 dependencies = [
  "axum",
  "clap",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0-rc.9"
+version = "1.4.0-rc.10"
 dependencies = [
  "axum",
  "http",
