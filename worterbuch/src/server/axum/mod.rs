@@ -58,7 +58,7 @@ use flate2::{
 use futures::Stream;
 use headers::{Authorization, ContentType, HeaderMapExt, authorization::Bearer};
 use http_body_util::BodyExt;
-use miette::IntoDiagnostic;
+use miette::{Context, IntoDiagnostic};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -785,7 +785,9 @@ pub(crate) async fn start(
         print_endpoint(&listener, false)?;
     }
 
-    let mut server = axum_server::from_tcp(listener);
+    let mut server = axum_server::from_tcp(listener)
+        .into_diagnostic()
+        .context("failed to create web server")?;
     server.http_builder().http2().enable_connect_protocol();
 
     let mut serve = Box::pin(

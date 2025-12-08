@@ -16,7 +16,7 @@ default = ["jemalloc"]
 
 
 [dependencies]
-axum = { version = "0.8.1", features = ["http2"] }
+axum = { version = "0.8.7", features = ["http2"] }
 clap = { version = "4.5.32", features = ["derive", "env"] }
 gethostname = "1.0.0"
 dotenvy = "0.15.7"
