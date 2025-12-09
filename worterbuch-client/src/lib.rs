@@ -34,10 +34,10 @@ use error::SubscriptionError;
 use futures_util::FutureExt;
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use futures_util::{SinkExt, StreamExt};
+use hashbrown::HashMap;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{self as json};
 use std::{
-    collections::HashMap,
     fmt::{Debug, Display},
     future::Future,
     io,

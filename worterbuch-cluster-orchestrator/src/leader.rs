@@ -24,8 +24,9 @@ use crate::{
     config::Peers,
     utils::{listen, send_heartbeat_requests},
 };
+use hashbrown::HashMap;
 use miette::Result;
-use std::{collections::HashMap, ops::ControlFlow, time::Instant};
+use std::{ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{Level, debug, error, info, instrument, trace, warn};

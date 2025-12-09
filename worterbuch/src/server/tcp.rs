@@ -25,9 +25,9 @@ use crate::{
     server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
+use hashbrown::HashMap;
 use miette::{IntoDiagnostic, Result};
 use std::{
-    collections::HashMap,
     io,
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,

@@ -17,8 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use hashbrown::{HashMap, hash_map::Entry};
 use miette::{IntoDiagnostic, Result, miette};
-use std::collections::{HashMap, hash_map::Entry};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
 use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, SubscriptionId};
@@ -205,7 +205,7 @@ fn add_matches(
             add_all_children(node, all_subscribers);
         }
 
-        if let Some(node) = current.tree.get(&elem.to_owned().into()) {
+        if let Some(node) = current.tree.get(&KeySegment::from(elem.to_owned())) {
             current = node;
         } else {
             return;

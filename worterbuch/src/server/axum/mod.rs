@@ -56,12 +56,12 @@ use flate2::{
     write::{GzDecoder, GzEncoder},
 };
 use futures::Stream;
+use hashbrown::HashMap;
 use headers::{Authorization, ContentType, HeaderMapExt, authorization::Bearer};
 use http_body_util::BodyExt;
 use miette::{Context, IntoDiagnostic};
 use serde_json::Value;
 use std::{
-    collections::HashMap,
     io::{self, ErrorKind, Write},
     net::{IpAddr, SocketAddr},
     path::PathBuf,

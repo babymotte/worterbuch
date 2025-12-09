@@ -18,12 +18,13 @@
  */
 
 use crate::subscribers::{LsSubscriber, Subscriber};
+use hashbrown::{
+    HashMap, HashSet,
+    hash_map::{Entry, Keys},
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::{
-        HashMap, HashSet, VecDeque,
-        hash_map::{Entry, Keys},
-    },
+    collections::VecDeque,
     hash::Hash,
     marker::PhantomData,
     mem::{self},

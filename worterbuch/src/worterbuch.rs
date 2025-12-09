@@ -26,10 +26,10 @@ use crate::{
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
 use chrono::prelude::{DateTime, Utc};
+use hashbrown::{HashMap, hash_map::Entry};
 use hashlink::LinkedHashMap;
 use serde_json::{Value, from_str, json};
 use std::{
-    collections::{HashMap, hash_map::Entry},
     io, mem,
     net::SocketAddr,
     ops::Deref,
