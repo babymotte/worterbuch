@@ -165,150 +165,190 @@ pub enum UiApi {
     CreatingAgents(usize, usize),
 }
 
-pub async fn start_throughput_test(
-    subsys: &mut SubsystemHandle,
-    ui_tx: mpsc::Sender<UiApi>,
-    mut api_rx: mpsc::Receiver<Api>,
-) -> miette::Result<()> {
-    let (status_tx, mut status_rx) = mpsc::channel(1024);
+struct ThroughputTest<'a> {
+    subsys: &'a mut SubsystemHandle,
+    status_tx: mpsc::UnboundedSender<Status>,
+    current_agents: usize,
+    current_target_rate: usize,
+    agent_apis: Vec<mpsc::UnboundedSender<AgentApi>>,
+    running: bool,
+    ui_tx: mpsc::UnboundedSender<UiApi>,
+    stats: Stats,
+}
 
-    let mut stats = Stats::default();
+impl<'a> ThroughputTest<'a> {
+    fn new(
+        subsys: &'a mut SubsystemHandle,
+        status_tx: mpsc::UnboundedSender<Status>,
+        ui_tx: mpsc::UnboundedSender<UiApi>,
+        stats: Stats,
+    ) -> Self {
+        Self {
+            subsys,
+            status_tx,
+            current_agents: 0,
+            current_target_rate: 1000,
+            agent_apis: vec![],
+            running: false,
+            ui_tx,
+            stats,
+        }
+    }
+
+    async fn process_api_message(&mut self, api: Api) -> miette::Result<()> {
+        match api {
+            Api::Start(agents, target_rate) => self.start(agents, target_rate).await?,
+            Api::Stop => self.stop().await?,
+            Api::SetAgents(agents) => self.set_agents(agents).await?,
+            Api::SetTargetRate(target_rate) => self.set_target_rate(target_rate).await?,
+        }
+
+        Ok(())
+    }
+
+    async fn start(&mut self, agents: usize, target_rate: usize) -> Result<(), miette::Error> {
+        self.running = true;
+        self.current_agents = agents;
+        self.current_target_rate = target_rate;
+        while self.agent_apis.len() < agents {
+            self.spawn_agent(agents).await?;
+        }
+        while self.agent_apis.len() > agents {
+            self.close_agent().await?;
+        }
+        let rate_per_agent = target_rate as f64 / agents as f64;
+        for api in &self.agent_apis {
+            api.send(AgentApi::Start(rate_per_agent))
+                .into_diagnostic()?;
+        }
+        self.stats.set_agents(agents);
+        self.ui_tx.send(UiApi::Running).into_diagnostic()?;
+        Ok(())
+    }
+
+    async fn spawn_agent(&mut self, agents: usize) -> Result<(), miette::Error> {
+        let i = self.agent_apis.len();
+        let (agent_tx, agent_rx) = mpsc::unbounded_channel();
+        let result_tx = self.status_tx.clone();
+        let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
+        debug!("Spawning agent {i}");
+        self.subsys.start(SubsystemBuilder::new(
+            format!("client-{i}"),
+            async move |s: &mut SubsystemHandle| client(i, result_tx, agent_rx, s, conn_tx).await,
+        ));
+        self.agent_apis.push(agent_tx);
+        let conn = conn_rx.recv().await;
+        if conn.is_none() {
+            error!("Connection result channel closed.");
+            return Err(miette::miette!("Failed to spawn agent {i}."));
+        }
+        debug!("Agent {i} spawned.");
+        self.ui_tx
+            .send(UiApi::CreatingAgents(self.agent_apis.len(), agents))
+            .into_diagnostic()
+            .context("UI API channel closed.")?;
+        Ok(())
+    }
+
+    async fn close_agent(&mut self) -> Result<(), miette::Error> {
+        Ok(if let Some(api) = self.agent_apis.pop() {
+            api.send(AgentApi::Close).into_diagnostic()?;
+        })
+    }
+
+    async fn stop(&mut self) -> Result<(), miette::Error> {
+        self.running = false;
+        for api in &self.agent_apis {
+            api.send(AgentApi::Stop).into_diagnostic()?;
+        }
+        self.ui_tx.send(UiApi::Stopped).into_diagnostic()?;
+        Ok(())
+    }
+
+    async fn set_agents(&mut self, agents: usize) -> Result<(), miette::Error> {
+        self.current_agents = agents;
+        while self.agent_apis.len() < agents {
+            self.spawn_agent(agents).await?;
+        }
+        while self.agent_apis.len() > agents {
+            self.close_agent().await?;
+        }
+        if self.running {
+            let rate_per_agent = self.current_target_rate as f64 / agents as f64;
+            for api in &self.agent_apis {
+                api.send(AgentApi::Start(rate_per_agent))
+                    .into_diagnostic()?;
+            }
+        }
+        self.stats.set_agents(agents);
+        self.ui_tx
+            .send(UiApi::Settings(Settings {
+                agents: Some(agents),
+                target_rate: Some(self.current_target_rate),
+            }))
+            .into_diagnostic()?;
+        Ok(())
+    }
+
+    async fn set_target_rate(&mut self, target_rate: usize) -> Result<(), miette::Error> {
+        self.current_target_rate = target_rate;
+
+        let rate_per_agent = target_rate as f64 / self.current_agents as f64;
+        for api in &self.agent_apis {
+            api.send(AgentApi::SetTargetRate(rate_per_agent))
+                .into_diagnostic()?;
+        }
+        self.ui_tx
+            .send(UiApi::Settings(Settings {
+                agents: Some(self.current_agents),
+                target_rate: Some(target_rate),
+            }))
+            .into_diagnostic()?;
+        Ok(())
+    }
+
+    async fn report_stats(&mut self) -> miette::Result<()> {
+        self.stats.log_stats();
+        self.ui_tx
+            .send(UiApi::Stats(self.stats.summarize()))
+            .into_diagnostic()?;
+        self.ui_tx
+            .send(UiApi::Settings(Settings {
+                agents: Some(self.current_agents),
+                target_rate: Some(self.current_target_rate),
+            }))
+            .into_diagnostic()?;
+        if self.running {
+            self.ui_tx.send(UiApi::Running).into_diagnostic()?;
+        } else {
+            self.ui_tx.send(UiApi::Stopped).into_diagnostic()?;
+        }
+        Ok(())
+    }
+}
+
+pub async fn start_throughput_test<'a>(
+    subsys: &'a mut SubsystemHandle,
+    ui_tx: mpsc::UnboundedSender<UiApi>,
+    mut api_rx: mpsc::UnboundedReceiver<Api>,
+) -> miette::Result<()> {
+    let (status_tx, mut status_rx) = mpsc::unbounded_channel();
+
+    let stats = Stats::default();
 
     let mut stats_timer = tokio::time::interval(Duration::from_secs(1));
 
-    let mut current_agents = 0;
-    let mut current_target_rate = 1000;
-    let mut agent_apis = vec![];
+    let ct = subsys.create_cancellation_token();
 
-    let mut running = false;
+    let mut test = ThroughputTest::new(subsys, status_tx, ui_tx, stats);
 
     loop {
         select! {
-            api = api_rx.recv() => if let Some(api) = api {
-                match api {
-                    Api::Start(agents, target_rate) => {
-                        running = true;
-                        current_agents = agents;
-                        current_target_rate = target_rate;
-
-                        'outer: while agent_apis.len() < agents {
-                            let i = agent_apis.len();
-                            let (agent_tx, agent_rx) = mpsc::channel(1);
-                            let result_tx = status_tx.clone();
-                            let (conn_tx, mut conn_rx) = mpsc::channel(1);
-                            debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), async move |s: &mut SubsystemHandle | client(i, result_tx, agent_rx, s, conn_tx).await));
-                            agent_apis.push(agent_tx);
-                            'inner: loop {
-                                select! {
-                                    conn = conn_rx.recv() => {
-                                        if conn.is_none() {
-                                            error!("Connection result channel closed.");
-                                            break 'outer;
-                                        }
-                                        break 'inner;
-                                    },
-                                    _ = status_rx.recv() => {
-                                        debug!("Dropping status update ...");
-                                    },
-                                }
-                            }
-                            debug!("Agent {i} spawned.");
-                            ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
-                        }
-
-                        while  agent_apis.len() > agents {
-                            if let Some(api) = agent_apis.pop() {
-                                api.send(AgentApi::Close).await.into_diagnostic()?;
-                            }
-                        }
-
-                        for api in &agent_apis {
-                            api.send(AgentApi::Start(target_rate as f64 / agents as f64)).await.into_diagnostic()?;
-                        }
-
-                        stats.set_agents(agents);
-                        ui_tx.send(UiApi::Running).await.into_diagnostic()?;
-                    },
-                    Api::Stop => {
-                        running = false;
-                        for api in &agent_apis {
-                            api.send(AgentApi::Stop).await.into_diagnostic()?;
-                        }
-                        ui_tx.send(UiApi::Stopped).await.into_diagnostic()?;
-                    },
-                    Api::SetAgents(agents) => {
-                        current_agents = agents;
-
-                        'outer: while agent_apis.len() < agents {
-                            let i = agent_apis.len();
-                            let (agent_tx, agent_rx) = mpsc::channel(1);
-                            let result_tx = status_tx.clone();
-                            let (conn_tx, mut conn_rx) = mpsc::channel(1);
-                            debug!("Spawning agent {i}");
-                            subsys.start(SubsystemBuilder::new(format!("client-{i}"), async move |s: &mut SubsystemHandle | client(i, result_tx, agent_rx, s, conn_tx).await));
-                            agent_apis.push(agent_tx);
-                            'inner: loop {
-                                select! {
-                                    conn = conn_rx.recv() => {
-                                        if conn.is_none() {
-                                            error!("Connection result channel closed.");
-                                            break 'outer;
-                                        }
-                                        break 'inner;
-                                    },
-                                    _ = status_rx.recv() => {
-                                        debug!("Dropping status update ...");
-                                    },
-                                }
-                            }
-                            debug!("Agent {i} spawned.");
-                            ui_tx.send(UiApi::CreatingAgents(agent_apis.len(), agents),).await.into_diagnostic().context("UI API channel closed.")?;
-                        }
-
-                        while  agent_apis.len() > agents {
-                            if let Some(api) = agent_apis.pop() {
-                                api.send(AgentApi::Close).await.into_diagnostic()?;
-                            }
-                        }
-
-                        if running {
-                            for api in &agent_apis {
-                                api.send(AgentApi::Start(current_target_rate as f64 / agents as f64)).await.into_diagnostic()?;
-                            }
-                        }
-
-                        stats.set_agents(agents);
-                        ui_tx.send(UiApi::Settings(Settings { agents: Some(agents), target_rate: Some(current_target_rate) })).await.into_diagnostic()?;
-                    },
-                    Api::SetTargetRate(target_rate) => {
-                        current_target_rate = target_rate;
-                        for api in &agent_apis {
-                            api.send(AgentApi::SetTargetRate(target_rate as f64 / current_agents as f64)).await.into_diagnostic()?;
-                        }
-
-                        ui_tx.send(UiApi::Settings(Settings { agents: Some(current_agents), target_rate: Some(target_rate) })).await.into_diagnostic()?;
-                    },
-                }
-            } else {
-                break;
-            },
-            status = status_rx.recv() => if let Some(status) = status {
-                stats.process_status_update(status);
-            } else {
-                break;
-            },
-            _ = stats_timer.tick() => {
-                stats.log_stats();
-                ui_tx.send(UiApi::Stats(stats.summarize())).await.into_diagnostic()?;
-                ui_tx.send(UiApi::Settings(Settings { agents: Some(current_agents), target_rate: Some(current_target_rate) })).await.into_diagnostic()?;
-                if running {
-                    ui_tx.send(UiApi::Running).await.into_diagnostic()?;
-                } else {
-                    ui_tx.send(UiApi::Stopped).await.into_diagnostic()?;
-                }
-            },
-            _ = subsys.on_shutdown_requested() => break,
+            Some(api) = api_rx.recv() =>  test.process_api_message(api).await?,
+            Some(status) = status_rx.recv() => test.stats.process_status_update(status),
+            _ = stats_timer.tick() => test.report_stats().await?,
+            _ = ct.cancelled() => break,
+            else => break,
         }
     }
 
@@ -317,10 +357,10 @@ pub async fn start_throughput_test(
 
 async fn client(
     id: usize,
-    result_tx: mpsc::Sender<Status>,
-    mut api: mpsc::Receiver<AgentApi>,
+    result_tx: mpsc::UnboundedSender<Status>,
+    mut api: mpsc::UnboundedReceiver<AgentApi>,
     subsys: &mut SubsystemHandle,
-    on_connected: mpsc::Sender<()>,
+    on_connected: mpsc::UnboundedSender<()>,
 ) -> miette::Result<()> {
     let (wb, _on_disconnect, _) = worterbuch_client::connect_with_default_config()
         .await
@@ -343,7 +383,7 @@ async fn client(
 
     let mut stopped = true;
 
-    on_connected.send(()).await.ok();
+    on_connected.send(()).ok();
 
     loop {
         select! {
@@ -382,11 +422,17 @@ async fn client(
                 break;
             },
             _ = status_timer.tick() => {
-                result_tx.send(Status { id, sent_offset, received_offset }).await.into_diagnostic().context("Failed to send status.")?;
+                result_tx.send(Status { id, sent_offset, received_offset }).into_diagnostic().context("Failed to send status.")?;
             },
             _ = delay_timer.tick(), if !stopped => {
+
+                if (sent_offset - received_offset) > 10_000 {
+                    // Don't send more if we are too far ahead
+                    continue;
+                }
+
                 sent_offset += 1;
-                wb.set(key.clone(), &sent_offset).await.into_diagnostic()
+                wb.set_async(key.clone(), &sent_offset).await.into_diagnostic()
                     .context("Failed to set value on worterbuch.")?;
             },
             _ = subsys.on_shutdown_requested() => {

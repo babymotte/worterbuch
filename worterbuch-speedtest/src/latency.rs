@@ -55,8 +55,8 @@ pub enum UiApi {
 
 pub async fn start_latency_test(
     subsys: &mut SubsystemHandle,
-    ui_tx: mpsc::Sender<UiApi>,
-    mut api_rx: mpsc::Receiver<Api>,
+    ui_tx: mpsc::UnboundedSender<UiApi>,
+    mut api_rx: mpsc::UnboundedReceiver<Api>,
 ) -> miette::Result<()> {
     let mut stop_tx = None;
 
@@ -76,7 +76,7 @@ pub async fn start_latency_test(
 
 async fn process_msg(
     msg: Api,
-    ui_tx: &mpsc::Sender<UiApi>,
+    ui_tx: &mpsc::UnboundedSender<UiApi>,
     current_stop_tx: Option<oneshot::Sender<()>>,
 ) -> miette::Result<Option<oneshot::Sender<()>>> {
     match msg {
@@ -105,7 +105,7 @@ async fn process_msg(
 
 async fn run_latency_test(
     settings: LatencySettings,
-    ui_tx: mpsc::Sender<UiApi>,
+    ui_tx: mpsc::UnboundedSender<UiApi>,
     mut stop_rx: oneshot::Receiver<()>,
 ) -> miette::Result<()> {
     info!("Starting latency test.");
@@ -143,7 +143,7 @@ async fn run_latency_test(
         counter as f32 / duration.as_secs_f32()
     );
 
-    ui_tx.send(UiApi::Stopped).await.into_diagnostic()?;
+    ui_tx.send(UiApi::Stopped).into_diagnostic()?;
 
     Ok(())
 }
