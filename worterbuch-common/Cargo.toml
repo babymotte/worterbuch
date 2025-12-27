@@ -55,6 +55,7 @@ opentelemetry-otlp = "0.31.0"
 http = "1.3.1"
 axum = { version = "0.8.7", optional = true }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
+hashbrown = "0.16.1"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -53,10 +53,10 @@ async fn main() -> miette::Result<()> {
 }
 
 async fn run_speedtests_with_ui(subsys: &mut SubsystemHandle) -> miette::Result<()> {
-    let (throughput_api_tx, throughput_api_rx) = mpsc::channel(1);
-    let (latency_api_tx, latency_api_rx) = mpsc::channel(1);
-    let (throughput_ui_tx, throughput_ui_rx) = mpsc::channel(1);
-    let (latency_ui_tx, latency_ui_rx) = mpsc::channel(1);
+    let (throughput_api_tx, throughput_api_rx) = mpsc::unbounded_channel();
+    let (latency_api_tx, latency_api_rx) = mpsc::unbounded_channel();
+    let (throughput_ui_tx, throughput_ui_rx) = mpsc::unbounded_channel();
+    let (latency_ui_tx, latency_ui_rx) = mpsc::unbounded_channel();
 
     subsys.start(SubsystemBuilder::new(
         "speedtest-web-ui",

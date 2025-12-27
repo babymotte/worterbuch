@@ -67,16 +67,16 @@ pub struct Settings {
 #[handler]
 async fn throughput_settings(
     Json(s): Json<Settings>,
-    Data(api): Data<&mpsc::Sender<throughput::Api>>,
+    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
 ) -> Result<Json<Value>> {
     if let Some(agents) = s.agents
-        && let Err(e) = api.send(throughput::Api::SetAgents(agents)).await
+        && let Err(e) = api.send(throughput::Api::SetAgents(agents))
     {
         return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
 
     if let Some(target_rate) = s.target_rate
-        && let Err(e) = api.send(throughput::Api::SetTargetRate(target_rate)).await
+        && let Err(e) = api.send(throughput::Api::SetTargetRate(target_rate))
     {
         return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
@@ -87,10 +87,10 @@ async fn throughput_settings(
 #[handler]
 async fn throughput_start(
     Json(s): Json<Settings>,
-    Data(api): Data<&mpsc::Sender<throughput::Api>>,
+    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
 ) -> Result<Json<Value>> {
     if let (Some(agents), Some(target_rate)) = (s.agents, s.target_rate) {
-        if let Err(e) = api.send(throughput::Api::Start(agents, target_rate)).await {
+        if let Err(e) = api.send(throughput::Api::Start(agents, target_rate)) {
             return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
         }
     } else {
@@ -107,8 +107,10 @@ async fn throughput_start(
 }
 
 #[handler]
-async fn throughput_stop(Data(api): Data<&mpsc::Sender<throughput::Api>>) -> Result<Json<Value>> {
-    if let Err(e) = api.send(throughput::Api::Stop).await {
+async fn throughput_stop(
+    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
+) -> Result<Json<Value>> {
+    if let Err(e) = api.send(throughput::Api::Stop) {
         return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
 
@@ -143,9 +145,9 @@ fn throughput_stats(
 #[handler]
 async fn latency_start(
     Json(s): Json<LatencySettings>,
-    Data(api): Data<&mpsc::Sender<latency::Api>>,
+    Data(api): Data<&mpsc::UnboundedSender<latency::Api>>,
 ) -> Result<Json<Value>> {
-    if let Err(e) = api.send(latency::Api::Start(s)).await {
+    if let Err(e) = api.send(latency::Api::Start(s)) {
         return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
 
@@ -153,8 +155,10 @@ async fn latency_start(
 }
 
 #[handler]
-async fn latency_stop(Data(api): Data<&mpsc::Sender<latency::Api>>) -> Result<Json<Value>> {
-    if let Err(e) = api.send(latency::Api::Stop).await {
+async fn latency_stop(
+    Data(api): Data<&mpsc::UnboundedSender<latency::Api>>,
+) -> Result<Json<Value>> {
+    if let Err(e) = api.send(latency::Api::Stop) {
         return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
     }
 
@@ -188,10 +192,10 @@ fn latency_events(
 
 pub async fn run_web_ui(
     subsys: &mut SubsystemHandle,
-    mut throughput_backend_events: mpsc::Receiver<throughput::UiApi>,
-    mut latency_backend_events: mpsc::Receiver<latency::UiApi>,
-    throughput_api: mpsc::Sender<throughput::Api>,
-    latency_api: mpsc::Sender<latency::Api>,
+    mut throughput_backend_events: mpsc::UnboundedReceiver<throughput::UiApi>,
+    mut latency_backend_events: mpsc::UnboundedReceiver<latency::UiApi>,
+    throughput_api: mpsc::UnboundedSender<throughput::Api>,
+    latency_api: mpsc::UnboundedSender<latency::Api>,
 ) -> miette::Result<()> {
     let web_root_path = env::var("WORTERBUCH_SPEEDTEST_WEBROOT_PATH")
         .unwrap_or("../../worterbuch-speedtest-ui/build".to_owned());
