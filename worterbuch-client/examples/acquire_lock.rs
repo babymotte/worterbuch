@@ -19,11 +19,16 @@ async fn main() -> Result<()> {
     let thread = spawn(async move {
         sleep(Duration::from_millis(500)).await;
 
+        // If possible, avoid using this approach and use `locked` instead.
+        // If you unintentionally return early from this function, the lock will not be released.
         info!("Client 2 tries to acquire lock.");
         wb2.acquire_lock(topic!("hello", "world")).await?;
         info!("Client 2 has acquired the lock.");
 
         sleep(Duration::from_secs(3)).await;
+
+        // if an error occurs here, the lock will not be released.
+        do_something_that_might_fail()?;
 
         info!("Client 2 releases the lock.");
         wb2.release_lock(topic!("hello", "world")).await?;
@@ -32,17 +37,37 @@ async fn main() -> Result<()> {
         Ok::<(), miette::Error>(())
     });
 
-    info!("Client 1 tries to acquire lock.");
-    wb1.acquire_lock(topic!("hello", "world")).await?;
-    info!("Client 1 has acquired the lock.");
+    {
+        info!("Client 1 tries to acquire lock.");
 
-    sleep(Duration::from_secs(3)).await;
+        wb1.locked(topic!("hello", "world"), async || {
+            info!("Client 1 has acquired the lock.");
 
-    info!("Client 1 releases the lock.");
-    wb1.release_lock(topic!("hello", "world")).await?;
-    info!("Client 1 has released the lock.");
+            sleep(Duration::from_secs(3)).await;
+
+            // if an error occurs here, the lock will still be released.
+            do_something_that_might_fail()?;
+
+            info!("Client 1 releases the lock.");
+
+            Ok::<(), miette::Error>(())
+        })
+        .await??;
+    }
 
     thread.await.into_diagnostic()??;
 
     Ok(())
+}
+
+fn do_something_that_might_fail() -> Result<()> {
+    // Uncomment to simulate an error.
+    // _fail()?;
+
+    Ok(())
+}
+
+fn _fail() -> Result<()> {
+    eprintln!("Oops, something went wrong!");
+    Err(miette::miette!("Simulated error"))
 }

@@ -926,6 +926,28 @@ impl Worterbuch {
         }
     }
 
+    pub async fn locked<T>(
+        &self,
+        key: Key,
+        task: impl AsyncFn() -> T + Send,
+    ) -> ConnectionResult<T> {
+        self.acquire_lock(key.clone()).await?;
+        let result = task().await;
+        self.release_lock(key).await?;
+        Ok(result)
+    }
+
+    pub async fn try_locked<T, E>(
+        &self,
+        key: Key,
+        task: impl AsyncFn() -> std::result::Result<T, E> + Send,
+    ) -> ConnectionResult<std::result::Result<T, E>> {
+        self.lock(key.clone()).await?;
+        let result = task().await;
+        self.release_lock(key).await?;
+        Ok(result)
+    }
+
     #[instrument(skip(self), err)]
     pub async fn release_lock(&self, key: Key) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
