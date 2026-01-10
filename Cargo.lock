@@ -3566,7 +3566,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-stream",
  "futures-core",
