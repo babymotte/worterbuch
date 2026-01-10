@@ -929,7 +929,7 @@ impl Worterbuch {
     pub async fn locked<T>(
         &self,
         key: Key,
-        task: impl AsyncFn() -> T + Send,
+        task: impl AsyncFnOnce() -> T + Send,
     ) -> ConnectionResult<T> {
         self.acquire_lock(key.clone()).await?;
         let result = task().await;
@@ -940,7 +940,7 @@ impl Worterbuch {
     pub async fn try_locked<T, E>(
         &self,
         key: Key,
-        task: impl AsyncFn() -> std::result::Result<T, E> + Send,
+        task: impl AsyncFnOnce() -> std::result::Result<T, E> + Send,
     ) -> ConnectionResult<std::result::Result<T, E>> {
         self.lock(key.clone()).await?;
         let result = task().await;
