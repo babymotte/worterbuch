@@ -210,7 +210,7 @@ where
                 self.tree = None;
             }
         }
-        self.is_obsolete()
+        removed
     }
 
     /// Test if a node is obsolete. A leaf node is obsolete, if it has no value, an internal node is obsolete if it has no value and no children.
