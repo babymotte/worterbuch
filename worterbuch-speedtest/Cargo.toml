@@ -21,7 +21,7 @@ tokio-graceful-shutdown = { version = "0.19.0", features = ["tracing"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-worterbuch-client = { version = "1.4.0", path = "../worterbuch-client" }
+worterbuch-client = { version = "1.4.1", path = "../worterbuch-client" }
 worterbuch-common = { version = "1.4.0", path = "../worterbuch-common", features = [
     "benchmark",
 ] }

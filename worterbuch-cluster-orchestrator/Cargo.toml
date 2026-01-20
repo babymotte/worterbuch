@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-cluster-orchestrator"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "An orchestrator for running Wörterbuch as a distributed cluster."
