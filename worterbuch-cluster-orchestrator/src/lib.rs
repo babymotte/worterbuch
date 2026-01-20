@@ -112,6 +112,8 @@ pub struct PeerInfo {
     address: IpAddr,
     raft_port: u16,
     sync_port: u16,
+    priority: Option<i64>,
+    suicide_on_split_brain: bool,
 }
 
 impl PeerInfo {
@@ -132,9 +134,9 @@ pub async fn instrument_and_run_main(subsys: &mut SubsystemHandle) -> Result<()>
 async fn run_main(
     subsys: &mut SubsystemHandle,
     mut config: config::Config,
-    mut peers_rx: tokio::sync::mpsc::Receiver<config::Peers>,
+    mut peers_rx: tokio::sync::mpsc::Receiver<(config::Peers, PeerInfo, Option<usize>)>,
 ) -> std::result::Result<(), miette::Error> {
-    let mut peers = peers_rx
+    let (mut peers, mut me, _) = peers_rx
         .recv()
         .await
         .ok_or_else(|| miette!("peers sender dropped"))?;
@@ -156,7 +158,7 @@ async fn run_main(
             ElectionOutcome::Leader => {
                 stats.leader().await;
                 select! {
-                    it = lead(subsys, &mut socket, &mut config, &mut peers, &mut peers_rx) => it?,
+                    it = lead(subsys, &mut socket, &mut config, &mut me, &mut peers, &mut peers_rx) => it?,
                     _ = subsys.on_shutdown_requested() => break,
                 }
             }

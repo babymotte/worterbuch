@@ -20,7 +20,7 @@ use super::{
     process_manager::{ChildProcessManager, CommandDefinition},
 };
 use crate::{
-    Heartbeat, PeerMessage, Vote,
+    Heartbeat, PeerInfo, PeerMessage, Vote,
     config::Peers,
     utils::{listen, send_heartbeat_requests},
 };
@@ -35,8 +35,9 @@ pub async fn lead(
     subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &mut Config,
+    me: &mut PeerInfo,
     peers: &mut Peers,
-    peers_rx: &mut mpsc::Receiver<Peers>,
+    peers_rx: &mut mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>,
 ) -> Result<()> {
     let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-leader", false);
 
@@ -57,13 +58,16 @@ pub async fn lead(
 
     loop {
         let update_quorum = if let Some(instant) = &peers_changed {
-            instant.elapsed().as_secs() > 10 + 2 * config.config_scan_interval
+            config.quorum_configured.is_some()
+                || instant.elapsed().as_secs() > 10 + 2 * config.config_scan_interval
         } else {
             false
         };
         if update_quorum {
             peers_changed = None;
             config.update_quorum(peers)?;
+            config.update_priority(&me)?;
+            config.update_suicide_on_split_brain(&me)?;
         }
 
         select! {
@@ -74,9 +78,14 @@ pub async fn lead(
                     break;
                 }
             },
-            recv = peers_rx.recv() => if let Some(p) = recv {
+            recv = peers_rx.recv() => if let Some((p, m, q)) = recv {
                 info!("Number of cluster nodes changed to {}", p.peer_nodes().len() + 1);
+                info!("Node priority changed to {:?}", m.priority);
+                info!("Quorum changed to {:?}", q);
+                info!("Suicide on split brain changed to {:?}", m.suicide_on_split_brain);
                 *peers = p;
+                config.quorum_configured = q;
+                *me = m;
                 peers_changed = Some(Instant::now());
             } else {
                 break;
@@ -114,7 +123,7 @@ async fn process_peer_message(
             // since we assume the leader role as soon as the quorum is met and don't wait until we received a vote from each node there may still be some votes coming in that we have not seen yet, we can ignore those
         }
         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-            if config.quorum_too_low {
+            if config.quorum_too_low && config.suicide_on_split_brain {
                 error!(
                     "Node '{}' seems to think it is leader. We got ourselves into a split brain scenario. Dropping to follower status to allow re-election.",
                     heartbeat.node_id

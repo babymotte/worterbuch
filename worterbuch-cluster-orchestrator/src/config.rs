@@ -37,6 +37,8 @@ pub struct RawPeerInfo {
     address: String,
     raft_port: u16,
     sync_port: u16,
+    priority: Option<i64>,
+    suicide_on_split_brain: Option<bool>,
 }
 
 impl TryFrom<&RawPeerInfo> for PeerInfo {
@@ -71,6 +73,8 @@ impl TryFrom<&RawPeerInfo> for PeerInfo {
             address: address.ip(),
             raft_port: value.raft_port,
             sync_port: value.sync_port,
+            priority: value.priority,
+            suicide_on_split_brain: value.suicide_on_split_brain.unwrap_or(true),
         })
     }
 }
@@ -78,6 +82,7 @@ impl TryFrom<&RawPeerInfo> for PeerInfo {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct ConfigFile {
     nodes: Vec<RawPeerInfo>,
+    quorum: Option<usize>,
     telemetry: Option<TelemetryConfig>,
 }
 
@@ -154,15 +159,6 @@ struct Args {
         default_value = "500"
     )]
     heartbeat_min_timeout: u64,
-    /// Port at which orchestrator will listen for votes and heartbeats from other nodes
-    #[arg(short, long, env = "WBCLUSTER_RAFT_PORT", default_value = "8181")]
-    port: u16,
-    /// The quorum required for a successful leader election vote [default: <number of nodes> / 2 + 1]
-    #[arg(short, long, env = "WBCLUSTER_QUORUM")]
-    quorum: Option<usize>,
-    /// Port used by followers to sync with the leader
-    #[arg(short, long, env = "WBCLUSTER_SYNC_PORT", default_value = "8282")]
-    sync_port: u16,
     /// Path to the worterbuch executable. If omitted, it will be looked up from the environment's PATH
     #[arg(
         long,
@@ -174,9 +170,6 @@ struct Args {
     /// Port for stats endpoint
     #[arg(long, env = "WBCLUSTER_STATS_PORT", default_value = "8383")]
     stats_port: u16,
-    /// Leader election priority
-    #[arg(long = "prio", env = "WBCLUSTER_ELECTION_PRIO")]
-    priority: Option<i64>,
     /// Data directory
     #[arg(long, env = "WORTERBUCH_DATA_DIR", default_value = "./data")]
     data_dir: PathBuf,
@@ -276,8 +269,9 @@ pub struct Config {
     pub stats_port: u16,
     pub data_dir: PathBuf,
     pub config_scan_interval: u64,
+    pub suicide_on_split_brain: bool,
     priority: Option<i64>,
-    quorum_configured: Option<usize>,
+    pub quorum_configured: Option<usize>,
 }
 
 impl Config {
@@ -313,13 +307,34 @@ impl Config {
         self.quorum = quorum;
         self.quorum_too_low = quorum_too_low;
 
+        info!("Updated election quorum to {}.", self.quorum);
+
+        Ok(())
+    }
+
+    pub fn update_priority(&mut self, me: &PeerInfo) -> Result<()> {
+        self.priority = me.priority;
+
+        info!("Updated node priority to {:?}.", self.priority);
+
+        Ok(())
+    }
+
+    pub fn update_suicide_on_split_brain(&mut self, me: &PeerInfo) -> Result<()> {
+        self.suicide_on_split_brain = me.suicide_on_split_brain;
+
+        info!(
+            "Node will suicide on split brain: {}.",
+            self.suicide_on_split_brain
+        );
+
         Ok(())
     }
 }
 
 pub async fn instrument_and_load_config(
     subsys: &SubsystemHandle,
-) -> Result<(Config, mpsc::Receiver<Peers>)> {
+) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
     let args: Args = Args::parse();
     let config_file = load_config_file(&args.config_path).await?;
 
@@ -333,7 +348,7 @@ async fn load_config(
     subsys: &SubsystemHandle,
     args: Args,
     config_file: ConfigFile,
-) -> Result<(Config, mpsc::Receiver<Peers>)> {
+) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
     info!("Loading orchestrator config …");
     let (tx, rx) = mpsc::channel(1);
     let mut peer_addresses = HashSet::new();
@@ -342,12 +357,7 @@ async fn load_config(
         .iter()
         .map(PeerInfo::try_from)
         .collect::<Result<Vec<PeerInfo>>>()?;
-    if !nodes.iter().any(|p| p.node_id == args.node_id) {
-        return Err(miette!(
-            "Node '{}' is not defined in the cluster config.",
-            args.node_id
-        ));
-    }
+    let mut me = None;
     let peers: Vec<PeerInfo> = nodes
         .iter()
         .filter_map(|p| {
@@ -355,32 +365,39 @@ async fn load_config(
                 peer_addresses.insert(p.address);
                 Some(p.to_owned())
             } else {
+                me = Some(p.to_owned());
                 None
             }
         })
         .collect();
+    let Some(me) = me else {
+        return Err(miette!(
+            "Node '{}' is not defined in the cluster config.",
+            args.node_id
+        ));
+    };
     debug!("Configured nodes: {nodes:?}");
     debug!("Configured peers: {peers:?}");
     let data_dir = args.data_dir;
-    let priority = args.priority;
-    let (quorum, quorum_too_low) = quorum_sanity_check(args.quorum, &peers)?;
+    let (quorum, quorum_too_low) = quorum_sanity_check(config_file.quorum, &peers)?;
     let peers = Peers(peers);
     let config = Config {
         node_id: args.node_id.clone(),
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
-        raft_port: args.port,
+        raft_port: me.raft_port,
         quorum,
         quorum_too_low,
-        sync_port: args.sync_port,
+        sync_port: me.sync_port,
         worterbuch_executable: args.worterbuch_executable,
         stats_port: args.stats_port,
-        priority,
+        priority: me.priority,
+        suicide_on_split_brain: me.suicide_on_split_brain,
         data_dir,
-        quorum_configured: args.quorum,
+        quorum_configured: config_file.quorum.clone(),
         config_scan_interval: args.config_scan_interval,
     };
-    tx.send(peers).await.ok();
+    tx.send((peers, me, config_file.quorum)).await.ok();
     let config_path = args.config_path.into();
     let scan_interval = Duration::from_secs(args.config_scan_interval);
     let node_id = args.node_id;
@@ -397,7 +414,7 @@ async fn load_config(
 async fn watch_config_file(
     subsys: &mut SubsystemHandle,
     path: PathBuf,
-    tx: mpsc::Sender<Peers>,
+    tx: mpsc::Sender<(Peers, PeerInfo, Option<usize>)>,
     scan_interval: Duration,
     config_file: ConfigFile,
     node_id: String,
@@ -421,7 +438,7 @@ async fn reload_config(
     path: &Path,
     config_file: ConfigFile,
     node_id: &str,
-    tx: &mpsc::Sender<Peers>,
+    tx: &mpsc::Sender<(Peers, PeerInfo, Option<usize>)>,
 ) -> Result<ConfigFile> {
     let cf = load_config_file(&path).await?;
     if cf != config_file {
@@ -431,25 +448,30 @@ async fn reload_config(
             .map(PeerInfo::try_from)
             .collect::<Result<Vec<PeerInfo>>>()?;
 
-        if !nodes.iter().any(|n| n.node_id == node_id) {
-            error!("This node is no longer part of the cluster config, shutting down …");
-            subsys.request_shutdown();
-        }
-
+        let mut me = None;
         let peers = nodes
             .iter()
             .filter_map(|p| {
                 if p.node_id != node_id {
                     Some(p.to_owned())
                 } else {
+                    me = Some(p.to_owned());
                     None
                 }
             })
             .collect();
+        let Some(me) = me else {
+            error!("This node is no longer part of the cluster config, shutting down …");
+            subsys.request_shutdown();
+            return Err(miette!(
+                "Node '{}' is not defined in the cluster config.",
+                node_id
+            ));
+        };
 
         let peers = Peers(peers);
 
-        if tx.try_send(peers).is_ok() {
+        if tx.try_send((peers, me, cf.quorum)).is_ok() {
             info!("Change in cluster config detected.");
             debug!("Configured nodes changed: {nodes:?}");
         }

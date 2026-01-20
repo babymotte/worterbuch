@@ -1,16 +1,21 @@
+# quorum: 1
 nodes:
   - nodeId: alice
     address: 127.0.0.1
     raftPort: 1337
     syncPort: 8282
+    # priority: 2
+    suicideOnSplitBrain: true
   - nodeId: bob
     address: 127.0.0.1
     raftPort: 1338
     syncPort: 8282
+    # priority: 0
   - nodeId: carl
     address: 127.0.0.1
     raftPort: 1339
     syncPort: 8282
+    # priority: 2
   # - nodeId: dave
   #   address: 127.0.0.1
   #   raftPort: 1340
@@ -22,4 +27,4 @@ nodes:
 telemetry:
   # endpoint: !http http://127.0.0.1:7280
   # endpoint: !grpc http://127.0.0.1:7281
-  endpoint: !grpc http://127.0.0.1:4317
+  # endpoint: !grpc http://127.0.0.1:4317
