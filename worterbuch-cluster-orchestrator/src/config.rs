@@ -394,7 +394,7 @@ async fn load_config(
         priority: me.priority,
         suicide_on_split_brain: me.suicide_on_split_brain,
         data_dir,
-        quorum_configured: config_file.quorum.clone(),
+        quorum_configured: config_file.quorum,
         config_scan_interval: args.config_scan_interval,
     };
     tx.send((peers, me, config_file.quorum)).await.ok();

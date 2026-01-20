@@ -66,8 +66,8 @@ pub async fn lead(
         if update_quorum {
             peers_changed = None;
             config.update_quorum(peers)?;
-            config.update_priority(&me)?;
-            config.update_suicide_on_split_brain(&me)?;
+            config.update_priority(me)?;
+            config.update_suicide_on_split_brain(me)?;
         }
 
         select! {
