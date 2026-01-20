@@ -343,9 +343,11 @@ impl Worterbuch {
                 )
             })?;
 
-        trace!("Notifying ls subscribers …");
-        self.notify_ls_subscribers(ls_subscribers).await;
-        trace!("Notifying ls subscribers done.");
+        if let Some(ls_subscribers) = ls_subscribers {
+            trace!("Notifying ls subscribers …");
+            self.notify_ls_subscribers(ls_subscribers).await;
+            trace!("Notifying ls subscribers done.");
+        }
         trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false)
             .await;
@@ -377,9 +379,11 @@ impl Worterbuch {
                 )
             })?;
 
-        trace!("Notifying ls subscribers …");
-        self.notify_ls_subscribers(ls_subscribers).await;
-        trace!("Notifying ls subscribers done.");
+        if let Some(ls_subscribers) = ls_subscribers {
+            trace!("Notifying ls subscribers …");
+            self.notify_ls_subscribers(ls_subscribers).await;
+            trace!("Notifying ls subscribers done.");
+        }
         trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false)
             .await;
@@ -858,7 +862,9 @@ impl Worterbuch {
                         )
                     })?;
 
-                self.notify_ls_subscribers(ls_subscribers).await;
+                if let Some(ls_subscribers) = ls_subscribers {
+                    self.notify_ls_subscribers(ls_subscribers).await;
+                }
                 self.notify_subscribers(&path, &key, &value, true, true)
                     .await;
                 Ok(value)
@@ -904,7 +910,9 @@ impl Worterbuch {
             self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
                 .await;
         }
-        self.notify_ls_subscribers(ls_subscribers).await;
+        if let Some(ls_subscribers) = ls_subscribers {
+            self.notify_ls_subscribers(ls_subscribers).await;
+        }
 
         mem_tools::schedule_trim();
 

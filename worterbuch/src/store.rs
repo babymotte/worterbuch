@@ -347,8 +347,8 @@ impl Store {
     pub fn delete(
         &mut self,
         path: &[RegularKeySegment],
-    ) -> StoreResult<Option<(Value, Vec<AffectedLsSubscribers>)>> {
-        let mut ls_subscribers = Vec::new();
+    ) -> StoreResult<Option<(Value, Option<Vec<AffectedLsSubscribers>>)>> {
+        let mut ls_subscribers = None;
         let removed = Store::ndelete(
             &mut self.data,
             path,
@@ -386,22 +386,15 @@ impl Store {
     pub fn get_matches(&self, path: &[KeySegment]) -> StoreResult<Vec<KeyValuePair>> {
         let mut matches = Vec::new();
         let traversed = vec![];
-        Store::ncollect_matches(
-            &self.data,
-            traversed,
-            path,
-            &mut matches,
-            None,
-            &mut Vec::new(),
-        )?;
+        Store::ncollect_matches(&self.data, traversed, path, &mut matches, None, &mut None)?;
         Ok(matches)
     }
 
     pub fn delete_matches(
         &mut self,
         path: &[KeySegment],
-    ) -> StoreResult<(Vec<KeyValuePair>, Vec<AffectedLsSubscribers>)> {
-        let mut ls_subscribers = Vec::new();
+    ) -> StoreResult<(Vec<KeyValuePair>, Option<Vec<AffectedLsSubscribers>>)> {
+        let mut ls_subscribers = None;
         let mut matches = Vec::new();
         let traversed_path = vec![];
         Store::ndelete_matches(
@@ -425,7 +418,7 @@ impl Store {
         node: &mut StoreNode,
         relative_path: &[RegularKeySegment],
         subscribers: Option<&SubscribersNode>,
-        ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
+        ls_subscribers: &mut Option<Vec<(Vec<LsSubscriber>, Vec<String>)>>,
     ) -> StoreResult<Option<Value>> {
         if relative_path.is_empty() {
             return Ok(node.take_value().map(Value::from));
@@ -447,7 +440,9 @@ impl Store {
                     && !subscribers.ls_subscribers.is_empty()
                 {
                     let subscribers = subscribers.ls_subscribers.clone();
-                    ls_subscribers.push((subscribers, new_children));
+                    ls_subscribers
+                        .get_or_insert_default()
+                        .push((subscribers, new_children));
                 }
             }
             Ok(val)
@@ -462,7 +457,7 @@ impl Store {
         matches: &mut KeyValuePairs,
         relative_path: &[KeySegment],
         subscribers: Option<&SubscribersNode>,
-        ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
+        ls_subscribers: &mut Option<Vec<(Vec<LsSubscriber>, Vec<String>)>>,
     ) -> StoreResult<()> {
         if relative_path.is_empty() {
             if let Some(value) = node.take_value() {
@@ -533,7 +528,7 @@ impl Store {
         matches: &mut KeyValuePairs,
         relative_path: &[KeySegment],
         subscribers: Option<&SubscribersNode>,
-        ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
+        ls_subscribers: &mut Option<Vec<(Vec<LsSubscriber>, Vec<String>)>>,
     ) -> StoreResult<()> {
         traversed_path.push(id);
 
@@ -552,7 +547,9 @@ impl Store {
                     && !subscribers.ls_subscribers.is_empty()
                 {
                     let subscribers = subscribers.ls_subscribers.clone();
-                    ls_subscribers.push((subscribers, new_children));
+                    ls_subscribers
+                        .get_or_insert_default()
+                        .push((subscribers, new_children));
                 }
             }
         }
@@ -566,7 +563,7 @@ impl Store {
         remaining_path: &'p [KeySegment],
         matches: &mut Vec<KeyValuePair>,
         subscribers: Option<&SubscribersNode>,
-        ls_subscribers: &mut Vec<(Vec<LsSubscriber>, Vec<String>)>,
+        ls_subscribers: &mut Option<Vec<(Vec<LsSubscriber>, Vec<String>)>>,
     ) -> StoreResult<()> {
         if remaining_path.is_empty() {
             if let Some(value) = node.value().map(AsRef::as_ref) {
@@ -603,7 +600,9 @@ impl Store {
                             && !subscribers.ls_subscribers.is_empty()
                         {
                             let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, new_children));
+                            ls_subscribers
+                                .get_or_insert_default()
+                                .push((subscribers, new_children));
                         }
                         let mut traversed_path = traversed_path.clone();
                         traversed_path.push(key);
@@ -626,7 +625,9 @@ impl Store {
                             && !subscribers.ls_subscribers.is_empty()
                         {
                             let subscribers = subscribers.ls_subscribers.clone();
-                            ls_subscribers.push((subscribers, new_children));
+                            ls_subscribers
+                                .get_or_insert_default()
+                                .push((subscribers, new_children));
                         }
                         let mut traversed_path = traversed_path.clone();
                         traversed_path.push(key);
@@ -729,7 +730,7 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
-    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
         self.insert(path, ValueEntry::Plain(value))
     }
 
@@ -738,7 +739,7 @@ impl Store {
         path: &[RegularKeySegment],
         value: Value,
         version: u64,
-    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
+    ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
         self.insert(path, ValueEntry::Cas(value, version))
     }
 
@@ -746,8 +747,8 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: ValueEntry,
-    ) -> StoreResult<(bool, Vec<AffectedLsSubscribers>)> {
-        let mut ls_subscribers = Vec::new();
+    ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
+        let mut ls_subscribers: Option<Vec<(Vec<LsSubscriber>, &[String])>> = None;
         let mut current_node = &mut self.data;
         let mut current_subscribers = Some(&self.subscribers);
 
@@ -759,7 +760,9 @@ impl Store {
                 && !subscribers.ls_subscribers.is_empty()
             {
                 let subscribers = subscribers.ls_subscribers.clone();
-                ls_subscribers.push((subscribers, &path[0..i]));
+                ls_subscribers
+                    .get_or_insert_default()
+                    .push((subscribers, &path[0..i]));
             }
 
             current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
@@ -810,19 +813,20 @@ impl Store {
             self.len += 1;
         }
 
-        let ls_subscribers = ls_subscribers
-            .into_iter()
-            .filter_map(|(subscribers, path)| {
-                {
-                    if path.is_empty() {
-                        Some(self.ls_root())
-                    } else {
-                        self.ls(path)
+        let ls_subscribers = ls_subscribers.map(|it| {
+            it.into_iter()
+                .filter_map(|(subscribers, path)| {
+                    {
+                        if path.is_empty() {
+                            Some(self.ls_root())
+                        } else {
+                            self.ls(path)
+                        }
                     }
-                }
-                .map(|it| (subscribers, it))
-            })
-            .collect();
+                    .map(|it| (subscribers, it))
+                })
+                .collect()
+        });
 
         Ok((value_changed, ls_subscribers))
     }
@@ -1267,7 +1271,7 @@ mod test {
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
 
         let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
-        assert!(subscribers.is_empty());
+        assert!(subscribers.is_none());
 
         let (tx, _) = mpsc::channel(1);
         let subscriber = LsSubscriber::new(
@@ -1277,7 +1281,56 @@ mod test {
         );
         store.add_ls_subscriber(&parent, subscriber);
         let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
-        assert!(subscribers.is_empty());
+        assert!(subscribers.is_none());
+    }
+
+    #[test]
+    fn delete_detects_ls_subscribers_not_empty() {
+        let mut store = Store::default();
+        let parent = ["hello".to_owned(), "there".to_owned()];
+        let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
+        let path2 = ["hello".to_owned(), "there".to_owned(), "you".to_owned()];
+
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
+        assert!(subscribers.is_none());
+
+        let (tx, _) = mpsc::channel(1);
+        let subscriber = LsSubscriber::new(
+            SubscriptionId::new(Uuid::new_v4(), 123),
+            parent.clone().into(),
+            tx,
+        );
+        store.add_ls_subscriber(&parent, subscriber);
+        store.insert(&path, json!("Hello There!").into()).unwrap();
+        let subscribers = store.delete(&path).unwrap().unwrap().1.unwrap();
+        assert_eq!(subscribers.len(), 1);
+
+        store.insert(&path, json!("Hello There!").into()).unwrap();
+        store.insert(&path2, json!("Hello There!").into()).unwrap();
+        let subscribers = store.delete(&path).unwrap().unwrap().1.unwrap();
+        assert_eq!(subscribers.len(), 1);
+    }
+
+    #[test]
+    fn pdelete_detects_ls_subscribers_not_empty() {
+        let mut store = Store::default();
+        let parent = ["hello".to_owned(), "there".to_owned()];
+        let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
+        let del_path = ["hello".into(), "there".into(), KeySegment::Wildcard];
+
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
+        assert!(subscribers.is_none());
+
+        let (tx, _) = mpsc::channel(1);
+        let subscriber = LsSubscriber::new(
+            SubscriptionId::new(Uuid::new_v4(), 123),
+            parent.clone().into(),
+            tx,
+        );
+        store.add_ls_subscriber(&parent, subscriber);
+        store.insert(&path, json!("Hello There!").into()).unwrap();
+        let subscribers = store.delete_matches(&del_path).unwrap().1.unwrap();
+        assert_eq!(subscribers.len(), 1);
     }
 
     #[test]
@@ -1294,6 +1347,7 @@ mod test {
         );
         store.add_ls_subscriber(&parent, subscriber);
         let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
+        let subscribers = subscribers.unwrap();
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].1, vec!["world".to_owned()]);
     }
