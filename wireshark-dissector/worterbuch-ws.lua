@@ -5,23 +5,18 @@ local worterbuch_ws_proto = Proto("worterbuch_ws", "Wörterbuch WebSocket Protoc
 -- Protocol fields
 local f_message = ProtoField.string("worterbuch_ws.message", "JSON Message")
 local f_message_type = ProtoField.string("worterbuch_ws.message_type", "Message Type")
-local f_direction = ProtoField.string("worterbuch_ws.direction", "Direction")
 local f_transaction_id = ProtoField.string("worterbuch_ws.transaction_id", "Transaction ID")
-local f_validation = ProtoField.string("worterbuch_ws.validation", "Validation")
 local f_invalid = ProtoField.string("worterbuch_ws.invalid", "Invalid Message")
 
 worterbuch_ws_proto.fields = {
-    f_message, f_message_type, f_direction,
-    f_transaction_id, f_validation, f_invalid
+    f_message, f_message_type,
+    f_transaction_id, f_invalid
 }
 
--- Valid message types for each direction
-local server_message_types = {
+-- Valid message types (combined list for heuristic detection)
+local valid_message_types = {
     "welcome", "authorized", "state", "cState", "pState",
-    "ack", "err", "lsState"
-}
-
-local client_message_types = {
+    "ack", "err", "lsState",
     "protocolSwitchRequest", "authorizationRequest", "get", "cGet", "pGet",
     "set", "cSet", "sPubInit", "sPub", "publish", "subscribe", "pSubscribe",
     "unsubscribe", "delete", "pDelete", "ls", "subscribeLs", "pLs",
@@ -37,8 +32,7 @@ local function create_lookup(list)
     return lookup
 end
 
-local server_types_lookup = create_lookup(server_message_types)
-local client_types_lookup = create_lookup(client_message_types)
+local valid_types_lookup = create_lookup(valid_message_types)
 
 -- Simple JSON message type extractor
 local function extract_message_type(json_str)
@@ -62,26 +56,12 @@ local function extract_transaction_id(json_str)
     return tid
 end
 
--- Validate message based on direction
-local function validate_message(json_str, is_client_to_server)
+-- Parse message and extract type
+local function parse_message(json_str)
     local msg_type = extract_message_type(json_str)
 
     if not msg_type then
         return false, nil, "Invalid JSON format"
-    end
-
-    local valid_types = is_client_to_server and client_types_lookup or server_types_lookup
-    local expected_direction = is_client_to_server and "Client→Server" or "Server→Client"
-
-    if not valid_types[msg_type] then
-        local actual_direction = client_types_lookup[msg_type] and "Client→Server" or
-            (server_types_lookup[msg_type] and "Server→Client" or "Unknown")
-        if actual_direction ~= "Unknown" and actual_direction ~= expected_direction then
-            return false, msg_type, string.format("Wrong direction (expected %s, got %s)",
-                expected_direction, actual_direction)
-        else
-            return false, msg_type, "Unknown message type"
-        end
     end
 
     return true, msg_type, nil
@@ -104,39 +84,31 @@ function worterbuch_ws_proto.dissector(buffer, pinfo, tree)
     -- Get the JSON payload
     local msg_text = buffer():string()
 
-    -- Determine direction based on message type (content-based detection)
-    -- This is more reliable than port-based detection
-    local msg_type = extract_message_type(msg_text)
-    local is_client_to_server = client_types_lookup[msg_type] or false
-    local direction = is_client_to_server and "Client → Server" or "Server → Client"
+    -- Parse the message
+    local is_valid, msg_type, error_msg = parse_message(msg_text)
 
-    -- Validate the message
-    local is_valid, msg_type, error_msg = validate_message(msg_text, is_client_to_server)
-
-    subtree:add(f_message, buffer(), msg_text)
-    subtree:add(f_direction, direction)
+    local msg_tree = subtree:add(f_message, buffer(), msg_text)
 
     if is_valid then
-        subtree:add(f_message_type, msg_type)
-        subtree:add(f_validation, "Valid")
+        msg_tree:add(f_message_type, msg_type)
 
         -- Extract transaction ID if present
         local tid = extract_transaction_id(msg_text)
         if tid then
-            subtree:add(f_transaction_id, tid)
+            msg_tree:add(f_transaction_id, tid)
         end
 
         -- Update info column
-        pinfo.cols.info:append(string.format(" [%s: %s]", direction, msg_type))
+        pinfo.cols.info:append(string.format(" [%s]", msg_type))
     else
-        subtree:add_expert_info(PI_MALFORMED, PI_ERROR, error_msg or "Invalid message")
-        subtree:add(f_invalid, error_msg or "Invalid message")
+        msg_tree:add_expert_info(PI_MALFORMED, PI_ERROR, error_msg or "Invalid message")
+        msg_tree:add(f_invalid, error_msg or "Invalid message")
         if msg_type then
-            subtree:add(f_message_type, msg_type .. " (invalid)")
+            msg_tree:add(f_message_type, msg_type .. " (invalid)")
         end
 
         -- Update info column
-        pinfo.cols.info:append(string.format(" [%s: Invalid]", direction))
+        pinfo.cols.info:append(" [Invalid]")
     end
 
     return length
@@ -168,7 +140,7 @@ local function heur_dissect_worterbuch_ws(buffer, pinfo, tree)
     end
 
     -- Check if it's a valid Wörterbuch message type
-    if not (client_types_lookup[msg_type] or server_types_lookup[msg_type]) then
+    if not valid_types_lookup[msg_type] then
         return false
     end
 
