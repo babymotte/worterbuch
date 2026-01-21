@@ -2,6 +2,9 @@
 -- Validates WebSocket text messages against client and server schemas
 local worterbuch_ws_proto = Proto("worterbuch_ws", "Wörterbuch WebSocket Protocol")
 
+-- Preferences
+worterbuch_ws_proto.prefs.ports = Pref.string("TCP ports", "", "Comma-separated list of TCP ports (e.g., 8080,3012)")
+
 -- Protocol fields
 local f_message = ProtoField.string("worterbuch_ws.message", "JSON Message")
 local f_message_type = ProtoField.string("worterbuch_ws.message_type", "Message Type")
@@ -151,3 +154,47 @@ end
 
 -- Register as a heuristic dissector for WebSocket
 worterbuch_ws_proto:register_heuristic("ws", heur_dissect_worterbuch_ws)
+
+-- Port registration management
+local tcp_port_table = DissectorTable.get("tcp.port")
+local registered_ports = {}
+
+-- Function to parse comma-separated port list
+local function parse_ports(port_string)
+    local ports = {}
+    if not port_string or port_string == "" then
+        return ports
+    end
+
+    for port_str in string.gmatch(port_string, "[^,]+") do
+        local port = tonumber(port_str:match("^%s*(.-)%s*$"))
+        if port and port > 0 and port < 65536 then
+            table.insert(ports, port)
+        end
+    end
+    return ports
+end
+
+-- Function to update port registrations
+local function update_ports()
+    -- Unregister old ports
+    for _, port in ipairs(registered_ports) do
+        tcp_port_table:remove(port, worterbuch_ws_proto)
+    end
+    registered_ports = {}
+
+    -- Register new ports
+    local ports = parse_ports(worterbuch_ws_proto.prefs.ports)
+    for _, port in ipairs(ports) do
+        tcp_port_table:add(port, worterbuch_ws_proto)
+        table.insert(registered_ports, port)
+    end
+end
+
+-- Register the prefs_changed function
+function worterbuch_ws_proto.prefs_changed()
+    update_ports()
+end
+
+-- Initial port registration
+update_ports()
