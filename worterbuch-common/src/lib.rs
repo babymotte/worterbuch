@@ -44,6 +44,7 @@ pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
+pub const SYSTEM_TOPIC_NAME: &str = "name";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_VERSION: &str = "version";
 pub const SYSTEM_TOPIC_LICENSE: &str = "license";

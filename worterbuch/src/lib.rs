@@ -71,7 +71,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tracing::{Instrument, Level, debug, error, info, span};
-use worterbuch_common::{INTERNAL_CLIENT_ID, ValueEntry};
+use worterbuch_common::{INTERNAL_CLIENT_ID, SYSTEM_TOPIC_NAME, ValueEntry};
 
 pub async fn spawn_worterbuch(
     subsys: &Subsystem,
@@ -101,6 +101,16 @@ async fn do_run_worterbuch(
     }
 
     let mut worterbuch = persistence::restore(&subsys, &config, &api).await?;
+
+    if let Some(name) = config.args.instance_name.as_ref() {
+        worterbuch
+            .set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_NAME),
+                json!(name),
+                INTERNAL_CLIENT_ID,
+            )
+            .await?;
+    }
 
     let web_server = if let Some(WsEndpoint {
         endpoint: Endpoint {
