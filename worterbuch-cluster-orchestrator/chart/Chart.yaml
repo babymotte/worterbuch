@@ -2,5 +2,5 @@ apiVersion: v2
 name: worterbuch
 description: Helm chart for a worterbuch server
 type: application
-version: 1.4.1
-appVersion: 1.4.1
+version: 1.5.0-alpha.1
+appVersion: 1.5.0-alpha.1

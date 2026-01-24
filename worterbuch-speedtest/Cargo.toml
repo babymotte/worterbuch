@@ -2,7 +2,7 @@
 
 [package]
 name = "worterbuch-speedtest"
-version = "1.4.0"
+version = "1.5.0-alpha.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -21,8 +21,8 @@ tokio-stream = { version = "0.1.14", features = ["sync"] }
 tosub = "0.1.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-worterbuch-client = { version = "1.4.1", path = "../worterbuch-client" }
-worterbuch-common = { version = "1.4.0", path = "../worterbuch-common", features = [
+worterbuch-client = { version = "1.5.0-alpha.1", path = "../worterbuch-client" }
+worterbuch-common = { version = "1.5.0-alpha.1", path = "../worterbuch-common", features = [
     "benchmark",
 ] }
 
