@@ -24,7 +24,7 @@ use tokio::{
     select,
     time::{Instant, interval},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::SYSTEM_TOPIC_SOURCES;
@@ -41,7 +41,7 @@ pub const LICENSE: &str = "COMMERCIAL";
 #[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
-pub async fn track_stats(wb: CloneableWbApi, subsys: &mut SubsystemHandle) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchResult<()> {
     let start = Instant::now();
 
     wb.set(
@@ -79,7 +79,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: &mut SubsystemHandle) -> Wo
     loop {
         select! {
             _ = interval.tick() => update_stats(&wb, start).await?,
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 

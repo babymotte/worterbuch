@@ -28,11 +28,11 @@ use hashbrown::HashMap;
 use miette::Result;
 use std::{ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 pub async fn lead(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     socket: &mut UdpSocket,
     config: &mut Config,
     me: &mut PeerInfo,
@@ -97,7 +97,7 @@ pub async fn lead(
             )) => if let ControlFlow::Break(_) = flow? {
                 break;
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 

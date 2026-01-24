@@ -26,7 +26,6 @@ use miette::IntoDiagnostic;
 use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing_subscriber::EnvFilter;
 use web_ui::run_web_ui;
 
@@ -38,7 +37,7 @@ async fn main() -> miette::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Toplevel::new(async move |s: &mut SubsystemHandle| {
+    Toplevel::new(async move |s| {
         s.start(SubsystemBuilder::new(
             "worterbuch-speedtest",
             run_speedtests_with_ui,
@@ -52,15 +51,15 @@ async fn main() -> miette::Result<()> {
     Ok(())
 }
 
-async fn run_speedtests_with_ui(subsys: &mut SubsystemHandle) -> miette::Result<()> {
+async fn run_speedtests_with_ui(subsys: Subsystem) -> miette::Result<()> {
     let (throughput_api_tx, throughput_api_rx) = mpsc::unbounded_channel();
     let (latency_api_tx, latency_api_rx) = mpsc::unbounded_channel();
     let (throughput_ui_tx, throughput_ui_rx) = mpsc::unbounded_channel();
     let (latency_ui_tx, latency_ui_rx) = mpsc::unbounded_channel();
 
-    subsys.start(SubsystemBuilder::new(
+    subsys.spawn(
         "speedtest-web-ui",
-        async |s: &mut SubsystemHandle| {
+        async |s| {
             run_web_ui(
                 s,
                 throughput_ui_rx,
@@ -71,17 +70,15 @@ async fn run_speedtests_with_ui(subsys: &mut SubsystemHandle) -> miette::Result<
             .await
         },
     ));
-    subsys.start(SubsystemBuilder::new(
+    subsys.spawn(
         "throughput",
-        async move |s: &mut SubsystemHandle| {
+        async move |s| {
             start_throughput_test(s, throughput_ui_tx, throughput_api_rx).await
         },
     ));
-    subsys.start(SubsystemBuilder::new(
+    subsys.spawn(
         "latency",
-        async move |s: &mut SubsystemHandle| {
-            start_latency_test(s, latency_ui_tx, latency_api_rx).await
-        },
+        async move |s| start_latency_test(s, latency_ui_tx, latency_api_rx).await,
     ));
 
     Ok(())

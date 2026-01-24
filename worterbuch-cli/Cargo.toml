@@ -13,7 +13,6 @@ categories = ["database", "command-line-utilities"]
 [dependencies]
 worterbuch-client = { version = "1.4.1", path = "../worterbuch-client" }
 tokio = { version = "1.44.2", features = ["rt", "macros", "io-std", "time"] }
-tokio-graceful-shutdown = { version = "0.19.0", features = ["tracing"] }
 dotenvy = "0.15.7"
 serde = "1.0.157"
 serde_json = "1.0.94"
@@ -21,6 +20,7 @@ clap = { version = "4.1.11", features = ["derive"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 miette = { version = "7.5.0", features = ["fancy"] }
 tracing = "0.1.41"
+tosub = "0.1.0"
 
 [lints.rust]
 unsafe_code = "forbid"

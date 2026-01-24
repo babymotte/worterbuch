@@ -72,7 +72,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
@@ -769,13 +769,13 @@ pub(crate) async fn start(
     bind_addr: IpAddr,
     port: u16,
     public_addr: String,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     ws_enabled: bool,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
 
     let router =
-        build_worterbuch_router(subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
+        build_worterbuch_router(&subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
 
     let handle = Handle::new();
 
@@ -798,7 +798,7 @@ pub(crate) async fn start(
 
     select! {
         res = &mut serve => res.into_diagnostic()?,
-        _ = subsys.on_shutdown_requested() => {
+        _ = subsys.shutdown_requested() => {
             handle.graceful_shutdown(Some(Duration::from_secs(5)));
             serve.await.into_diagnostic()?;
         },
@@ -810,7 +810,7 @@ pub(crate) async fn start(
 }
 
 pub async fn build_worterbuch_router(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     worterbuch: CloneableWbApi,
     tls: bool,
     port: u16,
@@ -826,10 +826,9 @@ pub async fn build_worterbuch_router(
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
         let wb = worterbuch.clone();
-        subsys.start(SubsystemBuilder::new(
-            "wsserver",
-            async |s: &mut SubsystemHandle| run_ws_server(s, ws_stream_rx, wb).await,
-        ));
+        subsys.spawn("wsserver", async |s| {
+            run_ws_server(s, ws_stream_rx, wb).await
+        });
         info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
         app = app.route("/ws", get(ws).with_state(ws_stream_tx));
     }
@@ -937,7 +936,7 @@ pub async fn build_worterbuch_router(
 }
 
 async fn run_ws_server(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     mut listener: mpsc::Receiver<(WebSocket, SocketAddr)>,
     worterbuch: CloneableWbApi,
 ) -> WorterbuchResult<()> {
@@ -966,32 +965,30 @@ async fn run_ws_server(
                     let worterbuch = worterbuch.clone();
                     let conn_closed_tx = conn_closed_tx.clone();
 
-                    let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), async move |s:&mut SubsystemHandle|  {
+                    let client = subsys.spawn(format!("client-{id}"), async move |s|  {
                         select! {
                             s = serve(id, remote_addr, worterbuch, socket) => if let Err(e) = s {
                                 error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                             },
-                            _ = s.on_shutdown_requested() => (),
+                            _ = s.shutdown_requested() => (),
                         }
                         conn_closed_tx.send(id).await.ok();
                         Ok::<(),miette::Error>(())
-                    }));
+                    });
                     clients.insert(id, client);
                 } else {
                     break;
                 }
                 debug!("Ready to accept new connections.");
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
-    for (cid, subsys) in clients {
-        subsys.initiate_shutdown();
+    for (cid, mut subsys) in clients {
+        subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
-        if let Err(e) = subsys.join().await {
-            error!("Error waiting for client {cid} to disconnect: {e}");
-        }
+        subsys.join().await;
     }
     debug!("All clients disconnected.");
 

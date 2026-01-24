@@ -40,7 +40,7 @@ use std::{
     path::Path,
 };
 use tokio::{fs::File, select};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, instrument};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,13 +126,13 @@ impl PeerInfo {
     }
 }
 
-pub async fn instrument_and_run_main(subsys: &mut SubsystemHandle) -> Result<()> {
-    let (config, peers_rx) = instrument_and_load_config(subsys).await?;
+pub async fn instrument_and_run_main(subsys: Subsystem) -> Result<()> {
+    let (config, peers_rx) = instrument_and_load_config(&subsys).await?;
     run_main(subsys, config, peers_rx).await
 }
 
 async fn run_main(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     mut config: config::Config,
     mut peers_rx: tokio::sync::mpsc::Receiver<(config::Peers, PeerInfo, Option<usize>)>,
 ) -> std::result::Result<(), miette::Error> {
@@ -143,30 +143,30 @@ async fn run_main(
 
     let mut socket = init_socket(&config).await?;
 
-    let stats = start_stats_endpoint(subsys, config.stats_port).await?;
+    let stats = start_stats_endpoint(&subsys, config.stats_port).await?;
 
-    while !subsys.is_shutdown_requested() {
+    while !subsys.is_shut_down() {
         let prio = config.priority().await;
 
         stats.candidate().await;
         let outcome = select! {
-            res = elect_leader(subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
-            _ = subsys.on_shutdown_requested() => break,
+            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
+            _ = subsys.shutdown_requested() => break,
         };
 
         match outcome {
             ElectionOutcome::Leader => {
                 stats.leader().await;
                 select! {
-                    it = lead(subsys, &mut socket, &mut config, &mut me, &mut peers, &mut peers_rx) => it?,
-                    _ = subsys.on_shutdown_requested() => break,
+                    it = lead(&subsys, &mut socket, &mut config, &mut me, &mut peers, &mut peers_rx) => it?,
+                    _ = subsys.shutdown_requested() => break,
                 }
             }
             ElectionOutcome::Follower(heartbeat) => {
                 stats.follower().await;
                 select! {
-                    it = follow(subsys, &mut socket,  &config, &peers, heartbeat) => it?,
-                    _ = subsys.on_shutdown_requested() => break,
+                    it = follow(&subsys, &mut socket,  &config, &peers, heartbeat) => it?,
+                    _ = subsys.shutdown_requested() => break,
                 }
             }
             ElectionOutcome::Cancelled => break,

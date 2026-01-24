@@ -39,7 +39,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     select,
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{debug, info, instrument, warn};
 use worterbuch_common::{GraveGoods, Key, LastWill, ValueEntry};
 
@@ -52,7 +52,7 @@ struct GraveGoodsLastWill {
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
 ) -> PersistenceResult<()> {
     v3::periodic(worterbuch, config, subsys).await
 }
@@ -90,13 +90,12 @@ pub struct PersistentJsonStorage {
 }
 
 impl PersistentJsonStorage {
-    pub fn new(subsys: &SubsystemHandle, config: Config, api: CloneableWbApi) -> Self {
+    pub fn new(subsys: &Subsystem, config: Config, api: CloneableWbApi) -> Self {
         info!("Using JSON file persistence.");
         let config_pers = config.clone();
-        subsys.start(SubsystemBuilder::new(
-            "json-persistence",
-            async |subsys: &mut SubsystemHandle| periodic(api, config_pers, subsys).await,
-        ));
+        subsys.spawn("json-persistence", async |subsys| {
+            periodic(api, config_pers, subsys).await
+        });
         Self { config }
     }
 }

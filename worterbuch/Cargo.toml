@@ -29,7 +29,6 @@ worterbuch-common = { version = "1.4.0", path = "../worterbuch-common", features
     "axum-errors",
 ] }
 tokio = { version = "1.44.2", features = ["rt-multi-thread", "fs"] }
-tokio-graceful-shutdown = { version = "0.19.0", features = ["tracing"] }
 dotenvy = "0.15.7"
 serde = { version = "1.0.157", features = ["derive"] }
 serde_json = "1.0.94"
@@ -44,7 +43,6 @@ hashlink = "0.11.0"
 tokio-stream = "0.1.14"
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 miette = { version = "7.1.0", features = ["fancy"] }
-tokio-util = "0.7.13"
 tracing = "0.1.41"
 flate2 = "1.1.0"
 lazy_static = "1.5.0"
@@ -74,6 +72,7 @@ libc = "0.2.175"
 redb = "3.0.2"
 strum = { version = "0.27.2", features = ["derive"] }
 hashbrown = { version = "0.16.1", features = ["serde"] }
+tosub = "0.1.0"
 
 [lints.rust]
 # unsafe_code = "forbid"

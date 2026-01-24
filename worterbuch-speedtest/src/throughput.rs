@@ -232,9 +232,9 @@ impl<'a> ThroughputTest<'a> {
         let result_tx = self.status_tx.clone();
         let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
         debug!("Spawning agent {i}");
-        self.subsys.start(SubsystemBuilder::new(
+        self.subsys.spawn(
             format!("client-{i}"),
-            async move |s: &mut SubsystemHandle| client(i, result_tx, agent_rx, s, conn_tx).await,
+            async move |s| client(i, result_tx, agent_rx, s, conn_tx).await,
         ));
         self.agent_apis.push(agent_tx);
         let conn = conn_rx.recv().await;
@@ -359,7 +359,7 @@ async fn client(
     id: usize,
     result_tx: mpsc::UnboundedSender<Status>,
     mut api: mpsc::UnboundedReceiver<AgentApi>,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     on_connected: mpsc::UnboundedSender<()>,
 ) -> miette::Result<()> {
     let (wb, _on_disconnect, _) = worterbuch_client::connect_with_default_config()
@@ -435,7 +435,7 @@ async fn client(
                 wb.set_async(key.clone(), &sent_offset).await.into_diagnostic()
                     .context("Failed to set value on worterbuch.")?;
             },
-            _ = subsys.on_shutdown_requested() => {
+            _ = subsys.shutdown_requested() => {
                 warn!("Shutdown requested.");
                 break;
             },

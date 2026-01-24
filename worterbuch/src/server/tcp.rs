@@ -42,7 +42,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
@@ -60,7 +60,7 @@ pub async fn start(
     config: Config,
     bind_addr: IpAddr,
     port: u16,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
@@ -80,7 +80,7 @@ pub async fn start(
     let mut clients = HashMap::new();
     loop {
         let evt = next_socket_event(
-            subsys,
+            &subsys,
             &mut conn_closed_rx,
             &listener,
             waiting_for_free_connections,
@@ -110,16 +110,16 @@ pub async fn start(
                             let worterbuch = worterbuch.clone();
                             let conn_closed_tx = conn_closed_tx.clone();
 
-                            let client = subsys.start(SubsystemBuilder::new(format!("client-{id}"), async move |s: &mut SubsystemHandle|  {
+                            let client = subsys.spawn(format!("client-{id}"), async move |s|  {
                             select! {
-                                s = serve(s, id, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                s = serve(&s, id, remote_addr, worterbuch, socket) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
-                                _ = s.on_shutdown_requested() => (),
+                                _ = s.shutdown_requested() => (),
                             }
                         conn_closed_tx.send(id).await.ok();
                         Ok::<(),miette::Error>(())
-                    }));
+                    });
                             clients.insert(id, client);
                         }
                         Err(e) => {
@@ -138,12 +138,10 @@ pub async fn start(
         }
     }
 
-    for (cid, subsys) in clients {
-        subsys.initiate_shutdown();
+    for (cid, mut subsys) in clients {
+        subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
-        if let Err(e) = subsys.join().await {
-            error!("Error waiting for client {cid} to disconnect: {e}");
-        }
+        subsys.join().await;
     }
     debug!("All clients disconnected.");
 
@@ -155,7 +153,7 @@ pub async fn start(
 }
 
 async fn next_socket_event(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     conn_closed_rx: &mut mpsc::Receiver<Uuid>,
     listener: &TcpListener,
     waiting_for_free_connections: bool,
@@ -167,12 +165,12 @@ async fn next_socket_event(
         } else {
             SocketEvent::Connected(None)
         },
-        _ = subsys.on_shutdown_requested() => SocketEvent::ShutdownRequested,
+        _ = subsys.shutdown_requested() => SocketEvent::ShutdownRequested,
     }
 }
 
 async fn serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -210,7 +208,7 @@ struct ServeLoop {
 }
 
 async fn serve_loop(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: Uuid,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -224,12 +222,9 @@ async fn serve_loop(
     // tcp socket send loop
     let (tcp_rx, tcp_tx) = socket.into_split();
     let (tcp_send_tx, tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
-    subsys.start(SubsystemBuilder::new(
-        "forward_messages_to_socket",
-        async move |s: &mut SubsystemHandle| {
-            forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout).await
-        },
-    ));
+    subsys.spawn("forward_messages_to_socket", async move |s| {
+        forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout).await
+    });
 
     let tcp_rx = BufReader::new(tcp_rx);
     let tcp_rx = tcp_rx.lines();
@@ -268,7 +263,7 @@ async fn serve_loop(
 }
 
 async fn forward_messages_to_socket(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: Uuid,
@@ -285,7 +280,7 @@ async fn forward_messages_to_socket(
                 warn!("Message forwarding to client {client_id} stopped: channel closed.");
                 break;
             },
-            _ = subsys.on_shutdown_requested() => {
+            _ = subsys.shutdown_requested() => {
                 warn!("Message forwarding to client {client_id} stopped: subsystem stopped.");
                 break;
             },

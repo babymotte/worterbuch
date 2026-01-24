@@ -22,7 +22,7 @@ use miette::Result;
 use std::io;
 use std::time::Duration;
 use tokio::select;
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tosub::Subsystem;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
@@ -58,17 +58,17 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Toplevel::new(async move |s: &mut SubsystemHandle| {
-        s.start(SubsystemBuilder::new("wbls", run));
-    })
-    .catch_signals()
-    .handle_shutdown_requests(Duration::from_millis(1000))
-    .await?;
+    Subsystem::build_root("wbpls")
+        .catch_signals()
+        .with_timeout(Duration::from_millis(1000))
+        .start(run)
+        .join()
+        .await;
 
     Ok(())
 }
 
-async fn run(subsys: &mut SubsystemHandle) -> Result<()> {
+async fn run(subsys: Subsystem) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 
@@ -105,10 +105,10 @@ async fn run(subsys: &mut SubsystemHandle) -> Result<()> {
             break;
         }
         select! {
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
             _ = &mut on_discnnect => {
                 warn!("Connection to server lost.");
-                subsys.request_shutdown();
+                subsys.request_global_shutdown();
             }
             msg = responses.recv() => if let Some(msg) = msg {
                 if let Some(tid) = msg.transaction_id()

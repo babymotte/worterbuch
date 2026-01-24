@@ -43,6 +43,7 @@ pub mod telemetry;
 mod worterbuch;
 
 pub use config::*;
+use tosub::Subsystem;
 pub use worterbuch_common as common;
 
 use crate::{
@@ -63,41 +64,31 @@ use leader_follower::{
 };
 use serde_json::json;
 use server::common::WbFunction;
-use std::error::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{Instrument, Level, debug, error, info, span};
 use worterbuch_common::{INTERNAL_CLIENT_ID, ValueEntry};
 
-type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
-
 pub async fn spawn_worterbuch(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: Config,
 ) -> WorterbuchAppResult<CloneableWbApi> {
     let (api_tx, api_rx) = oneshot::channel();
-    subsys.start(SubsystemBuilder::new(
-        "worterbuch",
-        async |s: &mut SubsystemHandle| do_run_worterbuch(s, config, Some(api_tx)).await,
-    ));
+    subsys.spawn("worterbuch", |s| do_run_worterbuch(s, config, Some(api_tx)));
     Ok(api_rx.await?)
 }
 
-pub async fn run_worterbuch(
-    subsys: &mut SubsystemHandle,
-    config: Config,
-) -> WorterbuchAppResult<()> {
+pub async fn run_worterbuch(subsys: Subsystem, config: Config) -> WorterbuchAppResult<()> {
     do_run_worterbuch(subsys, config, None).await?;
     Ok(())
 }
 
 async fn do_run_worterbuch(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     config: Config,
     tx: Option<oneshot::Sender<CloneableWbApi>>,
 ) -> WorterbuchAppResult<()> {
@@ -109,7 +100,7 @@ async fn do_run_worterbuch(
         tx.send(api.clone()).ok();
     }
 
-    let mut worterbuch = persistence::restore(subsys, &config, &api).await?;
+    let mut worterbuch = persistence::restore(&subsys, &config, &api).await?;
 
     let web_server = if let Some(WsEndpoint {
         endpoint: Endpoint {
@@ -120,25 +111,23 @@ async fn do_run_worterbuch(
         public_addr,
     }) = &config.ws_endpoint
     {
+        info!("Starting web server …");
         let sapi = api.clone();
         let tls = tls.to_owned();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         let public_addr = public_addr.to_owned();
         let ws_enabled = !config.follower;
-        Some(subsys.start(SubsystemBuilder::new(
-            "webserver",
-            async move |subsys: &mut SubsystemHandle| {
-                server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled)
-                    .await
-            },
-        )))
+        Some(subsys.spawn("webserver", async move |subsys| {
+            server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled).await
+        }))
     } else {
+        info!("Web server disabled.");
         None
     };
 
     if config.follower {
-        run_in_follower_mode(subsys, worterbuch, api_rx, config, web_server).await?;
+        run_in_follower_mode(&subsys, worterbuch, api_rx, config, web_server).await?;
     } else {
         worterbuch
             .set(
@@ -150,10 +139,9 @@ async fn do_run_worterbuch(
             .await?;
 
         let worterbuch_uptime = api.clone();
-        subsys.start(SubsystemBuilder::new(
-            "stats",
-            async |subsys: &mut SubsystemHandle| track_stats(worterbuch_uptime, subsys).await,
-        ));
+        subsys.spawn("stats", async |subsys| {
+            track_stats(worterbuch_uptime, subsys).await
+        });
 
         let cfg = config.clone();
         let tcp_server = if let Some(Endpoint {
@@ -165,12 +153,9 @@ async fn do_run_worterbuch(
             let sapi = api.clone();
             let bind_addr = bind_addr.to_owned();
             let port = port.to_owned();
-            Some(subsys.start(SubsystemBuilder::new(
-                "tcpserver",
-                async move |subsys: &mut SubsystemHandle| {
-                    server::tcp::start(sapi, cfg, bind_addr, port, subsys).await
-                },
-            )))
+            Some(subsys.spawn("tcpserver", async move |subsys| {
+                server::tcp::start(sapi, cfg, bind_addr, port, subsys).await
+            }))
         } else {
             None
         };
@@ -179,12 +164,9 @@ async fn do_run_worterbuch(
         let unix_socket = if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
             let sapi = api.clone();
             let path = path.clone();
-            Some(subsys.start(SubsystemBuilder::new(
-                "unixsocket",
-                async move |subsys: &mut SubsystemHandle| {
-                    server::unix::start(sapi, path, subsys).await
-                },
-            )))
+            Some(subsys.spawn("unixsocket", async move |subsys| {
+                server::unix::start(sapi, path, subsys).await
+            }))
         } else {
             None
         };
@@ -194,7 +176,7 @@ async fn do_run_worterbuch(
 
         if config.leader {
             run_in_leader_mode(
-                subsys,
+                &subsys,
                 worterbuch,
                 api_rx,
                 config,
@@ -205,7 +187,7 @@ async fn do_run_worterbuch(
             .await?;
         } else {
             run_in_regular_mode(
-                subsys,
+                &subsys,
                 worterbuch,
                 api_rx,
                 config,
@@ -443,13 +425,13 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
 }
 
 async fn run_in_regular_mode(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<ServerSubsystem>,
-    tcp_server: Option<ServerSubsystem>,
-    unix_socket: Option<ServerSubsystem>,
+    web_server: Option<Subsystem>,
+    tcp_server: Option<Subsystem>,
+    unix_socket: Option<Subsystem>,
 ) -> WorterbuchAppResult<()> {
     loop {
         select! {
@@ -457,7 +439,7 @@ async fn run_in_regular_mode(
                 Some(function) => process_api_call(&mut worterbuch, function).await,
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -473,13 +455,13 @@ async fn run_in_regular_mode(
 }
 
 async fn run_in_leader_mode(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<ServerSubsystem>,
-    tcp_server: Option<ServerSubsystem>,
-    unix_socket: Option<ServerSubsystem>,
+    web_server: Option<Subsystem>,
+    tcp_server: Option<Subsystem>,
+    unix_socket: Option<Subsystem>,
 ) -> WorterbuchAppResult<()> {
     info!("Running in LEADER mode.");
 
@@ -502,12 +484,9 @@ async fn run_in_leader_mode(
     let mut dead = vec![];
 
     let cfg = config.clone();
-    subsys.start(SubsystemBuilder::new(
-        "cluster_sync_port",
-        async move |s: &mut SubsystemHandle| {
-            run_cluster_sync_port(s, cfg, follower_connected_tx).await
-        },
-    ));
+    subsys.spawn("cluster_sync_port", async move |s| {
+        run_cluster_sync_port(s, cfg, follower_connected_tx).await
+    });
 
     let (mut grave_goods_rx, _) = worterbuch
         .psubscribe(
@@ -606,7 +585,7 @@ async fn run_in_leader_mode(
                 },
                 None => break,
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -622,11 +601,11 @@ async fn run_in_leader_mode(
 }
 
 async fn run_in_follower_mode(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<ServerSubsystem>,
+    web_server: Option<Subsystem>,
 ) -> WorterbuchAppResult<()> {
     let leader_addr = if let Some(it) = &config.leader_address {
         it
@@ -671,7 +650,7 @@ async fn run_in_follower_mode(
                 return Err(WorterbuchAppError::ClusterError(format!("error receiving update from leader: {e}")));
             }
         },
-        _ = subsys.on_shutdown_requested() => return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned())),
+        _ = subsys.shutdown_requested() => return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned())),
     }
     info!("Successfully synced with leader.");
 
@@ -693,7 +672,7 @@ async fn run_in_follower_mode(
                 debug!("Follower persistence interval triggered");
                 worterbuch.flush().await?;
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -701,16 +680,16 @@ async fn run_in_follower_mode(
 }
 
 async fn shutdown(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     config: Config,
-    web_server: Option<ServerSubsystem>,
-    tcp_server: Option<ServerSubsystem>,
-    unix_socket: Option<ServerSubsystem>,
+    web_server: Option<Subsystem>,
+    tcp_server: Option<Subsystem>,
+    unix_socket: Option<Subsystem>,
 ) -> WorterbuchAppResult<()> {
     info!("Shutdown sequence triggered");
 
-    subsys.request_shutdown();
+    subsys.request_global_shutdown();
 
     shutdown_servers(web_server, tcp_server, unix_socket).await;
 
@@ -726,32 +705,26 @@ async fn shutdown(
 }
 
 async fn shutdown_servers(
-    web_server: Option<ServerSubsystem>,
-    tcp_server: Option<ServerSubsystem>,
-    unix_socket: Option<ServerSubsystem>,
+    web_server: Option<Subsystem>,
+    tcp_server: Option<Subsystem>,
+    unix_socket: Option<Subsystem>,
 ) {
-    if let Some(it) = web_server {
+    if let Some(mut it) = web_server {
         info!("Shutting down web server …");
-        it.initiate_shutdown();
-        if let Err(e) = it.join().await {
-            error!("Error waiting for web server to shut down: {e}");
-        }
+        it.request_local_shutdown();
+        it.join().await;
     }
 
-    if let Some(it) = tcp_server {
+    if let Some(mut it) = tcp_server {
         info!("Shutting down tcp server …");
-        it.initiate_shutdown();
-        if let Err(e) = it.join().await {
-            error!("Error waiting for tcp server to shut down: {e}");
-        }
+        it.request_local_shutdown();
+        it.join().await;
     }
 
-    if let Some(it) = unix_socket {
+    if let Some(mut it) = unix_socket {
         info!("Shutting down unix socket …");
-        it.initiate_shutdown();
-        if let Err(e) = it.join().await {
-            error!("Error waiting for unix socket to shut down: {e}");
-        }
+        it.request_local_shutdown();
+        it.join().await;
     }
 }
 

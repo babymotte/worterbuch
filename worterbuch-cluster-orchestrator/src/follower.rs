@@ -28,11 +28,11 @@ use crate::{
 use miette::Result;
 use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, time::sleep};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{Level, info, instrument, warn};
 
 pub async fn follow(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     socket: &mut UdpSocket,
     config: &Config,
     peers: &Peers,
@@ -65,7 +65,7 @@ pub async fn follow(
                 )) => if let ControlFlow::Break(_) = flow? {
                     break 'inner;
                 },
-                _ = subsys.on_shutdown_requested() => break 'outer,
+                _ = subsys.shutdown_requested() => break 'outer,
             }
         }
     }

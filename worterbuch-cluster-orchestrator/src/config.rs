@@ -27,7 +27,7 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, select, sync::mpsc, time::interval};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -333,7 +333,7 @@ impl Config {
 }
 
 pub async fn instrument_and_load_config(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
 ) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
     let args: Args = Args::parse();
     let config_file = load_config_file(&args.config_path).await?;
@@ -345,7 +345,7 @@ pub async fn instrument_and_load_config(
 
 // #[instrument(skip(subsys), err)]
 async fn load_config(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     args: Args,
     config_file: ConfigFile,
 ) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
@@ -401,18 +401,15 @@ async fn load_config(
     let config_path = args.config_path.into();
     let scan_interval = Duration::from_secs(args.config_scan_interval);
     let node_id = args.node_id;
-    subsys.start(SubsystemBuilder::new(
-        "config-file-watcher",
-        async move |s: &mut SubsystemHandle| {
-            watch_config_file(s, config_path, tx, scan_interval, config_file, node_id).await
-        },
-    ));
+    subsys.spawn("config-file-watcher", async move |s| {
+        watch_config_file(s, config_path, tx, scan_interval, config_file, node_id).await
+    });
 
     Ok((config, rx))
 }
 
 async fn watch_config_file(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     path: PathBuf,
     tx: mpsc::Sender<(Peers, PeerInfo, Option<usize>)>,
     scan_interval: Duration,
@@ -425,8 +422,8 @@ async fn watch_config_file(
 
     loop {
         select! {
-            _ = interval.tick() => config_file = reload_config(subsys, &path, config_file, &node_id, &tx).await?,
-            _ = subsys.on_shutdown_requested() => break,
+            _ = interval.tick() => config_file = reload_config(&subsys, &path, config_file, &node_id, &tx).await?,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -434,7 +431,7 @@ async fn watch_config_file(
 }
 
 async fn reload_config(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     path: &Path,
     config_file: ConfigFile,
     node_id: &str,
@@ -462,7 +459,7 @@ async fn reload_config(
             .collect();
         let Some(me) = me else {
             error!("This node is no longer part of the cluster config, shutting down …");
-            subsys.request_shutdown();
+            subsys.request_global_shutdown();
             return Err(miette!(
                 "Node '{}' is not defined in the cluster config.",
                 node_id

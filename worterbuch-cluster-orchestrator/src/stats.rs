@@ -12,7 +12,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 #[cfg(feature = "jemalloc")]
 use tower_http::cors::Any;
 #[cfg(feature = "jemalloc")]
@@ -178,22 +178,21 @@ impl Server {
     }
 }
 
-pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
+pub async fn start_stats_endpoint(subsys: &Subsystem, port: u16) -> Result<StatsSender> {
     let (evt_tx, evt_rx) = mpsc::channel(1);
     let (api_tx, api_rx) = mpsc::channel(1);
 
     StatsActor::start_stats_actor(subsys, evt_rx, api_rx);
 
-    subsys.start(SubsystemBuilder::new(
-        "stats-endpoint",
-        async move |s: &mut SubsystemHandle| run_server(s, api_tx, port).await,
-    ));
+    subsys.spawn("stats-endpoint", async move |s| {
+        run_server(s, api_tx, port).await
+    });
 
     Ok(StatsSender(evt_tx))
 }
 
 async fn run_server(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     api_tx: mpsc::Sender<StatsApiMessage>,
     port: u16,
 ) -> Result<()> {
@@ -237,9 +236,9 @@ async fn run_server(
         .into_diagnostic()
         .wrap_err_with(|| format!("stats endpoint could not bind to socket address {addr}"))?;
 
-    let shutdown_token = subsys.create_cancellation_token();
+    let shutdown_token = subsys.clone();
     let signal = async move {
-        shutdown_token.cancelled().await;
+        shutdown_token.shutdown_requested().await;
     };
 
     axum::serve(listener, app.with_state(server))
@@ -259,31 +258,28 @@ fn cors() -> CorsLayer {
     // .expose_headers([header::SET_COOKIE])
 }
 
-struct StatsActor<'a> {
-    subsys: &'a mut SubsystemHandle,
+struct StatsActor {
+    subsys: Subsystem,
     stats_rx: mpsc::Receiver<StatsEvent>,
     api_rx: mpsc::Receiver<StatsApiMessage>,
     election_state: ElectionState,
 }
 
-impl<'a> StatsActor<'a> {
+impl StatsActor {
     fn start_stats_actor(
-        subsys: &SubsystemHandle,
+        subsys: &Subsystem,
         stats_rx: mpsc::Receiver<StatsEvent>,
         api_rx: mpsc::Receiver<StatsApiMessage>,
     ) {
-        subsys.start(SubsystemBuilder::new(
-            "stats-actor",
-            async |s: &mut SubsystemHandle| {
-                let actor = StatsActor {
-                    subsys: s,
-                    stats_rx,
-                    api_rx,
-                    election_state: ElectionState::Candidate,
-                };
-                actor.run_stats_actor().await
-            },
-        ));
+        subsys.spawn("stats-actor", async |s| {
+            let actor = StatsActor {
+                subsys: s,
+                stats_rx,
+                api_rx,
+                election_state: ElectionState::Candidate,
+            };
+            actor.run_stats_actor().await
+        });
     }
 
     async fn run_stats_actor(mut self) -> Result<()> {
@@ -297,7 +293,7 @@ impl<'a> StatsActor<'a> {
                     Some(it) => self.api_request(it),
                     None => break,
                 },
-                _ = self.subsys.on_shutdown_requested() => break,
+                _ = self.subsys.shutdown_requested() => break,
             }
         }
 

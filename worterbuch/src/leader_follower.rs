@@ -31,7 +31,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
@@ -66,7 +66,7 @@ pub enum ClientWriteCommand {
 pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
 
 pub async fn run_cluster_sync_port(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     config: Config,
     on_follower_connected: mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -97,13 +97,13 @@ pub async fn run_cluster_sync_port(
         select! {
             client = listener.accept() => match client {
                 // TODO reject connections from clients that are not cluster peers
-                Ok(client) => serve(subsys, client, &on_follower_connected, config.clone()).await,
+                Ok(client) => serve(&subsys, client, &on_follower_connected, config.clone()).await,
                 Err(e) => {
                     error!("Error accepting follower connections: {e}");
                     break;
                 },
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -115,7 +115,7 @@ pub async fn run_cluster_sync_port(
 }
 
 async fn serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client: (TcpStream, SocketAddr),
     on_follower_connected: &mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -128,17 +128,14 @@ async fn serve(
         return;
     }
 
-    subsys.start(SubsystemBuilder::new(
-        client.1.to_string(),
-        async move |s: &mut SubsystemHandle| {
-            forward_events_to_follower(s, client.0, client.1, sync_rx, config).await;
-            Ok::<(), Error>(())
-        },
-    ));
+    subsys.spawn(client.1.to_string(), async move |s| {
+        forward_events_to_follower(s, client.0, client.1, sync_rx, config).await;
+        Ok::<(), Error>(())
+    });
 }
 
 async fn forward_events_to_follower(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     mut tcp_stream: TcpStream,
     follower: SocketAddr,
     sync_rx: oneshot::Receiver<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -193,7 +190,7 @@ async fn forward_events_to_follower(
                     }
                 }
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
@@ -250,23 +247,20 @@ pub async fn process_leader_message(
     Ok(())
 }
 
-pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
+pub fn shutdown_on_stdin_close(subsys: &Subsystem) {
     info!("Registering stdin close handler …");
 
     let (tx, rx) = oneshot::channel();
 
-    subsys.start(SubsystemBuilder::new(
-        "stdin-monitor",
-        async |s: &mut SubsystemHandle| {
-            select! {
-                _ = rx => (),
-                _ = s.on_shutdown_requested() => (),
-            }
-            info!("Shutting down …");
-            s.request_shutdown();
-            Ok::<(), miette::Error>(())
-        },
-    ));
+    subsys.spawn("stdin-monitor", async |s| {
+        select! {
+            _ = rx => (),
+            _ = s.shutdown_requested() => (),
+        }
+        info!("Shutting down …");
+        s.request_global_shutdown();
+        Ok::<(), miette::Error>(())
+    });
 
     thread::spawn(move || {
         let stdin = io::stdin();

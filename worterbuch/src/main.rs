@@ -19,7 +19,7 @@
 
 use miette::{IntoDiagnostic, Result};
 use std::env;
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tosub::Subsystem;
 use worterbuch::{Config, run_worterbuch};
 
 fn main() -> Result<()> {
@@ -88,15 +88,12 @@ async fn start() -> Result<()> {
 
     let cfg = config.clone();
 
-    Toplevel::new(async |s: &mut SubsystemHandle| {
-        s.start(SubsystemBuilder::new(
-            "worterbuch",
-            async |s: &mut SubsystemHandle| run_worterbuch(s, config).await,
-        ));
-    })
-    .catch_signals()
-    .handle_shutdown_requests(cfg.shutdown_timeout)
-    .await?;
+    Subsystem::build_root("worterbuch")
+        .catch_signals()
+        .with_timeout(cfg.shutdown_timeout)
+        .start(async |s| run_worterbuch(s, config).await)
+        .join()
+        .await;
 
     Ok(())
 }

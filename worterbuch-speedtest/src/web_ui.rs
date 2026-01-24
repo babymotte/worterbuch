@@ -191,7 +191,7 @@ fn latency_events(
 }
 
 pub async fn run_web_ui(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     mut throughput_backend_events: mpsc::UnboundedReceiver<throughput::UiApi>,
     mut latency_backend_events: mpsc::UnboundedReceiver<latency::UiApi>,
     throughput_api: mpsc::UnboundedSender<throughput::Api>,
@@ -287,7 +287,7 @@ pub async fn run_web_ui(
 
     Server::new(TcpListener::bind(format!("0.0.0.0:{port}")))
         .name("worterbuch-speedtest-server")
-        .run_with_graceful_shutdown(app, subsys.on_shutdown_requested(), None)
+        .run_with_graceful_shutdown(app, subsys.shutdown_requested(), None)
         .await
         .into_diagnostic()?;
 

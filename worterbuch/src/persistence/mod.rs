@@ -11,7 +11,7 @@ use crate::{
 };
 use lazy_static::lazy_static;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{info, warn};
 use worterbuch_common::{Key, SYSTEM_TOPIC_ROOT_PREFIX, ValueEntry};
 
@@ -107,7 +107,7 @@ impl PersistentStorageImpl {
 }
 
 pub(crate) async fn restore(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: &Config,
     api: &CloneableWbApi,
 ) -> PersistenceResult<Worterbuch> {
@@ -119,7 +119,7 @@ pub(crate) async fn restore(
 }
 
 async fn get_storage_instance(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: &Config,
     api: &CloneableWbApi,
 ) -> PersistenceResult<PersistentStorageImpl> {

@@ -178,6 +178,7 @@ fn load(
     config: Config,
     tx: oneshot::Sender<Worterbuch>,
 ) -> PersistenceResult<()> {
+    info!("Loading data from ReDB …");
     let mut store = Store::default();
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(TABLE)?;
@@ -192,6 +193,7 @@ fn load(
         };
     }
     store.count_entries();
+    info!("Data load complete.");
     tx.send(Worterbuch::with_store(store, config.to_owned()))
         .ok();
     Ok(())

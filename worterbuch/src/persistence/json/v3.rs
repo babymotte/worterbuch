@@ -26,14 +26,14 @@ use worterbuch_common::WbApi;
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
 ) -> PersistenceResult<()> {
     let mut interval = config.persistence_interval();
 
     loop {
         select! {
             _ = interval.tick() => asynchronous(&worterbuch, &config).await?,
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 

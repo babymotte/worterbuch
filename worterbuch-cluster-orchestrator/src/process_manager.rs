@@ -16,15 +16,15 @@
  */
 
 use miette::{Context, IntoDiagnostic, Result};
-use std::{error::Error, fmt, ops::ControlFlow, process::Stdio, time::Duration};
+use std::{fmt, ops::ControlFlow, process::Stdio, time::Duration};
 use tokio::{
     process::{Child, ChildStdin, Command},
     select,
     sync::mpsc,
     time::{Interval, interval, sleep},
 };
-use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
 use tokio_process_terminate::TerminateExt;
+use tosub::Subsystem;
 use tracing::{info, instrument, warn};
 
 #[derive(Debug, Clone)]
@@ -58,8 +58,8 @@ impl fmt::Display for CommandDefinition {
     }
 }
 
-pub struct ChildProcessManagerActor<'a> {
-    subsys: &'a mut SubsystemHandle,
+pub struct ChildProcessManagerActor {
+    subsys: Subsystem,
     api_rx: mpsc::Receiver<ChildProcessMessage>,
     command: Option<CommandDefinition>,
     process: Option<(Child, String)>,
@@ -71,12 +71,12 @@ pub struct ChildProcessManagerActor<'a> {
 
 pub struct ChildProcessManager {
     api_tx: mpsc::Sender<ChildProcessMessage>,
-    subsys: NestedSubsystem<Box<dyn Error + Send + Sync + 'static>>,
+    subsys: Subsystem,
 }
 
 impl Drop for ChildProcessManager {
     fn drop(&mut self) {
-        self.subsys.initiate_shutdown();
+        self.subsys.request_local_shutdown();
     }
 }
 
@@ -85,7 +85,7 @@ enum ChildProcessMessage {
     Restart(CommandDefinition),
 }
 
-impl<'a> ChildProcessManagerActor<'a> {
+impl ChildProcessManagerActor {
     async fn run_process_manager(mut self) -> Result<()> {
         let mut crash_counter = 0;
         let mut interval = interval(Duration::from_secs(10));
@@ -111,7 +111,7 @@ impl<'a> ChildProcessManagerActor<'a> {
 
         if !self.restart && self.started {
             info!("Automatic restart disabled, shutting down …");
-            self.subsys.request_shutdown();
+            self.subsys.request_global_shutdown();
         }
     }
 
@@ -134,7 +134,7 @@ impl<'a> ChildProcessManagerActor<'a> {
                 recv = self.api_rx.recv() => if let Some(msg) = recv {
                     self.process_msg(msg).await?;
                 },
-                _ = self.subsys.on_shutdown_requested() => self.stop().await?,
+                _ = self.subsys.shutdown_requested() => self.stop().await?,
             }
         }
 
@@ -149,7 +149,7 @@ impl<'a> ChildProcessManagerActor<'a> {
     async fn wait(&mut self, millis: u64) -> Result<()> {
         select! {
             _ = sleep(Duration::from_millis(millis)) => (),
-            _ = self.subsys.on_shutdown_requested() => self.stop().await?,
+            _ = self.subsys.shutdown_requested() => self.stop().await?,
         }
 
         Ok(())
@@ -211,7 +211,7 @@ impl<'a> ChildProcessManagerActor<'a> {
                     *crash_counter -= 1;
                 }
             },
-            _ = self.subsys.on_shutdown_requested() => {
+            _ = self.subsys.shutdown_requested() => {
                 self.process = Some((proc, cmd));
                 self.stop().await?;
             },
@@ -255,25 +255,22 @@ impl<'a> ChildProcessManagerActor<'a> {
 }
 
 impl ChildProcessManager {
-    pub fn new(subsys: &SubsystemHandle, name: &str, restart: bool) -> Self {
+    pub fn new(subsys: &Subsystem, name: &str, restart: bool) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
-        let subsys = subsys.start(SubsystemBuilder::new(
-            name,
-            async move |s: &mut SubsystemHandle| {
-                let actor = ChildProcessManagerActor {
-                    subsys: s,
-                    api_rx,
-                    process: None,
-                    stdin: None,
-                    command: None,
-                    started: false,
-                    stopped: false,
-                    restart,
-                };
-                actor.run_process_manager().await
-            },
-        ));
+        let subsys = subsys.spawn(name, async move |s| {
+            let actor = ChildProcessManagerActor {
+                subsys: s,
+                api_rx,
+                process: None,
+                stdin: None,
+                command: None,
+                started: false,
+                stopped: false,
+                restart,
+            };
+            actor.run_process_manager().await
+        });
 
         ChildProcessManager { api_tx, subsys }
     }
@@ -287,13 +284,9 @@ impl ChildProcessManager {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn stop(&self) -> Result<()> {
-        self.subsys.initiate_shutdown();
-        self.subsys
-            .join()
-            .await
-            .into_diagnostic()
-            .wrap_err("error waiting for subsystem to stop")?;
+    pub async fn stop(&mut self) -> Result<()> {
+        self.subsys.request_local_shutdown();
+        self.subsys.join().await;
         Ok(())
     }
 }

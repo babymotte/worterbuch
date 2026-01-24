@@ -23,7 +23,7 @@ use crate::{
 use miette::{Context, IntoDiagnostic, Result};
 use std::{ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{Instrument, Level, debug, info, instrument, span, warn};
 
 enum ElectionRoundEvent {
@@ -41,7 +41,7 @@ pub enum ElectionOutcome {
 }
 
 struct Election<'a> {
-    subsys: &'a SubsystemHandle,
+    subsys: &'a Subsystem,
     socket: &'a mut UdpSocket,
     config: &'a mut Config,
     votes_in_my_favor: usize,
@@ -51,7 +51,7 @@ struct Election<'a> {
 
 impl<'a> Election<'a> {
     fn new(
-        subsys: &'a SubsystemHandle,
+        subsys: &'a Subsystem,
         socket: &'a mut UdpSocket,
         config: &'a mut Config,
         peers: &'a mut Peers,
@@ -175,7 +175,7 @@ impl<'a> Election<'a> {
                 _ = &mut timeout => ElectionRoundEvent::Timeout,
                 recv = peers_rx.recv() => ElectionRoundEvent::PeersChanged(recv),
                 msg = self.recv_peer_msg(buf) => ElectionRoundEvent::PeerMessageReceived(msg?),
-                _ = self.subsys.on_shutdown_requested() => ElectionRoundEvent::ShutdownRequested
+                _ = self.subsys.shutdown_requested() => ElectionRoundEvent::ShutdownRequested
             };
 
             match next_event {
@@ -326,7 +326,7 @@ impl<'a> Election<'a> {
                         },
                     }
                 },
-                _ = self.subsys.on_shutdown_requested() => return Ok(None),
+                _ = self.subsys.shutdown_requested() => return Ok(None),
             }
         }
     }
@@ -371,7 +371,7 @@ impl<'a> Election<'a> {
                         },
                     }
                 },
-                _ = self.subsys.on_shutdown_requested() => return Ok(Some(ElectionOutcome::Cancelled)),
+                _ = self.subsys.shutdown_requested() => return Ok(Some(ElectionOutcome::Cancelled)),
                 _ = &mut timeout => {
                     warn!("Didn't get a heartbeat from node '{}' in time, looks like it did not become leader after all.", supported_vote.node_id);
                     return Ok(None);
@@ -411,7 +411,7 @@ impl<'a> Election<'a> {
 
 // #[instrument(skip(subsys, socket, config, peers_rx))]
 pub async fn elect_leader(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     socket: &mut UdpSocket,
     config: &mut Config,
     peers: &mut Peers,
@@ -421,6 +421,6 @@ pub async fn elect_leader(
     let mut election = Election::new(subsys, socket, config, peers, prio);
     select! {
         leader = election.run(peers_rx) => leader,
-        _ = subsys.on_shutdown_requested() => Ok(ElectionOutcome::Cancelled),
+        _ = subsys.shutdown_requested() => Ok(ElectionOutcome::Cancelled),
     }
 }

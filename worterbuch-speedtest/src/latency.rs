@@ -54,7 +54,7 @@ pub enum UiApi {
 }
 
 pub async fn start_latency_test(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     ui_tx: mpsc::UnboundedSender<UiApi>,
     mut api_rx: mpsc::UnboundedReceiver<Api>,
 ) -> miette::Result<()> {
@@ -67,7 +67,7 @@ pub async fn start_latency_test(
             } else {
                 break;
             },
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
 
