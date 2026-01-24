@@ -46,8 +46,8 @@ use tokio::{
     spawn,
     sync::{broadcast, mpsc},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tosub::Subsystem;
 use tracing::{error, info};
 
 use crate::{

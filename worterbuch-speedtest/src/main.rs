@@ -22,10 +22,10 @@ mod throughput;
 mod web_ui;
 
 use latency::start_latency_test;
-use miette::IntoDiagnostic;
 use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
+use tosub::Subsystem;
 use tracing_subscriber::EnvFilter;
 use web_ui::run_web_ui;
 
@@ -37,16 +37,12 @@ async fn main() -> miette::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Toplevel::new(async move |s| {
-        s.start(SubsystemBuilder::new(
-            "worterbuch-speedtest",
-            run_speedtests_with_ui,
-        ));
-    })
-    .catch_signals()
-    .handle_shutdown_requests(Duration::from_millis(1000))
-    .await
-    .into_diagnostic()?;
+    Subsystem::build_root("worterbuch-speedtest")
+        .catch_signals()
+        .with_timeout(Duration::from_millis(1000))
+        .start(run_speedtests_with_ui)
+        .join()
+        .await;
 
     Ok(())
 }
@@ -57,29 +53,22 @@ async fn run_speedtests_with_ui(subsys: Subsystem) -> miette::Result<()> {
     let (throughput_ui_tx, throughput_ui_rx) = mpsc::unbounded_channel();
     let (latency_ui_tx, latency_ui_rx) = mpsc::unbounded_channel();
 
-    subsys.spawn(
-        "speedtest-web-ui",
-        async |s| {
-            run_web_ui(
-                s,
-                throughput_ui_rx,
-                latency_ui_rx,
-                throughput_api_tx,
-                latency_api_tx,
-            )
-            .await
-        },
-    ));
-    subsys.spawn(
-        "throughput",
-        async move |s| {
-            start_throughput_test(s, throughput_ui_tx, throughput_api_rx).await
-        },
-    ));
-    subsys.spawn(
-        "latency",
-        async move |s| start_latency_test(s, latency_ui_tx, latency_api_rx).await,
-    ));
+    subsys.spawn("speedtest-web-ui", async |s| {
+        run_web_ui(
+            s,
+            throughput_ui_rx,
+            latency_ui_rx,
+            throughput_api_tx,
+            latency_api_tx,
+        )
+        .await
+    });
+    subsys.spawn("throughput", async move |s| {
+        start_throughput_test(s, throughput_ui_tx, throughput_api_rx).await
+    });
+    subsys.spawn("latency", async move |s| {
+        start_latency_test(s, latency_ui_tx, latency_api_rx).await
+    });
 
     Ok(())
 }

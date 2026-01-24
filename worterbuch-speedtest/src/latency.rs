@@ -24,7 +24,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{error, info};
 use worterbuch_client::{
     ServerMessage, benchmark::generate_dummy_data, connect_with_default_config,

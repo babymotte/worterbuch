@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{select, sync::mpsc};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{debug, error, warn};
 use worterbuch_client::topic;
 
@@ -165,8 +165,8 @@ pub enum UiApi {
     CreatingAgents(usize, usize),
 }
 
-struct ThroughputTest<'a> {
-    subsys: &'a mut SubsystemHandle,
+struct ThroughputTest {
+    subsys: Subsystem,
     status_tx: mpsc::UnboundedSender<Status>,
     current_agents: usize,
     current_target_rate: usize,
@@ -176,9 +176,9 @@ struct ThroughputTest<'a> {
     stats: Stats,
 }
 
-impl<'a> ThroughputTest<'a> {
+impl ThroughputTest {
     fn new(
-        subsys: &'a mut SubsystemHandle,
+        subsys: Subsystem,
         status_tx: mpsc::UnboundedSender<Status>,
         ui_tx: mpsc::UnboundedSender<UiApi>,
         stats: Stats,
@@ -232,10 +232,9 @@ impl<'a> ThroughputTest<'a> {
         let result_tx = self.status_tx.clone();
         let (conn_tx, mut conn_rx) = mpsc::unbounded_channel();
         debug!("Spawning agent {i}");
-        self.subsys.spawn(
-            format!("client-{i}"),
-            async move |s| client(i, result_tx, agent_rx, s, conn_tx).await,
-        ));
+        self.subsys.spawn(format!("client-{i}"), async move |s| {
+            client(i, result_tx, agent_rx, s, conn_tx).await
+        });
         self.agent_apis.push(agent_tx);
         let conn = conn_rx.recv().await;
         if conn.is_none() {
@@ -328,7 +327,7 @@ impl<'a> ThroughputTest<'a> {
 }
 
 pub async fn start_throughput_test<'a>(
-    subsys: &'a mut SubsystemHandle,
+    subsys: Subsystem,
     ui_tx: mpsc::UnboundedSender<UiApi>,
     mut api_rx: mpsc::UnboundedReceiver<Api>,
 ) -> miette::Result<()> {
@@ -338,16 +337,14 @@ pub async fn start_throughput_test<'a>(
 
     let mut stats_timer = tokio::time::interval(Duration::from_secs(1));
 
-    let ct = subsys.create_cancellation_token();
-
-    let mut test = ThroughputTest::new(subsys, status_tx, ui_tx, stats);
+    let mut test = ThroughputTest::new(subsys.clone(), status_tx, ui_tx, stats);
 
     loop {
         select! {
             Some(api) = api_rx.recv() =>  test.process_api_message(api).await?,
             Some(status) = status_rx.recv() => test.stats.process_status_update(status),
             _ = stats_timer.tick() => test.report_stats().await?,
-            _ = ct.cancelled() => break,
+            _ = subsys.shutdown_requested() => break,
             else => break,
         }
     }
