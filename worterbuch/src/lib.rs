@@ -72,7 +72,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{Instrument, Level, debug, error, info, span};
-use worterbuch_common::{INTERNAL_CLIENT_ID, ValueEntry};
+use worterbuch_common::{INTERNAL_CLIENT_ID, SYSTEM_TOPIC_NAME, ValueEntry};
 
 type ServerSubsystem = tokio_graceful_shutdown::NestedSubsystem<Box<dyn Error + Send + Sync>>;
 
@@ -110,6 +110,16 @@ async fn do_run_worterbuch(
     }
 
     let mut worterbuch = persistence::restore(subsys, &config, &api).await?;
+
+    if let Some(name) = config.args.instance_name.as_ref() {
+        worterbuch
+            .set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_NAME),
+                json!(name),
+                INTERNAL_CLIENT_ID,
+            )
+            .await?;
+    }
 
     let web_server = if let Some(WsEndpoint {
         endpoint: Endpoint {
