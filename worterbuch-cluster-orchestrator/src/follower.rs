@@ -28,11 +28,11 @@ use crate::{
 use miette::Result;
 use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, time::sleep};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{Level, info, instrument, warn};
 
 pub async fn follow(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &Config,
     peers: &Peers,

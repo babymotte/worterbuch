@@ -23,7 +23,7 @@ use crate::{
 use miette::{Context, IntoDiagnostic, Result};
 use std::{ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{Instrument, Level, debug, info, instrument, span, warn};
 
 enum ElectionRoundEvent {
@@ -41,7 +41,7 @@ pub enum ElectionOutcome {
 }
 
 struct Election<'a> {
-    subsys: &'a Subsystem,
+    subsys: &'a SubsystemHandle,
     socket: &'a mut UdpSocket,
     config: &'a mut Config,
     votes_in_my_favor: usize,
@@ -51,7 +51,7 @@ struct Election<'a> {
 
 impl<'a> Election<'a> {
     fn new(
-        subsys: &'a Subsystem,
+        subsys: &'a SubsystemHandle,
         socket: &'a mut UdpSocket,
         config: &'a mut Config,
         peers: &'a mut Peers,
@@ -411,7 +411,7 @@ impl<'a> Election<'a> {
 
 // #[instrument(skip(subsys, socket, config, peers_rx))]
 pub async fn elect_leader(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &mut Config,
     peers: &mut Peers,

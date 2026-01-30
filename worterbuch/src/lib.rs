@@ -43,7 +43,7 @@ pub mod telemetry;
 mod worterbuch;
 
 pub use config::*;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 pub use worterbuch_common as common;
 
 use crate::{
@@ -74,7 +74,7 @@ use tracing::{Instrument, Level, debug, error, info, span};
 use worterbuch_common::{INTERNAL_CLIENT_ID, SYSTEM_TOPIC_NAME, ValueEntry};
 
 pub async fn spawn_worterbuch(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     config: Config,
 ) -> WorterbuchAppResult<CloneableWbApi> {
     let (api_tx, api_rx) = oneshot::channel();
@@ -82,13 +82,13 @@ pub async fn spawn_worterbuch(
     Ok(api_rx.await?)
 }
 
-pub async fn run_worterbuch(subsys: Subsystem, config: Config) -> WorterbuchAppResult<()> {
+pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> WorterbuchAppResult<()> {
     do_run_worterbuch(subsys, config, None).await?;
     Ok(())
 }
 
 async fn do_run_worterbuch(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     config: Config,
     tx: Option<oneshot::Sender<CloneableWbApi>>,
 ) -> WorterbuchAppResult<()> {
@@ -435,13 +435,13 @@ async fn process_api_call_as_follower(worterbuch: &mut Worterbuch, function: WbF
 }
 
 async fn run_in_regular_mode(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<Subsystem>,
-    tcp_server: Option<Subsystem>,
-    unix_socket: Option<Subsystem>,
+    web_server: Option<SubsystemHandle>,
+    tcp_server: Option<SubsystemHandle>,
+    unix_socket: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
     loop {
         select! {
@@ -465,13 +465,13 @@ async fn run_in_regular_mode(
 }
 
 async fn run_in_leader_mode(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<Subsystem>,
-    tcp_server: Option<Subsystem>,
-    unix_socket: Option<Subsystem>,
+    web_server: Option<SubsystemHandle>,
+    tcp_server: Option<SubsystemHandle>,
+    unix_socket: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
     info!("Running in LEADER mode.");
 
@@ -611,11 +611,11 @@ async fn run_in_leader_mode(
 }
 
 async fn run_in_follower_mode(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<Subsystem>,
+    web_server: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
     let leader_addr = if let Some(it) = &config.leader_address {
         it
@@ -690,12 +690,12 @@ async fn run_in_follower_mode(
 }
 
 async fn shutdown(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     config: Config,
-    web_server: Option<Subsystem>,
-    tcp_server: Option<Subsystem>,
-    unix_socket: Option<Subsystem>,
+    web_server: Option<SubsystemHandle>,
+    tcp_server: Option<SubsystemHandle>,
+    unix_socket: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
     info!("Shutdown sequence triggered");
 
@@ -715,23 +715,23 @@ async fn shutdown(
 }
 
 async fn shutdown_servers(
-    web_server: Option<Subsystem>,
-    tcp_server: Option<Subsystem>,
-    unix_socket: Option<Subsystem>,
+    web_server: Option<SubsystemHandle>,
+    tcp_server: Option<SubsystemHandle>,
+    unix_socket: Option<SubsystemHandle>,
 ) {
-    if let Some(mut it) = web_server {
+    if let Some(it) = web_server {
         info!("Shutting down web server …");
         it.request_local_shutdown();
         it.join().await;
     }
 
-    if let Some(mut it) = tcp_server {
+    if let Some(it) = tcp_server {
         info!("Shutting down tcp server …");
         it.request_local_shutdown();
         it.join().await;
     }
 
-    if let Some(mut it) = unix_socket {
+    if let Some(it) = unix_socket {
         info!("Shutting down unix socket …");
         it.request_local_shutdown();
         it.join().await;

@@ -26,7 +26,7 @@ use worterbuch_common::WbApi;
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
 ) -> PersistenceResult<()> {
     let mut interval = config.persistence_interval();
 

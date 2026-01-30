@@ -23,7 +23,7 @@ mod websocket;
 use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
-    error::WorterbuchAppResult,
+    error::{WorterbuchAppError, WorterbuchAppResult},
     print_endpoint,
     server::{CloneableWbApi, common::init_server_socket},
     stats::VERSION,
@@ -72,7 +72,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
@@ -769,7 +769,7 @@ pub(crate) async fn start(
     bind_addr: IpAddr,
     port: u16,
     public_addr: String,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     ws_enabled: bool,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
@@ -810,7 +810,7 @@ pub(crate) async fn start(
 }
 
 pub async fn build_worterbuch_router(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     worterbuch: CloneableWbApi,
     tls: bool,
     port: u16,
@@ -936,7 +936,7 @@ pub async fn build_worterbuch_router(
 }
 
 async fn run_ws_server(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     mut listener: mpsc::Receiver<(WebSocket, SocketAddr)>,
     worterbuch: CloneableWbApi,
 ) -> WorterbuchResult<()> {
@@ -973,7 +973,7 @@ async fn run_ws_server(
                             _ = s.shutdown_requested() => (),
                         }
                         conn_closed_tx.send(id).await.ok();
-                        Ok::<(),miette::Error>(())
+                        Ok::<(),WorterbuchAppError>(())
                     });
                     clients.insert(id, client);
                 } else {
@@ -985,7 +985,7 @@ async fn run_ws_server(
         }
     }
 
-    for (cid, mut subsys) in clients {
+    for (cid, subsys) in clients {
         subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
         subsys.join().await;

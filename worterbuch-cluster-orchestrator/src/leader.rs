@@ -28,11 +28,11 @@ use hashbrown::HashMap;
 use miette::Result;
 use std::{ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 pub async fn lead(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     socket: &mut UdpSocket,
     config: &mut Config,
     me: &mut PeerInfo,

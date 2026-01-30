@@ -24,7 +24,7 @@ use tokio::{
     time::{Interval, interval, sleep},
 };
 use tokio_process_terminate::TerminateExt;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{info, instrument, warn};
 
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ impl fmt::Display for CommandDefinition {
 }
 
 pub struct ChildProcessManagerActor {
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     api_rx: mpsc::Receiver<ChildProcessMessage>,
     command: Option<CommandDefinition>,
     process: Option<(Child, String)>,
@@ -71,7 +71,7 @@ pub struct ChildProcessManagerActor {
 
 pub struct ChildProcessManager {
     api_tx: mpsc::Sender<ChildProcessMessage>,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
 }
 
 impl Drop for ChildProcessManager {
@@ -255,7 +255,7 @@ impl ChildProcessManagerActor {
 }
 
 impl ChildProcessManager {
-    pub fn new(subsys: &Subsystem, name: &str, restart: bool) -> Self {
+    pub fn new(subsys: &SubsystemHandle, name: &str, restart: bool) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
         let subsys = subsys.spawn(name, async move |s| {

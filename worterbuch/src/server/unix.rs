@@ -30,7 +30,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 use worterbuch_common::{
@@ -46,7 +46,7 @@ enum SocketEvent {
 pub async fn start(
     worterbuch: CloneableWbApi,
     bind_addr: PathBuf,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
 ) -> Result<()> {
     info!(
         "Serving Unix Socket endpoint at {}",
@@ -124,7 +124,7 @@ pub async fn start(
         }
     }
 
-    for (cid, mut subsys) in clients {
+    for (cid, subsys) in clients {
         subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
         subsys.join().await;
@@ -140,7 +140,7 @@ pub async fn start(
 }
 
 async fn next_socket_event(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     conn_closed_rx: &mut mpsc::Receiver<Uuid>,
     listener: &UnixListener,
     waiting_for_free_connections: bool,
@@ -157,7 +157,7 @@ async fn next_socket_event(
 }
 
 async fn serve(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
@@ -190,7 +190,7 @@ struct ServeLoop<'a> {
 }
 
 async fn serve_loop(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     client_id: Uuid,
     remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
@@ -245,7 +245,7 @@ async fn serve_loop(
 }
 
 async fn forward_messages_to_socket(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     mut unix_send_rx: mpsc::Receiver<ServerMessage>,
     mut unix_tx: OwnedWriteHalf,
     client_id: Uuid,

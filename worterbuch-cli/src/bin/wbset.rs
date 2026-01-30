@@ -23,7 +23,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_message, provide_key_value_pairs};
@@ -59,17 +59,16 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Subsystem::build_root("wbset")
+    tosub::build_root("wbset")
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
         .start(run)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }
 
-async fn run(subsys: Subsystem) -> Result<()> {
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

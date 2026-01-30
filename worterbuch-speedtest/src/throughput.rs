@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, error, warn};
 use worterbuch_client::topic;
 
@@ -166,7 +166,7 @@ pub enum UiApi {
 }
 
 struct ThroughputTest {
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     status_tx: mpsc::UnboundedSender<Status>,
     current_agents: usize,
     current_target_rate: usize,
@@ -178,7 +178,7 @@ struct ThroughputTest {
 
 impl ThroughputTest {
     fn new(
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         status_tx: mpsc::UnboundedSender<Status>,
         ui_tx: mpsc::UnboundedSender<UiApi>,
         stats: Stats,
@@ -327,7 +327,7 @@ impl ThroughputTest {
 }
 
 pub async fn start_throughput_test<'a>(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     ui_tx: mpsc::UnboundedSender<UiApi>,
     mut api_rx: mpsc::UnboundedReceiver<Api>,
 ) -> miette::Result<()> {
@@ -356,7 +356,7 @@ async fn client(
     id: usize,
     result_tx: mpsc::UnboundedSender<Status>,
     mut api: mpsc::UnboundedReceiver<AgentApi>,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     on_connected: mpsc::UnboundedSender<()>,
 ) -> miette::Result<()> {
     let (wb, _on_disconnect, _) = worterbuch_client::connect_with_default_config()

@@ -72,7 +72,7 @@ libc = "0.2.175"
 redb = "3.0.2"
 strum = { version = "0.27.2", features = ["derive"] }
 hashbrown = { version = "0.16.1", features = ["serde"] }
-tosub = "0.1.0"
+tosub = "1.0.0-rc.2"
 
 [lints.rust]
 # unsafe_code = "forbid"

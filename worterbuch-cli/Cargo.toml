@@ -20,7 +20,7 @@ clap = { version = "4.1.11", features = ["derive"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 miette = { version = "7.5.0", features = ["fancy"] }
 tracing = "0.1.41"
-tosub = "0.1.0"
+tosub = "1.0.0-rc.2"
 
 [lints.rust]
 unsafe_code = "forbid"

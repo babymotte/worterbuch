@@ -31,7 +31,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
@@ -66,7 +66,7 @@ pub enum ClientWriteCommand {
 pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
 
 pub async fn run_cluster_sync_port(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     config: Config,
     on_follower_connected: mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -115,7 +115,7 @@ pub async fn run_cluster_sync_port(
 }
 
 async fn serve(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     client: (TcpStream, SocketAddr),
     on_follower_connected: &mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -135,7 +135,7 @@ async fn serve(
 }
 
 async fn forward_events_to_follower(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     mut tcp_stream: TcpStream,
     follower: SocketAddr,
     sync_rx: oneshot::Receiver<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
@@ -247,7 +247,7 @@ pub async fn process_leader_message(
     Ok(())
 }
 
-pub fn shutdown_on_stdin_close(subsys: &Subsystem) {
+pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
     info!("Registering stdin close handler …");
 
     let (tx, rx) = oneshot::channel();

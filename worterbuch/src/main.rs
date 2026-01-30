@@ -19,7 +19,6 @@
 
 use miette::{IntoDiagnostic, Result};
 use std::env;
-use tosub::Subsystem;
 use worterbuch::{Config, run_worterbuch};
 
 fn main() -> Result<()> {
@@ -88,12 +87,11 @@ async fn start() -> Result<()> {
 
     let cfg = config.clone();
 
-    Subsystem::build_root("worterbuch")
+    tosub::build_root("worterbuch")
         .catch_signals()
         .with_timeout(cfg.shutdown_timeout)
         .start(async |s| run_worterbuch(s, config).await)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }

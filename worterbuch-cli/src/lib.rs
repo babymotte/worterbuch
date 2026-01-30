@@ -27,7 +27,7 @@ use std::{
     time::Duration,
 };
 use tokio::{select, spawn, sync::mpsc, time::sleep};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::error;
 use worterbuch_client::{
     Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
@@ -43,7 +43,7 @@ pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
     }
 }
 
-pub fn provide_keys(keys: Option<Vec<String>>, subsys: Subsystem, tx: mpsc::Sender<String>) {
+pub fn provide_keys(keys: Option<Vec<String>>, subsys: SubsystemHandle, tx: mpsc::Sender<String>) {
     if let Some(keys) = keys {
         spawn(async move {
             for key in keys {
@@ -81,7 +81,7 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: Subsystem, tx: mpsc::Send
     }
 }
 
-pub fn provide_values(json: bool, subsys: Subsystem, tx: mpsc::Sender<Value>) {
+pub fn provide_values(json: bool, subsys: SubsystemHandle, tx: mpsc::Sender<Value>) {
     subsys.spawn("read-stdin", async move |s| {
         let (lines_tx, mut lines_rx) = mpsc::channel(1);
         thread::spawn(move || {
@@ -122,7 +122,7 @@ pub fn provide_values(json: bool, subsys: Subsystem, tx: mpsc::Sender<Value>) {
 pub fn provide_key_value_pairs(
     key_value_pairs: Option<Vec<String>>,
     json: bool,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     tx: mpsc::Sender<(Key, Value)>,
 ) {
     if let Some(key_value_pairs) = key_value_pairs {

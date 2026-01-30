@@ -47,7 +47,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{error, info};
 
 use crate::{
@@ -191,7 +191,7 @@ fn latency_events(
 }
 
 pub async fn run_web_ui(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     mut throughput_backend_events: mpsc::UnboundedReceiver<throughput::UiApi>,
     mut latency_backend_events: mpsc::UnboundedReceiver<latency::UiApi>,
     throughput_api: mpsc::UnboundedSender<throughput::Api>,

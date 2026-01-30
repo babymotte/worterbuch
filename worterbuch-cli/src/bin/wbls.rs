@@ -22,7 +22,7 @@ use miette::Result;
 use std::io;
 use std::time::Duration;
 use tokio::select;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
@@ -58,17 +58,16 @@ async fn main() -> Result<()> {
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    Subsystem::build_root("wbls")
+    tosub::build_root("wbls")
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
         .start(run)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }
 
-async fn run(subsys: Subsystem) -> Result<()> {
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

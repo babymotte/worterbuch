@@ -27,7 +27,7 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, select, sync::mpsc, time::interval};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -333,7 +333,7 @@ impl Config {
 }
 
 pub async fn instrument_and_load_config(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
 ) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
     let args: Args = Args::parse();
     let config_file = load_config_file(&args.config_path).await?;
@@ -345,7 +345,7 @@ pub async fn instrument_and_load_config(
 
 // #[instrument(skip(subsys), err)]
 async fn load_config(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     args: Args,
     config_file: ConfigFile,
 ) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
@@ -409,7 +409,7 @@ async fn load_config(
 }
 
 async fn watch_config_file(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     path: PathBuf,
     tx: mpsc::Sender<(Peers, PeerInfo, Option<usize>)>,
     scan_interval: Duration,
@@ -431,7 +431,7 @@ async fn watch_config_file(
 }
 
 async fn reload_config(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     path: &Path,
     config_file: ConfigFile,
     node_id: &str,

@@ -25,7 +25,7 @@ use latency::start_latency_test;
 use std::{io, time::Duration};
 use throughput::start_throughput_test;
 use tokio::sync::mpsc;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing_subscriber::EnvFilter;
 use web_ui::run_web_ui;
 
@@ -37,7 +37,7 @@ async fn main() -> miette::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Subsystem::build_root("worterbuch-speedtest")
+    tosub::build_root("worterbuch-speedtest")
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
         .start(run_speedtests_with_ui)
@@ -47,7 +47,7 @@ async fn main() -> miette::Result<()> {
     Ok(())
 }
 
-async fn run_speedtests_with_ui(subsys: Subsystem) -> miette::Result<()> {
+async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
     let (throughput_api_tx, throughput_api_rx) = mpsc::unbounded_channel();
     let (latency_api_tx, latency_api_rx) = mpsc::unbounded_channel();
     let (throughput_ui_tx, throughput_ui_rx) = mpsc::unbounded_channel();

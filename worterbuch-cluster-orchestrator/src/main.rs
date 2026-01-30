@@ -17,19 +17,17 @@
 
 use miette::Result;
 use std::time::Duration;
-use tosub::Subsystem;
 use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
-    Subsystem::build_root("cluster-orchestrator")
+    tosub::build_root("cluster-orchestrator")
         .catch_signals()
         .with_timeout(Duration::from_secs(5))
         .start(instrument_and_run_main)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }

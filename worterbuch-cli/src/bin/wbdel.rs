@@ -21,7 +21,7 @@ use clap::Parser;
 use miette::Result;
 use std::{io, time::Duration};
 use tokio::{select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
@@ -60,17 +60,16 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    Subsystem::build_root("wbdel")
+    tosub::build_root("wbdel")
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
         .start(run)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }
 
-async fn run(subsys: Subsystem) -> Result<()> {
+async fn run(subsys: SubsystemHandle) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

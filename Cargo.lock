@@ -2879,10 +2879,12 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "0.1.0"
+version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d05a1c962623cc9c9a6cd48478e7c89a66d67b42a1db796089459da5bec5bb0"
+checksum = "1f71148f3fd3a1a076004cf6becf18d864d5a0845a23aed6561f66242a3c4f22"
 dependencies = [
+ "miette",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
