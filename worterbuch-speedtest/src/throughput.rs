@@ -239,7 +239,7 @@ impl<'a> ThroughputTest<'a> {
         self.agent_apis.push(agent_tx);
         let conn = conn_rx.recv().await;
         if conn.is_none() {
-            error!("Connection result channel closed.");
+            debug!("Connection result channel closed.");
             return Err(miette::miette!("Failed to spawn agent {i}."));
         }
         debug!("Agent {i} spawned.");
@@ -412,13 +412,13 @@ async fn client(
                     }
                 }
             } else {
-                warn!("Agent API channel closed.");
+                debug!("Agent API channel closed.");
                 break;
             },
             recv = rx.recv() => if let Some(offset) = recv {
                 if let Some(offset) = offset { received_offset = offset; }
             } else {
-                warn!("Worterbuch subscription channel closed.");
+                debug!("Worterbuch subscription channel closed.");
                 break;
             },
             _ = status_timer.tick() => {

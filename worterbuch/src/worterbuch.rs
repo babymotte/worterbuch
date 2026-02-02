@@ -199,7 +199,7 @@ impl PStateAggregatorState {
         spawn(async move {
             sleep(aggregate_duration).await;
             if let Err(e) = send_trigger.send(()).await {
-                error!("Error triggering send of aggregated PState to client {client_id}: {e}");
+                debug!("Error triggering send of aggregated PState to client {client_id}: {e}");
             }
         });
     }
@@ -485,7 +485,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
 
             let subs_key = topic!(
@@ -502,7 +502,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
             self.update_subscription_count(subs_key, client_subs).await;
         }
@@ -558,7 +558,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
             let subs_key = topic!(
                 SYSTEM_TOPIC_ROOT,
@@ -574,7 +574,7 @@ impl Worterbuch {
                 )
                 .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
             self.update_subscription_count(subs_key, client_subs).await;
         }
@@ -588,10 +588,10 @@ impl Worterbuch {
                 .set(topic!(subs_key), json!(client_subs), INTERNAL_CLIENT_ID)
                 .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
         } else if let Err(e) = self.delete(topic!(subs_key), INTERNAL_CLIENT_ID).await {
-            warn!("Error in subscription monitoring: {e}");
+            debug!("Error in subscription monitoring: {e}");
         }
     }
 
@@ -729,7 +729,7 @@ impl Worterbuch {
                 {
                     match e {
                         WorterbuchError::NoSuchValue(_) => (/* will happen on disconnect */),
-                        _ => warn!("Error in subscription monitoring: {e}"),
+                        _ => debug!("Error in subscription monitoring: {e}"),
                     }
                 }
                 self.update_subscription_count(subs_key, client_subs).await;
@@ -746,7 +746,7 @@ impl Worterbuch {
                     )
                     .await
             {
-                warn!("Error in subscription monitoring: {e}");
+                debug!("Error in subscription monitoring: {e}");
             }
             if self.subscribers.unsubscribe(&path, subscription) {
                 Ok(())
@@ -1197,10 +1197,11 @@ impl Worterbuch {
             );
         }
 
-        info!("Dropping locks of client {}.", client_id);
         if let Some(keys) = self.store.unlock_all(client_id).await
             && self.config.extended_monitoring
+            && !keys.is_empty()
         {
+            info!("Dropping locks of client {}.", client_id);
             for (key, client_id) in keys {
                 self.locked(client_id, &key).await;
             }
@@ -1212,7 +1213,7 @@ impl Worterbuch {
         let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         debug!("Deleting {pattern}");
         if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
-            warn!("Error in subscription monitoring: {e}");
+            debug!("Error in subscription monitoring: {e}");
         }
 
         self.clients.remove(&client_id);
@@ -1234,13 +1235,15 @@ impl Worterbuch {
             .filter(|k| k.client_id == client_id)
             .map(ToOwned::to_owned)
             .collect();
-        info!(
-            "Removing {} subscription(s) of client {client_id} ({}).",
-            subscription_keys.len(),
-            remote_addr
-                .map(|it| it.to_string())
-                .unwrap_or_else(|| "<unknown>".to_owned())
-        );
+        if !subscription_keys.is_empty() {
+            info!(
+                "Removing {} subscription(s) of client {client_id} ({}).",
+                subscription_keys.len(),
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            );
+        }
         for subscription in subscription_keys {
             if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
                 error!("Inconsistent subscription state: {e}");
@@ -1268,7 +1271,7 @@ impl Worterbuch {
                 }
             }
         } else {
-            info!(
+            debug!(
                 "Client {client_id} ({}) has no grave goods.",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1298,7 +1301,7 @@ impl Worterbuch {
                 }
             }
         } else {
-            info!(
+            debug!(
                 "Client {client_id} ({}) has no last will.",
                 remote_addr
                     .map(|it| it.to_string())
@@ -1315,7 +1318,7 @@ impl Worterbuch {
                 )
                 .await
         {
-            warn!("Error in subscription monitoring: {e}");
+            debug!("Error in subscription monitoring: {e}");
         }
 
         mem_tools::schedule_trim();

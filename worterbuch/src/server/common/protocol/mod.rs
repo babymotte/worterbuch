@@ -1,7 +1,7 @@
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims};
 use tokio::sync::mpsc;
-use tracing::{Instrument, Level, debug, error, info, instrument, trace, trace_span};
+use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
 use uuid::Uuid;
 use v0::V0;
 use v1::V1;
@@ -72,7 +72,7 @@ impl Proto {
         match deserialized {
             Ok(Some(msg)) => {
                 if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
-                    info!("Switching protocol to v{}", protocol_switch_request.version);
+                    debug!("Switching protocol to v{}", protocol_switch_request.version);
                     if self.switch_protocol(protocol_switch_request.version) {
                         self.latest
                             .v0

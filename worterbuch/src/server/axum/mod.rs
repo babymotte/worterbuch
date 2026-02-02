@@ -92,7 +92,7 @@ async fn ws(
     State(ws_tx): State<mpsc::Sender<(WebSocket, SocketAddr)>>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Response> {
-    info!("Client connected");
+    debug!("Client connected");
 
     let callback = move |socket| async move {
         ws_tx.send((socket, remote)).await.ok();
