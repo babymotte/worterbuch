@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 use tokio::{spawn, time::sleep};
-use tracing::{error, info};
+use tracing::{debug, error};
 
 lazy_static! {
     static ref TRIM_TIMER: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
@@ -13,7 +13,7 @@ lazy_static! {
 /// Schedule a debounced `trim_now()` call 1 second in the future.
 /// If called again before the 1 second passes, the timer resets.
 pub fn schedule_trim() {
-    info!("Scheduling trim …");
+    debug!("Scheduling trim …");
     let timer_arc = TRIM_TIMER.clone();
 
     let Ok(mut guard) = timer_arc.lock() else {
@@ -30,9 +30,9 @@ pub fn schedule_trim() {
     let handle = spawn(async move {
         sleep(Duration::from_secs(1)).await;
 
-        info!("Trim triggered.");
+        debug!("Trim triggered.");
         if trim_now() {
-            info!("Memory released.");
+            debug!("Memory released.");
         }
     });
 

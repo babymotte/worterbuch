@@ -176,6 +176,8 @@ async fn serve(
         }
     }
 
+    info!("Client disconnected: {client_id} ({remote_addr:?})");
+
     worterbuch.disconnected(client_id, None).await?;
 
     Ok(())
@@ -259,11 +261,11 @@ async fn forward_messages_to_socket(
                     break;
                 }
             } else {
-                warn!("Message forwarding to client {client_id} stopped: channel closed.");
+                debug!("Message forwarding to client {client_id} stopped: channel closed.");
                 break;
             },
             _ = subsys.shutdown_requested() => {
-                warn!("Message forwarding to client {client_id} stopped: subsystem stopped.");
+                debug!("Message forwarding to client {client_id} stopped: subsystem stopped.");
                 break;
             },
         }
