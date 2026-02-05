@@ -1473,7 +1473,7 @@ mod test {
     #[tokio::test]
     async fn export_removes_system_keys() {
         dotenvy::dotenv().ok();
-        let mut wb = Worterbuch::with_config(Config::new().await.unwrap());
+        let mut wb = Worterbuch::with_config(Config::new(None).await.unwrap());
         wb.set("hello/world".to_owned(), json!("test"), INTERNAL_CLIENT_ID)
             .await
             .unwrap();
