@@ -66,13 +66,13 @@ pub struct Args {
     )]
     pub follower: bool,
     /// Port at which to listen for cluster peer sync connections (only with --leader)
-    #[arg(long, short)]
+    #[arg(long, short, value_name = "PORT")]
     pub sync_port: Option<u16>,
-    /// Socket address of the leader node to sync to in the form <IP or hostname>:<port> (only with --follower)
-    #[arg(long, short)]
+    /// Socket address of the leader node to sync to (only with --follower)
+    #[arg(long, short, value_name = "HOST:PORT")]
     pub leader_address: Option<String>,
     /// Instance name
-    #[arg(short = 'n', long, env = "WORTERBUCH_INSTANCE_NAME")]
+    #[arg(short = 'n', long, value_name = "NAME")]
     pub instance_name: Option<String>,
 }
 
@@ -96,7 +96,7 @@ pub struct UnixEndpoint {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Config {
-    pub args: Args,
+    pub instance_name: Option<String>,
     pub ws_endpoint: Option<WsEndpoint>,
     pub tcp_endpoint: Option<Endpoint>,
     #[cfg(target_family = "unix")]
@@ -266,12 +266,11 @@ impl Config {
         Ok(())
     }
 
-    pub async fn new() -> ConfigResult<Self> {
-        let args = Args::parse();
-
+    pub async fn new(args: Option<Args>) -> ConfigResult<Self> {
         match load_license().await {
             Ok(license) => {
                 let mut config = Config {
+                    instance_name: None,
                     ws_endpoint: Some(WsEndpoint {
                         endpoint: Endpoint {
                             tls: false,
@@ -302,20 +301,30 @@ impl Config {
                     auth_token_key: None,
                     license,
                     shutdown_timeout: Duration::from_secs(1),
-                    follower: args.follower,
-                    leader: args.leader,
-                    sync_port: args.sync_port,
-                    leader_address: args.leader_address.clone(),
+                    follower: false,
+                    leader: false,
+                    sync_port: None,
+                    leader_address: None,
                     default_export_file_name: None,
                     cors_allowed_origins: None,
                     print_endpoints: false,
-                    args,
                 };
                 config.load_env()?;
+                if let Some(args) = args {
+                    config.apply_args(args);
+                }
                 Ok(config)
             }
             Err(e) => Err(ConfigError::InvalidLicense(e.to_string())),
         }
+    }
+
+    fn apply_args(&mut self, args: Args) {
+        self.follower = args.follower;
+        self.leader = args.leader;
+        self.sync_port = args.sync_port;
+        self.leader_address = args.leader_address.clone();
+        self.instance_name = args.instance_name.clone();
     }
 
     pub fn persistence_interval(&self) -> Interval {

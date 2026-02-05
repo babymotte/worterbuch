@@ -111,7 +111,7 @@ async fn do_run_worterbuch(
 
     let mut worterbuch = persistence::restore(subsys, &config, &api).await?;
 
-    if let Some(name) = config.args.instance_name.as_ref() {
+    if let Some(name) = config.instance_name.as_ref() {
         worterbuch
             .set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_NAME),

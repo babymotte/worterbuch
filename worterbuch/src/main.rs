@@ -17,10 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use clap::Parser;
 use miette::{IntoDiagnostic, Result};
 use std::env;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
-use worterbuch::{Config, run_worterbuch};
+use worterbuch::{Args, Config, run_worterbuch};
 
 fn main() -> Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -55,13 +56,13 @@ fn run_multi_threaded() -> Result<()> {
 async fn start() -> Result<()> {
     dotenvy::dotenv().ok();
 
-    let config = Config::new().await?;
+    let args = Args::parse();
+
+    let config = Config::new(Some(args.clone())).await?;
 
     #[cfg(feature = "telemetry")]
     {
         use worterbuch::telemetry;
-
-        let args = config.args.clone();
 
         let hostname = hostname::get().into_diagnostic()?;
         let cluster_role = if args.leader {
