@@ -60,6 +60,13 @@ pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
 pub const SYSTEM_TOPIC_CLIENT_NAME: &str = "clientName";
 pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "protocolVersion";
 pub const SYSTEM_TOPIC_MODE: &str = "mode";
+pub const SYSTEM_TOPIC_UPTIME: &str = "uptime";
+pub const SYSTEM_TOPIC_STORE: &str = "store";
+pub const SYSTEM_TOPIC_VALUES: &str = "values";
+pub const SYSTEM_TOPIC_COUNT: &str = "count";
+pub const SYSTEM_TOPIC_JEMALLOC: &str = "jemalloc";
+pub const SYSTEM_TOPIC_RAW: &str = "raw";
+pub const SYSTEM_TOPIC_FORMATTED: &str = "formatted";
 
 pub type TransactionId = u64;
 pub type RequestPattern = String;

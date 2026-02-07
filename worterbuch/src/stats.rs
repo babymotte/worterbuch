@@ -29,7 +29,8 @@ use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
-    SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION, WbApi, error::WorterbuchResult,
+    SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE,
+    SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION, WbApi, error::WorterbuchResult,
     topic,
 };
 
@@ -98,7 +99,7 @@ async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<(
 
 async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResult<()> {
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/uptime"),
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_UPTIME),
         json!(uptime.as_secs()),
         INTERNAL_CLIENT_ID.to_owned(),
     )
@@ -108,7 +109,12 @@ async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResul
 async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
     let len = wb.entries().await?;
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/store/values/count"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_STORE,
+            SYSTEM_TOPIC_VALUES,
+            SYSTEM_TOPIC_COUNT
+        ),
         json!(len),
         INTERNAL_CLIENT_ID.to_owned(),
     )
@@ -119,6 +125,7 @@ async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
 async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     use tikv_jemalloc_ctl::{epoch, stats};
+    use worterbuch_common::{SYSTEM_TOPIC_FORMATTED, SYSTEM_TOPIC_JEMALLOC, SYSTEM_TOPIC_RAW};
 
     // Advance the epoch to refresh stats
     epoch::advance().into_diagnostic()?;
@@ -131,84 +138,144 @@ async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
     let retained = stats::retained::read().into_diagnostic()?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/allocated"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "allocated"
+        ),
         json!(allocated),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/resident"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "resident"
+        ),
         json!(resident),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/active"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "active"
+        ),
         json!(active),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/mapped"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "mapped"
+        ),
         json!(mapped),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/retained"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "retained"
+        ),
         json!(retained),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/raw/metadata"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_RAW,
+            "metadata"
+        ),
         json!(metadata),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/allocated"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "allocated"
+        ),
         json!(format_bytes(allocated)),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/resident"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "resident"
+        ),
         json!(format_bytes(resident)),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/active"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "active"
+        ),
         json!(format_bytes(active)),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/mapped"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "mapped"
+        ),
         json!(format_bytes(mapped)),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/retained"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "retained"
+        ),
         json!(format_bytes(retained)),
         INTERNAL_CLIENT_ID.to_owned(),
     )
     .await?;
 
     wb.set(
-        format!("{SYSTEM_TOPIC_ROOT}/jemalloc/formatted/metadata"),
+        topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_JEMALLOC,
+            SYSTEM_TOPIC_FORMATTED,
+            "metadata"
+        ),
         json!(format_bytes(metadata)),
         INTERNAL_CLIENT_ID.to_owned(),
     )

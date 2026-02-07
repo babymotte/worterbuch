@@ -10,10 +10,14 @@ use crate::{
     server::CloneableWbApi,
 };
 use lazy_static::lazy_static;
+use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
 use tracing::{info, warn};
-use worterbuch_common::{Key, SYSTEM_TOPIC_ROOT_PREFIX, ValueEntry};
+use worterbuch_common::{
+    INTERNAL_CLIENT_ID, Key, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+    SYSTEM_TOPIC_STORE, ValueEntry, topic,
+};
 
 lazy_static! {
     static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
@@ -114,6 +118,12 @@ pub(crate) async fn restore(
     let persistent_storage = get_storage_instance(subsys, config, api).await?;
     let mut wb = persistent_storage.load(config).await;
     wb.set_persistent_storage(persistent_storage);
+    wb.set(
+        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_MODE),
+        json!(config.persistence_mode),
+        INTERNAL_CLIENT_ID,
+    )
+    .await?;
     unlock_persistence();
     Ok(wb)
 }
