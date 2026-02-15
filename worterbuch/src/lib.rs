@@ -127,7 +127,7 @@ async fn do_run_worterbuch(
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         let public_addr = public_addr.to_owned();
-        let ws_enabled = !config.follower;
+        let ws_enabled = !config.ws_disabled && !config.follower;
         Some(subsys.spawn("webserver", async move |subsys| {
             server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled).await
         }))
@@ -159,6 +159,7 @@ async fn do_run_worterbuch(
             bind_addr,
             port,
         }) = &config.tcp_endpoint
+            && !config.tcp_disabled
         {
             let sapi = api.clone();
             let bind_addr = bind_addr.to_owned();
@@ -171,7 +172,9 @@ async fn do_run_worterbuch(
         };
 
         #[cfg(target_family = "unix")]
-        let unix_socket = if let Some(UnixEndpoint { path }) = &config.unix_endpoint {
+        let unix_socket = if let Some(UnixEndpoint { path }) = &config.unix_endpoint
+            && !config.unix_disabled
+        {
             let sapi = api.clone();
             let path = path.clone();
             Some(subsys.spawn("unixsocket", async move |subsys| {

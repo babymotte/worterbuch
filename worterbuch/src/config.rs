@@ -123,6 +123,9 @@ pub struct Config {
     pub default_export_file_name: Option<String>,
     pub cors_allowed_origins: Option<Vec<String>>,
     pub print_endpoints: bool,
+    pub ws_disabled: bool,
+    pub tcp_disabled: bool,
+    pub unix_disabled: bool,
 }
 
 impl Config {
@@ -258,6 +261,25 @@ impl Config {
             self.print_endpoints = enabled == "true" || enabled == "1";
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_WS") {
+            let disabled = val.to_lowercase();
+            let disabled = disabled.trim();
+            self.ws_disabled = disabled == "true" || disabled == "1";
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_TCP") {
+            let disabled = val.to_lowercase();
+            let disabled = disabled.trim();
+            self.tcp_disabled = disabled == "true" || disabled == "1";
+        }
+
+        #[cfg(target_family = "unix")]
+        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_UNIX") {
+            let disabled = val.to_lowercase();
+            let disabled = disabled.trim();
+            self.unix_disabled = disabled == "true" || disabled == "1";
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -308,6 +330,10 @@ impl Config {
                     default_export_file_name: None,
                     cors_allowed_origins: None,
                     print_endpoints: false,
+                    ws_disabled: false,
+                    tcp_disabled: false,
+                    #[cfg(target_family = "unix")]
+                    unix_disabled: false,
                 };
                 config.load_env()?;
                 if let Some(args) = args {
