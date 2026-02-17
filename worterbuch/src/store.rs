@@ -1080,6 +1080,10 @@ fn concat_key(path: &[&str], key: Option<&str>) -> String {
 
 #[cfg(test)]
 mod test {
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use serde_json::json;
     use tokio::sync::mpsc;

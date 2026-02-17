@@ -1,3 +1,6 @@
+#![allow(clippy::as_conversions)]
+#![allow(clippy::unwrap_used)]
+
 use miette::Result;
 use std::{collections::BTreeSet, io, thread};
 use tokio::runtime;

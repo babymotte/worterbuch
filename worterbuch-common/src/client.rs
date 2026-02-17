@@ -232,6 +232,9 @@ pub struct Transform {
 #[cfg(test)]
 mod test {
 
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use serde_json::json;
 

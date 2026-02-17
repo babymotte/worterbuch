@@ -128,6 +128,10 @@ pub mod commercial {
 
 #[cfg(test)]
 mod test {
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]

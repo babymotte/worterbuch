@@ -619,6 +619,10 @@ pub trait WbApi {
 
 #[cfg(test)]
 mod test {
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use crate::{ErrorCode, ProtocolVersion};
     use serde_json::json;
 

@@ -223,6 +223,10 @@ fn add_all_children(node: &Node, all_subscribers: &mut Vec<Subscriber>) {
 
 #[cfg(test)]
 mod test {
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use tokio::sync::mpsc::channel;
     use uuid::Uuid;

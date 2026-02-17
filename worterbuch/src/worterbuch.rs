@@ -1468,6 +1468,10 @@ fn escape_wildcards(pattern: &str) -> String {
 
 #[cfg(test)]
 mod test {
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[tokio::test]

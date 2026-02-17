@@ -431,9 +431,12 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
 
 #[cfg(test)]
 mod test {
-    use serde_json::json;
+
+    #![allow(clippy::as_conversions)]
+    #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn state_is_serialized_correctly() {
