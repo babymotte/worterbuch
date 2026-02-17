@@ -38,7 +38,7 @@ pub struct WsClientSocket {
     #[cfg(feature = "ws")]
     websocket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     #[cfg(feature = "wasm")]
-    websocket: WebSocketStream,
+    websocket: Box<WebSocketStream>,
 }
 
 impl WsClientSocket {
@@ -49,7 +49,9 @@ impl WsClientSocket {
 
     #[cfg(feature = "wasm")]
     pub fn new(websocket: WebSocketStream) -> Self {
-        Self { websocket }
+        Self {
+            websocket: Box::new(websocket),
+        }
     }
 
     pub async fn send_msg(&mut self, msg: &ClientMessage) -> ConnectionResult<()> {

@@ -256,7 +256,7 @@ pub enum ConnectionError {
     #[cfg(feature = "ws")]
     WebsocketError(Box<tungstenite::Error>),
     #[cfg(feature = "wasm")]
-    WebsocketError(Box<tokio_tungstenite_wasm::Error>),
+    WebsocketWasmError(Box<tokio_tungstenite_wasm::Error>),
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
     RecvError(Box<oneshot::error::RecvError>),
     BcRecvError(Box<broadcast::error::RecvError>),
@@ -281,8 +281,10 @@ impl fmt::Display for ConnectionError {
         match self {
             Self::IoError(e) => e.fmt(f),
             Self::SendError(e) => e.fmt(f),
-            #[cfg(any(feature = "ws", feature = "wasm"))]
+            #[cfg(feature = "ws")]
             Self::WebsocketError(e) => e.fmt(f),
+            #[cfg(feature = "wasm")]
+            Self::WebsocketWasmError(e) => e.fmt(f),
             Self::TrySendError(e) => e.fmt(f),
             Self::RecvError(e) => e.fmt(f),
             Self::BcRecvError(e) => e.fmt(f),
@@ -334,7 +336,7 @@ impl From<tungstenite::Error> for ConnectionError {
 #[cfg(feature = "wasm")]
 impl From<tokio_tungstenite_wasm::Error> for ConnectionError {
     fn from(e: tokio_tungstenite_wasm::Error) -> Self {
-        ConnectionError::WebsocketError(Box::new(e))
+        ConnectionError::WebsocketWasmError(Box::new(e))
     }
 }
 
