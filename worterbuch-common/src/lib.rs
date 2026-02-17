@@ -212,15 +212,16 @@ impl fmt::Display for ErrorCode {
 
 #[macro_export]
 macro_rules! topic {
-    ($( $x:expr ),+ ) => {
-        {
-            let mut segments = Vec::new();
-            $(
-                segments.push($x.to_string());
-            )+
-            segments.join("/")
-        }
-    };
+    ($first:expr $(, $rest:expr)*) => {{
+        use std::fmt::Write;
+        let mut s = String::new();
+        write!(s, "{}", $first).expect("writing to a String never fails");
+        $(
+            s.push('/');
+            write!(s, "{}", $rest).expect("writing to a String never fails");
+        )*
+        s
+    }};
 }
 
 pub type Version = String;
