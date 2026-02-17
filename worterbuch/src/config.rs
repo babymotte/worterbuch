@@ -125,6 +125,7 @@ pub struct Config {
     pub print_endpoints: bool,
     pub ws_disabled: bool,
     pub tcp_disabled: bool,
+    #[cfg(target_family = "unix")]
     pub unix_disabled: bool,
 }
 
