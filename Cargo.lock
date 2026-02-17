@@ -3630,7 +3630,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.5.0-rc.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "axum-extra",
@@ -3680,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.5.0-rc.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "clap",
  "dotenvy",
@@ -3696,7 +3696,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.5.0-rc.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -3717,7 +3717,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.5.0-rc.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "clap",
@@ -3749,7 +3749,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.5.0-rc.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "hashbrown 0.16.1",
