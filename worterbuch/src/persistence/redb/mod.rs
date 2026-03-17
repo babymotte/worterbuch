@@ -40,8 +40,9 @@ pub struct PersistentRedbStore {
 
 impl PersistentRedbStore {
     pub async fn new(config: &Config) -> PersistenceResult<Self> {
-        info!("Using redb persistence.");
         let path = PathBuf::from(&config.data_dir).join("worterbuch.re.db");
+
+        info!("Using redb persistence with data dir {}", path.display());
 
         fs::create_dir_all(&config.data_dir).await?;
 

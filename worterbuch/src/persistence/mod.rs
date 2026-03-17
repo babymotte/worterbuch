@@ -81,10 +81,14 @@ impl PersistentStorageImpl {
     }
 
     pub async fn load(&self, config: &Config) -> Worterbuch {
-        let res = match self {
-            PersistentStorageImpl::Json(s) => s.load(config).await,
-            PersistentStorageImpl::ReDB(s) => s.load(config).await,
-            PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
+        let res = if config.follower {
+            Ok(Worterbuch::with_config(config.clone()))
+        } else {
+            match self {
+                PersistentStorageImpl::Json(s) => s.load(config).await,
+                PersistentStorageImpl::ReDB(s) => s.load(config).await,
+                PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
+            }
         };
 
         match res {
@@ -123,14 +127,16 @@ async fn get_storage_instance(
     config: &Config,
     api: &CloneableWbApi,
 ) -> PersistenceResult<PersistentStorageImpl> {
-    if !config.use_persistence || config.follower {
+    if !config.use_persistence {
         return Ok(PersistentStorageImpl::Noop);
     }
+
+    let flush_periodically = !config.follower;
 
     let storage =
         match config.persistence_mode {
             PersistenceMode::Json => PersistentStorageImpl::Json(Box::new(
-                PersistentJsonStorage::new(subsys, config.clone(), api.clone()),
+                PersistentJsonStorage::new(subsys, config.clone(), api.clone(), flush_periodically),
             )),
             PersistenceMode::ReDB => {
                 PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(config).await?))
