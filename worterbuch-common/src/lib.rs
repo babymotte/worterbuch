@@ -35,6 +35,7 @@ use std::{fmt, net::SocketAddr, ops::Deref};
 use tokio::sync::{mpsc, oneshot};
 use tracing::Span;
 use uuid::Uuid;
+
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
 #[cfg(feature = "jemalloc")]
@@ -618,12 +619,72 @@ pub trait WbApi {
     fn entries(&self) -> impl Future<Output = WorterbuchResult<usize>> + Send;
 }
 
+mod macros {
+
+    #[macro_export]
+    macro_rules! while_select {
+        ($($tokens:tt)*) => {
+            '__while_select: loop {
+                match ::tokio::select! { $($tokens)* } {
+                    ::std::ops::ControlFlow::Continue(_) => {}
+                    ::std::ops::ControlFlow::Break(v) => break '__while_select v,
+                }
+            }
+        };
+    }
+
+    mod test {
+
+        #![allow(clippy::as_conversions)]
+        #![allow(clippy::unwrap_used)]
+
+        #[tokio::test]
+        async fn while_select_breaks_as_expected_on_control_flow() {
+            use std::{ops::ControlFlow, time::Duration};
+            use tokio::time::sleep;
+
+            let mut fut_a = Box::pin(async { ControlFlow::Break::<&'static str>("hello") });
+            let mut fut_b = Box::pin(async {
+                sleep(Duration::from_secs(1)).await;
+                ControlFlow::Break::<&'static str>("nein")
+            });
+
+            let res = while_select!(
+                it = &mut fut_a => it,
+                it = &mut fut_b => it,
+            );
+
+            assert_eq!("hello", res);
+        }
+
+        #[tokio::test]
+        async fn while_select_breaks_as_expected_on_break() {
+            use std::{ops::ControlFlow, time::Duration};
+            use tokio::time::sleep;
+
+            let mut fut_a = Box::pin(async {});
+            let mut fut_b = Box::pin(async {
+                sleep(Duration::from_secs(1)).await;
+                ControlFlow::Break::<&'static str>("nein")
+            });
+
+            let res = while_select!(
+                _ = &mut fut_a => break "hello",
+                it = &mut fut_b => it,
+            );
+
+            assert_eq!("hello", res);
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
 
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
+    use super::*;
     use crate::{ErrorCode, ProtocolVersion};
     use serde_json::json;
 

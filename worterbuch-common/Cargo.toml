@@ -57,6 +57,10 @@ axum = { version = "0.8.7", optional = true }
 jsonwebtoken = "10.3.0"
 hashbrown = "0.16.1"
 
+
+[dev-dependencies]
+tokio = { version = "1.46.1", features = ["full"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 

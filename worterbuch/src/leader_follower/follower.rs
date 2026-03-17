@@ -1,5 +1,5 @@
 /*
- *  Types and helper functions for leader/follower mode
+ *  Helper functions for follower mode
  *
  *  Copyright (C) 2024 Michael Bachmann
  *
@@ -28,6 +28,7 @@ use crate::{
     shutdown,
 };
 use serde_json::json;
+use std::ops::ControlFlow;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
@@ -37,7 +38,9 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
-    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, error::WorterbuchError, receive_msg, topic,
+    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    error::{ConnectionResult, WorterbuchError},
+    receive_msg, topic, while_select,
 };
 
 pub(crate) async fn run_in_follower_mode(
@@ -95,29 +98,50 @@ pub(crate) async fn run_in_follower_mode(
     }
     info!("Successfully synced with leader.");
 
-    loop {
-        select! {
-            recv = receive_msg(&mut lines) => match recv {
-                Ok(Some(msg)) => process_leader_message(msg, &mut worterbuch).await?,
-                Ok(None) => break,
-                Err(e) => {
-                    error!("Error receiving update from leader: {e}");
-                    break;
-                }
-            },
-            recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call(&mut worterbuch, function).await,
-                None => break,
-            },
-            _ = persistence_interval.tick() => {
-                debug!("Follower persistence interval triggered");
-                worterbuch.flush().await?;
-            },
-            _ = subsys.shutdown_requested() => break,
-        }
+    while_select! {
+        recv = receive_msg(&mut lines) => try_process_leader_message(recv, &mut worterbuch).await?,
+        recv = api_rx.recv() => try_process_api_call(recv, &mut worterbuch).await?,
+        _ = persistence_interval.tick() => try_flush(&mut worterbuch).await?,
+        _ = subsys.shutdown_requested() => break,
     }
 
     shutdown(subsys, worterbuch, config, web_server, None, None).await
+}
+
+async fn try_process_leader_message(
+    recv: ConnectionResult<Option<LeaderSyncMessage>>,
+    worterbuch: &mut Worterbuch,
+) -> WorterbuchAppResult<ControlFlow<()>> {
+    match recv {
+        Ok(Some(msg)) => {
+            process_leader_message(msg, worterbuch).await?;
+            Ok(ControlFlow::Continue(()))
+        }
+        Ok(None) => Ok(ControlFlow::Break(())),
+        Err(e) => {
+            error!("Error receiving update from leader: {e}");
+            Ok(ControlFlow::Break(()))
+        }
+    }
+}
+
+async fn try_process_api_call(
+    recv: Option<WbFunction>,
+    worterbuch: &mut Worterbuch,
+) -> WorterbuchAppResult<ControlFlow<()>> {
+    match recv {
+        Some(function) => {
+            process_api_call(worterbuch, function).await;
+            Ok(ControlFlow::Continue(()))
+        }
+        None => Ok(ControlFlow::Break(())),
+    }
+}
+
+async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFlow<()>> {
+    debug!("Follower persistence interval triggered");
+    worterbuch.flush().await?;
+    Ok(ControlFlow::Continue(()))
 }
 
 async fn initial_sync(
