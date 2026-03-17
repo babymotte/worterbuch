@@ -326,12 +326,18 @@ impl Worterbuch {
     }
 
     #[instrument(level = Level::TRACE, skip(self))]
-    pub async fn set(&mut self, key: Key, value: Value, client_id: Uuid) -> WorterbuchResult<()> {
+    pub async fn set(
+        &mut self,
+        key: Key,
+        value: Value,
+        client_id: Uuid,
+        force: bool,
+    ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone())?;
+        let (changed, ls_subscribers) = self.store.insert_plain(&path, value.clone(), force)?;
 
         self.persistent_storage
             .update_value(&key, &ValueEntry::Plain(value.clone()))
@@ -362,12 +368,15 @@ impl Worterbuch {
         value: Value,
         version: CasVersion,
         client_id: Uuid,
+        force: bool,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
 
-        let (changed, ls_subscribers) = self.store.insert_cas(&path, value.clone(), version)?;
+        let (changed, ls_subscribers) =
+            self.store
+                .insert_cas(&path, value.clone(), version, force)?;
 
         self.persistent_storage
             .update_value(&key, &ValueEntry::Cas(value.clone(), version))
@@ -482,6 +491,7 @@ impl Worterbuch {
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    true,
                 )
                 .await
             {
@@ -499,6 +509,7 @@ impl Worterbuch {
                     topic!(subs_key, key),
                     json!(transaction_id),
                     INTERNAL_CLIENT_ID,
+                    true,
                 )
                 .await
             {
@@ -555,6 +566,7 @@ impl Worterbuch {
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    true,
                 )
                 .await
             {
@@ -571,6 +583,7 @@ impl Worterbuch {
                     topic!(subs_key, escape_wildcards(&pattern)),
                     json!(transaction_id),
                     INTERNAL_CLIENT_ID,
+                    true,
                 )
                 .await
             {
@@ -585,7 +598,12 @@ impl Worterbuch {
     async fn update_subscription_count(&mut self, subs_key: String, client_subs: usize) {
         if client_subs > 0 {
             if let Err(e) = self
-                .set(topic!(subs_key), json!(client_subs), INTERNAL_CLIENT_ID)
+                .set(
+                    topic!(subs_key),
+                    json!(client_subs),
+                    INTERNAL_CLIENT_ID,
+                    true,
+                )
                 .await
             {
                 debug!("Error in subscription monitoring: {e}");
@@ -743,6 +761,7 @@ impl Worterbuch {
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                         json!(self.subscriptions.len()),
                         INTERNAL_CLIENT_ID,
+                        true,
                     )
                     .await
             {
@@ -951,6 +970,7 @@ impl Worterbuch {
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LOCKS, escape_wildcards(key)),
                         json!(client_id),
                         INTERNAL_CLIENT_ID,
+                        true,
                     )
                     .await
                 {
@@ -1051,6 +1071,7 @@ impl Worterbuch {
                 client_count_key,
                 json!(self.clients.len()),
                 INTERNAL_CLIENT_ID,
+                true,
             )
             .await
         {
@@ -1098,6 +1119,7 @@ impl Worterbuch {
             ),
             json!(protocol),
             INTERNAL_CLIENT_ID,
+            true,
         )
         .await
     }
@@ -1116,6 +1138,7 @@ impl Worterbuch {
             ),
             json!(protocol_version),
             INTERNAL_CLIENT_ID,
+            true,
         )
         .await
     }
@@ -1137,6 +1160,7 @@ impl Worterbuch {
             ),
             remote_addr,
             INTERNAL_CLIENT_ID,
+            true,
         )
         .await
     }
@@ -1156,6 +1180,7 @@ impl Worterbuch {
             ),
             timestamp,
             INTERNAL_CLIENT_ID,
+            true,
         )
         .await
     }
@@ -1223,6 +1248,7 @@ impl Worterbuch {
                 client_count_key,
                 json!(self.clients.len()),
                 INTERNAL_CLIENT_ID,
+                true,
             )
             .await
         {
@@ -1296,7 +1322,10 @@ impl Worterbuch {
                     last_will.key,
                     last_will.value
                 );
-                if let Err(e) = self.set(last_will.key, last_will.value, client_id).await {
+                if let Err(e) = self
+                    .set(last_will.key, last_will.value, client_id, true)
+                    .await
+                {
                     error!("Error setting last will of client {client_id}: {e}");
                 }
             }
@@ -1315,6 +1344,7 @@ impl Worterbuch {
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    true,
                 )
                 .await
         {
@@ -1415,7 +1445,9 @@ impl Worterbuch {
     #[instrument(skip(self))]
     pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill) {
         for lw in last_wills {
-            self.set(lw.key, lw.value, INTERNAL_CLIENT_ID).await.ok();
+            self.set(lw.key, lw.value, INTERNAL_CLIENT_ID, true)
+                .await
+                .ok();
         }
     }
 
@@ -1478,13 +1510,19 @@ mod test {
     async fn export_removes_system_keys() {
         dotenvy::dotenv().ok();
         let mut wb = Worterbuch::with_config(Config::new(None).await.unwrap());
-        wb.set("hello/world".to_owned(), json!("test"), INTERNAL_CLIENT_ID)
-            .await
-            .unwrap();
+        wb.set(
+            "hello/world".to_owned(),
+            json!("test"),
+            INTERNAL_CLIENT_ID,
+            false,
+        )
+        .await
+        .unwrap();
         wb.set(
             "$SYS/something".to_owned(),
             json!("this should not be exported"),
             INTERNAL_CLIENT_ID,
+            false,
         )
         .await
         .unwrap();

@@ -122,6 +122,7 @@ pub(crate) async fn restore(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_MODE),
         json!(config.persistence_mode),
         INTERNAL_CLIENT_ID,
+        true,
     )
     .await?;
     unlock_persistence();

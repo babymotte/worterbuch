@@ -188,8 +188,8 @@ fn load(
         let value = serde_json::from_str::<ValueEntry>(&v.value())?;
         let path: Vec<String> = key.split('/').map(ToOwned::to_owned).collect();
         match value {
-            ValueEntry::Cas(value, version) => store.insert_cas(&path, value, version)?,
-            ValueEntry::Plain(value) => store.insert_plain(&path, value)?,
+            ValueEntry::Cas(value, version) => store.insert_cas(&path, value, version, true)?,
+            ValueEntry::Plain(value) => store.insert_plain(&path, value, true)?,
         };
     }
     store.count_entries();

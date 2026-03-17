@@ -730,8 +730,9 @@ impl Store {
         &mut self,
         path: &[RegularKeySegment],
         value: Value,
+        force: bool,
     ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
-        self.insert(path, ValueEntry::Plain(value))
+        self.insert(path, ValueEntry::Plain(value), force)
     }
 
     pub fn insert_cas(
@@ -739,14 +740,16 @@ impl Store {
         path: &[RegularKeySegment],
         value: Value,
         version: u64,
+        force: bool,
     ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
-        self.insert(path, ValueEntry::Cas(value, version))
+        self.insert(path, ValueEntry::Cas(value, version), force)
     }
 
     fn insert(
         &mut self,
         path: &[RegularKeySegment],
         value: ValueEntry,
+        force: bool,
     ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
         let mut ls_subscribers: Option<Vec<(Vec<LsSubscriber>, &[String])>> = None;
         let mut current_node = &mut self.data;
@@ -768,41 +771,52 @@ impl Store {
             current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
         }
 
-        let (value_existed, value_changed, value) = match (current_node.value(), value) {
-            (None, ValueEntry::Plain(v)) => {
-                // no value present, we can insert plain value
+        let (value_existed, value_changed, value) = match (current_node.value(), value, force) {
+            (None, ValueEntry::Plain(v), _) => {
+                // no value present, we can always insert plain value
                 (false, true, ValueEntry::Plain(v))
             }
-            (None, ValueEntry::Cas(value, 0)) => {
-                // no value present, we can insert cas value if version is 0
+            (None, ValueEntry::Cas(value, 0), _) | (None, ValueEntry::Cas(value, _), true) => {
+                // no value present, we can insert cas value if version is 0 or insertion is forced
                 (false, true, ValueEntry::Cas(value, 1))
             }
-            (None, ValueEntry::Cas(_, _)) => {
-                // no value present, we cannot insert cas value if version != 0
+            (None, ValueEntry::Cas(_, _), false) => {
+                // no value present, we cannot insert cas value if version != 0 and insertion is not forced
                 return Err(StoreError::CasVersionMismatch);
             }
-            (Some(ValueEntry::Plain(current)), ValueEntry::Plain(val)) => {
-                // plain value present, we can insert plain value
+            (Some(ValueEntry::Plain(current)), ValueEntry::Plain(val), _) => {
+                // plain value present, we can always insert plain value
                 (true, current != &val, ValueEntry::Plain(val))
             }
-            (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, 0)) => {
-                // plain value present, we can insert cas value if version is 0
+            (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, 0), _)
+            | (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, _), true) => {
+                // plain value present, we can insert cas value if version is 0 or insertion is forced
                 (true, current != &val, ValueEntry::Cas(val, 1))
             }
-            (Some(ValueEntry::Plain(_)), ValueEntry::Cas(_, _)) => {
-                // plain value present, we cannot insert cas value if version != 0
+            (Some(ValueEntry::Plain(_)), ValueEntry::Cas(_, _), false) => {
+                // plain value present, we cannot insert cas value if version != 0 and insertion is not forced
                 return Err(StoreError::CasVersionMismatch);
             }
-            (Some(ValueEntry::Cas(_, _)), ValueEntry::Plain(_)) => {
+            (Some(ValueEntry::Cas(current, _)), ValueEntry::Plain(val), true) => {
+                // cas value present, we can insert plain value if insertion is forced
+                (true, current != &val, ValueEntry::Plain(val))
+            }
+            (Some(ValueEntry::Cas(_, _)), ValueEntry::Plain(_), false) => {
                 // cas value present, we cannot insert plain value
                 return Err(StoreError::Cas);
             }
-            (Some(ValueEntry::Cas(current, v_curr)), ValueEntry::Cas(val, v)) if v_curr == &v => {
+            (Some(ValueEntry::Cas(current, _)), ValueEntry::Cas(val, v), true) => {
+                // cas value present, we can insert new cas value if insertion is forced
+                (true, current != &val, ValueEntry::Cas(val, v + 1))
+            }
+            (Some(ValueEntry::Cas(current, v_curr)), ValueEntry::Cas(val, v), false)
+                if v_curr == &v =>
+            {
                 // cas value present, we can insert new cas value if the version matches
                 (true, current != &val, ValueEntry::Cas(val, v + 1))
             }
-            (Some(ValueEntry::Cas(_, _)), ValueEntry::Cas(_, _)) => {
-                // cas value present, we cannot insert cas value with mismatched version
+            (Some(ValueEntry::Cas(_, _)), ValueEntry::Cas(_, _), false) => {
+                // cas value present, we cannot insert cas value if versions do not match and insertion is not forced
                 return Err(StoreError::CasVersionMismatch);
             }
         };
@@ -1103,7 +1117,9 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!").into()).unwrap();
+        store
+            .insert(&path, json!("Hello, World!").into(), false)
+            .unwrap();
 
         assert_eq!(store.get(&path), Some(&json!("Hello, World!")));
         assert_eq!(store.get(&reg_key_segs("test/a")), None);
@@ -1115,7 +1131,9 @@ mod test {
         let path = reg_key_segs("test/a/b");
 
         let mut store = Store::default();
-        store.insert(&path, json!("Hello, World!").into()).unwrap();
+        store
+            .insert(&path, json!("Hello, World!").into(), false)
+            .unwrap();
 
         // assert_eq!(store.len)
 
@@ -1137,12 +1155,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0").into()).unwrap();
-        store.insert(&path1, json!("1").into()).unwrap();
-        store.insert(&path2, json!("2").into()).unwrap();
-        store.insert(&path3, json!("3").into()).unwrap();
-        store.insert(&path4, json!("4").into()).unwrap();
-        store.insert(&path5, json!("5").into()).unwrap();
+        store.insert(&path0, json!("0").into(), false).unwrap();
+        store.insert(&path1, json!("1").into(), false).unwrap();
+        store.insert(&path2, json!("2").into(), false).unwrap();
+        store.insert(&path3, json!("3").into(), false).unwrap();
+        store.insert(&path4, json!("4").into(), false).unwrap();
+        store.insert(&path5, json!("5").into(), false).unwrap();
 
         let res = store.get_matches(&key_segs("test/a/?")).unwrap();
         assert_eq!(res.len(), 2);
@@ -1203,12 +1221,12 @@ mod test {
         let path5 = reg_key_segs("trolo/c/b/d");
 
         let mut store = Store::default();
-        store.insert(&path0, json!("0").into()).unwrap();
-        store.insert(&path1, json!("1").into()).unwrap();
-        store.insert(&path2, json!("2").into()).unwrap();
-        store.insert(&path3, json!("3").into()).unwrap();
-        store.insert(&path4, json!("4").into()).unwrap();
-        store.insert(&path5, json!("5").into()).unwrap();
+        store.insert(&path0, json!("0").into(), false).unwrap();
+        store.insert(&path1, json!("1").into(), false).unwrap();
+        store.insert(&path2, json!("2").into(), false).unwrap();
+        store.insert(&path3, json!("3").into(), false).unwrap();
+        store.insert(&path4, json!("4").into(), false).unwrap();
+        store.insert(&path5, json!("5").into(), false).unwrap();
 
         let res = store.get_matches(&key_segs("test/a/#")).unwrap();
         assert_eq!(res.len(), 2);
@@ -1274,7 +1292,7 @@ mod test {
         let parent = ["hello".to_owned(), "there".to_owned()];
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
 
-        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into(), false).unwrap();
         assert!(subscribers.is_none());
 
         let (tx, _) = mpsc::channel(1);
@@ -1284,7 +1302,9 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
+        let (_, subscribers) = store
+            .insert(&path, json!("Hello There!").into(), false)
+            .unwrap();
         assert!(subscribers.is_none());
     }
 
@@ -1295,7 +1315,7 @@ mod test {
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
         let path2 = ["hello".to_owned(), "there".to_owned(), "you".to_owned()];
 
-        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into(), false).unwrap();
         assert!(subscribers.is_none());
 
         let (tx, _) = mpsc::channel(1);
@@ -1305,12 +1325,18 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        store.insert(&path, json!("Hello There!").into()).unwrap();
+        store
+            .insert(&path, json!("Hello There!").into(), false)
+            .unwrap();
         let subscribers = store.delete(&path).unwrap().unwrap().1.unwrap();
         assert_eq!(subscribers.len(), 1);
 
-        store.insert(&path, json!("Hello There!").into()).unwrap();
-        store.insert(&path2, json!("Hello There!").into()).unwrap();
+        store
+            .insert(&path, json!("Hello There!").into(), false)
+            .unwrap();
+        store
+            .insert(&path2, json!("Hello There!").into(), false)
+            .unwrap();
         let subscribers = store.delete(&path).unwrap().unwrap().1.unwrap();
         assert_eq!(subscribers.len(), 1);
     }
@@ -1322,7 +1348,7 @@ mod test {
         let path = ["hello".to_owned(), "there".to_owned(), "world".to_owned()];
         let del_path = ["hello".into(), "there".into(), KeySegment::Wildcard];
 
-        let (_, subscribers) = store.insert(&path, json!("Hello!").into()).unwrap();
+        let (_, subscribers) = store.insert(&path, json!("Hello!").into(), false).unwrap();
         assert!(subscribers.is_none());
 
         let (tx, _) = mpsc::channel(1);
@@ -1332,7 +1358,9 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        store.insert(&path, json!("Hello There!").into()).unwrap();
+        store
+            .insert(&path, json!("Hello There!").into(), false)
+            .unwrap();
         let subscribers = store.delete_matches(&del_path).unwrap().1.unwrap();
         assert_eq!(subscribers.len(), 1);
     }
@@ -1350,7 +1378,9 @@ mod test {
             tx,
         );
         store.add_ls_subscriber(&parent, subscriber);
-        let (_, subscribers) = store.insert(&path, json!("Hello There!").into()).unwrap();
+        let (_, subscribers) = store
+            .insert(&path, json!("Hello There!").into(), false)
+            .unwrap();
         let subscribers = subscribers.unwrap();
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].1, vec!["world".to_owned()]);
@@ -1360,77 +1390,77 @@ mod test {
     fn initial_cas_insert_with_version_0_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!("hello"), 0).is_ok());
+        assert!(store.insert_cas(&path, json!("hello"), 0, false).is_ok());
     }
 
     #[test]
     fn plain_to_cas_upgrade_with_version_0_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_plain(&path, json!(1)).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 0).is_ok());
+        assert!(store.insert_plain(&path, json!(1), false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 0, false).is_ok());
     }
 
     #[test]
     fn initial_cas_insert_with_version_1_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!("hello"), 1).is_err())
+        assert!(store.insert_cas(&path, json!("hello"), 1, false).is_err())
     }
 
     #[test]
     fn plain_to_cas_upgrade_with_version_1_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_plain(&path, json!(1)).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 1).is_err());
+        assert!(store.insert_plain(&path, json!(1), false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 1, false).is_err());
     }
 
     #[test]
     fn cas_set_with_previous_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
-        assert!(store.insert_cas(&path, json!(3), 1).is_err());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1, false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2, false).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 1, false).is_err());
     }
 
     #[test]
     fn cas_set_with_same_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
-        assert!(store.insert_cas(&path, json!(3), 2).is_err());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1, false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2, false).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 2, false).is_err());
     }
 
     #[test]
     fn cas_set_with_next_version_number_succeeds() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
-        assert!(store.insert_cas(&path, json!(3), 3).is_ok());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1, false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2, false).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 3, false).is_ok());
     }
 
     #[test]
     fn cas_set_with_future_version_number_fails() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
-        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
-        assert!(store.insert_cas(&path, json!(2), 2).is_ok());
-        assert!(store.insert_cas(&path, json!(3), 4).is_err());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1, false).is_ok());
+        assert!(store.insert_cas(&path, json!(2), 2, false).is_ok());
+        assert!(store.insert_cas(&path, json!(3), 4, false).is_err());
     }
 
     #[test]
     fn cas_value_can_be_deleted() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
         assert_eq!(store.get(&path), Some(&json!(0)));
         assert!(store.delete(&path,).is_ok());
         assert_eq!(store.get(&path), None);
@@ -1441,7 +1471,7 @@ mod test {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let pattern = key_segs("hello/#");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
         assert_eq!(store.get(&path), Some(&json!(0)));
         assert!(store.delete_matches(&pattern).is_ok());
         assert_eq!(store.get(&path), None);
@@ -1451,9 +1481,9 @@ mod test {
     fn cas_set_increments_version() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(0), 1)));
-        assert!(store.insert_cas(&path, json!(1), 1).is_ok());
+        assert!(store.insert_cas(&path, json!(1), 1, false).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(1), 2)));
     }
 
@@ -1461,9 +1491,9 @@ mod test {
     fn regular_set_cannot_overwrite_cas_value() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        assert!(store.insert_cas(&path, json!(0), 0).is_ok());
+        assert!(store.insert_cas(&path, json!(0), 0, false).is_ok());
         assert_eq!(store.cget(&path), Some((&json!(0), 1)));
-        assert!(store.insert_plain(&path, json!(1)).is_err());
+        assert!(store.insert_plain(&path, json!(1), false).is_err());
     }
 
     #[test]
@@ -1502,7 +1532,7 @@ mod test {
         let path = reg_key_segs("hello/cas");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
-        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
 
@@ -1512,7 +1542,7 @@ mod test {
         let path = reg_key_segs("hello/cas");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
-        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         assert_eq!(store.get(&path), Some(&json!("hello")));
         assert!(store.delete(&path,).is_ok());
         assert_eq!(store.get(&path), None);
@@ -1524,7 +1554,7 @@ mod test {
         let path = reg_key_segs("hello/cas");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
-        assert!(store.insert_plain(&path, json!("hello")).is_ok());
+        assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         store.unlock(client_1, &path).await.unwrap();
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
@@ -1536,7 +1566,7 @@ mod test {
         let path2 = reg_key_segs("hello/cas/test");
         let client_1 = Uuid::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
-        assert!(store.insert_plain(&path2, json!("hello")).is_ok());
+        assert!(store.insert_plain(&path2, json!("hello"), false).is_ok());
         store.unlock(client_1, &path).await.unwrap();
         assert_eq!(store.get(&path2), Some(&json!("hello")));
     }
@@ -1550,9 +1580,9 @@ mod test {
         let path2 = reg_key_segs("hello/cas/test");
         let path3 = reg_key_segs("hello/cas/test2");
         let client_1 = Uuid::new_v4();
-        store.insert_plain(&path, json!("hello1")).unwrap();
-        store.insert_plain(&path2, json!("hello2")).unwrap();
-        store.insert_plain(&path3, json!("hello3")).unwrap();
+        store.insert_plain(&path, json!("hello1"), false).unwrap();
+        store.insert_plain(&path2, json!("hello2"), false).unwrap();
+        store.insert_plain(&path3, json!("hello3"), false).unwrap();
         store.lock(client_1, path2.clone()).unwrap();
         assert!(store.delete_matches(&del).is_ok());
         assert_eq!(store.get(&path), None);
