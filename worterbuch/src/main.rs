@@ -60,7 +60,7 @@ async fn start() -> Result<()> {
     let config = Config::new(Some(args.clone())).await?;
 
     #[cfg(feature = "telemetry")]
-    {
+    let shutdown_telemetry = {
         use worterbuch::telemetry;
 
         let hostname = hostname::get().into_diagnostic()?;
@@ -71,20 +71,25 @@ async fn start() -> Result<()> {
         } else {
             None
         };
-        telemetry::init(
+        let drop_guard = telemetry::init(
             args.instance_name
                 .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
             cluster_role,
         )
         .await?;
-    }
+        move || drop(drop_guard)
+    };
 
     #[cfg(not(feature = "telemetry"))]
-    {
+    let shutdown_telemetry = {
         use worterbuch::logging;
 
         logging::init()?;
-    }
+
+        move || {
+            // TODO shutdown logging correctly
+        }
+    };
 
     let cfg = config.clone();
 
@@ -93,6 +98,8 @@ async fn start() -> Result<()> {
         .with_timeout(cfg.shutdown_timeout)
         .start(async |s| run_worterbuch(s, config).await)
         .await?;
+
+    shutdown_telemetry();
 
     Ok(())
 }
