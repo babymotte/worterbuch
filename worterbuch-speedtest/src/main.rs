@@ -41,8 +41,7 @@ async fn main() -> miette::Result<()> {
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
         .start(run_speedtests_with_ui)
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }
@@ -69,6 +68,8 @@ async fn run_speedtests_with_ui(subsys: SubsystemHandle) -> miette::Result<()> {
     subsys.spawn("latency", async move |s| {
         start_latency_test(s, latency_ui_tx, latency_api_rx).await
     });
+
+    subsys.shutdown_requested().await;
 
     Ok(())
 }

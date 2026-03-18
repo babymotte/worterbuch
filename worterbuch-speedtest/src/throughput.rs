@@ -22,12 +22,14 @@ use miette::{Context, IntoDiagnostic};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    ops::ControlFlow,
     time::{Duration, Instant},
 };
 use tokio::{select, sync::mpsc};
 use tosub::SubsystemHandle;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use worterbuch_client::topic;
+use worterbuch_common::while_select;
 
 #[derive(Debug)]
 struct Status {
@@ -339,17 +341,38 @@ pub async fn start_throughput_test<'a>(
 
     let mut test = ThroughputTest::new(subsys.clone(), status_tx, ui_tx, stats);
 
-    loop {
-        select! {
-            Some(api) = api_rx.recv() =>  test.process_api_message(api).await?,
-            Some(status) = status_rx.recv() => test.stats.process_status_update(status),
-            _ = stats_timer.tick() => test.report_stats().await?,
-            _ = subsys.shutdown_requested() => break,
-            else => break,
-        }
+    while_select! {
+        api = api_rx.recv() => try_process_api_message(api, &mut test).await?,
+        status = status_rx.recv() => try_process_status_update(status, &mut test),
+        _ = stats_timer.tick() => try_report_stats(&mut test).await?,
+        _ = subsys.shutdown_requested() => break,
     }
 
     Ok(())
+}
+
+async fn try_process_api_message(
+    api: Option<Api>,
+    test: &mut ThroughputTest,
+) -> miette::Result<ControlFlow<()>> {
+    let Some(api) = api else {
+        return Ok(ControlFlow::Break(()));
+    };
+    test.process_api_message(api).await?;
+    Ok(ControlFlow::Continue(()))
+}
+
+fn try_process_status_update(status: Option<Status>, test: &mut ThroughputTest) -> ControlFlow<()> {
+    let Some(status) = status else {
+        return ControlFlow::Break(());
+    };
+    test.stats.process_status_update(status);
+    ControlFlow::Continue(())
+}
+
+async fn try_report_stats(test: &mut ThroughputTest) -> miette::Result<ControlFlow<()>> {
+    test.report_stats().await?;
+    Ok(ControlFlow::Continue(()))
 }
 
 async fn client(

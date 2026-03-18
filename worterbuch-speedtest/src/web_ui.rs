@@ -197,8 +197,8 @@ pub async fn run_web_ui(
     throughput_api: mpsc::UnboundedSender<throughput::Api>,
     latency_api: mpsc::UnboundedSender<latency::Api>,
 ) -> miette::Result<()> {
-    let web_root_path = env::var("WORTERBUCH_SPEEDTEST_WEBROOT_PATH")
-        .unwrap_or("../../worterbuch-speedtest-ui/build".to_owned());
+    let web_root_path =
+        env::var("WORTERBUCH_SPEEDTEST_WEBROOT_PATH").unwrap_or("./web-ui/dist".to_owned());
     let port = env::var("WORTERBUCH_SPEEDTEST_PORT")
         .ok()
         .and_then(|it| it.parse::<u16>().ok())
