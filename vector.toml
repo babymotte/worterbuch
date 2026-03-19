@@ -1,0 +1,29 @@
+[sources.worterbuch]
+type = "opentelemetry"
+
+[sources.worterbuch.grpc]
+address = "0.0.0.0:4317"
+
+[sources.worterbuch.http]
+address = "0.0.0.0:4318"
+
+[transforms.format_logs]
+type = "remap"
+inputs = ["worterbuch.logs"]
+drop_on_abort = true
+source = '''
+if !exists(.message) || is_null(.message) {
+  abort
+}
+header, _err = join([
+  format_timestamp!(timestamp!(.timestamp), format: "%Y-%m-%dT%H:%M:%S%.6fZ"),
+  string!(.severity_text),
+  string!(.scope.name)
+], "  ");
+.message, _err = join([header, string!(.message)], ": ")
+'''
+
+[sinks.console]
+type = "console"
+inputs = ["format_logs"]
+encoding.codec = "text"
