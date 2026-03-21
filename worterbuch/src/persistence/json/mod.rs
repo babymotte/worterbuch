@@ -90,12 +90,19 @@ pub struct PersistentJsonStorage {
 }
 
 impl PersistentJsonStorage {
-    pub fn new(subsys: &SubsystemHandle, config: Config, api: CloneableWbApi) -> Self {
+    pub fn new(
+        subsys: &SubsystemHandle,
+        config: Config,
+        api: CloneableWbApi,
+        flush_periodically: bool,
+    ) -> Self {
         info!("Using JSON file persistence.");
-        let config_pers = config.clone();
-        subsys.spawn("json-persistence", async |subsys| {
-            periodic(api, config_pers, subsys).await
-        });
+        if flush_periodically {
+            let config_pers = config.clone();
+            subsys.spawn("json-persistence", async |subsys| {
+                periodic(api, config_pers, subsys).await
+            });
+        }
         Self { config }
     }
 }
