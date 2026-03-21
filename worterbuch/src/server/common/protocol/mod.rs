@@ -2,11 +2,10 @@ use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims};
 use tokio::sync::mpsc;
 use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
-use uuid::Uuid;
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    Ack, ClientMessage, ProtocolVersionSegment, ServerMessage, WbApi,
+    Ack, ClientId, ClientMessage, ProtocolVersionSegment, ServerMessage, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 
@@ -25,7 +24,7 @@ pub struct Proto {
 
 impl Proto {
     pub fn new(
-        client_id: Uuid,
+        client_id: ClientId,
         tx: mpsc::Sender<ServerMessage>,
         auth_required: bool,
         config: Config,
@@ -116,7 +115,7 @@ impl Proto {
         }
     }
 
-    fn client_id(&self) -> Uuid {
+    fn client_id(&self) -> ClientId {
         self.latest.v0.client_id
     }
 

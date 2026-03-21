@@ -44,10 +44,9 @@ use tokio::{
     time::sleep,
 };
 use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
-use uuid::Uuid;
 use worterbuch_common::{
-    CasVersion, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill, PState,
-    PStateEvent, Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern,
+    CasVersion, ClientId, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill,
+    PState, PStateEvent, Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern,
     SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
     SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
     SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
@@ -84,7 +83,11 @@ struct PStateAggregatorState {
 }
 
 impl PStateAggregatorState {
-    async fn aggregate_loop(mut self, mut aggregate_rx: Receiver<PStateEvent>, client_id: Uuid) {
+    async fn aggregate_loop(
+        mut self,
+        mut aggregate_rx: Receiver<PStateEvent>,
+        client_id: ClientId,
+    ) {
         let (send_trigger_tx, mut send_trigger_rx) = mpsc::channel::<()>(1);
 
         loop {
@@ -113,7 +116,7 @@ impl PStateAggregatorState {
         &mut self,
         event: PStateEvent,
         send_trigger_tx: &mpsc::Sender<()>,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<()> {
         if !self.send_is_scheduled {
             self.schedule_send(send_trigger_tx.clone(), self.aggregate_duration, client_id);
@@ -193,7 +196,7 @@ impl PStateAggregatorState {
         &mut self,
         send_trigger: mpsc::Sender<()>,
         aggregate_duration: Duration,
-        client_id: Uuid,
+        client_id: ClientId,
     ) {
         self.send_is_scheduled = true;
         spawn(async move {
@@ -216,7 +219,7 @@ impl PStateAggregator {
         aggregate_duration: Duration,
         transaction_id: TransactionId,
         channel_buffer_size: usize,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> Self {
         let aggregator_state = PStateAggregatorState {
             aggregate_duration,
@@ -249,8 +252,8 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
-    clients: HashMap<Uuid, ClientInfo>,
-    spub_keys: HashMap<Uuid, HashMap<TransactionId, Key>>,
+    clients: HashMap<ClientId, ClientInfo>,
+    spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
     persistent_storage: PersistentStorageImpl,
 }
 
@@ -330,7 +333,7 @@ impl Worterbuch {
         &mut self,
         key: Key,
         value: Value,
-        client_id: Uuid,
+        client_id: ClientId,
         force: bool,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
@@ -367,7 +370,7 @@ impl Worterbuch {
         key: Key,
         value: Value,
         version: CasVersion,
-        client_id: Uuid,
+        client_id: ClientId,
         force: bool,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
@@ -405,7 +408,7 @@ impl Worterbuch {
         &mut self,
         transaction_id: TransactionId,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
         self.store_key(client_id, transaction_id, key);
@@ -417,7 +420,7 @@ impl Worterbuch {
         &mut self,
         transaction_id: TransactionId,
         value: Value,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<()> {
         if let Some(key) = self.lookup_key(client_id, transaction_id) {
             self.publish(key, value).await
@@ -442,7 +445,7 @@ impl Worterbuch {
 
     pub async fn subscribe(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         key: Key,
         unique: bool,
@@ -523,7 +526,7 @@ impl Worterbuch {
 
     pub async fn psubscribe(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         pattern: RequestPattern,
         unique: bool,
@@ -615,7 +618,7 @@ impl Worterbuch {
 
     pub async fn subscribe_ls(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         parent: Option<Key>,
     ) -> WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)> {
@@ -700,7 +703,7 @@ impl Worterbuch {
 
     pub async fn unsubscribe(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
         let subscription = SubscriptionId::new(client_id, transaction_id);
@@ -710,7 +713,7 @@ impl Worterbuch {
     async fn do_unsubscribe(
         &mut self,
         subscription: &SubscriptionId,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(subscription) {
             let mut client_subs = 0;
@@ -779,7 +782,7 @@ impl Worterbuch {
 
     pub fn unsubscribe_ls(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
         let subscription = SubscriptionId::new(client_id, transaction_id);
@@ -864,7 +867,7 @@ impl Worterbuch {
         trace!("Calling {} ls subscribers done.", len);
     }
 
-    pub async fn delete(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<Value> {
+    pub async fn delete(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<Value> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -895,7 +898,7 @@ impl Worterbuch {
     pub async fn pdelete(
         &mut self,
         pattern: RequestPattern,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<KeyValuePairs> {
         self.internal_pdelete(pattern, false, client_id).await
     }
@@ -904,7 +907,7 @@ impl Worterbuch {
         &mut self,
         pattern: RequestPattern,
         skip_read_only_check: bool,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
         if !skip_read_only_check {
             check_for_read_only_key(&pattern, client_id)?;
@@ -938,7 +941,7 @@ impl Worterbuch {
         Ok(deleted)
     }
 
-    pub async fn lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+    pub async fn lock(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         self.store.lock(client_id, path)?;
@@ -951,7 +954,7 @@ impl Worterbuch {
     pub async fn acquire_lock(
         &mut self,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> WorterbuchResult<oneshot::Receiver<()>> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
@@ -962,7 +965,7 @@ impl Worterbuch {
         Ok(rx)
     }
 
-    async fn locked(&mut self, client_id: Option<Uuid>, key: &str) {
+    async fn locked(&mut self, client_id: Option<ClientId>, key: &str) {
         if self.config.extended_monitoring {
             if let Some(client_id) = client_id {
                 if let Err(e) = self
@@ -988,7 +991,7 @@ impl Worterbuch {
         }
     }
 
-    pub async fn release_lock(&mut self, key: Key, client_id: Uuid) -> WorterbuchResult<()> {
+    pub async fn release_lock(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         let client_id = self.store.unlock(client_id, &path).await?;
@@ -1052,7 +1055,7 @@ impl Worterbuch {
 
     pub async fn connected(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         remote_addr: Option<SocketAddr>,
         protocol: &Protocol,
     ) -> WorterbuchResult<()> {
@@ -1095,7 +1098,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn protocol_switched(&mut self, client_id: Uuid, protocol: ProtocolMajorVersion) {
+    pub async fn protocol_switched(&mut self, client_id: ClientId, protocol: ProtocolMajorVersion) {
         if self.clients.contains_key(&client_id)
             && self.config.extended_monitoring
             && client_id != INTERNAL_CLIENT_ID
@@ -1107,7 +1110,7 @@ impl Worterbuch {
 
     async fn set_client_protocol(
         &mut self,
-        client_id: &Uuid,
+        client_id: &ClientId,
         protocol: &Protocol,
     ) -> WorterbuchResult<()> {
         self.set(
@@ -1126,7 +1129,7 @@ impl Worterbuch {
 
     async fn set_client_protocol_version(
         &mut self,
-        client_id: &Uuid,
+        client_id: &ClientId,
         protocol_version: ProtocolMajorVersion,
     ) -> WorterbuchResult<()> {
         self.set(
@@ -1145,7 +1148,7 @@ impl Worterbuch {
 
     async fn set_client_address(
         &mut self,
-        client_id: &Uuid,
+        client_id: &ClientId,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         let remote_addr = serde_json::to_value(remote_addr).map_err(|e| {
@@ -1167,7 +1170,7 @@ impl Worterbuch {
 
     async fn set_client_timestamp(
         &mut self,
-        client_id: &Uuid,
+        client_id: &ClientId,
         timestamp: DateTime<Utc>,
     ) -> WorterbuchResult<()> {
         let timestamp = json!(timestamp.format("%+").to_string());
@@ -1185,7 +1188,7 @@ impl Worterbuch {
         .await
     }
 
-    fn grave_goods_for_client(&self, client_id: &Uuid) -> Option<GraveGoods> {
+    fn grave_goods_for_client(&self, client_id: &ClientId) -> Option<GraveGoods> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1196,7 +1199,7 @@ impl Worterbuch {
         value.and_then(|it| serde_json::from_value(it).ok())
     }
 
-    fn last_will_for_client(&self, client_id: &Uuid) -> Option<LastWill> {
+    fn last_will_for_client(&self, client_id: &ClientId) -> Option<LastWill> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1209,7 +1212,7 @@ impl Worterbuch {
 
     pub async fn disconnected(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
@@ -1356,7 +1359,7 @@ impl Worterbuch {
         Ok(())
     }
 
-    fn store_key(&mut self, client_id: Uuid, transaction_id: TransactionId, key: Key) {
+    fn store_key(&mut self, client_id: ClientId, transaction_id: TransactionId, key: Key) {
         let keys = match self.spub_keys.entry(client_id) {
             Entry::Occupied(it) => it.into_mut(),
             Entry::Vacant(it) => it.insert(HashMap::new()),
@@ -1364,7 +1367,7 @@ impl Worterbuch {
         keys.insert(transaction_id, key);
     }
 
-    fn lookup_key(&self, client_id: Uuid, transaction_id: TransactionId) -> Option<Key> {
+    fn lookup_key(&self, client_id: ClientId, transaction_id: TransactionId) -> Option<Key> {
         self.spub_keys
             .get(&client_id)
             .and_then(|keys| keys.get(&transaction_id))
@@ -1463,7 +1466,7 @@ impl Worterbuch {
     }
 }
 
-fn check_for_read_only_key(key: &str, client_id: Uuid) -> WorterbuchResult<()> {
+fn check_for_read_only_key(key: &str, client_id: ClientId) -> WorterbuchResult<()> {
     if client_id == INTERNAL_CLIENT_ID {
         // modification is made internally by the server, so everything is allowed
         return Ok(());

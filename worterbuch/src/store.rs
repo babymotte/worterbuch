@@ -32,10 +32,9 @@ use std::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, warn};
-use uuid::Uuid;
 use worterbuch_common::{
-    CasVersion, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment, SYSTEM_TOPIC_ROOT,
-    SubscriptionId, Value, ValueEntry,
+    CasVersion, ClientId, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment,
+    SYSTEM_TOPIC_ROOT, SubscriptionId, Value, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
 };
@@ -65,19 +64,19 @@ impl From<PersistedStore> for Store {
 }
 
 struct Lock {
-    holder: Uuid,
-    candidates: VecDeque<(Uuid, Vec<oneshot::Sender<()>>)>,
+    holder: ClientId,
+    candidates: VecDeque<(ClientId, Vec<oneshot::Sender<()>>)>,
 }
 
 impl Lock {
-    fn new(client_id: Uuid) -> Self {
+    fn new(client_id: ClientId) -> Self {
         Lock {
             holder: client_id,
             candidates: VecDeque::new(),
         }
     }
 
-    async fn release(&mut self, client_id: Uuid) -> (bool, Option<Uuid>) {
+    async fn release(&mut self, client_id: ClientId) -> (bool, Option<ClientId>) {
         if client_id == self.holder {
             if let Some((id, txs)) = self.candidates.pop_front() {
                 self.holder = id;
@@ -94,7 +93,7 @@ impl Lock {
         }
     }
 
-    async fn queue(&mut self, client_id: Uuid, tx: oneshot::Sender<()>) {
+    async fn queue(&mut self, client_id: ClientId, tx: oneshot::Sender<()>) {
         if let Some((_, txs)) = self.candidates.iter_mut().find(|(id, _)| id == &client_id) {
             txs.push(tx);
         } else {
@@ -283,7 +282,7 @@ pub struct Store {
     data: StoreNode,
     len: usize,
     subscribers: SubscribersNode,
-    locked_keys: HashMap<Uuid, Vec<Box<[RegularKeySegment]>>>,
+    locked_keys: HashMap<ClientId, Vec<Box<[RegularKeySegment]>>>,
     locks: LockNode,
 }
 
@@ -987,7 +986,7 @@ impl Store {
 
     pub fn lock(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         path: Box<[RegularKeySegment]>,
     ) -> WorterbuchResult<()> {
         let node = self.get_or_create_lock_node(path.clone());
@@ -1011,9 +1010,9 @@ impl Store {
 
     pub async fn acquire_lock(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         path: Box<[RegularKeySegment]>,
-    ) -> (oneshot::Receiver<()>, Option<Uuid>) {
+    ) -> (oneshot::Receiver<()>, Option<ClientId>) {
         let (tx, rx) = oneshot::channel();
         let node = self.get_or_create_lock_node(path.clone());
         let holder = match &mut node.value_mut() {
@@ -1040,7 +1039,10 @@ impl Store {
         (rx, holder)
     }
 
-    pub async fn unlock_all(&mut self, client_id: Uuid) -> Option<Vec<(String, Option<Uuid>)>> {
+    pub async fn unlock_all(
+        &mut self,
+        client_id: ClientId,
+    ) -> Option<Vec<(String, Option<ClientId>)>> {
         if let Some(paths) = self.locked_keys.remove(&client_id) {
             let mut out = vec![];
             for path in paths {
@@ -1055,9 +1057,9 @@ impl Store {
 
     pub async fn unlock(
         &mut self,
-        client_id: Uuid,
+        client_id: ClientId,
         path: &[RegularKeySegment],
-    ) -> WorterbuchResult<Option<Uuid>> {
+    ) -> WorterbuchResult<Option<ClientId>> {
         let node = self.get_or_create_lock_node(path.into());
 
         if let Some(lock) = node.value_mut() {
@@ -1101,8 +1103,7 @@ mod test {
     use super::*;
     use serde_json::json;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
-    use worterbuch_common::parse_segments;
+    use worterbuch_common::{ClientId, parse_segments};
 
     fn reg_key_segs(key: &str) -> Box<[RegularKeySegment]> {
         parse_segments(key).unwrap().into()
@@ -1297,7 +1298,7 @@ mod test {
 
         let (tx, _) = mpsc::channel(1);
         let subscriber = LsSubscriber::new(
-            SubscriptionId::new(Uuid::new_v4(), 123),
+            SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
         );
@@ -1320,7 +1321,7 @@ mod test {
 
         let (tx, _) = mpsc::channel(1);
         let subscriber = LsSubscriber::new(
-            SubscriptionId::new(Uuid::new_v4(), 123),
+            SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
         );
@@ -1353,7 +1354,7 @@ mod test {
 
         let (tx, _) = mpsc::channel(1);
         let subscriber = LsSubscriber::new(
-            SubscriptionId::new(Uuid::new_v4(), 123),
+            SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
         );
@@ -1373,7 +1374,7 @@ mod test {
 
         let (tx, _) = mpsc::channel(1);
         let subscriber = LsSubscriber::new(
-            SubscriptionId::new(Uuid::new_v4(), 123),
+            SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
         );
@@ -1500,7 +1501,7 @@ mod test {
     fn lock_can_be_acquired() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client = Uuid::new_v4();
+        let client = ClientId::new_v4();
         assert!(store.lock(client, path).is_ok());
     }
 
@@ -1508,8 +1509,8 @@ mod test {
     fn lock_can_be_acquired_by_only_one_client() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client_1 = Uuid::new_v4();
-        let client_2 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
+        let client_2 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path).is_err());
     }
@@ -1518,8 +1519,8 @@ mod test {
     async fn lock_can_be_re_acquired_after_unlock() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client_1 = Uuid::new_v4();
-        let client_2 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
+        let client_2 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path.clone()).is_err());
         store.unlock(client_1, &path).await.unwrap();
@@ -1530,7 +1531,7 @@ mod test {
     fn locked_value_can_be_written() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client_1 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         assert_eq!(store.get(&path), Some(&json!("hello")));
@@ -1540,7 +1541,7 @@ mod test {
     fn locked_value_can_be_deleted() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client_1 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         assert_eq!(store.get(&path), Some(&json!("hello")));
@@ -1552,7 +1553,7 @@ mod test {
     async fn unlocking_a_key_does_not_delete_its_value() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
-        let client_1 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
         store.unlock(client_1, &path).await.unwrap();
@@ -1564,7 +1565,7 @@ mod test {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let path2 = reg_key_segs("hello/cas/test");
-        let client_1 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path2, json!("hello"), false).is_ok());
         store.unlock(client_1, &path).await.unwrap();
@@ -1579,7 +1580,7 @@ mod test {
         let path = reg_key_segs("hello/cas");
         let path2 = reg_key_segs("hello/cas/test");
         let path3 = reg_key_segs("hello/cas/test2");
-        let client_1 = Uuid::new_v4();
+        let client_1 = ClientId::new_v4();
         store.insert_plain(&path, json!("hello1"), false).unwrap();
         store.insert_plain(&path2, json!("hello2"), false).unwrap();
         store.insert_plain(&path3, json!("hello3"), false).unwrap();

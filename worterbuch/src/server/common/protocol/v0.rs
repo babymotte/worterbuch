@@ -8,18 +8,17 @@ use serde_json::json;
 use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
-use uuid::Uuid;
 use worterbuch_common::{
-    Ack, AuthCheck, AuthorizationRequest, ClientMessage as CM, Delete, Err, ErrorCode, Get, Ls,
-    LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish, SPub,
-    SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, SubscriptionId,
+    Ack, AuthCheck, AuthorizationRequest, ClientId, ClientMessage as CM, Delete, Err, ErrorCode,
+    Get, Ls, LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish,
+    SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, SubscriptionId,
     TransactionId, Unsubscribe, UnsubscribeLs, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
 };
 
 #[derive(Clone)]
 pub struct V0 {
-    pub client_id: Uuid,
+    pub client_id: ClientId,
     pub tx: mpsc::Sender<ServerMessage>,
     pub auth_required: bool,
     pub config: Config,
@@ -867,7 +866,7 @@ async fn aggregate_loop(
     mut rx: mpsc::Receiver<PStateEvent>,
     subscription: SubscriptionInfo,
     client_sub: mpsc::Sender<ServerMessage>,
-    client_id: Uuid,
+    client_id: ClientId,
 ) {
     if !subscription.live_only {
         debug!("Immediately forwarding current state to new subscription {subscription:?} …");

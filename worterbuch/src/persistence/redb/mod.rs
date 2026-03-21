@@ -10,12 +10,17 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tracing::{debug, error, info, trace};
-use worterbuch_common::{Key, ValueEntry};
+use worterbuch_common::{ClientId, GraveGoods, Key, LastWill, ValueEntry};
 
 const TABLE: TableDefinition<Key, String> = TableDefinition::new("worterbuch");
+const TABLE_LAST_WILL: TableDefinition<Key, String> = TableDefinition::new("worterbuch_last_will");
+const TABLE_GRAVE_GOODS: TableDefinition<Key, String> =
+    TableDefinition::new("worterbuch_grave_goods");
 
 enum StoreAction {
     Update(Key, ValueEntry),
+    UpdateLastWill(ClientId, LastWill),
+    UpdateGraveGoods(ClientId, GraveGoods),
     Delete(Key),
     Flush(oneshot::Sender<()>),
     Clear,
@@ -26,6 +31,12 @@ impl fmt::Debug for StoreAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreAction::Update(key, _) => f.debug_tuple("Update").field(key).finish(),
+            StoreAction::UpdateLastWill(client_id, _) => {
+                f.debug_tuple("UpdateLastWill").field(client_id).finish()
+            }
+            StoreAction::UpdateGraveGoods(client_id, _) => {
+                f.debug_tuple("UpdateGraveGoods").field(client_id).finish()
+            }
             StoreAction::Delete(key) => f.debug_tuple("Delete").field(key).finish(),
             StoreAction::Flush(_) => f.debug_tuple("Flush").finish(),
             StoreAction::Clear => f.debug_tuple("Clear").finish(),
@@ -59,6 +70,30 @@ impl PersistentStorage for PersistentRedbStore {
     async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
         self.tx
             .send(StoreAction::Update(key.clone(), value.clone()))
+            .await
+            .ok();
+        Ok(())
+    }
+
+    async fn update_grave_goods(
+        &self,
+        client_id: ClientId,
+        grave_goods: worterbuch_common::GraveGoods,
+    ) -> PersistenceResult<()> {
+        self.tx
+            .send(StoreAction::UpdateGraveGoods(client_id, grave_goods))
+            .await
+            .ok();
+        Ok(())
+    }
+
+    async fn update_last_will(
+        &self,
+        client_id: ClientId,
+        last_will: worterbuch_common::LastWill,
+    ) -> PersistenceResult<()> {
+        self.tx
+            .send(StoreAction::UpdateLastWill(client_id, last_will))
             .await
             .ok();
         Ok(())
@@ -118,6 +153,12 @@ async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Conf
             StoreAction::Update(key, value) => {
                 update_value(&mut db, key, value, &mut rx, &mut next_action)
             }
+            StoreAction::UpdateLastWill(client_id, last_will) => {
+                update_last_will(&mut db, client_id, last_will)
+            }
+            StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
+                update_grave_goods(&mut db, client_id, grave_goods)
+            }
             StoreAction::Delete(key) => delete_value(&mut db, key, &mut rx, &mut next_action),
             StoreAction::Flush(tx) => flush(&mut db, tx),
             StoreAction::Clear => clear(&mut db),
@@ -139,6 +180,7 @@ fn update_value(
     rx: &mut mpsc::Receiver<StoreAction>,
     next_action: &mut Option<StoreAction>,
 ) -> PersistenceResult<()> {
+    trace!("Updating value {key}={value:?}");
     let write_txn = db.begin_write()?;
     {
         let mut table = write_txn.open_table(TABLE)?;
@@ -146,7 +188,47 @@ fn update_value(
         table.insert(key, value)?;
         batch_process(rx, next_action, table)?;
     }
+    trace!("Updating value done, committing db …");
     write_txn.commit()?;
+    trace!("Committing db done.");
+    Ok(())
+}
+
+fn update_last_will(
+    db: &mut Database,
+    client_id: ClientId,
+    last_will: LastWill,
+) -> PersistenceResult<()> {
+    trace!("Updating last will of client {client_id}={last_will:?}");
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(TABLE_LAST_WILL)?;
+        let key = serde_json::to_string(&client_id)?;
+        let value = serde_json::to_string(&last_will)?;
+        table.insert(key, value)?;
+    }
+    trace!("Updating last will done, committing db …");
+    write_txn.commit()?;
+    trace!("Committing db done.");
+    Ok(())
+}
+
+fn update_grave_goods(
+    db: &mut Database,
+    client_id: ClientId,
+    grave_goods: GraveGoods,
+) -> PersistenceResult<()> {
+    trace!("Updating grave goods of client {client_id}={grave_goods:?}");
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(TABLE_GRAVE_GOODS)?;
+        let key = serde_json::to_string(&client_id)?;
+        let value = serde_json::to_string(&grave_goods)?;
+        table.insert(key, value)?;
+    }
+    trace!("Updating grave goods done, committing db …");
+    write_txn.commit()?;
+    trace!("Committing db done.");
     Ok(())
 }
 
@@ -203,6 +285,8 @@ fn load(
 fn clear(db: &mut Database) -> PersistenceResult<()> {
     let write_txn = db.begin_write()?;
     write_txn.delete_table(TABLE)?;
+    write_txn.delete_table(TABLE_LAST_WILL)?;
+    write_txn.delete_table(TABLE_GRAVE_GOODS)?;
     write_txn.commit()?;
     Ok(())
 }

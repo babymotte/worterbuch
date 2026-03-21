@@ -79,11 +79,10 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing::{debug, debug_span, error, info, instrument, warn};
-use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
-    AuthCheck, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo, StateEvent,
-    WbApi,
+    AuthCheck, ClientId, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, ServerInfo,
+    StateEvent, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
 };
 
@@ -320,7 +319,7 @@ async fn set(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     wb.set(key, value, client_id).await?;
     Ok(Json("Ok"))
 }
@@ -346,7 +345,7 @@ async fn delete_value(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     Ok(Json(wb.delete(key, client_id).await?))
 }
 
@@ -358,7 +357,7 @@ async fn pdelete(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     Ok(Json(wb.pdelete(pattern, client_id).await?))
 }
 
@@ -393,7 +392,7 @@ async fn subscribe(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
@@ -466,7 +465,7 @@ async fn psubscribe(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let unique: bool = params
@@ -528,7 +527,7 @@ async fn subscribels_root(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
@@ -581,7 +580,7 @@ async fn subscribels(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
-    let client_id = Uuid::new_v4();
+    let client_id = ClientId::new_v4();
     connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
     let wb_unsub = wb.clone();
@@ -960,7 +959,7 @@ async fn run_ws_server(
             con = listener.recv(), if !waiting_for_free_connections => {
                 debug!("Trying to accept new client connection.");
                 if let Some((socket, remote_addr)) = con {
-                    let id = Uuid::new_v4();
+                    let id = ClientId::new_v4();
                     debug!("{} WS connection(s) open.",clients.len());
                     let worterbuch = worterbuch.clone();
                     let conn_closed_tx = conn_closed_tx.clone();
@@ -1001,7 +1000,7 @@ async fn run_ws_server(
 
 async fn connected(
     wb: &CloneableWbApi,
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
 ) -> WorterbuchResult<()> {
     if let Err(e) = wb

@@ -44,13 +44,12 @@ use tokio::{
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
-use uuid::Uuid;
 use worterbuch_common::{
-    Protocol, ServerInfo, ServerMessage, WbApi, Welcome, write_line_and_flush,
+    ClientId, Protocol, ServerInfo, ServerMessage, WbApi, Welcome, write_line_and_flush,
 };
 
 enum SocketEvent {
-    Disconnected(Option<Uuid>),
+    Disconnected(Option<ClientId>),
     Connected(Option<Result<(TcpStream, SocketAddr), io::Error>>),
     ShutdownRequested,
 }
@@ -105,7 +104,7 @@ pub async fn start(
                     debug!("Trying to accept new client connection.");
                     match con {
                         Ok((socket, remote_addr)) => {
-                            let id = Uuid::new_v4();
+                            let id = ClientId::new_v4();
                             debug!("{} TCP connection(s) open.", clients.len());
                             let worterbuch = worterbuch.clone();
                             let conn_closed_tx = conn_closed_tx.clone();
@@ -154,7 +153,7 @@ pub async fn start(
 
 async fn next_socket_event(
     subsys: &SubsystemHandle,
-    conn_closed_rx: &mut mpsc::Receiver<Uuid>,
+    conn_closed_rx: &mut mpsc::Receiver<ClientId>,
     listener: &TcpListener,
     waiting_for_free_connections: bool,
 ) -> SocketEvent {
@@ -171,7 +170,7 @@ async fn next_socket_event(
 
 async fn serve(
     subsys: &SubsystemHandle,
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
@@ -202,7 +201,7 @@ async fn serve(
 }
 
 struct ServeLoop {
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
     authorized: Option<JwtClaims>,
     tcp_rx: Lines<BufReader<OwnedReadHalf>>,
@@ -211,7 +210,7 @@ struct ServeLoop {
 
 async fn serve_loop(
     subsys: &SubsystemHandle,
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
@@ -268,7 +267,7 @@ async fn forward_messages_to_socket(
     subsys: SubsystemHandle,
     mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
     mut tcp_tx: OwnedWriteHalf,
-    client_id: Uuid,
+    client_id: ClientId,
     send_timeout: Option<Duration>,
 ) -> Result<()> {
     loop {

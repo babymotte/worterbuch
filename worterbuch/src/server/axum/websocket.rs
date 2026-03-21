@@ -31,11 +31,10 @@ use miette::{IntoDiagnostic, Result, miette};
 use std::{net::SocketAddr, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
-use uuid::Uuid;
-use worterbuch_common::{Protocol, ServerInfo, ServerMessage, WbApi, Welcome};
+use worterbuch_common::{ClientId, Protocol, ServerInfo, ServerMessage, WbApi, Welcome};
 
 pub(crate) async fn serve(
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
@@ -67,7 +66,7 @@ pub(crate) async fn serve(
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
 async fn serve_loop(
-    client_id: Uuid,
+    client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
@@ -134,7 +133,7 @@ async fn serve_loop(
 }
 
 async fn send_loop(
-    client_id: Uuid,
+    client_id: ClientId,
     send_timeout: Option<Duration>,
     mut ws_tx: SplitSink<WebSocket, Message>,
     mut ws_send_rx: mpsc::Receiver<ServerMessage>,
@@ -151,7 +150,7 @@ async fn send_with_timeout(
     msg: ServerMessage,
     websocket: &mut WebSocketSender,
     send_timeout: Option<Duration>,
-    client_id: Uuid,
+    client_id: ClientId,
 ) -> Result<()> {
     let json = serde_json::to_string(&msg).into_diagnostic()?;
     let msg = Message::Text(json.into());

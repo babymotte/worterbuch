@@ -229,8 +229,7 @@ mod test {
 
     use super::*;
     use tokio::sync::mpsc::channel;
-    use uuid::Uuid;
-    use worterbuch_common::parse_segments;
+    use worterbuch_common::{ClientId, parse_segments};
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
         parse_segments(key).unwrap()
@@ -247,7 +246,7 @@ mod test {
         let (tx, _rx) = channel(1);
         let pattern = KeySegment::parse("test/?/b/#");
         let id = SubscriptionId {
-            client_id: Uuid::new_v4(),
+            client_id: ClientId::new_v4(),
             transaction_id: 123,
         };
         let subscriber = Subscriber::new(
@@ -273,7 +272,7 @@ mod test {
         let (tx, _rx) = channel(1);
         let pattern = key_segs("test/?/b/#");
         let id = SubscriptionId {
-            client_id: Uuid::new_v4(),
+            client_id: ClientId::new_v4(),
             transaction_id: 123,
         };
         let subscriber = Subscriber::new(

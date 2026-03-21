@@ -41,7 +41,7 @@ mod jemalloc;
 #[cfg(feature = "jemalloc")]
 pub mod profiling;
 
-pub const INTERNAL_CLIENT_ID: Uuid = Uuid::nil();
+pub const INTERNAL_CLIENT_ID: ClientId = ClientId::nil();
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
@@ -88,6 +88,7 @@ pub type LiveOnlyFlag = bool;
 pub type AuthToken = String;
 pub type AuthTokenKey = String;
 pub type CasVersion = u64;
+pub type ClientId = Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValueEntry {
@@ -454,12 +455,12 @@ pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<St
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SubscriptionId {
-    pub client_id: Uuid,
+    pub client_id: ClientId,
     pub transaction_id: TransactionId,
 }
 
 impl SubscriptionId {
-    pub fn new(client_id: Uuid, transaction_id: TransactionId) -> Self {
+    pub fn new(client_id: ClientId, transaction_id: TransactionId) -> Self {
         SubscriptionId {
             client_id,
             transaction_id,
@@ -485,7 +486,7 @@ pub trait WbApi {
         &self,
         key: Key,
         value: Value,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn cset(
@@ -493,35 +494,39 @@ pub trait WbApi {
         key: Key,
         value: Value,
         version: CasVersion,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
-    fn lock(&self, key: Key, client_id: Uuid) -> impl Future<Output = WorterbuchResult<()>> + Send;
+    fn lock(
+        &self,
+        key: Key,
+        client_id: ClientId,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn acquire_lock(
         &self,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<oneshot::Receiver<()>>> + Send;
 
     fn release_lock(
         &self,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn spub_init(
         &self,
         transaction_id: TransactionId,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn spub(
         &self,
         transaction_id: TransactionId,
         value: Value,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn publish(&self, key: Key, value: Value) -> impl Future<Output = WorterbuchResult<()>> + Send;
@@ -538,7 +543,7 @@ pub trait WbApi {
 
     fn subscribe(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         key: Key,
         unique: bool,
@@ -547,7 +552,7 @@ pub trait WbApi {
 
     fn psubscribe(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         pattern: RequestPattern,
         unique: bool,
@@ -556,7 +561,7 @@ pub trait WbApi {
 
     fn subscribe_ls(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
         parent: Option<Key>,
     ) -> impl Future<
@@ -565,44 +570,44 @@ pub trait WbApi {
 
     fn unsubscribe(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn unsubscribe_ls(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         transaction_id: TransactionId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn delete(
         &self,
         key: Key,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<Value>> + Send;
 
     fn pdelete(
         &self,
         pattern: RequestPattern,
-        client_id: Uuid,
+        client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
 
     fn connected(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         remote_addr: Option<SocketAddr>,
         protocol: Protocol,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn protocol_switched(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         protocol: ProtocolMajorVersion,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn disconnected(
         &self,
-        client_id: Uuid,
+        client_id: ClientId,
         remote_addr: Option<SocketAddr>,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
@@ -684,7 +689,6 @@ mod test {
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
-    use super::*;
     use crate::{ErrorCode, ProtocolVersion};
     use serde_json::json;
 

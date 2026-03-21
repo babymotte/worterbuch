@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
 use tracing::{info, warn};
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID, Key, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-    SYSTEM_TOPIC_STORE, ValueEntry, topic,
+    ClientId, GraveGoods, INTERNAL_CLIENT_ID, Key, LastWill, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, ValueEntry, topic,
 };
 
 lazy_static! {
@@ -35,6 +35,18 @@ pub trait PersistentStorage {
     async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()>;
 
     async fn delete_value(&self, key: &Key) -> PersistenceResult<()>;
+
+    async fn update_grave_goods(
+        &self,
+        client_id: ClientId,
+        grave_goods: GraveGoods,
+    ) -> PersistenceResult<()>;
+
+    async fn update_last_will(
+        &self,
+        client_id: ClientId,
+        last_will: LastWill,
+    ) -> PersistenceResult<()>;
 
     async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()>;
 

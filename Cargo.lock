@@ -165,15 +165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89cbf775b137e9b968e67227ef7f775587cde3fd31b0d8599dbd0f598a48340"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -369,20 +360,6 @@ name = "bytemuck"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "bytes"
@@ -1413,9 +1390,9 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "10.2.0"
+version = "10.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76e1c7d7df3e34443b3621b459b066a7b79644f059fc8b2db7070c825fd417e"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1734,6 +1711,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-appender-tracing"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef6a1ac5ca3accf562b8c306fa8483c85f4390f768185ab775f242f7fe8fdcc2"
+dependencies = [
+ "opentelemetry",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "opentelemetry-http"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1808,6 +1797,8 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.2",
  "thiserror",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1838,6 +1829,16 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2",
+]
+
+[[package]]
+name = "parking_lot"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
+dependencies = [
+ "lock_api",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2765,28 +2766,13 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "tracing",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "tokio-graceful-shutdown"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cda9f4941c1115704cb95185af6ec3932c71759da15765cd027855be1022418"
-dependencies = [
- "atomic",
- "bytemuck",
- "miette",
- "pin-project-lite",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -2849,9 +2835,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite-wasm"
-version = "0.7.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5ff91dae56f600914be4d3728ffcce2e6b5f8d1bbf6af8fbd22d3f727924bbf"
+checksum = "ccecee909c02b8863f9bda87253127eb4da0e7e1342330b2583fbc4d1795c2f8"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2914,6 +2900,19 @@ dependencies = [
  "bytes",
  "prost 0.14.3",
  "tonic",
+]
+
+[[package]]
+name = "tosub"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc230d0dc536bf6fbe5a66fe48ecc8d9d7120761f3dae325efcfee2d9680dc5d"
+dependencies = [
+ "miette",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3498,7 +3497,7 @@ checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "worterbuch"
-version = "1.4.1"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "axum-extra",
@@ -3520,6 +3519,7 @@ dependencies = [
  "libc",
  "miette",
  "opentelemetry",
+ "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry-resource-detectors",
  "opentelemetry-semantic-conventions",
@@ -3535,10 +3535,9 @@ dependencies = [
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
- "tokio-graceful-shutdown",
  "tokio-metrics",
  "tokio-stream",
- "tokio-util",
+ "tosub",
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
@@ -3549,7 +3548,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.4.1"
+version = "1.5.0-rc.3"
 dependencies = [
  "clap",
  "dotenvy",
@@ -3557,7 +3556,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-graceful-shutdown",
+ "tosub",
  "tracing",
  "tracing-subscriber",
  "worterbuch-client",
@@ -3565,7 +3564,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.2"
+version = "1.5.0-rc.3"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -3586,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.4.1"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "clap",
@@ -3607,8 +3606,8 @@ dependencies = [
  "thiserror",
  "tikv-jemallocator",
  "tokio",
- "tokio-graceful-shutdown",
  "tokio-process-terminate",
+ "tosub",
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
@@ -3618,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0"
+version = "1.5.0-rc.3"
 dependencies = [
  "axum",
  "hashbrown 0.16.1",

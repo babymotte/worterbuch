@@ -41,7 +41,7 @@ use tokio::{
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
-use worterbuch_common::{GraveGoods, Key, LastWill, ValueEntry};
+use worterbuch_common::{ClientId, GraveGoods, Key, LastWill, ValueEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {
@@ -109,6 +109,16 @@ impl PersistentJsonStorage {
 
 impl PersistentStorage for PersistentJsonStorage {
     async fn update_value(&self, _: &Key, _: &ValueEntry) -> PersistenceResult<()> {
+        // does nothing
+        Ok(())
+    }
+
+    async fn update_grave_goods(&self, _: ClientId, _: GraveGoods) -> PersistenceResult<()> {
+        // does nothing
+        Ok(())
+    }
+
+    async fn update_last_will(&self, _: ClientId, _: LastWill) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }

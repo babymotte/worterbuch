@@ -18,8 +18,8 @@
  */
 
 use crate::{
-    AuthCheckOwned, ClientMessage, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
-    RequestPattern, TransactionId, server::Err,
+    AuthCheckOwned, ClientId, ClientMessage, ErrorCode, Key, MetaData, Privilege,
+    ProtocolVersionSegment, RequestPattern, TransactionId, server::Err,
 };
 use http::StatusCode;
 #[cfg(feature = "ws")]
@@ -34,7 +34,6 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
 };
-use uuid::Uuid;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum ConfigError {
@@ -131,7 +130,7 @@ pub enum WorterbuchError {
     KeyIsLocked(Key),
     KeyIsNotLocked(Key),
     FeatureDisabled(MetaData),
-    ClientIdCollision(Uuid),
+    ClientIdCollision(ClientId),
 }
 
 impl fmt::Display for WorterbuchError {
