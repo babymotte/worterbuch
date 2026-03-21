@@ -2822,7 +2822,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0"
+version = "1.4.2"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -2838,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0"
+version = "1.4.2"
 dependencies = [
  "hashbrown",
  "http",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-speedtest"
-version = "1.4.0"
+version = "1.4.2"
 dependencies = [
  "clap",
  "dotenvy",
