@@ -78,7 +78,7 @@ impl PersistentStorage for PersistentRedbStore {
     async fn update_grave_goods(
         &self,
         client_id: ClientId,
-        grave_goods: worterbuch_common::GraveGoods,
+        grave_goods: GraveGoods,
     ) -> PersistenceResult<()> {
         self.tx
             .send(StoreAction::UpdateGraveGoods(client_id, grave_goods))
@@ -90,7 +90,7 @@ impl PersistentStorage for PersistentRedbStore {
     async fn update_last_will(
         &self,
         client_id: ClientId,
-        last_will: worterbuch_common::LastWill,
+        last_will: LastWill,
     ) -> PersistenceResult<()> {
         self.tx
             .send(StoreAction::UpdateLastWill(client_id, last_will))
@@ -269,6 +269,7 @@ fn load(
         let (k, v) = entry?;
         let key = k.value();
         let value = serde_json::from_str::<ValueEntry>(&v.value())?;
+        trace!("Read entry {key}={value:?}");
         let path: Vec<String> = key.split('/').map(ToOwned::to_owned).collect();
         match value {
             ValueEntry::Cas(value, version) => store.insert_cas(&path, value, version, true)?,

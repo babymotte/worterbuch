@@ -13,9 +13,10 @@ use lazy_static::lazy_static;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 use worterbuch_common::{
-    ClientId, GraveGoods, INTERNAL_CLIENT_ID, Key, LastWill, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+    ClientId, GraveGoods, INTERNAL_CLIENT_ID, Key, LastWill, SYSTEM_TOPIC_CLIENTS,
+    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
     SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, ValueEntry, topic,
 };
 
@@ -64,15 +65,56 @@ pub enum PersistentStorageImpl {
 }
 
 impl PersistentStorageImpl {
-    pub async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
+    pub async fn update_value(
+        &self,
+        key: &Key,
+        value: &ValueEntry,
+        client_id: Option<ClientId>,
+    ) -> PersistenceResult<()> {
         if key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-            return Ok(());
-        }
-
-        match self {
-            PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
-            PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
-            PersistentStorageImpl::Noop => Ok(()),
+            if let Some(client_id) = client_id {
+                if is_grave_goods_topic(key) {
+                    let grave_goods = match value {
+                        ValueEntry::Cas(value, _) => serde_json::from_value(value.to_owned())?,
+                        ValueEntry::Plain(value) => serde_json::from_value(value.to_owned())?,
+                    };
+                    trace!("Updating grave goods for client {client_id} to {grave_goods:?}");
+                    match self {
+                        PersistentStorageImpl::Json(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        PersistentStorageImpl::ReDB(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        PersistentStorageImpl::Noop => Ok(()),
+                    }
+                } else if is_last_will_topic(key) {
+                    let last_will = match value {
+                        ValueEntry::Cas(value, _) => serde_json::from_value(value.to_owned())?,
+                        ValueEntry::Plain(value) => serde_json::from_value(value.to_owned())?,
+                    };
+                    trace!("Updating last will for client {client_id} to {last_will:?}");
+                    match self {
+                        PersistentStorageImpl::Json(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        PersistentStorageImpl::ReDB(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        PersistentStorageImpl::Noop => Ok(()),
+                    }
+                } else {
+                    Ok(())
+                }
+            } else {
+                Ok(())
+            }
+        } else {
+            match self {
+                PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
+                PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
+                PersistentStorageImpl::Noop => Ok(()),
+            }
         }
     }
 
@@ -124,6 +166,48 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
+
+    pub async fn update_grave_goods(
+        &self,
+        client_id: ClientId,
+        grave_goods: GraveGoods,
+    ) -> PersistenceResult<()> {
+        match self {
+            PersistentStorageImpl::Json(s) => s.update_grave_goods(client_id, grave_goods).await,
+            PersistentStorageImpl::ReDB(s) => s.update_grave_goods(client_id, grave_goods).await,
+            PersistentStorageImpl::Noop => Ok(()),
+        }
+    }
+
+    pub async fn update_last_will(
+        &self,
+        client_id: ClientId,
+        last_will: LastWill,
+    ) -> PersistenceResult<()> {
+        match self {
+            PersistentStorageImpl::Json(s) => s.update_last_will(client_id, last_will).await,
+            PersistentStorageImpl::ReDB(s) => s.update_last_will(client_id, last_will).await,
+            PersistentStorageImpl::Noop => Ok(()),
+        }
+    }
+}
+
+fn is_grave_goods_topic(key: &str) -> bool {
+    let mut split = key.split('/');
+    (
+        Some(SYSTEM_TOPIC_CLIENTS),
+        Some(SYSTEM_TOPIC_GRAVE_GOODS),
+        None,
+    ) == (split.nth(1), split.nth(1), split.next())
+}
+
+fn is_last_will_topic(key: &str) -> bool {
+    let mut split = key.split('/');
+    (
+        Some(SYSTEM_TOPIC_CLIENTS),
+        Some(SYSTEM_TOPIC_LAST_WILL),
+        None,
+    ) == (split.nth(1), split.nth(1), split.next())
 }
 
 pub(crate) async fn restore(
