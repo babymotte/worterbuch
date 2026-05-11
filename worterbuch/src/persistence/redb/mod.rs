@@ -10,7 +10,9 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tracing::{debug, error, info, trace};
-use worterbuch_common::{ClientId, GraveGoods, Key, LastWill, ValueEntry};
+use worterbuch_common::{
+    ClientId, GraveGoods, Key, KeyValuePair, LastWill, ValueEntry, parse_segments,
+};
 
 const TABLE: TableDefinition<Key, String> = TableDefinition::new("worterbuch");
 const TABLE_LAST_WILL: TableDefinition<Key, String> = TableDefinition::new("worterbuch_last_will");
@@ -126,6 +128,7 @@ impl PersistentStorage for PersistentRedbStore {
         Ok(())
     }
 }
+
 async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
     let mut next_action = None;
 
@@ -182,12 +185,12 @@ fn update_value(
 ) -> PersistenceResult<()> {
     trace!("Updating value {key}={value:?}");
     let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(TABLE)?;
-        let value = serde_json::to_string(&value)?;
-        table.insert(key, value)?;
-        batch_process(rx, next_action, table)?;
-    }
+
+    let mut table = write_txn.open_table(TABLE)?;
+    let value = serde_json::to_string(&value)?;
+    table.insert(key, value)?;
+    batch_process(rx, next_action, table)?;
+
     trace!("Updating value done, committing db …");
     write_txn.commit()?;
     trace!("Committing db done.");
@@ -201,12 +204,13 @@ fn update_last_will(
 ) -> PersistenceResult<()> {
     trace!("Updating last will of client {client_id}={last_will:?}");
     let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(TABLE_LAST_WILL)?;
-        let key = serde_json::to_string(&client_id)?;
-        let value = serde_json::to_string(&last_will)?;
-        table.insert(key, value)?;
-    }
+
+    let mut table = write_txn.open_table(TABLE_LAST_WILL)?;
+    let key = serde_json::to_string(&client_id)?;
+    let value = serde_json::to_string(&last_will)?;
+    table.insert(key, value)?;
+    drop(table);
+
     trace!("Updating last will done, committing db …");
     write_txn.commit()?;
     trace!("Committing db done.");
@@ -220,12 +224,13 @@ fn update_grave_goods(
 ) -> PersistenceResult<()> {
     trace!("Updating grave goods of client {client_id}={grave_goods:?}");
     let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(TABLE_GRAVE_GOODS)?;
-        let key = serde_json::to_string(&client_id)?;
-        let value = serde_json::to_string(&grave_goods)?;
-        table.insert(key, value)?;
-    }
+
+    let mut table = write_txn.open_table(TABLE_GRAVE_GOODS)?;
+    let key = serde_json::to_string(&client_id)?;
+    let value = serde_json::to_string(&grave_goods)?;
+    table.insert(key, value)?;
+    drop(table);
+
     trace!("Updating grave goods done, committing db …");
     write_txn.commit()?;
     trace!("Committing db done.");
@@ -239,11 +244,11 @@ fn delete_value(
     next_action: &mut Option<StoreAction>,
 ) -> PersistenceResult<()> {
     let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(TABLE)?;
-        table.remove(key)?;
-        batch_process(rx, next_action, table)?;
-    }
+
+    let mut table = write_txn.open_table(TABLE)?;
+    table.remove(key)?;
+    batch_process(rx, next_action, table)?;
+
     write_txn.commit()?;
     Ok(())
 }
@@ -262,7 +267,22 @@ fn load(
     tx: oneshot::Sender<Worterbuch>,
 ) -> PersistenceResult<()> {
     info!("Loading data from ReDB …");
+
     let mut store = Store::default();
+
+    restore_entries(db, &mut store)?;
+    apply_pending_grave_goods(db, &mut store)?;
+    apply_pending_last_wills(db, &mut store)?;
+    db.compact()?;
+
+    store.count_entries();
+    info!("Data load complete.");
+    tx.send(Worterbuch::with_store(store, config.to_owned()))
+        .ok();
+    Ok(())
+}
+
+fn restore_entries(db: &mut Database, store: &mut Store) -> PersistenceResult<()> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(TABLE)?;
     for entry in table.iter()? {
@@ -270,16 +290,82 @@ fn load(
         let key = k.value();
         let value = serde_json::from_str::<ValueEntry>(&v.value())?;
         trace!("Read entry {key}={value:?}");
-        let path: Vec<String> = key.split('/').map(ToOwned::to_owned).collect();
+        let path = parse_segments(&key)?;
         match value {
             ValueEntry::Cas(value, version) => store.insert_cas(&path, value, version, true)?,
             ValueEntry::Plain(value) => store.insert_plain(&path, value, true)?,
         };
     }
-    store.count_entries();
-    info!("Data load complete.");
-    tx.send(Worterbuch::with_store(store, config.to_owned()))
-        .ok();
+    Ok(())
+}
+
+fn apply_pending_grave_goods(db: &mut Database, store: &mut Store) -> PersistenceResult<()> {
+    let write_txn = db.begin_write()?;
+    let mut table = write_txn.open_table(TABLE)?;
+    let gg_table = write_txn.open_table(TABLE_GRAVE_GOODS)?;
+    for entry in gg_table.iter()? {
+        let (k, v) = entry?;
+        let key = k.value();
+        let value = serde_json::from_str::<ValueEntry>(&v.value())?;
+        trace!("Read grave goods entry {key}={value:?}");
+        match value {
+            ValueEntry::Cas(value, _) => apply_grave_good(store, value, &mut table)?,
+            ValueEntry::Plain(value) => apply_grave_good(store, value, &mut table)?,
+        };
+    }
+    drop(gg_table);
+    drop(table);
+    write_txn.delete_table(TABLE_GRAVE_GOODS)?;
+    write_txn.commit()?;
+    Ok(())
+}
+
+fn apply_pending_last_wills(db: &mut Database, store: &mut Store) -> PersistenceResult<()> {
+    let write_txn = db.begin_write()?;
+    let mut table = write_txn.open_table(TABLE)?;
+    let lw_table = write_txn.open_table(TABLE_LAST_WILL)?;
+    for entry in lw_table.iter()? {
+        let (k, v) = entry?;
+        let key = k.value();
+        let value = serde_json::from_str::<ValueEntry>(&v.value())?;
+        trace!("Read last will entry {key}={value:?}");
+        match value {
+            ValueEntry::Cas(value, _) => apply_last_will(store, value, &mut table)?,
+            ValueEntry::Plain(value) => apply_last_will(store, value, &mut table)?,
+        };
+    }
+    drop(lw_table);
+    drop(table);
+    write_txn.delete_table(TABLE_LAST_WILL)?;
+    write_txn.commit()?;
+    Ok(())
+}
+
+fn apply_grave_good(
+    store: &mut Store,
+    value: serde_json::Value,
+    table: &mut redb::Table<'_, Key, String>,
+) -> PersistenceResult<()> {
+    let grave_goods: GraveGoods = serde_json::from_value(value)?;
+    for key in grave_goods {
+        let path = parse_segments(&key)?;
+        store.delete(&path)?;
+        table.remove(&key)?;
+    }
+    Ok(())
+}
+
+fn apply_last_will(
+    store: &mut Store,
+    value: serde_json::Value,
+    table: &mut redb::Table<'_, Key, String>,
+) -> PersistenceResult<()> {
+    let last_will: LastWill = serde_json::from_value(value)?;
+    for KeyValuePair { key, value } in last_will {
+        let path = parse_segments(&key)?;
+        store.insert_plain(&path, value.clone(), true)?;
+        table.insert(key, serde_json::to_string(&ValueEntry::Plain(value))?)?;
+    }
     Ok(())
 }
 

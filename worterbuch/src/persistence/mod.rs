@@ -166,30 +166,6 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
-
-    pub async fn update_grave_goods(
-        &self,
-        client_id: ClientId,
-        grave_goods: GraveGoods,
-    ) -> PersistenceResult<()> {
-        match self {
-            PersistentStorageImpl::Json(s) => s.update_grave_goods(client_id, grave_goods).await,
-            PersistentStorageImpl::ReDB(s) => s.update_grave_goods(client_id, grave_goods).await,
-            PersistentStorageImpl::Noop => Ok(()),
-        }
-    }
-
-    pub async fn update_last_will(
-        &self,
-        client_id: ClientId,
-        last_will: LastWill,
-    ) -> PersistenceResult<()> {
-        match self {
-            PersistentStorageImpl::Json(s) => s.update_last_will(client_id, last_will).await,
-            PersistentStorageImpl::ReDB(s) => s.update_last_will(client_id, last_will).await,
-            PersistentStorageImpl::Noop => Ok(()),
-        }
-    }
 }
 
 fn is_grave_goods_topic(key: &str) -> bool {
