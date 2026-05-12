@@ -63,6 +63,7 @@ impl From<PersistedStore> for Store {
     }
 }
 
+#[derive(Debug)]
 struct Lock {
     holder: ClientId,
     candidates: VecDeque<(ClientId, Vec<oneshot::Sender<()>>)>,
@@ -253,7 +254,8 @@ where
     }
 
     fn drop_children(&mut self) {
-        self.tree = None
+        self.tree = None;
+        self.value = None;
     }
 }
 
@@ -277,7 +279,7 @@ pub struct SubscribersNode {
     pub tree: SubscribersTree,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Store {
     data: StoreNode,
     len: usize,
@@ -404,11 +406,7 @@ impl Store {
             Some(&self.subscribers),
             &mut ls_subscribers,
         )?;
-        if self.len < matches.len() {
-            self.len = 0;
-        } else {
-            self.len -= matches.len();
-        }
+        self.len = self.len.saturating_sub(matches.len());
         debug_assert!(self.data.is_empty() || self.data.is_clean());
         Ok((matches, ls_subscribers))
     }
@@ -744,7 +742,7 @@ impl Store {
         self.insert(path, ValueEntry::Cas(value, version), force)
     }
 
-    fn insert(
+    pub fn insert(
         &mut self,
         path: &[RegularKeySegment],
         value: ValueEntry,
