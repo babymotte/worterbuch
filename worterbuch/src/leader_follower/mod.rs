@@ -22,13 +22,6 @@ pub(crate) mod leader;
 
 use crate::store::StoreNode;
 use serde::{Deserialize, Serialize};
-use std::{
-    io::{self, BufRead},
-    thread,
-};
-use tokio::{select, sync::oneshot};
-use tosub::SubsystemHandle;
-use tracing::{debug, info};
 use worterbuch_common::{CasVersion, GraveGoods, Key, LastWill, RequestPattern, Value};
 
 #[derive(Serialize)]
