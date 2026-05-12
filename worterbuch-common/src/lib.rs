@@ -628,6 +628,14 @@ mod macros {
 
     #[macro_export]
     macro_rules! while_select {
+        (biased; $($tokens:tt)*) => {
+            '__while_select: loop {
+                match ::tokio::select! { biased; $($tokens)* } {
+                    ::std::ops::ControlFlow::Continue(_) => {}
+                    ::std::ops::ControlFlow::Break(v) => break '__while_select v,
+                }
+            }
+        };
         ($($tokens:tt)*) => {
             '__while_select: loop {
                 match ::tokio::select! { $($tokens)* } {
@@ -655,6 +663,26 @@ mod macros {
             });
 
             let res = while_select!(
+                it = &mut fut_a => it,
+                it = &mut fut_b => it,
+            );
+
+            assert_eq!("hello", res);
+        }
+
+        #[tokio::test]
+        async fn while_select_biased_breaks_as_expected_on_control_flow() {
+            use std::{ops::ControlFlow, time::Duration};
+            use tokio::time::sleep;
+
+            let mut fut_a = Box::pin(async { ControlFlow::Break::<&'static str>("hello") });
+            let mut fut_b = Box::pin(async {
+                sleep(Duration::from_secs(1)).await;
+                ControlFlow::Break::<&'static str>("nein")
+            });
+
+            let res = while_select!(
+                biased;
                 it = &mut fut_a => it,
                 it = &mut fut_b => it,
             );

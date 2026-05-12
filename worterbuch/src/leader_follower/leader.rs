@@ -109,11 +109,12 @@ pub(crate) async fn run_in_leader_mode(
         .await?;
 
     while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
         recv = grave_goods_rx.recv() => try_forward_grave_goods_change(recv, &mut client_write_txs, &mut dead).await?,
         recv = last_will_rx.recv() => try_forward_last_will_change(recv, &mut client_write_txs, &mut dead).await?,
-        recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch, &mut client_write_txs, &mut dead).await?,
         recv = follower_connected_rx.recv() => try_forward_follower_connected(recv, &mut worterbuch,&mut client_write_txs, &config, &mut tx_id).await?,
-        _ = subsys.shutdown_requested() => break,
+        recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch, &mut client_write_txs, &mut dead).await?,
     }
 
     shutdown(
@@ -309,8 +310,9 @@ async fn run_cluster_sync_port(
     let listener = socket.listen(1024).into_diagnostic()?;
 
     while_select! {
-        client = listener.accept() => accecpt_client(client, &subsys, &config ,&on_follower_connected).await,
+        biased;
         _ = subsys.shutdown_requested() => break,
+        client = listener.accept() => accecpt_client(client, &subsys, &config ,&on_follower_connected).await,
     }
 
     drop(listener);

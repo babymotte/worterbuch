@@ -342,10 +342,11 @@ pub async fn start_throughput_test<'a>(
     let mut test = ThroughputTest::new(subsys.clone(), status_tx, ui_tx, stats);
 
     while_select! {
-        api = api_rx.recv() => try_process_api_message(api, &mut test).await?,
-        status = status_rx.recv() => try_process_status_update(status, &mut test),
-        _ = stats_timer.tick() => try_report_stats(&mut test).await?,
+        biased;
         _ = subsys.shutdown_requested() => break,
+        _ = stats_timer.tick() => try_report_stats(&mut test).await?,
+        status = status_rx.recv() => try_process_status_update(status, &mut test),
+        api = api_rx.recv() => try_process_api_message(api, &mut test).await?,
     }
 
     Ok(())

@@ -95,10 +95,11 @@ pub(crate) async fn run_in_follower_mode(
     info!("Successfully synced with leader.");
 
     while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        _ = persistence_interval.tick() => try_flush(&mut worterbuch).await?,
         recv = receive_msg(&mut lines) => try_process_leader_message(recv, &mut worterbuch).await?,
         recv = api_rx.recv() => try_process_api_call(recv, &mut worterbuch).await?,
-        _ = persistence_interval.tick() => try_flush(&mut worterbuch).await?,
-        _ = subsys.shutdown_requested() => break,
     }
 
     shutdown(subsys, worterbuch, config, web_server, None, None).await
