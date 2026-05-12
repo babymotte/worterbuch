@@ -3631,6 +3631,7 @@ dependencies = [
  "opentelemetry-otlp",
  "pprof_util",
  "random_word",
+ "redb",
  "regex",
  "serde",
  "serde_json",

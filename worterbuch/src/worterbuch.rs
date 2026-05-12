@@ -1345,6 +1345,16 @@ impl Worterbuch {
             );
         }
 
+        self.persistent_storage
+            .remove_grave_goods_and_last_will(client_id)
+            .await
+            .map_err(|e| {
+                WorterbuchError::IoError(
+                    io::Error::other(e),
+                    "Failed to remove grave goods and last will".to_owned(),
+                )
+            })?;
+
         if self.config.extended_monitoring
             && let Err(e) = self
                 .set(

@@ -40,6 +40,8 @@ use uuid::Uuid;
 mod jemalloc;
 #[cfg(feature = "jemalloc")]
 pub mod profiling;
+#[cfg(feature = "redb")]
+pub mod redb;
 
 pub const INTERNAL_CLIENT_ID: ClientId = ClientId::nil();
 

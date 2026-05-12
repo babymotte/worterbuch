@@ -40,13 +40,13 @@ pub trait PersistentStorage {
     async fn update_grave_goods(
         &self,
         client_id: ClientId,
-        grave_goods: GraveGoods,
+        grave_goods: Option<GraveGoods>,
     ) -> PersistenceResult<()>;
 
     async fn update_last_will(
         &self,
         client_id: ClientId,
-        last_will: LastWill,
+        last_will: Option<LastWill>,
     ) -> PersistenceResult<()>;
 
     async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()>;
@@ -163,6 +163,25 @@ impl PersistentStorageImpl {
         match self {
             PersistentStorageImpl::Json(s) => s.clear().await,
             PersistentStorageImpl::ReDB(s) => s.clear().await,
+            PersistentStorageImpl::Noop => Ok(()),
+        }
+    }
+
+    pub async fn remove_grave_goods_and_last_will(
+        &self,
+        client_id: ClientId,
+    ) -> PersistenceResult<()> {
+        match self {
+            PersistentStorageImpl::Json(s) => {
+                s.update_grave_goods(client_id, None).await?;
+                s.update_last_will(client_id, None).await?;
+                Ok(())
+            }
+            PersistentStorageImpl::ReDB(s) => {
+                s.update_grave_goods(client_id, None).await?;
+                s.update_last_will(client_id, None).await?;
+                Ok(())
+            }
             PersistentStorageImpl::Noop => Ok(()),
         }
     }

@@ -28,6 +28,7 @@ default = ["jemalloc", "telemetry"]
 [dependencies]
 worterbuch-common = { version = "1.5.0-rc.5", path = "../worterbuch-common", features = [
     "axum-errors",
+    "redb",
 ] }
 tokio = { version = "1.44.2", features = ["rt-multi-thread", "fs"] }
 dotenvy = "0.15.7"

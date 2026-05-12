@@ -113,12 +113,16 @@ impl PersistentStorage for PersistentJsonStorage {
         Ok(())
     }
 
-    async fn update_grave_goods(&self, _: ClientId, _: GraveGoods) -> PersistenceResult<()> {
+    async fn update_grave_goods(
+        &self,
+        _: ClientId,
+        _: Option<GraveGoods>,
+    ) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
 
-    async fn update_last_will(&self, _: ClientId, _: LastWill) -> PersistenceResult<()> {
+    async fn update_last_will(&self, _: ClientId, _: Option<LastWill>) -> PersistenceResult<()> {
         // does nothing
         Ok(())
     }
