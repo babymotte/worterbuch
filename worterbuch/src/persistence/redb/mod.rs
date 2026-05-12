@@ -3,18 +3,21 @@ use crate::{
     persistence::{PersistentStorage, error::PersistenceResult},
     store::Store,
 };
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{
+    Database, ReadableDatabase, ReadableTable, TableDefinition, TableError, WriteTransaction,
+};
 use std::{fmt, path::PathBuf};
 use tokio::{
     fs, spawn,
     sync::{mpsc, oneshot},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
 };
 
-const TABLE: TableDefinition<Key, ValueEntry> = TableDefinition::new("worterbuch");
+const TABLE_V1: TableDefinition<Key, String> = TableDefinition::new("worterbuch");
+const TABLE_V2: TableDefinition<Key, ValueEntry> = TableDefinition::new("worterbuch");
 const TABLE_LAST_WILL: TableDefinition<String, LastWill> =
     TableDefinition::new("worterbuch_last_will");
 const TABLE_GRAVE_GOODS: TableDefinition<String, GraveGoods> =
@@ -187,7 +190,7 @@ fn update_value(
     trace!("Updating value {key}={value:?}");
     let write_txn = db.begin_write()?;
 
-    let mut table = write_txn.open_table(TABLE)?;
+    let mut table = write_txn.open_table(TABLE_V2)?;
     table.insert(key, value)?;
     batch_process(rx, next_action, table)?;
 
@@ -249,7 +252,7 @@ fn delete_value(
 ) -> PersistenceResult<()> {
     let write_txn = db.begin_write()?;
 
-    let mut table = write_txn.open_table(TABLE)?;
+    let mut table = write_txn.open_table(TABLE_V2)?;
     table.remove(key)?;
     batch_process(rx, next_action, table)?;
 
@@ -292,15 +295,67 @@ fn load(
 
 fn restore_entries(db: &mut Database, store: &mut Store) -> PersistenceResult<()> {
     let read_txn = db.begin_read()?;
-    let table = read_txn.open_table(TABLE)?;
-    for entry in table.iter()? {
+    match read_txn.open_table(TABLE_V2) {
+        Ok(table) => {
+            for entry in table.iter()? {
+                let (k, v) = entry?;
+                let key = k.value();
+                let value = v.value();
+                trace!("Read entry {key}={value:?}");
+                let path = parse_segments(&key)?;
+                store.insert(&path, value, true)?;
+            }
+        }
+        Err(e) => match e {
+            TableError::TableTypeMismatch { table, value, .. } => {
+                warn!(
+                    "Got unexpected value type '{}' in table '{}'. Starting data migration …",
+                    value.name(),
+                    table
+                );
+                drop(read_txn);
+                migrate_from_v1_to_v2(db)?;
+                restore_entries(db, store)?;
+            }
+            TableError::TableDoesNotExist(name) => {
+                warn!("Table '{name}' does not exist, starting with empty store.");
+            }
+            e => Err(e)?,
+        },
+    }
+
+    Ok(())
+}
+
+fn migrate_from_v1_to_v2(db: &mut Database) -> PersistenceResult<()> {
+    let write_txn = db.begin_write()?;
+
+    let new_name = "worterbuch_v1";
+    let renamed_table_def = TableDefinition::new(new_name);
+
+    write_txn.rename_table(TABLE_V1, renamed_table_def)?;
+    let table_v1 = write_txn.open_table::<String, String>(renamed_table_def)?;
+    let mut table_v2 = write_txn.open_table(TABLE_V2)?;
+
+    for entry in table_v1.iter()? {
         let (k, v) = entry?;
         let key = k.value();
         let value = v.value();
-        trace!("Read entry {key}={value:?}");
-        let path = parse_segments(&key)?;
-        store.insert(&path, value, true)?;
+        trace!("Migrating entry {}={}", key, value);
+        let value = serde_json::from_str::<ValueEntry>(&value)?;
+        table_v2.insert(key, value)?;
     }
+
+    drop(table_v1);
+    drop(table_v2);
+
+    write_txn.delete_table(renamed_table_def)?;
+    write_txn.commit()?;
+
+    db.compact()?;
+
+    info!("Data migration from v1 to v2 complete.");
+
     Ok(())
 }
 
@@ -308,7 +363,7 @@ fn apply_pending_grave_goods(
     write_txn: &WriteTransaction,
     store: &mut Store,
 ) -> PersistenceResult<()> {
-    let mut table = write_txn.open_table(TABLE)?;
+    let mut table = write_txn.open_table(TABLE_V2)?;
     let gg_table = write_txn.open_table(TABLE_GRAVE_GOODS)?;
     for entry in gg_table.iter()? {
         let (k, v) = entry?;
@@ -326,7 +381,7 @@ fn apply_pending_last_wills(
     write_txn: &WriteTransaction,
     store: &mut Store,
 ) -> PersistenceResult<()> {
-    let mut table = write_txn.open_table(TABLE)?;
+    let mut table = write_txn.open_table(TABLE_V2)?;
     let lw_table = write_txn.open_table(TABLE_LAST_WILL)?;
     for entry in lw_table.iter()? {
         let (k, v) = entry?;
@@ -373,7 +428,7 @@ fn apply_last_will(
 
 fn clear(db: &mut Database) -> PersistenceResult<()> {
     let write_txn = db.begin_write()?;
-    write_txn.delete_table(TABLE)?;
+    write_txn.delete_table(TABLE_V2)?;
     write_txn.delete_table(TABLE_LAST_WILL)?;
     write_txn.delete_table(TABLE_GRAVE_GOODS)?;
     write_txn.commit()?;
