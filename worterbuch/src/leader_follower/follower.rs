@@ -20,9 +20,7 @@
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     error::{WorterbuchAppError, WorterbuchAppResult},
-    leader_follower::{
-        ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, shutdown_on_stdin_close,
-    },
+    leader_follower::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
     persistence::unlock_persistence,
     server::common::WbFunction,
     shutdown,
@@ -58,8 +56,6 @@ pub(crate) async fn run_in_follower_mode(
         ));
     };
     info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
-
-    shutdown_on_stdin_close(subsys);
 
     worterbuch
         .set(

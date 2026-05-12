@@ -93,9 +93,14 @@ async fn start() -> Result<()> {
 
     let cfg = config.clone();
 
-    tosub::build_root("worterbuch")
-        .catch_signals()
-        .with_timeout(cfg.shutdown_timeout)
+    let mut root_builder =
+        tosub::build_default_root("worterbuch").with_timeout(cfg.shutdown_timeout);
+
+    if cfg.follower || cfg.leader {
+        root_builder = root_builder.shutdown_on_stdin_close();
+    }
+
+    root_builder
         .start(async |s| run_worterbuch(s, config).await)
         .await?;
 

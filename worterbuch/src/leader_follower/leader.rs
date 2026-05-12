@@ -21,9 +21,7 @@ use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     error::WorterbuchAppResult,
     forward_api_call, forward_to_followers,
-    leader_follower::{
-        ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, shutdown_on_stdin_close,
-    },
+    leader_follower::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
     process_api_call,
     server::common::WbFunction,
     shutdown,
@@ -58,8 +56,6 @@ pub(crate) async fn run_in_leader_mode(
     unix_socket: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
     info!("Running in LEADER mode.");
-
-    shutdown_on_stdin_close(subsys);
 
     worterbuch
         .set(

@@ -57,32 +57,3 @@ pub enum ClientWriteCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
-
-pub fn shutdown_on_stdin_close(subsys: &SubsystemHandle) {
-    info!("Registering stdin close handler …");
-
-    let (tx, rx) = oneshot::channel();
-
-    subsys.spawn("stdin-monitor", async |s| {
-        select! {
-            _ = rx => (),
-            _ = s.shutdown_requested() => (),
-        }
-        info!("Shutting down …");
-        s.request_global_shutdown();
-        Ok::<(), miette::Error>(())
-    });
-
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        let handle = stdin.lock().lines();
-
-        for line in handle {
-            // ignore
-            debug!("{line:?}");
-        }
-
-        info!("stdin closed.");
-        tx.send(()).ok();
-    });
-}
