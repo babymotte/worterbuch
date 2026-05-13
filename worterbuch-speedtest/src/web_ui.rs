@@ -18,7 +18,9 @@
  */
 
 use std::{
-    env, io,
+    convert::Infallible,
+    env,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -26,28 +28,29 @@ use std::{
     time::Duration,
 };
 
-use miette::IntoDiagnostic;
-use poem::{
-    EndpointExt, Error, IntoResponse, Result, Route, Server,
-    endpoint::StaticFilesEndpoint,
-    get, handler,
+use axum::{
+    Json, Router,
+    extract::State,
     http::StatusCode,
-    listener::TcpListener,
-    middleware::{AddData, Tracing},
-    post,
-    web::{
-        Data, Json, WithHeader,
-        sse::{Event, SSE},
-    },
+    response::sse::{Event, KeepAlive, Sse},
+    routing::{get, post},
 };
+use futures::Stream;
+use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
+    net::TcpListener,
     spawn,
     sync::{broadcast, mpsc},
 };
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tosub::SubsystemHandle;
+use tower_http::{
+    cors::CorsLayer,
+    services::{ServeDir, ServeFile},
+    trace::TraceLayer,
+};
 use tracing::{error, info};
 
 use crate::{
@@ -64,130 +67,124 @@ pub struct Settings {
     pub target_rate: Option<usize>,
 }
 
-#[handler]
+#[derive(Clone)]
+struct AppState {
+    throughput_api: mpsc::UnboundedSender<throughput::Api>,
+    throughput_stats_tx: broadcast::Sender<throughput::UiApi>,
+    throughput_running: Arc<AtomicBool>,
+    latency_api: mpsc::UnboundedSender<latency::Api>,
+    latency_events_tx: broadcast::Sender<latency::UiApi>,
+    latency_running: Arc<AtomicBool>,
+}
+
+type ApiResult<T> = Result<T, (StatusCode, String)>;
+
 async fn throughput_settings(
+    State(state): State<AppState>,
     Json(s): Json<Settings>,
-    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
-) -> Result<Json<Value>> {
-    if let Some(agents) = s.agents
-        && let Err(e) = api.send(throughput::Api::SetAgents(agents))
-    {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
+) -> ApiResult<Json<Value>> {
+    if let Some(agents) = s.agents {
+        state
+            .throughput_api
+            .send(throughput::Api::SetAgents(agents))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
-    if let Some(target_rate) = s.target_rate
-        && let Err(e) = api.send(throughput::Api::SetTargetRate(target_rate))
-    {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
+    if let Some(target_rate) = s.target_rate {
+        state
+            .throughput_api
+            .send(throughput::Api::SetTargetRate(target_rate))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     Ok(Json(json!("Ok")))
 }
 
-#[handler]
 async fn throughput_start(
+    State(state): State<AppState>,
     Json(s): Json<Settings>,
-    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
-) -> Result<Json<Value>> {
+) -> ApiResult<Json<Value>> {
     if let (Some(agents), Some(target_rate)) = (s.agents, s.target_rate) {
-        if let Err(e) = api.send(throughput::Api::Start(agents, target_rate)) {
-            return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-        }
+        state
+            .throughput_api
+            .send(throughput::Api::Start(agents, target_rate))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     } else {
-        return Err(Error::new(
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "need both agents and target rate",
-            ),
+        return Err((
             StatusCode::BAD_REQUEST,
+            "need both agents and target rate".to_owned(),
         ));
     }
 
     Ok(Json(json!("Ok")))
 }
 
-#[handler]
-async fn throughput_stop(
-    Data(api): Data<&mpsc::UnboundedSender<throughput::Api>>,
-) -> Result<Json<Value>> {
-    if let Err(e) = api.send(throughput::Api::Stop) {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-    }
+async fn throughput_stop(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    state
+        .throughput_api
+        .send(throughput::Api::Stop)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(json!("Ok")))
 }
 
-#[handler]
-fn throughput_stats(
-    Data(tx): Data<&broadcast::Sender<throughput::UiApi>>,
-    Data(running): Data<&Arc<AtomicBool>>,
-) -> WithHeader<SSE> {
-    let running = running.load(Ordering::Acquire);
-    let rx = tx.subscribe();
+async fn throughput_stats(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let running = state.throughput_running.load(Ordering::Acquire);
+    let rx = state.throughput_stats_tx.subscribe();
     if running {
-        tx.send(throughput::UiApi::Running)
+        state.throughput_stats_tx.send(throughput::UiApi::Running)
     } else {
-        tx.send(throughput::UiApi::Stopped)
+        state.throughput_stats_tx.send(throughput::UiApi::Stopped)
     }
     .ok();
-    let stream = BroadcastStream::new(rx)
-        .map(move |stat| {
-            stat.ok()
-                .and_then(|s| serde_json::to_string(&s).ok())
-                .map(Event::message)
-        })
-        .filter_map(|it| it);
-    SSE::new(stream)
-        .keep_alive(Duration::from_secs(5))
-        .with_header("Access-Control-Allow-Origin", "*")
+    let stream = BroadcastStream::new(rx).filter_map(|stat| {
+        stat.ok()
+            .and_then(|s| serde_json::to_string(&s).ok())
+            .map(|data| Ok(Event::default().data(data)))
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default().interval(Duration::from_secs(5)))
 }
 
-#[handler]
 async fn latency_start(
+    State(state): State<AppState>,
     Json(s): Json<LatencySettings>,
-    Data(api): Data<&mpsc::UnboundedSender<latency::Api>>,
-) -> Result<Json<Value>> {
-    if let Err(e) = api.send(latency::Api::Start(s)) {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-    }
+) -> ApiResult<Json<Value>> {
+    state
+        .latency_api
+        .send(latency::Api::Start(s))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(json!("Ok")))
 }
 
-#[handler]
-async fn latency_stop(
-    Data(api): Data<&mpsc::UnboundedSender<latency::Api>>,
-) -> Result<Json<Value>> {
-    if let Err(e) = api.send(latency::Api::Stop) {
-        return Err(Error::new(e, StatusCode::INTERNAL_SERVER_ERROR));
-    }
+async fn latency_stop(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    state
+        .latency_api
+        .send(latency::Api::Stop)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(json!("Ok")))
 }
 
-#[handler]
-fn latency_events(
-    Data(tx): Data<&broadcast::Sender<latency::UiApi>>,
-    Data(running): Data<&Arc<AtomicBool>>,
-) -> WithHeader<SSE> {
-    let running = running.load(Ordering::Acquire);
-    let rx = tx.subscribe();
+async fn latency_events(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let running = state.latency_running.load(Ordering::Acquire);
+    let rx = state.latency_events_tx.subscribe();
     if running {
-        tx.send(latency::UiApi::Running)
+        state.latency_events_tx.send(latency::UiApi::Running)
     } else {
-        tx.send(latency::UiApi::Stopped)
+        state.latency_events_tx.send(latency::UiApi::Stopped)
     }
     .ok();
-    let stream = BroadcastStream::new(rx)
-        .map(move |stat| {
-            stat.ok()
-                .and_then(|s| serde_json::to_string(&s).ok())
-                .map(Event::message)
-        })
-        .filter_map(|it| it);
-    SSE::new(stream)
-        .keep_alive(Duration::from_secs(5))
-        .with_header("Access-Control-Allow-Origin", "*")
+    let stream = BroadcastStream::new(rx).filter_map(|stat| {
+        stat.ok()
+            .and_then(|s| serde_json::to_string(&s).ok())
+            .map(|data| Ok(Event::default().data(data)))
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default().interval(Duration::from_secs(5)))
 }
 
 pub async fn run_web_ui(
@@ -207,47 +204,32 @@ pub async fn run_web_ui(
     let (latency_events_tx, latency_events_rx) = broadcast::channel(1000);
     let throughput_running = Arc::new(AtomicBool::new(false));
     let latency_running = Arc::new(AtomicBool::new(false));
-    let app = Route::new()
-        .at(
-            "/throughput/settings",
-            post(throughput_settings.with(AddData::new(throughput_api.clone()))),
+
+    let state = AppState {
+        throughput_api,
+        throughput_stats_tx: throughput_stats_tx.clone(),
+        throughput_running: throughput_running.clone(),
+        latency_api,
+        latency_events_tx: latency_events_tx.clone(),
+        latency_running: latency_running.clone(),
+    };
+
+    let web_root_path = PathBuf::from(web_root_path);
+    let app = Router::new()
+        .route("/throughput/settings", post(throughput_settings))
+        .route("/throughput/start", post(throughput_start))
+        .route("/throughput/stop", post(throughput_stop))
+        .route("/throughput/stats", get(throughput_stats))
+        .route("/latency/start", post(latency_start))
+        .route("/latency/stop", post(latency_stop))
+        .route("/latency/events", get(latency_events))
+        .fallback_service(
+            ServeDir::new(&web_root_path)
+                .fallback(ServeFile::new(web_root_path.join("index.html"))),
         )
-        .at(
-            "/throughput/start",
-            post(throughput_start.with(AddData::new(throughput_api.clone()))),
-        )
-        .at(
-            "/throughput/stop",
-            post(throughput_stop.with(AddData::new(throughput_api.clone()))),
-        )
-        .at(
-            "/throughput/stats",
-            get(throughput_stats
-                .with(AddData::new(throughput_stats_tx.clone()))
-                .with(AddData::new(throughput_running.clone()))),
-        )
-        .at(
-            "/latency/start",
-            post(latency_start.with(AddData::new(latency_api.clone()))),
-        )
-        .at(
-            "/latency/stop",
-            post(latency_stop.with(AddData::new(latency_api.clone()))),
-        )
-        .at(
-            "/latency/events",
-            get(latency_events
-                .with(AddData::new(latency_events_tx.clone()))
-                .with(AddData::new(latency_running.clone()))),
-        )
-        .nest(
-            "/",
-            StaticFilesEndpoint::new(web_root_path)
-                .index_file("index.html")
-                .fallback_to_index()
-                .redirect_to_slash_directory(),
-        )
-        .with(Tracing);
+        .with_state(state)
+        .layer(TraceLayer::new_for_http())
+        .layer(CorsLayer::permissive());
 
     let throughput_tx = throughput_stats_tx.clone();
     spawn(async move {
@@ -285,9 +267,12 @@ pub async fn run_web_ui(
     let host = host.to_str().unwrap_or("localhost");
     info!("Starting speedtest server at http://{host}:{port}");
 
-    Server::new(TcpListener::bind(format!("0.0.0.0:{port}")))
-        .name("worterbuch-speedtest-server")
-        .run_with_graceful_shutdown(app, subsys.shutdown_requested(), None)
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
+        .await
+        .into_diagnostic()?;
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move { subsys.shutdown_requested().await })
         .await
         .into_diagnostic()?;
 
