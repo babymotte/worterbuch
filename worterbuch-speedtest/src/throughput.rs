@@ -252,9 +252,10 @@ impl ThroughputTest {
     }
 
     async fn close_agent(&mut self) -> Result<(), miette::Error> {
-        Ok(if let Some(api) = self.agent_apis.pop() {
+        let _: () = if let Some(api) = self.agent_apis.pop() {
             api.send(AgentApi::Close).into_diagnostic()?;
-        })
+        };
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), miette::Error> {
@@ -328,7 +329,7 @@ impl ThroughputTest {
     }
 }
 
-pub async fn start_throughput_test<'a>(
+pub async fn start_throughput_test(
     subsys: SubsystemHandle,
     ui_tx: mpsc::UnboundedSender<UiApi>,
     mut api_rx: mpsc::UnboundedReceiver<Api>,
