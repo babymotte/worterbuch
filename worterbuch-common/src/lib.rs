@@ -24,13 +24,12 @@ pub mod error;
 mod server;
 
 pub use client::*;
-use serde_json::json;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 pub use server::*;
 
 use error::WorterbuchResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_repr::*;
-use sha2::{Digest, Sha256};
+use serde_json::json;
 use std::{fmt, net::SocketAddr, ops::Deref};
 use tokio::sync::{mpsc, oneshot};
 use tracing::Span;
@@ -444,15 +443,6 @@ pub fn quote(str: impl AsRef<str>) -> String {
     } else {
         format!("\"{str_ref}\"")
     }
-}
-
-pub fn digest_token(auth_token: &Option<String>, client_id: String) -> Option<String> {
-    auth_token.as_deref().map(|token| {
-        let salted = client_id + token;
-        let mut hasher = Sha256::new();
-        hasher.update(salted.as_bytes());
-        format!("{:x}", hasher.finalize())
-    })
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
