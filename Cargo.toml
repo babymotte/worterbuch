@@ -8,6 +8,79 @@ members = [
 ]
 resolver = "3"
 
+[workspace.dependencies]
+# Internal crates
+worterbuch-common = { version = "1.5.0-rc.6", path = "worterbuch-common" }
+worterbuch-client = { version = "1.5.0-rc.6", path = "worterbuch-client" }
+
+async-stream = "0.3.4"
+axum = "0.8.7"
+axum-extra = "0.12.2"
+axum-server = "0.8.0"
+base64 = "0.22.1"
+chrono = "0.4.41"
+clap = "4.5.32"
+dotenvy = "0.15.7"
+flate2 = "1.1.0"
+futures = "0.3.27"
+futures-core = "0.3.27"
+futures-util = { version = "0.3.27", default-features = false }
+gethostname = "1.0.0"
+getrandom = "0.4.2"
+hashbrown = "0.17.1"
+hashlink = "0.11.0"
+headers = "0.4.1"
+hex = "0.4.3"
+hostname = "0.4.0"
+http = "1.3.1"
+http-body-util = "0.1.3"
+inferno = "0.12.2"
+jemalloc_pprof = { version = "0.8.0", features = ["flamegraph"] }
+jsonwebtoken = "10.3.0"
+lazy_static = "1.5.0"
+libc = "0.2.175"
+mappings = "0.7.0"
+miette = "7.5.0"
+mio = { version = "1.0.3", default-features = false }
+opentelemetry = "0.31.0"
+opentelemetry-appender-tracing = "0.31.1"
+opentelemetry-otlp = "0.31.0"
+opentelemetry-resource-detectors = "0.10.0"
+opentelemetry-semantic-conventions = "0.31.0"
+opentelemetry_sdk = "0.31.0"
+pprof_util = { version = "0.8.0", features = ["flamegraph"] }
+rand = "0.10.1"
+random_word = { version = "0.5.0", features = ["en"] }
+redb = "4.1.0"
+regex = "1.11.1"
+serde = "1.0.219"
+serde_json = "1.0.140"
+serde_repr = "0.1.16"
+serde_yaml = "0.9.34"
+sha2 = "0.11.0"
+socket2 = { version = "0.6.0", features = ["all"] }
+strum = { version = "0.28.0", features = ["derive"] }
+supports-color = "3.0.2"
+thiserror = "2.0.16"
+tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats"] }
+tikv-jemallocator = { version = "0.6.0", features = [
+    "profiling",
+    "unprefixed_malloc_on_supported_platforms",
+] }
+tokio = "1.46.1"
+tokio-metrics = "0.5.0"
+tokio-process-terminate = "0.3.2"
+tokio-stream = "0.1.14"
+tokio-tungstenite = "0.29.0"
+tokio-tungstenite-wasm = "0.8.2"
+tosub = "1.1.3"
+tower-http = "0.6.2"
+tracing = "0.1.41"
+tracing-opentelemetry = "0.32.0"
+tracing-subscriber = "0.3.20"
+tungstenite = "0.29.0"
+uuid = "1.15.1"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
