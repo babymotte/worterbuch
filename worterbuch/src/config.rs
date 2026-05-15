@@ -43,7 +43,7 @@ pub enum PersistenceMode {
     Json,
     ReDB,
     // RocksDB,
-    // Sqlite
+    SQLite,
 }
 
 #[derive(Parser, Debug, Clone, PartialEq, Serialize)]

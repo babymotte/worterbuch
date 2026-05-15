@@ -204,6 +204,7 @@ pub enum ErrorCode {
     LockAcquisitionCancelled = 22,
     FeatureDisabled = 23,
     ClientIDCollision = 24,
+    EmptyKey = 25,
     Other = u8::MAX,
 }
 

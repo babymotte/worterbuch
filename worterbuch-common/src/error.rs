@@ -131,6 +131,7 @@ pub enum WorterbuchError {
     KeyIsNotLocked(Key),
     FeatureDisabled(MetaData),
     ClientIdCollision(ClientId),
+    EmptyKey,
 }
 
 impl fmt::Display for WorterbuchError {
@@ -201,14 +202,17 @@ impl fmt::Display for WorterbuchError {
                 )
             }
             WorterbuchError::KeyIsLocked(key) => {
-                write!(f, "Key {key} is locked by another client",)
+                write!(f, "Key {key} is locked by another client")
             }
             WorterbuchError::KeyIsNotLocked(key) => {
-                write!(f, "Key {key} is not locked",)
+                write!(f, "Key {key} is not locked")
             }
             WorterbuchError::FeatureDisabled(m) => m.fmt(f),
             WorterbuchError::ClientIdCollision(id) => {
-                write!(f, "Client ID collision: {id} already exists",)
+                write!(f, "Client ID collision: {id} already exists")
+            }
+            WorterbuchError::EmptyKey => {
+                write!(f, "Key cannot be empty")
             }
         }
     }
@@ -416,6 +420,7 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::KeyIsNotLocked(_) => ErrorCode::KeyIsNotLocked,
             WorterbuchError::FeatureDisabled(_) => ErrorCode::KeyIsNotLocked,
             WorterbuchError::ClientIdCollision(_) => ErrorCode::ClientIDCollision,
+            WorterbuchError::EmptyKey => ErrorCode::EmptyKey,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
         }
     }
@@ -428,7 +433,8 @@ impl From<WorterbuchError> for (StatusCode, String) {
             | WorterbuchError::IllegalWildcard(_)
             | WorterbuchError::MultiWildcardAtIllegalPosition(_)
             | WorterbuchError::NotImplemented
-            | WorterbuchError::KeyIsNotLocked(_) => (StatusCode::BAD_REQUEST, e.to_string()),
+            | WorterbuchError::KeyIsNotLocked(_)
+            | WorterbuchError::EmptyKey => (StatusCode::BAD_REQUEST, e.to_string()),
 
             WorterbuchError::AlreadyAuthorized
             | WorterbuchError::NotSubscribed

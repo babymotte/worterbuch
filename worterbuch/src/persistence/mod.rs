@@ -1,11 +1,13 @@
 pub mod error;
 mod json;
 mod redb;
+mod sqlite;
 
 use crate::{
     Config, PersistenceMode, Worterbuch,
     persistence::{
         error::PersistenceResult, json::PersistentJsonStorage, redb::PersistentRedbStore,
+        sqlite::PersistentSQLiteStore,
     },
     server::CloneableWbApi,
 };
@@ -60,6 +62,7 @@ pub trait PersistentStorage {
 pub enum PersistentStorageImpl {
     Json(Box<PersistentJsonStorage>),
     ReDB(Box<PersistentRedbStore>),
+    SQLite(Box<PersistentSQLiteStore>),
     #[default]
     Noop,
 }
@@ -86,6 +89,9 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::ReDB(s) => {
                             s.update_grave_goods(client_id, grave_goods).await
                         }
+                        PersistentStorageImpl::SQLite(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
                         PersistentStorageImpl::Noop => Ok(()),
                     }
                 } else if is_last_will_topic(key) {
@@ -101,6 +107,9 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::ReDB(s) => {
                             s.update_last_will(client_id, last_will).await
                         }
+                        PersistentStorageImpl::SQLite(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
                         PersistentStorageImpl::Noop => Ok(()),
                     }
                 } else {
@@ -113,6 +122,7 @@ impl PersistentStorageImpl {
             match self {
                 PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
                 PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
+                PersistentStorageImpl::SQLite(s) => s.update_value(key, value).await,
                 PersistentStorageImpl::Noop => Ok(()),
             }
         }
@@ -126,6 +136,7 @@ impl PersistentStorageImpl {
         match self {
             PersistentStorageImpl::Json(s) => s.delete_value(key).await,
             PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
+            PersistentStorageImpl::SQLite(s) => s.delete_value(key).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -134,6 +145,7 @@ impl PersistentStorageImpl {
         match self {
             PersistentStorageImpl::Json(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::ReDB(s) => s.flush(worterbuch).await,
+            PersistentStorageImpl::SQLite(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -145,6 +157,7 @@ impl PersistentStorageImpl {
             match self {
                 PersistentStorageImpl::Json(s) => s.load(config).await,
                 PersistentStorageImpl::ReDB(s) => s.load(config).await,
+                PersistentStorageImpl::SQLite(s) => s.load(config).await,
                 PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
             }
         };
@@ -163,6 +176,7 @@ impl PersistentStorageImpl {
         match self {
             PersistentStorageImpl::Json(s) => s.clear().await,
             PersistentStorageImpl::ReDB(s) => s.clear().await,
+            PersistentStorageImpl::SQLite(s) => s.clear().await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -178,6 +192,11 @@ impl PersistentStorageImpl {
                 Ok(())
             }
             PersistentStorageImpl::ReDB(s) => {
+                s.update_grave_goods(client_id, None).await?;
+                s.update_last_will(client_id, None).await?;
+                Ok(())
+            }
+            PersistentStorageImpl::SQLite(s) => {
                 s.update_grave_goods(client_id, None).await?;
                 s.update_last_will(client_id, None).await?;
                 Ok(())
@@ -242,6 +261,9 @@ async fn get_storage_instance(
             )),
             PersistenceMode::ReDB => {
                 PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(config).await?))
+            }
+            PersistenceMode::SQLite => {
+                PersistentStorageImpl::SQLite(Box::new(PersistentSQLiteStore::new(config).await?))
             }
         };
 

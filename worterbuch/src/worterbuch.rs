@@ -1481,6 +1481,10 @@ impl Worterbuch {
 }
 
 fn check_for_read_only_key(key: &str, client_id: ClientId) -> WorterbuchResult<()> {
+    if key.is_empty() {
+        return Err(WorterbuchError::EmptyKey);
+    }
+
     if client_id == INTERNAL_CLIENT_ID {
         // modification is made internally by the server, so everything is allowed
         return Ok(());
