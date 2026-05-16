@@ -1,7 +1,7 @@
 use crate::persistence::error::PersistenceResult;
 use rusqlite::{Connection, params};
-use std::{collections::HashMap, path::Path};
-use worterbuch_common::ValueEntry;
+use std::{collections::HashMap, io, path::Path};
+use worterbuch_common::{KeyValuePair, ValueEntry};
 
 const ROOT_ID: i64 = 0;
 
@@ -229,5 +229,100 @@ impl SqliTrie {
              DELETE FROM last_wills;",
         )?;
         Ok(())
+    }
+
+    pub(crate) fn insert_last_will(
+        &self,
+        client_id: uuid::Uuid,
+        last_will: Option<Vec<worterbuch_common::KeyValuePair>>,
+    ) -> PersistenceResult<()> {
+        let client_id = client_id.to_string();
+
+        if let Some(last_will) = last_will {
+            let value = serde_json::to_string(&last_will)?;
+            self.conn
+                .prepare_cached(
+                    "INSERT OR REPLACE INTO last_wills (client_id, value) VALUES (?1, ?2);",
+                )?
+                .execute(params![client_id, value])?;
+        } else {
+            self.conn
+                .prepare_cached("DELETE FROM last_wills WHERE client_id = ?1;")?
+                .execute(params![client_id])?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn insert_grave_goods(
+        &self,
+        client_id: uuid::Uuid,
+        grave_goods: Option<Vec<String>>,
+    ) -> PersistenceResult<()> {
+        let client_id = client_id.to_string();
+
+        if let Some(grave_goods) = grave_goods {
+            let value = serde_json::to_string(&grave_goods)?;
+            self.conn
+                .prepare_cached(
+                    "INSERT OR REPLACE INTO grave_goods (client_id, value) VALUES (?1, ?2);",
+                )?
+                .execute(params![client_id, value])?;
+        } else {
+            self.conn
+                .prepare_cached("DELETE FROM grave_goods WHERE client_id = ?1;")?
+                .execute(params![client_id])?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drain_grave_goods(&self) -> PersistenceResult<HashMap<uuid::Uuid, Vec<String>>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT client_id, value FROM grave_goods")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut map = HashMap::new();
+        for (client_id_str, value_str) in rows {
+            let client_id = client_id_str
+                .parse::<uuid::Uuid>()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let value: Vec<String> = serde_json::from_str(&value_str)?;
+            map.insert(client_id, value);
+        }
+
+        self.conn.execute_batch("DELETE FROM grave_goods")?;
+
+        Ok(map)
+    }
+
+    pub(crate) fn drain_last_wills(
+        &self,
+    ) -> PersistenceResult<HashMap<uuid::Uuid, Vec<KeyValuePair>>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT client_id, value FROM last_wills")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut map = HashMap::new();
+        for (client_id_str, value_str) in rows {
+            let client_id = client_id_str
+                .parse::<uuid::Uuid>()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let value: Vec<KeyValuePair> = serde_json::from_str(&value_str)?;
+            map.insert(client_id, value);
+        }
+
+        self.conn.execute_batch("DELETE FROM last_wills")?;
+
+        Ok(map)
     }
 }

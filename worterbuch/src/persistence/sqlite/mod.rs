@@ -11,7 +11,9 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tracing::{debug, error, info, trace};
-use worterbuch_common::{ClientId, GraveGoods, Key, LastWill, ValueEntry, parse_segments};
+use worterbuch_common::{
+    ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
+};
 
 enum StoreAction {
     Update(Key, ValueEntry),
@@ -209,7 +211,7 @@ fn update_last_will(
 ) -> PersistenceResult<()> {
     trace!("Updating last will of client {client_id}={last_will:?}");
 
-    // TODO
+    db.insert_last_will(client_id, last_will)?;
 
     Ok(())
 }
@@ -221,7 +223,7 @@ fn update_grave_goods(
 ) -> PersistenceResult<()> {
     trace!("Updating grave goods of client {client_id}={grave_goods:?}");
 
-    // TODO
+    db.insert_grave_goods(client_id, grave_goods)?;
 
     Ok(())
 }
@@ -270,18 +272,41 @@ fn restore_entries(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()
 }
 
 fn apply_pending_grave_goods(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()> {
-    // TODO
-
+    let grave_goods = db.drain_grave_goods()?;
+    for (client_id, grave_goods) in grave_goods {
+        trace!("Found pending grave goods for client {client_id}: {grave_goods:?}");
+        apply_grave_good(store, grave_goods)?;
+    }
     Ok(())
 }
 
 fn apply_pending_last_wills(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()> {
-    // TODO
-
+    let last_wills = db.drain_last_wills()?;
+    for (client_id, last_will) in last_wills {
+        trace!("Found pending last will for client {client_id}: {last_will:?}");
+        apply_last_will(store, last_will)?;
+    }
     Ok(())
 }
 
 fn clear(db: &mut SqliTrie) -> PersistenceResult<()> {
     db.clear()?;
+    Ok(())
+}
+
+fn apply_grave_good(store: &mut Store, grave_goods: GraveGoods) -> PersistenceResult<()> {
+    for pattern in grave_goods {
+        let path = KeySegment::parse(&pattern);
+        let (removed, _) = store.delete_matches(&path)?;
+        trace!("Found grave goods for pattern {pattern}: {removed:?}");
+    }
+    Ok(())
+}
+
+fn apply_last_will(store: &mut Store, last_will: LastWill) -> PersistenceResult<()> {
+    for KeyValuePair { key, value } in last_will {
+        let path = parse_segments(&key)?;
+        store.insert_plain(&path, value.clone(), true)?;
+    }
     Ok(())
 }
