@@ -23,8 +23,10 @@ telemetry = [
     "opentelemetry-appender-tracing",
 ]
 commercial = []
+redb = ["dep:redb"]
+sqlite = ["dep:rusqlite"]
 turso = ["dep:turso"]
-default = ["jemalloc", "telemetry"]
+default = ["jemalloc", "telemetry", "redb", "sqlite"]
 
 [dependencies]
 axum = { workspace = true, features = ["http2", "ws"] }
@@ -58,8 +60,8 @@ opentelemetry-otlp = { workspace = true, features = [
 ], optional = true }
 opentelemetry-resource-detectors = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
-redb = { workspace = true }
-rusqlite = { workspace = true }
+redb = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

@@ -292,6 +292,7 @@ impl Worterbuch {
     }
 
     #[instrument(skip(store, config))]
+    #[cfg(any(feature = "redb", feature = "sqlite", feature = "turso"))]
     pub fn with_store(store: Store, config: Config) -> Worterbuch {
         debug!("Loaded persisted store with {} entries.", store.len());
         Worterbuch {

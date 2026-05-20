@@ -1,4 +1,6 @@
+use crate::store::StoreError;
 use miette::Diagnostic;
+#[cfg(feature = "redb")]
 use redb::{
     CommitError, CompactionError, DatabaseError, StorageError, TableError, TransactionError,
 };
@@ -6,8 +8,6 @@ use std::io;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use worterbuch_common::error::WorterbuchError;
-
-use crate::store::StoreError;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum PersistenceError {
@@ -23,18 +23,25 @@ pub enum PersistenceError {
     WorterbuchError(#[from] WorterbuchError),
     #[error("Written data is different from data to be written")]
     DataMismatch,
+    #[cfg(feature = "redb")]
     #[error("redb database error: {0}")]
     RedbDatabaseBError(#[from] DatabaseError),
+    #[cfg(feature = "redb")]
     #[error("redb transaction error: {0}")]
     RedbTransactioneError(#[from] TransactionError),
+    #[cfg(feature = "redb")]
     #[error("redb table error: {0}")]
     RedbTableError(#[from] TableError),
+    #[cfg(feature = "redb")]
     #[error("redb storage error: {0}")]
     RedbStorageError(#[from] StorageError),
+    #[cfg(feature = "redb")]
     #[error("redb compaction error: {0}")]
     RedbCompactionError(#[from] CompactionError),
+    #[cfg(feature = "redb")]
     #[error("redb commit error: {0}")]
     RedbCommitError(#[from] CommitError),
+    #[cfg(feature = "sqlite")]
     #[error("sqlite error: {0}")]
     SqliteError(#[from] rusqlite::Error),
     #[cfg(feature = "turso")]

@@ -1,20 +1,23 @@
 pub mod error;
 mod json;
+#[cfg(feature = "redb")]
 mod redb;
+#[cfg(feature = "sqlite")]
 mod sqlite;
 #[cfg(feature = "turso")]
 mod turso;
 
-use crate::{
-    Config, PersistenceMode, Worterbuch,
-    persistence::{
-        error::PersistenceResult, json::PersistentJsonStorage, redb::PersistentRedbStore,
-        sqlite::PersistentSQLiteStore,
-    },
-    server::CloneableWbApi,
-};
+#[cfg(feature = "redb")]
+use crate::persistence::redb::PersistentRedbStore;
+#[cfg(feature = "sqlite")]
+use crate::persistence::sqlite::PersistentSQLiteStore;
 #[cfg(feature = "turso")]
 use crate::persistence::turso::PersistentTursoStore;
+use crate::{
+    Config, PersistenceMode, Worterbuch,
+    persistence::{error::PersistenceResult, json::PersistentJsonStorage},
+    server::CloneableWbApi,
+};
 use lazy_static::lazy_static;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -65,7 +68,9 @@ pub trait PersistentStorage {
 #[derive(Default)]
 pub enum PersistentStorageImpl {
     Json(Box<PersistentJsonStorage>),
+    #[cfg(feature = "redb")]
     ReDB(Box<PersistentRedbStore>),
+    #[cfg(feature = "sqlite")]
     SQLite(Box<PersistentSQLiteStore>),
     #[cfg(feature = "turso")]
     Turso(Box<PersistentTursoStore>),
@@ -92,9 +97,11 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::Json(s) => {
                             s.update_grave_goods(client_id, grave_goods).await
                         }
+                        #[cfg(feature = "redb")]
                         PersistentStorageImpl::ReDB(s) => {
                             s.update_grave_goods(client_id, grave_goods).await
                         }
+                        #[cfg(feature = "sqlite")]
                         PersistentStorageImpl::SQLite(s) => {
                             s.update_grave_goods(client_id, grave_goods).await
                         }
@@ -114,9 +121,11 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::Json(s) => {
                             s.update_last_will(client_id, last_will).await
                         }
+                        #[cfg(feature = "redb")]
                         PersistentStorageImpl::ReDB(s) => {
                             s.update_last_will(client_id, last_will).await
                         }
+                        #[cfg(feature = "sqlite")]
                         PersistentStorageImpl::SQLite(s) => {
                             s.update_last_will(client_id, last_will).await
                         }
@@ -135,7 +144,9 @@ impl PersistentStorageImpl {
         } else {
             match self {
                 PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
+                #[cfg(feature = "redb")]
                 PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
+                #[cfg(feature = "sqlite")]
                 PersistentStorageImpl::SQLite(s) => s.update_value(key, value).await,
                 #[cfg(feature = "turso")]
                 PersistentStorageImpl::Turso(s) => s.update_value(key, value).await,
@@ -151,7 +162,9 @@ impl PersistentStorageImpl {
 
         match self {
             PersistentStorageImpl::Json(s) => s.delete_value(key).await,
+            #[cfg(feature = "redb")]
             PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
+            #[cfg(feature = "sqlite")]
             PersistentStorageImpl::SQLite(s) => s.delete_value(key).await,
             #[cfg(feature = "turso")]
             PersistentStorageImpl::Turso(s) => s.delete_value(key).await,
@@ -162,7 +175,9 @@ impl PersistentStorageImpl {
     pub async fn flush(&mut self, worterbuch: &mut Worterbuch) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.flush(worterbuch).await,
+            #[cfg(feature = "redb")]
             PersistentStorageImpl::ReDB(s) => s.flush(worterbuch).await,
+            #[cfg(feature = "sqlite")]
             PersistentStorageImpl::SQLite(s) => s.flush(worterbuch).await,
             #[cfg(feature = "turso")]
             PersistentStorageImpl::Turso(s) => s.flush(worterbuch).await,
@@ -176,7 +191,9 @@ impl PersistentStorageImpl {
         } else {
             match self {
                 PersistentStorageImpl::Json(s) => s.load(config).await,
+                #[cfg(feature = "redb")]
                 PersistentStorageImpl::ReDB(s) => s.load(config).await,
+                #[cfg(feature = "sqlite")]
                 PersistentStorageImpl::SQLite(s) => s.load(config).await,
                 #[cfg(feature = "turso")]
                 PersistentStorageImpl::Turso(s) => s.load(config).await,
@@ -197,7 +214,9 @@ impl PersistentStorageImpl {
     pub async fn clear(&self) -> PersistenceResult<()> {
         match self {
             PersistentStorageImpl::Json(s) => s.clear().await,
+            #[cfg(feature = "redb")]
             PersistentStorageImpl::ReDB(s) => s.clear().await,
+            #[cfg(feature = "sqlite")]
             PersistentStorageImpl::SQLite(s) => s.clear().await,
             #[cfg(feature = "turso")]
             PersistentStorageImpl::Turso(s) => s.clear().await,
@@ -215,11 +234,13 @@ impl PersistentStorageImpl {
                 s.update_last_will(client_id, None).await?;
                 Ok(())
             }
+            #[cfg(feature = "redb")]
             PersistentStorageImpl::ReDB(s) => {
                 s.update_grave_goods(client_id, None).await?;
                 s.update_last_will(client_id, None).await?;
                 Ok(())
             }
+            #[cfg(feature = "sqlite")]
             PersistentStorageImpl::SQLite(s) => {
                 s.update_grave_goods(client_id, None).await?;
                 s.update_last_will(client_id, None).await?;
@@ -289,9 +310,11 @@ async fn get_storage_instance(
             PersistenceMode::Json => PersistentStorageImpl::Json(Box::new(
                 PersistentJsonStorage::new(subsys, config.clone(), api.clone(), flush_periodically),
             )),
+            #[cfg(feature = "redb")]
             PersistenceMode::ReDB => {
                 PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(config).await?))
             }
+            #[cfg(feature = "sqlite")]
             PersistenceMode::SQLite => {
                 PersistentStorageImpl::SQLite(Box::new(PersistentSQLiteStore::new(config).await?))
             }
