@@ -150,9 +150,7 @@ async fn run(mut db: TursoTrie, mut rx: mpsc::Receiver<StoreAction>, config: Con
             StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
                 update_grave_goods(&mut db, client_id, grave_goods).await
             }
-            StoreAction::Delete(key) => {
-                delete_value(&mut db, key, &mut rx, &mut next_action).await
-            }
+            StoreAction::Delete(key) => delete_value(&mut db, key, &mut rx, &mut next_action).await,
             StoreAction::Clear => clear(&mut db).await,
             StoreAction::Load(tx) => load(&mut db, config.clone(), tx).await,
         };
@@ -278,10 +276,7 @@ async fn restore_entries(db: &mut TursoTrie, store: &mut Store) -> PersistenceRe
     Ok(())
 }
 
-async fn apply_pending_grave_goods(
-    db: &mut TursoTrie,
-    store: &mut Store,
-) -> PersistenceResult<()> {
+async fn apply_pending_grave_goods(db: &mut TursoTrie, store: &mut Store) -> PersistenceResult<()> {
     let grave_goods = db.drain_grave_goods().await?;
     for (client_id, grave_goods) in grave_goods {
         trace!("Found pending grave goods for client {client_id}: {grave_goods:?}");
@@ -290,10 +285,7 @@ async fn apply_pending_grave_goods(
     Ok(())
 }
 
-async fn apply_pending_last_wills(
-    db: &mut TursoTrie,
-    store: &mut Store,
-) -> PersistenceResult<()> {
+async fn apply_pending_last_wills(db: &mut TursoTrie, store: &mut Store) -> PersistenceResult<()> {
     let last_wills = db.drain_last_wills().await?;
     for (client_id, last_will) in last_wills {
         trace!("Found pending last will for client {client_id}: {last_will:?}");

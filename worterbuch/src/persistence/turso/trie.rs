@@ -85,7 +85,9 @@ impl TursoTrie {
             return Ok(false);
         }
 
-        let leaf_id = *ids.last().expect("ids are known to be non-empty at this point");
+        let leaf_id = *ids
+            .last()
+            .expect("ids are known to be non-empty at this point");
         if !self.has_value(leaf_id).await? {
             return Ok(false);
         }
@@ -186,10 +188,7 @@ impl TursoTrie {
                 .await?;
         } else {
             self.conn
-                .execute(
-                    "DELETE FROM last_wills WHERE client_id = ?1",
-                    (client_id,),
-                )
+                .execute("DELETE FROM last_wills WHERE client_id = ?1", (client_id,))
                 .await?;
         }
         Ok(())
@@ -211,10 +210,7 @@ impl TursoTrie {
                 .await?;
         } else {
             self.conn
-                .execute(
-                    "DELETE FROM grave_goods WHERE client_id = ?1",
-                    (client_id,),
-                )
+                .execute("DELETE FROM grave_goods WHERE client_id = ?1", (client_id,))
                 .await?;
         }
         Ok(())
