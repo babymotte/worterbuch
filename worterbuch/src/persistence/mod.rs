@@ -2,6 +2,8 @@ pub mod error;
 mod json;
 mod redb;
 mod sqlite;
+#[cfg(feature = "turso")]
+mod turso;
 
 use crate::{
     Config, PersistenceMode, Worterbuch,
@@ -11,6 +13,8 @@ use crate::{
     },
     server::CloneableWbApi,
 };
+#[cfg(feature = "turso")]
+use crate::persistence::turso::PersistentTursoStore;
 use lazy_static::lazy_static;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,6 +67,8 @@ pub enum PersistentStorageImpl {
     Json(Box<PersistentJsonStorage>),
     ReDB(Box<PersistentRedbStore>),
     SQLite(Box<PersistentSQLiteStore>),
+    #[cfg(feature = "turso")]
+    Turso(Box<PersistentTursoStore>),
     #[default]
     Noop,
 }
@@ -92,6 +98,10 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::SQLite(s) => {
                             s.update_grave_goods(client_id, grave_goods).await
                         }
+                        #[cfg(feature = "turso")]
+                        PersistentStorageImpl::Turso(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
                         PersistentStorageImpl::Noop => Ok(()),
                     }
                 } else if is_last_will_topic(key) {
@@ -110,6 +120,10 @@ impl PersistentStorageImpl {
                         PersistentStorageImpl::SQLite(s) => {
                             s.update_last_will(client_id, last_will).await
                         }
+                        #[cfg(feature = "turso")]
+                        PersistentStorageImpl::Turso(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
                         PersistentStorageImpl::Noop => Ok(()),
                     }
                 } else {
@@ -123,6 +137,8 @@ impl PersistentStorageImpl {
                 PersistentStorageImpl::Json(s) => s.update_value(key, value).await,
                 PersistentStorageImpl::ReDB(s) => s.update_value(key, value).await,
                 PersistentStorageImpl::SQLite(s) => s.update_value(key, value).await,
+                #[cfg(feature = "turso")]
+                PersistentStorageImpl::Turso(s) => s.update_value(key, value).await,
                 PersistentStorageImpl::Noop => Ok(()),
             }
         }
@@ -137,6 +153,8 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Json(s) => s.delete_value(key).await,
             PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
             PersistentStorageImpl::SQLite(s) => s.delete_value(key).await,
+            #[cfg(feature = "turso")]
+            PersistentStorageImpl::Turso(s) => s.delete_value(key).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -146,6 +164,8 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Json(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::ReDB(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::SQLite(s) => s.flush(worterbuch).await,
+            #[cfg(feature = "turso")]
+            PersistentStorageImpl::Turso(s) => s.flush(worterbuch).await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -158,6 +178,8 @@ impl PersistentStorageImpl {
                 PersistentStorageImpl::Json(s) => s.load(config).await,
                 PersistentStorageImpl::ReDB(s) => s.load(config).await,
                 PersistentStorageImpl::SQLite(s) => s.load(config).await,
+                #[cfg(feature = "turso")]
+                PersistentStorageImpl::Turso(s) => s.load(config).await,
                 PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
             }
         };
@@ -177,6 +199,8 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Json(s) => s.clear().await,
             PersistentStorageImpl::ReDB(s) => s.clear().await,
             PersistentStorageImpl::SQLite(s) => s.clear().await,
+            #[cfg(feature = "turso")]
+            PersistentStorageImpl::Turso(s) => s.clear().await,
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
@@ -197,6 +221,12 @@ impl PersistentStorageImpl {
                 Ok(())
             }
             PersistentStorageImpl::SQLite(s) => {
+                s.update_grave_goods(client_id, None).await?;
+                s.update_last_will(client_id, None).await?;
+                Ok(())
+            }
+            #[cfg(feature = "turso")]
+            PersistentStorageImpl::Turso(s) => {
                 s.update_grave_goods(client_id, None).await?;
                 s.update_last_will(client_id, None).await?;
                 Ok(())
@@ -264,6 +294,10 @@ async fn get_storage_instance(
             }
             PersistenceMode::SQLite => {
                 PersistentStorageImpl::SQLite(Box::new(PersistentSQLiteStore::new(config).await?))
+            }
+            #[cfg(feature = "turso")]
+            PersistenceMode::Turso => {
+                PersistentStorageImpl::Turso(Box::new(PersistentTursoStore::new(config).await?))
             }
         };
 

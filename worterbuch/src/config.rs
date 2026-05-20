@@ -44,6 +44,8 @@ pub enum PersistenceMode {
     ReDB,
     // RocksDB,
     SQLite,
+    #[cfg(feature = "turso")]
+    Turso,
 }
 
 #[derive(Parser, Debug, Clone, PartialEq, Serialize)]

@@ -37,6 +37,9 @@ pub enum PersistenceError {
     RedbCommitError(#[from] CommitError),
     #[error("sqlite error: {0}")]
     SqliteError(#[from] rusqlite::Error),
+    #[cfg(feature = "turso")]
+    #[error("turso error: {0}")]
+    TursoError(#[from] turso::Error),
     #[error("store error: {0}")]
     StoreError(#[from] StoreError),
     #[error("internal api error")]

@@ -23,6 +23,7 @@ telemetry = [
     "opentelemetry-appender-tracing",
 ]
 commercial = []
+turso = ["dep:turso"]
 default = ["jemalloc", "telemetry"]
 
 [dependencies]
@@ -76,6 +77,7 @@ tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+turso = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 worterbuch-common = { workspace = true, features = ["axum-errors", "redb"] }
 

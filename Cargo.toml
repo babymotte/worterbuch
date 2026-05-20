@@ -44,11 +44,11 @@ mappings = "0.7.0"
 miette = "7.5.0"
 mio = { version = "1.0.3", default-features = false }
 opentelemetry = "0.31.0"
+opentelemetry_sdk = "0.31.0"
 opentelemetry-appender-tracing = "0.31.1"
 opentelemetry-otlp = "0.31.0"
 opentelemetry-resource-detectors = "0.10.0"
 opentelemetry-semantic-conventions = "0.31.0"
-opentelemetry_sdk = "0.31.0"
 pprof_util = { version = "0.8.0", features = ["flamegraph"] }
 rand = "0.10.1"
 random_word = { version = "0.5.0", features = ["en"] }
@@ -81,6 +81,7 @@ tracing = "0.1.41"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = "0.3.20"
 tungstenite = "0.29.0"
+turso = "0.6.0"
 uuid = "1.15.1"
 
 [profile.release]
