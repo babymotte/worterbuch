@@ -22,7 +22,6 @@ fn grave_goods_and_last_will_are_presisted_with_json_storage_and_applied_after_c
     let active_runner = runner.start_wb(false);
     let (mut client, tests) = active_runner.start_client_test();
     active_runner.run_test(&mut client, &tests[1]);
-    // TODO verify grave goods and last will have been applied
     active_runner.shutdown_wb();
     // TODO verify grave goods and last will have been cleaned up
 }
