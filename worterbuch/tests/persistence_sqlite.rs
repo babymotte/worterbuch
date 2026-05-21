@@ -2,6 +2,7 @@ mod test_common;
 
 use crate::test_common::TestRunner;
 
+#[cfg(feature = "sqlite")]
 #[test]
 fn grave_goods_and_last_will_are_presisted_with_sqlite_storage_and_applied_after_crash() {
     let runner = TestRunner::new(

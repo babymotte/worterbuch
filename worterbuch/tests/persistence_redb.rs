@@ -2,6 +2,7 @@ mod test_common;
 
 use crate::test_common::TestRunner;
 
+#[cfg(feature = "redb")]
 #[test]
 fn grave_goods_and_last_will_are_presisted_with_redb_storage_and_applied_after_crash() {
     let runner = TestRunner::new(
