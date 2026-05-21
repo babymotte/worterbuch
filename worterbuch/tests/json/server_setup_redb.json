@@ -1,0 +1,9 @@
+{
+  "env": {
+    "WORTERBUCH_USE_PERSISTENCE": "true",
+    "WORTERBUCH_DATA_DIR": "./tests/data/redb",
+    "WORTERBUCH_PERSISTENCE_MODE": "ReDB",
+    "WORTERBUCH_EXIT_ON_STDIN_CLOSE": "true",
+    "WORTERBUCH_LOG": "info,worterbuch::persistence=trace"
+  }
+}

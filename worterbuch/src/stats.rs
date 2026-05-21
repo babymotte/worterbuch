@@ -19,11 +19,8 @@
 
 use crate::{INTERNAL_CLIENT_ID, server::CloneableWbApi};
 use serde_json::json;
-use std::time::Duration;
-use tokio::{
-    select,
-    time::{Instant, interval},
-};
+use std::{ops::ControlFlow, time::Duration};
+use tokio::time::{Instant, interval};
 use tosub::SubsystemHandle;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
@@ -31,7 +28,7 @@ use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
     SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE,
     SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION, WbApi, error::WorterbuchResult,
-    topic,
+    topic, while_select,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -50,14 +47,16 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
         json!(VERSION),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await?;
+    .await
+    .ok();
 
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE),
         json!(LICENSE),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await?;
+    .await
+    .ok();
 
     #[cfg(feature = "commercial")]
     wb.set(
@@ -65,7 +64,8 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
         json!(wb.config().license),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await?;
+    .await
+    .ok();
 
     #[cfg(not(feature = "commercial"))]
     wb.set(
@@ -73,15 +73,15 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
         json!(format!("{REPO}/releases/tag/v{VERSION}")),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await?;
+    .await
+    .ok();
 
     let mut interval = interval(Duration::from_secs(1));
 
-    loop {
-        select! {
-            _ = interval.tick() => update_stats(&wb, start).await?,
-            _ = subsys.shutdown_requested() => break,
-        }
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        _ = interval.tick() => update_stats(&wb, start).await,
     }
 
     debug!("stats subsystem completed.");
@@ -89,12 +89,18 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> Worterb
     Ok(())
 }
 
-async fn update_stats(wb: &CloneableWbApi, start: Instant) -> WorterbuchResult<()> {
-    update_uptime(wb, start.elapsed()).await?;
-    update_message_count(wb).await?;
+async fn update_stats(wb: &CloneableWbApi, start: Instant) -> ControlFlow<()> {
+    if update_uptime(wb, start.elapsed()).await.is_err() {
+        return ControlFlow::Break(());
+    }
+    if update_message_count(wb).await.is_err() {
+        return ControlFlow::Break(());
+    }
     #[cfg(feature = "jemalloc")]
-    update_jemalloc_stats(wb).await.ok();
-    Ok(())
+    if update_jemalloc_stats(wb).await.is_err() {
+        return ControlFlow::Break(());
+    }
+    ControlFlow::Continue(())
 }
 
 async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResult<()> {

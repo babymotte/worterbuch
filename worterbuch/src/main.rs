@@ -96,7 +96,7 @@ async fn start() -> Result<()> {
     let mut root_builder =
         tosub::build_default_root("worterbuch").with_timeout(cfg.shutdown_timeout);
 
-    if cfg.follower || cfg.leader {
+    if cfg.follower || cfg.leader || cfg.exit_on_stdin_close {
         root_builder = root_builder.shutdown_on_stdin_close();
     }
 

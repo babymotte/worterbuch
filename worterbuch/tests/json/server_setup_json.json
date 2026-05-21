@@ -1,0 +1,10 @@
+{
+  "env": {
+    "WORTERBUCH_USE_PERSISTENCE": "true",
+    "WORTERBUCH_DATA_DIR": "./tests/data/json",
+    "WORTERBUCH_PERSISTENCE_MODE": "Json",
+    "WORTERBUCH_EXIT_ON_STDIN_CLOSE": "true",
+    "WORTERBUCH_PERSISTENCE_INTERVAL": "1",
+    "WORTERBUCH_LOG": "info,worterbuch::persistence=trace"
+  }
+}

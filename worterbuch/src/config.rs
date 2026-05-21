@@ -131,6 +131,7 @@ pub struct Config {
     pub tcp_disabled: bool,
     #[cfg(target_family = "unix")]
     pub unix_disabled: bool,
+    pub exit_on_stdin_close: bool,
 }
 
 impl Config {
@@ -285,6 +286,18 @@ impl Config {
             self.unix_disabled = disabled == "true" || disabled == "1";
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_UNIX") {
+            let disabled = val.to_lowercase();
+            let disabled = disabled.trim();
+            self.unix_disabled = disabled == "true" || disabled == "1";
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_EXIT_ON_STDIN_CLOSE") {
+            let enabled = val.to_lowercase();
+            let enabled = enabled.trim();
+            self.exit_on_stdin_close = enabled == "true" || enabled == "1";
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -339,6 +352,7 @@ impl Config {
                     tcp_disabled: false,
                     #[cfg(target_family = "unix")]
                     unix_disabled: false,
+                    exit_on_stdin_close: false,
                 };
                 config.load_env()?;
                 if let Some(args) = args {

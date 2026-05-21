@@ -1,0 +1,38 @@
+[
+    {
+        "setup": [
+            {"set":{"transactionId":"{{tid}}","key":"this/needs/to/go","value":"hello, world!"}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too","value":"root"}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too/1","value":"begone"}},
+            {"set":{"transactionId":"{{tid}}","key":"$SYS/clients/{{client_id}}/graveGoods","value":["this/needs/to/go","all/of/this/too/#"]}},
+            {"set":{"transactionId":"{{tid}}","key":"$SYS/clients/{{client_id}}/lastWill","value":[{"key":"this/needs/to/appear","value":"yes"},{"key":"this/too","value":"YASS!!!"}]}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too/2","value":"we don't want this here"}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too/3","value":123}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too/1/1","value":[42,"haha", [true, null]]}},
+            {"set":{"transactionId":"{{tid}}","key":"all/of/this/too/1/2","value":{"let's":{"try":{"some":{"complex":"objects"}}}}}}
+        ],
+        "assert": [
+            {
+                "equals": [
+                    {"key":"this/needs/to/go","value":"hello, world!"},
+                    {"key":"all/of/this/too","value":"root"},
+                    {"key":"all/of/this/too/1","value":"begone"},
+                    {"key":"all/of/this/too/1/1","value":[42,"haha", [true, null]]},
+                    {"key":"all/of/this/too/1/2","value":{"let's":{"try":{"some":{"complex":"objects"}}}}},
+                    {"key":"all/of/this/too/2","value":"we don't want this here"},
+                    {"key":"all/of/this/too/3","value":123}
+                ]
+            },
+            {
+                "notPresent": ["this/needs/to/appear","this/too"]
+            }
+        ]
+    },
+    {
+        "setup": [],
+        "assert": [
+            {"equals": [{"key":"this/needs/to/appear","value":"yes"},{"key":"this/too","value":"YASS!!!"}]},
+            {"notPresent": ["this/needs/to/go","all/of/this/too","all/of/this/too/1","all/of/this/too/1/1","all/of/this/too/1/2","all/of/this/too/2","all/of/this/too/3"]}
+        ]
+    }
+]
