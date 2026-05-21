@@ -65,13 +65,13 @@ jobs:
       - name: Run linter
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-          WORTERBUCH_LICENSE_FILE: ./test/license
+          WORTERBUCH_LICENSE_FILE: ./tests/license
         run: cargo clippy ${{ matrix.args }} -- --deny warnings
 
       - name: Run tests
         env:
           WORTERBUCH_LICENSE_PUBLIC_KEY: ${{ secrets.WORTERBUCH_TEST_LICENSE_PUBLIC_KEY }}
-          WORTERBUCH_LICENSE_FILE: ./test/license
+          WORTERBUCH_LICENSE_FILE: ./tests/license
         run: cargo test ${{ matrix.args }}
 
   publish:
