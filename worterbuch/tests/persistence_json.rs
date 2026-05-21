@@ -16,7 +16,7 @@ fn grave_goods_and_last_will_are_presisted_with_json_storage_and_applied_after_c
     active_runner.run_test(&mut client2, &tests2[0]);
     active_runner.run_test(&mut client3, &tests3[0]);
     // wait for persistence interval to elapse
-    std::thread::sleep(std::time::Duration::from_millis(1500));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     let runner = active_runner.kill_wb();
     // TODO verify correct JSON data was written
     let active_runner = runner.start_wb(false);

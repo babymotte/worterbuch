@@ -17,7 +17,7 @@ fn grave_goods_and_last_will_are_presisted_with_sqlite_storage_and_applied_after
     active_runner.run_test(&mut client2, &tests2[0]);
     active_runner.run_test(&mut client3, &tests3[0]);
     // wait for persistence interval to elapse
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(100));
     let runner = active_runner.kill_wb();
     // TODO verify correct JSON data was written
     let active_runner = runner.start_wb(false);
