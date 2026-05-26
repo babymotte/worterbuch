@@ -221,7 +221,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: "embedded-"
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
@@ -231,37 +231,42 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             image: ubuntu-24.04
             ext: ""
-            args: "--no-default-features --features=commercial"
+            args: "--no-default-features --features=commercial,redb,sqlite"
             label: "embedded-commercial-"
           - target: aarch64-unknown-linux-gnu
             image: ubuntu-24.04-arm
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
           - target: arm-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
           - target: armv7-unknown-linux-gnueabihf
             image: ubuntu-24.04-arm
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
+          - target: armv7-unknown-linux-gnueabihf
+            image: ubuntu-24.04-arm
+            ext: ""
+            args: "--no-default-features --features=commercial,redb,sqlite"
+            label: "commercial-"
           - target: x86_64-pc-windows-msvc
             image: windows-2022
             ext: ".exe"
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
           - target: aarch64-apple-darwin
             image: macos-15
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
           - target: x86_64-apple-darwin
             image: macos-15-intel
             ext: ""
-            args: "--no-default-features"
+            args: "--no-default-features --features=redb,sqlite"
             label: ""
 
     steps:
