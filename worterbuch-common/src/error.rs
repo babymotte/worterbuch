@@ -26,6 +26,7 @@ use http::StatusCode;
 use http::header::InvalidHeaderValue;
 use jsonwebtoken::Algorithm;
 use miette::Diagnostic;
+#[cfg(feature = "telemetry")]
 use opentelemetry_otlp::ExporterBuildError;
 use std::{fmt, io, net::AddrParseError, num::ParseIntError};
 use thiserror::Error;
@@ -55,6 +56,7 @@ pub enum ConfigError {
     IoError(#[from] io::Error),
     #[error("could not load config file: {0}")]
     YamlError(#[from] serde_yaml::Error),
+    #[cfg(feature = "telemetry")]
     #[error("error setting up telemetry: {0}")]
     ExporterBuildError(#[from] ExporterBuildError),
     #[error("Parse error: {0}")]

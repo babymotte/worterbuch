@@ -25,6 +25,7 @@ jemalloc = [
 ]
 axum-errors = ["axum"]
 redb = ["dep:redb"]
+telemetry = ["opentelemetry", "opentelemetry-otlp"]
 
 [dependencies]
 axum = { workspace = true, optional = true }
@@ -35,8 +36,8 @@ jemalloc_pprof = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true }
 mappings = { workspace = true, optional = true }
 miette = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
 pprof_util = { workspace = true, optional = true }
 random_word = { workspace = true, optional = true }
 redb = { workspace = true, optional = true }

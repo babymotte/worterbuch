@@ -21,6 +21,7 @@ telemetry = [
     "opentelemetry_sdk",
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
+    "worterbuch-common/telemetry",
 ]
 commercial = []
 redb = ["dep:redb"]
