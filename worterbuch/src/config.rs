@@ -93,6 +93,7 @@ pub struct WsEndpoint {
     pub public_addr: String,
 }
 
+#[cfg(target_family = "unix")]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UnixEndpoint {
     pub path: PathBuf,
@@ -280,12 +281,6 @@ impl Config {
         }
 
         #[cfg(target_family = "unix")]
-        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_UNIX") {
-            let disabled = val.to_lowercase();
-            let disabled = disabled.trim();
-            self.unix_disabled = disabled == "true" || disabled == "1";
-        }
-
         if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_UNIX") {
             let disabled = val.to_lowercase();
             let disabled = disabled.trim();
