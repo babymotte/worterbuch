@@ -5,9 +5,9 @@ use crate::{
     persistence::{PersistentStorage, error::PersistenceResult, sqlite::trie::SqliTrie},
     store::Store,
 };
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, thread};
 use tokio::{
-    fs, spawn,
+    fs,
     sync::{mpsc, oneshot},
 };
 use tracing::{debug, error, info, trace};
@@ -57,7 +57,8 @@ impl PersistentSQLiteStore {
 
         let (tx, rx) = mpsc::channel(config.channel_buffer_size);
 
-        spawn(run(db, rx, config.clone()));
+        let cfg = config.clone();
+        thread::spawn(move || run(db, rx, cfg));
 
         Ok(Self { tx })
     }
@@ -119,7 +120,7 @@ impl PersistentStorage for PersistentSQLiteStore {
     }
 }
 
-async fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
+fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
     let mut next_action = None;
 
     loop {
@@ -128,7 +129,7 @@ async fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Conf
             action
         } else {
             trace!("No action scheduled yet, waiting to receive one …");
-            match rx.recv().await {
+            match rx.blocking_recv() {
                 Some(action) => {
                     trace!("Received store action {action:?}");
                     action
