@@ -32,6 +32,7 @@ mod leader_follower;
 pub(crate) mod license;
 #[cfg(not(feature = "telemetry"))]
 pub mod logging;
+#[cfg(not(feature = "jemalloc"))]
 mod mem_tools;
 mod persistence;
 pub mod server;

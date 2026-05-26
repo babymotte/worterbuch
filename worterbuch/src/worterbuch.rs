@@ -17,10 +17,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(not(feature = "jemalloc"))]
+use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
-    mem_tools,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
     store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
@@ -941,6 +942,7 @@ impl Worterbuch {
             self.notify_ls_subscribers(ls_subscribers).await;
         }
 
+        #[cfg(not(feature = "jemalloc"))]
         mem_tools::schedule_trim();
 
         Ok(deleted)
@@ -1369,6 +1371,7 @@ impl Worterbuch {
             debug!("Error in subscription monitoring: {e}");
         }
 
+        #[cfg(not(feature = "jemalloc"))]
         mem_tools::schedule_trim();
 
         Ok(())
