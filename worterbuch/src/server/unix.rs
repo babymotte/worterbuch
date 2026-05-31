@@ -255,8 +255,8 @@ async fn forward_messages_to_socket(
     loop {
         select! {
             recv = unix_send_rx.recv() => if let Some(msg) = recv {
-                if let Err(e) = write_line_and_flush(msg, &mut unix_tx, send_timeout, client_id).await {
-                    error!("Error sending UNIX message: {e}");
+                if let Err(e) = write_line_and_flush(&msg, &mut unix_tx, send_timeout, client_id).await {
+                    error!("Error sending UNIX message '{msg:?}': {e}");
                     break;
                 }
             } else {

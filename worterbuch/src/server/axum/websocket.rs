@@ -139,20 +139,20 @@ async fn send_loop(
     mut ws_send_rx: mpsc::Receiver<ServerMessage>,
 ) {
     while let Some(msg) = ws_send_rx.recv().await {
-        if let Err(e) = send_with_timeout(msg, &mut ws_tx, send_timeout, client_id).await {
-            error!("Error sending WS message: {e}");
+        if let Err(e) = send_with_timeout(&msg, &mut ws_tx, send_timeout, client_id).await {
+            error!("Error sending WS message '{msg:?}': {e}");
             break;
         }
     }
 }
 
 async fn send_with_timeout(
-    msg: ServerMessage,
+    msg: &ServerMessage,
     websocket: &mut WebSocketSender,
     send_timeout: Option<Duration>,
     client_id: ClientId,
 ) -> Result<()> {
-    let json = serde_json::to_string(&msg).into_diagnostic()?;
+    let json = serde_json::to_string(msg).into_diagnostic()?;
     let msg = Message::Text(json.into());
 
     if let Some(send_timeout) = send_timeout {

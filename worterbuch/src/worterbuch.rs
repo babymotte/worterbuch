@@ -1245,12 +1245,6 @@ impl Worterbuch {
         let grave_goods = self.grave_goods_for_client(&client_id);
         let last_wills = self.last_will_for_client(&client_id);
 
-        let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
-        debug!("Deleting {pattern}");
-        if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
-            debug!("Error in subscription monitoring: {e}");
-        }
-
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
@@ -1284,6 +1278,12 @@ impl Worterbuch {
             if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
                 error!("Inconsistent subscription state: {e}");
             }
+        }
+
+        let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
+        debug!("Deleting {pattern}");
+        if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
+            debug!("Error in subscription monitoring: {e}");
         }
 
         if let Some(grave_goods) = grave_goods {
