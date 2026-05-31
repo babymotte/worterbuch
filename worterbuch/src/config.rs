@@ -18,7 +18,7 @@
  */
 
 use crate::license::{License, load_license};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use miette::IntoDiagnostic;
 use serde::Serialize;
 use serde_json::json;
@@ -53,31 +53,28 @@ pub enum PersistenceMode {
 #[derive(Parser, Debug, Clone, PartialEq, Serialize)]
 #[command(author, version, about = "An in-memory data base / message broker hybrid", long_about = None)]
 pub struct Args {
-    /// Start server in leader mode (requires --sync-port)
-    #[arg(
-        long,
-        conflicts_with = "follower",
-        requires = "sync_port",
-        default_value_t = false
-    )]
-    pub leader: bool,
-    /// Start server in follower mode (requires --leader_address)
-    #[arg(
-        long,
-        conflicts_with = "leader",
-        requires = "leader_address",
-        default_value_t = false
-    )]
-    pub follower: bool,
-    /// Port at which to listen for cluster peer sync connections (only with --leader)
-    #[arg(long, short, value_name = "PORT")]
-    pub sync_port: Option<u16>,
-    /// Socket address of the leader node to sync to (only with --follower)
-    #[arg(long, short, value_name = "HOST:PORT")]
-    pub leader_address: Option<String>,
     /// Instance name
     #[arg(short = 'n', long, value_name = "NAME")]
     pub instance_name: Option<String>,
+
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Serialize)]
+pub enum Commands {
+    /// Start server in leader mode
+    Leader {
+        /// Port at which to listen for cluster peer sync connections
+        #[arg(long, short, value_name = "PORT")]
+        sync_port: u16,
+    },
+    /// Start server in follower mode
+    Follower {
+        /// Socket address of the leader node to sync to
+        #[arg(long, short, value_name = "HOST:PORT")]
+        leader_address: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -360,10 +357,23 @@ impl Config {
     }
 
     fn apply_args(&mut self, args: Args) {
-        self.follower = args.follower;
-        self.leader = args.leader;
-        self.sync_port = args.sync_port;
-        self.leader_address = args.leader_address.clone();
+        match args.command {
+            Some(Commands::Leader { sync_port }) => {
+                self.leader = true;
+                self.sync_port = Some(sync_port);
+                self.follower = false;
+            }
+            Some(Commands::Follower { leader_address }) => {
+                self.follower = true;
+                self.leader_address = Some(leader_address);
+                self.leader = false;
+            }
+            None => {
+                self.leader = false;
+                self.follower = false;
+            }
+        }
+
         self.instance_name = args.instance_name.clone();
     }
 

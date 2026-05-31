@@ -20,7 +20,7 @@
 use clap::Parser;
 use miette::{IntoDiagnostic, Result};
 use std::env;
-use worterbuch::{Args, Config, run_worterbuch};
+use worterbuch::{Args, Commands, Config, run_worterbuch};
 
 fn main() -> Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -64,12 +64,10 @@ async fn start() -> Result<()> {
         use worterbuch::telemetry;
 
         let hostname = hostname::get().into_diagnostic()?;
-        let cluster_role = if args.leader {
-            Some("leader".to_owned())
-        } else if args.follower {
-            Some("follower".to_owned())
-        } else {
-            None
+        let cluster_role = match args.command {
+            Some(Commands::Leader { .. }) => Some("leader".to_owned()),
+            Some(Commands::Follower { .. }) => Some("follower".to_owned()),
+            None => None,
         };
         let drop_guard = telemetry::init(
             args.instance_name
