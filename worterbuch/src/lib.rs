@@ -26,9 +26,9 @@
 //! own application.
 
 mod auth;
+mod cluster;
 mod config;
 pub mod error;
-mod leader_follower;
 pub(crate) mod license;
 #[cfg(not(feature = "telemetry"))]
 pub mod logging;
@@ -48,17 +48,17 @@ use tosub::SubsystemHandle;
 pub use worterbuch_common as common;
 
 use crate::{
+    cluster::{follower::run_in_follower_mode, leader::run_in_leader_mode},
     error::WorterbuchAppResult,
-    leader_follower::{follower::run_in_follower_mode, leader::run_in_leader_mode},
     server::{CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
     stats::track_stats,
     worterbuch::Worterbuch,
 };
+use cluster::ClientWriteCommand;
 use common::{
     SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Value,
     topic,
 };
-use leader_follower::ClientWriteCommand;
 use serde_json::json;
 use server::common::WbFunction;
 use tokio::{

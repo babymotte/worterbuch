@@ -19,8 +19,8 @@
 
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
+    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
     error::{WorterbuchAppError, WorterbuchAppResult},
-    leader_follower::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
     persistence::unlock_persistence,
     server::common::WbFunction,
     shutdown,

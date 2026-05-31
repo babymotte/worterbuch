@@ -19,10 +19,9 @@
 
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
+    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
     error::WorterbuchAppResult,
-    forward_api_call, forward_to_followers,
-    leader_follower::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
-    process_api_call,
+    forward_api_call, forward_to_followers, process_api_call,
     server::common::WbFunction,
     shutdown,
 };
