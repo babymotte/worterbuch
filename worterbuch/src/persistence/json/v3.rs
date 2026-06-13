@@ -18,7 +18,7 @@
  */
 
 use super::*;
-use crate::persistence::is_persistence_locked;
+use crate::persistence::{TIMESTAMP_FILE_NAME, is_persistence_locked};
 use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
 use worterbuch_common::WbApi;
@@ -307,7 +307,7 @@ pub(crate) async fn file_paths(
         grave_goods_last_will_path.push("gglw.b.json");
         grave_goods_last_will_path_checksum.push("gglw.b.json.sha256");
     }
-    last_persisted.push("last-persisted");
+    last_persisted.push(TIMESTAMP_FILE_NAME);
 
     Ok((
         store_path,

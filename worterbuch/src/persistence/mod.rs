@@ -29,6 +29,8 @@ use worterbuch_common::{
     SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, ValueEntry, topic,
 };
 
+pub const TIMESTAMP_FILE_NAME: &str = "last-persisted";
+
 lazy_static! {
     static ref PERSISTENCE_LOCKED: AtomicBool = AtomicBool::new(true);
 }
@@ -311,17 +313,17 @@ async fn get_storage_instance(
                 PersistentJsonStorage::new(subsys, config.clone(), api.clone(), flush_periodically),
             )),
             #[cfg(feature = "redb")]
-            PersistenceMode::ReDB => {
-                PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(config).await?))
-            }
+            PersistenceMode::ReDB => PersistentStorageImpl::ReDB(Box::new(
+                PersistentRedbStore::new(&subsys, config).await?,
+            )),
             #[cfg(feature = "sqlite")]
-            PersistenceMode::SQLite => {
-                PersistentStorageImpl::SQLite(Box::new(PersistentSQLiteStore::new(config).await?))
-            }
+            PersistenceMode::SQLite => PersistentStorageImpl::SQLite(Box::new(
+                PersistentSQLiteStore::new(&subsys, config).await?,
+            )),
             #[cfg(feature = "turso")]
-            PersistenceMode::Turso => {
-                PersistentStorageImpl::Turso(Box::new(PersistentTursoStore::new(config).await?))
-            }
+            PersistenceMode::Turso => PersistentStorageImpl::Turso(Box::new(
+                PersistentTursoStore::new(&subsys, config).await?,
+            )),
         };
 
     Ok(storage)

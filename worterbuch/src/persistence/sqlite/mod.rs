@@ -2,14 +2,17 @@ mod trie;
 
 use crate::{
     Config, Worterbuch,
-    persistence::{PersistentStorage, error::PersistenceResult, sqlite::trie::SqliTrie},
+    persistence::{
+        PersistentStorage, TIMESTAMP_FILE_NAME, error::PersistenceResult, sqlite::trie::SqliTrie,
+    },
     store::Store,
 };
-use std::{fmt, path::PathBuf, thread};
+use std::{fmt, fs, path::PathBuf, thread, time::Duration};
 use tokio::{
-    fs,
+    select,
     sync::{mpsc, oneshot},
 };
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
@@ -22,6 +25,7 @@ enum StoreAction {
     Delete(Key),
     Clear,
     Load(oneshot::Sender<Worterbuch>),
+    UpdateTimestamp,
 }
 
 impl fmt::Debug for StoreAction {
@@ -37,6 +41,7 @@ impl fmt::Debug for StoreAction {
             StoreAction::Delete(key) => f.debug_tuple("Delete").field(key).finish(),
             StoreAction::Clear => f.debug_tuple("Clear").finish(),
             StoreAction::Load(_) => f.debug_tuple("Load").finish(),
+            StoreAction::UpdateTimestamp => f.debug_tuple("UpdateTimestamp").finish(),
         }
     }
 }
@@ -46,19 +51,37 @@ pub struct PersistentSQLiteStore {
 }
 
 impl PersistentSQLiteStore {
-    pub async fn new(config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.sqlite.db");
+        let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
         info!("Using sqlite persistence with data dir {}", path.display());
 
-        fs::create_dir_all(&config.data_dir).await?;
+        tokio::fs::create_dir_all(&config.data_dir).await?;
 
         let db = SqliTrie::open(path)?;
 
         let (tx, rx) = mpsc::channel(config.channel_buffer_size);
 
+        let txc = tx.clone();
+        subsys.spawn("timestamp-update", move |s| async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                select! {
+                    biased;
+                    _ = s.shutdown_requested() => break,
+                    _ = interval.tick() => {
+                        if txc.send(StoreAction::UpdateTimestamp).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok::<(), miette::Report>(())
+        });
+
         let cfg = config.clone();
-        thread::spawn(move || run(db, rx, cfg));
+        thread::spawn(move || run(db, rx, cfg, timestamp_file_path));
 
         Ok(Self { tx })
     }
@@ -120,8 +143,15 @@ impl PersistentStorage for PersistentSQLiteStore {
     }
 }
 
-fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
+fn run(
+    mut db: SqliTrie,
+    mut rx: mpsc::Receiver<StoreAction>,
+    config: Config,
+    timestamp_file_path: PathBuf,
+) {
     let mut next_action = None;
+
+    let mut update_timestamp = false;
 
     loop {
         let action = if let Some(action) = next_action.take() {
@@ -145,17 +175,33 @@ fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
 
         if let Err(e) = match action {
             StoreAction::Update(key, value) => {
+                update_timestamp = true;
                 update_value(&mut db, key, value, &mut rx, &mut next_action)
             }
             StoreAction::UpdateLastWill(client_id, last_will) => {
+                update_timestamp = true;
                 update_last_will(&mut db, client_id, last_will)
             }
             StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
+                update_timestamp = true;
                 update_grave_goods(&mut db, client_id, grave_goods)
             }
-            StoreAction::Delete(key) => delete_value(&mut db, key, &mut rx, &mut next_action),
-            StoreAction::Clear => clear(&mut db),
+            StoreAction::Delete(key) => {
+                update_timestamp = true;
+                delete_value(&mut db, key, &mut rx, &mut next_action)
+            }
+            StoreAction::Clear => {
+                update_timestamp = true;
+                clear(&mut db)
+            }
             StoreAction::Load(tx) => load(&mut db, config.clone(), tx),
+            StoreAction::UpdateTimestamp => {
+                if !update_timestamp {
+                    continue;
+                }
+                update_timestamp = false;
+                update_timestamp_file(&timestamp_file_path)
+            }
         } {
             error!("Error in SQLite persistence: {e}");
         }
@@ -164,6 +210,19 @@ fn run(mut db: SqliTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
     }
 
     info!("SQLite closed.");
+}
+
+fn update_timestamp_file(
+    timestamp_file_path: &PathBuf,
+) -> Result<(), super::error::PersistenceError> {
+    info!(
+        "Updating timestamp file {} …",
+        timestamp_file_path.display()
+    );
+    if let Err(e) = fs::File::create(timestamp_file_path) {
+        error!("Failed to update timestamp file: {e}");
+    }
+    Ok(())
 }
 
 fn update_value(
