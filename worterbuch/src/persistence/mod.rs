@@ -314,15 +314,15 @@ async fn get_storage_instance(
             )),
             #[cfg(feature = "redb")]
             PersistenceMode::ReDB => PersistentStorageImpl::ReDB(Box::new(
-                PersistentRedbStore::new(&subsys, config).await?,
+                PersistentRedbStore::new(subsys, config).await?,
             )),
             #[cfg(feature = "sqlite")]
             PersistenceMode::SQLite => PersistentStorageImpl::SQLite(Box::new(
-                PersistentSQLiteStore::new(&subsys, config).await?,
+                PersistentSQLiteStore::new(subsys, config).await?,
             )),
             #[cfg(feature = "turso")]
             PersistenceMode::Turso => PersistentStorageImpl::Turso(Box::new(
-                PersistentTursoStore::new(&subsys, config).await?,
+                PersistentTursoStore::new(subsys, config).await?,
             )),
         };
 
