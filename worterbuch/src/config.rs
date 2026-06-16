@@ -41,12 +41,8 @@ use worterbuch_common::{
 // #[serde(rename_all = "camelCase")]
 pub enum PersistenceMode {
     Json,
-    #[cfg(feature = "redb")]
     ReDB,
-    // RocksDB,
-    #[cfg(feature = "sqlite")]
     SQLite,
-    #[cfg(feature = "turso")]
     Turso,
 }
 

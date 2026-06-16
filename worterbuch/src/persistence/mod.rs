@@ -327,49 +327,83 @@ async fn get_storage_instance(
                 flush_periodically,
             )))
         }
-        #[cfg(feature = "redb")]
         PersistenceMode::ReDB => {
-            if !config
-                .license
-                .features
-                .persistence
-                .contains(&PersistenceMode::ReDB)
+            #[cfg(not(feature = "redb"))]
             {
-                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                use crate::persistence::error::PersistenceError;
+                return Err(PersistenceError::PersistenceModeNotEnabled(
                     PersistenceMode::ReDB,
                 ));
             }
-            PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(subsys, config).await?))
-        }
-        #[cfg(feature = "sqlite")]
-        PersistenceMode::SQLite => {
-            if !config
-                .license
-                .features
-                .persistence
-                .contains(&PersistenceMode::SQLite)
+
+            #[cfg(feature = "redb")]
             {
-                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                if !config
+                    .license
+                    .features
+                    .persistence
+                    .contains(&PersistenceMode::ReDB)
+                {
+                    return Err(crate::persistence::error::PersistenceError::NoLicense(
+                        PersistenceMode::ReDB,
+                    ));
+                }
+                PersistentStorageImpl::ReDB(Box::new(
+                    PersistentRedbStore::new(subsys, config).await?,
+                ))
+            }
+        }
+        PersistenceMode::SQLite => {
+            #[cfg(not(feature = "sqlite"))]
+            {
+                use crate::persistence::error::PersistenceError;
+                return Err(PersistenceError::PersistenceModeNotEnabled(
                     PersistenceMode::SQLite,
                 ));
             }
-            PersistentStorageImpl::SQLite(Box::new(
-                PersistentSQLiteStore::new(subsys, config).await?,
-            ))
-        }
-        #[cfg(feature = "turso")]
-        PersistenceMode::Turso => {
-            if !config
-                .license
-                .features
-                .persistence
-                .contains(&PersistenceMode::Turso)
+
+            #[cfg(feature = "sqlite")]
             {
-                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                if !config
+                    .license
+                    .features
+                    .persistence
+                    .contains(&PersistenceMode::SQLite)
+                {
+                    return Err(crate::persistence::error::PersistenceError::NoLicense(
+                        PersistenceMode::SQLite,
+                    ));
+                }
+                PersistentStorageImpl::SQLite(Box::new(
+                    PersistentSQLiteStore::new(subsys, config).await?,
+                ))
+            }
+        }
+        PersistenceMode::Turso => {
+            #[cfg(not(feature = "turso"))]
+            {
+                use crate::persistence::error::PersistenceError;
+                return Err(PersistenceError::PersistenceModeNotEnabled(
                     PersistenceMode::Turso,
                 ));
             }
-            PersistentStorageImpl::Turso(Box::new(PersistentTursoStore::new(subsys, config).await?))
+
+            #[cfg(feature = "turso")]
+            {
+                if !config
+                    .license
+                    .features
+                    .persistence
+                    .contains(&PersistenceMode::Turso)
+                {
+                    return Err(crate::persistence::error::PersistenceError::NoLicense(
+                        PersistenceMode::Turso,
+                    ));
+                }
+                PersistentStorageImpl::Turso(Box::new(
+                    PersistentTursoStore::new(subsys, config).await?,
+                ))
+            }
         }
     };
 

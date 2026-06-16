@@ -53,6 +53,8 @@ pub enum PersistenceError {
     ApiError(#[from] oneshot::error::RecvError),
     #[error("no license for persistence mode {0:?}")]
     NoLicense(PersistenceMode),
+    #[error("persistence mode {0:?} is disabled by feature flag")]
+    PersistenceModeNotEnabled(PersistenceMode),
 }
 
 pub type PersistenceResult<T> = Result<T, PersistenceError>;
