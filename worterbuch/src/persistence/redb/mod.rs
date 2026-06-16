@@ -1,16 +1,17 @@
 use crate::{
     Config, Worterbuch,
-    persistence::{PersistentStorage, error::PersistenceResult},
+    persistence::{PersistentStorage, TIMESTAMP_FILE_NAME, error::PersistenceResult},
     store::Store,
 };
 use redb::{
     Database, ReadableDatabase, ReadableTable, TableDefinition, TableError, WriteTransaction,
 };
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, time::Duration};
 use tokio::{
-    fs, spawn,
+    fs, select, spawn,
     sync::{mpsc, oneshot},
 };
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
@@ -31,6 +32,7 @@ enum StoreAction {
     Flush(oneshot::Sender<()>),
     Clear,
     Load(oneshot::Sender<Worterbuch>),
+    UpdateTimestamp,
 }
 
 impl fmt::Debug for StoreAction {
@@ -47,6 +49,7 @@ impl fmt::Debug for StoreAction {
             StoreAction::Flush(_) => f.debug_tuple("Flush").finish(),
             StoreAction::Clear => f.debug_tuple("Clear").finish(),
             StoreAction::Load(_) => f.debug_tuple("Load").finish(),
+            StoreAction::UpdateTimestamp => f.debug_tuple("UpdateTimestamp").finish(),
         }
     }
 }
@@ -56,8 +59,9 @@ pub struct PersistentRedbStore {
 }
 
 impl PersistentRedbStore {
-    pub async fn new(config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.re.db");
+        let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
         info!("Using redb persistence with data dir {}", path.display());
 
@@ -66,7 +70,24 @@ impl PersistentRedbStore {
         let db = Database::create(path)?;
         let (tx, rx) = mpsc::channel(config.channel_buffer_size);
 
-        spawn(run(db, rx, config.clone()));
+        let txc = tx.clone();
+        subsys.spawn("timestamp-update", move |s| async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                select! {
+                    biased;
+                    _ = s.shutdown_requested() => break,
+                    _ = interval.tick() => {
+                        if txc.send(StoreAction::UpdateTimestamp).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok::<(), miette::Report>(())
+        });
+
+        spawn(run(db, rx, config.clone(), timestamp_file_path));
 
         Ok(Self { tx })
     }
@@ -133,8 +154,15 @@ impl PersistentStorage for PersistentRedbStore {
     }
 }
 
-async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
+async fn run(
+    mut db: Database,
+    mut rx: mpsc::Receiver<StoreAction>,
+    config: Config,
+    timestamp_file_path: PathBuf,
+) {
     let mut next_action = None;
+
+    let mut update_timestamp = false;
 
     loop {
         let action = if let Some(action) = next_action.take() {
@@ -158,18 +186,34 @@ async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Conf
 
         if let Err(e) = match action {
             StoreAction::Update(key, value) => {
+                update_timestamp = true;
                 update_value(&mut db, key, value, &mut rx, &mut next_action)
             }
             StoreAction::UpdateLastWill(client_id, last_will) => {
+                update_timestamp = true;
                 update_last_will(&mut db, client_id, last_will)
             }
             StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
+                update_timestamp = true;
                 update_grave_goods(&mut db, client_id, grave_goods)
             }
-            StoreAction::Delete(key) => delete_value(&mut db, key, &mut rx, &mut next_action),
+            StoreAction::Delete(key) => {
+                update_timestamp = true;
+                delete_value(&mut db, key, &mut rx, &mut next_action)
+            }
             StoreAction::Flush(tx) => flush(&mut db, tx),
-            StoreAction::Clear => clear(&mut db),
+            StoreAction::Clear => {
+                update_timestamp = true;
+                clear(&mut db)
+            }
             StoreAction::Load(tx) => load(&mut db, config.clone(), tx),
+            StoreAction::UpdateTimestamp => {
+                if !update_timestamp {
+                    continue;
+                }
+                update_timestamp = false;
+                update_timestamp_file(&timestamp_file_path).await
+            }
         } {
             error!("Error in ReDB persistence: {e}");
         }
@@ -178,6 +222,19 @@ async fn run(mut db: Database, mut rx: mpsc::Receiver<StoreAction>, config: Conf
     }
 
     info!("ReDB closed.");
+}
+
+async fn update_timestamp_file(
+    timestamp_file_path: &PathBuf,
+) -> Result<(), super::error::PersistenceError> {
+    info!(
+        "Updating timestamp file {} …",
+        timestamp_file_path.display()
+    );
+    if let Err(e) = fs::File::create(timestamp_file_path).await {
+        error!("Failed to update timestamp file: {e}");
+    }
+    Ok(())
 }
 
 fn update_value(

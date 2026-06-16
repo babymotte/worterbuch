@@ -19,6 +19,8 @@ pub enum WorterbuchAppError {
     IoError(#[from] io::Error),
     #[error("Channel error: {0}")]
     ChannelError(#[from] oneshot::error::RecvError),
+    #[error("No license for feature {0}")]
+    NoLicense(String),
 }
 
 pub type WorterbuchAppResult<T> = Result<T, WorterbuchAppError>;

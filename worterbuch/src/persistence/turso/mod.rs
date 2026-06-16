@@ -2,14 +2,17 @@ mod trie;
 
 use crate::{
     Config, Worterbuch,
-    persistence::{PersistentStorage, error::PersistenceResult, turso::trie::TursoTrie},
+    persistence::{
+        PersistentStorage, TIMESTAMP_FILE_NAME, error::PersistenceResult, turso::trie::TursoTrie,
+    },
     store::Store,
 };
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, time::Duration};
 use tokio::{
-    fs, spawn,
+    fs, select, spawn,
     sync::{mpsc, oneshot},
 };
+use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
@@ -22,6 +25,7 @@ enum StoreAction {
     Delete(Key),
     Clear,
     Load(oneshot::Sender<Worterbuch>),
+    UpdateTimestamp,
 }
 
 impl fmt::Debug for StoreAction {
@@ -37,6 +41,7 @@ impl fmt::Debug for StoreAction {
             StoreAction::Delete(key) => f.debug_tuple("Delete").field(key).finish(),
             StoreAction::Clear => f.debug_tuple("Clear").finish(),
             StoreAction::Load(_) => f.debug_tuple("Load").finish(),
+            StoreAction::UpdateTimestamp => f.debug_tuple("UpdateTimestamp").finish(),
         }
     }
 }
@@ -46,8 +51,9 @@ pub struct PersistentTursoStore {
 }
 
 impl PersistentTursoStore {
-    pub async fn new(config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.turso.db");
+        let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
         info!("Using turso persistence with data dir {}", path.display());
 
@@ -57,7 +63,22 @@ impl PersistentTursoStore {
 
         let (tx, rx) = mpsc::channel(config.channel_buffer_size);
 
-        spawn(run(db, rx, config.clone()));
+        let txc = tx.clone();
+        subsys.spawn("timestamp-update", move |s| async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                select! {
+                    biased;
+                    _ = s.shutdown_requested() => break,
+                    _ = interval.tick() => {
+                        if txc.send(StoreAction::UpdateTimestamp).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok::<(), miette::Report>(())
+        });
 
         Ok(Self { tx })
     }
@@ -117,8 +138,15 @@ impl PersistentStorage for PersistentTursoStore {
     }
 }
 
-async fn run(mut db: TursoTrie, mut rx: mpsc::Receiver<StoreAction>, config: Config) {
+async fn run(
+    mut db: TursoTrie,
+    mut rx: mpsc::Receiver<StoreAction>,
+    config: Config,
+    timestamp_file_path: PathBuf,
+) {
     let mut next_action = None;
+
+    let mut update_timestamp = false;
 
     loop {
         let action = if let Some(action) = next_action.take() {
@@ -142,17 +170,33 @@ async fn run(mut db: TursoTrie, mut rx: mpsc::Receiver<StoreAction>, config: Con
 
         let result = match action {
             StoreAction::Update(key, value) => {
+                update_timestamp = true;
                 update_value(&mut db, key, value, &mut rx, &mut next_action).await
             }
             StoreAction::UpdateLastWill(client_id, last_will) => {
+                update_timestamp = true;
                 update_last_will(&mut db, client_id, last_will).await
             }
             StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
+                update_timestamp = true;
                 update_grave_goods(&mut db, client_id, grave_goods).await
             }
-            StoreAction::Delete(key) => delete_value(&mut db, key, &mut rx, &mut next_action).await,
-            StoreAction::Clear => clear(&mut db).await,
+            StoreAction::Delete(key) => {
+                update_timestamp = true;
+                delete_value(&mut db, key, &mut rx, &mut next_action).await
+            }
+            StoreAction::Clear => {
+                update_timestamp = true;
+                clear(&mut db).await
+            }
             StoreAction::Load(tx) => load(&mut db, config.clone(), tx).await,
+            StoreAction::UpdateTimestamp => {
+                if !update_timestamp {
+                    continue;
+                }
+                update_timestamp = false;
+                update_timestamp_file(&timestamp_file_path).await
+            }
         };
 
         if let Err(e) = result {
@@ -162,7 +206,22 @@ async fn run(mut db: TursoTrie, mut rx: mpsc::Receiver<StoreAction>, config: Con
         trace!("Store action processed.");
     }
 
+    update_timestamp_file(&timestamp_file_path).await.ok();
+
     info!("Turso closed.");
+}
+
+async fn update_timestamp_file(
+    timestamp_file_path: &PathBuf,
+) -> Result<(), super::error::PersistenceError> {
+    info!(
+        "Updating timestamp file {} …",
+        timestamp_file_path.display()
+    );
+    if let Err(e) = fs::File::create(timestamp_file_path).await {
+        error!("Failed to update timestamp file: {e}");
+    }
+    Ok(())
 }
 
 async fn update_value(

@@ -48,6 +48,13 @@ pub(crate) async fn run_in_follower_mode(
     config: Config,
     web_server: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
+    #[cfg(feature = "commercial")]
+    if !config.license.features.clustering {
+        return Err(crate::error::WorterbuchAppError::NoLicense(
+            "clustering".to_owned(),
+        ));
+    }
+
     let leader_addr = if let Some(it) = &config.leader_address {
         it
     } else {
@@ -55,6 +62,7 @@ pub(crate) async fn run_in_follower_mode(
             "No valid leader address configured.".to_owned(),
         ));
     };
+
     info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
 
     worterbuch

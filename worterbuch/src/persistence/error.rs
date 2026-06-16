@@ -1,4 +1,4 @@
-use crate::store::StoreError;
+use crate::{PersistenceMode, store::StoreError};
 use miette::Diagnostic;
 #[cfg(feature = "redb")]
 use redb::{
@@ -25,7 +25,7 @@ pub enum PersistenceError {
     DataMismatch,
     #[cfg(feature = "redb")]
     #[error("redb database error: {0}")]
-    RedbDatabaseBError(#[from] DatabaseError),
+    RedbDatabaseError(#[from] DatabaseError),
     #[cfg(feature = "redb")]
     #[error("redb transaction error: {0}")]
     RedbTransactioneError(#[from] TransactionError),
@@ -51,6 +51,10 @@ pub enum PersistenceError {
     StoreError(#[from] StoreError),
     #[error("internal api error")]
     ApiError(#[from] oneshot::error::RecvError),
+    #[error("no license for persistence mode {0:?}")]
+    NoLicense(PersistenceMode),
+    #[error("persistence mode {0:?} is disabled by feature flag")]
+    PersistenceModeNotEnabled(PersistenceMode),
 }
 
 pub type PersistenceResult<T> = Result<T, PersistenceError>;
