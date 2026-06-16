@@ -20,7 +20,7 @@
 use crate::license::{License, load_license};
 use clap::Parser;
 use miette::IntoDiagnostic;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     env,
@@ -37,7 +37,7 @@ use worterbuch_common::{
     error::{ConfigError, ConfigIntContext, ConfigResult},
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize, EnumString)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]
 // #[serde(rename_all = "camelCase")]
 pub enum PersistenceMode {
     Json,
@@ -133,6 +133,7 @@ pub struct Config {
     #[cfg(target_family = "unix")]
     pub unix_disabled: bool,
     pub exit_on_stdin_close: bool,
+    pub license_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -293,6 +294,10 @@ impl Config {
             self.exit_on_stdin_close = enabled == "true" || enabled == "1";
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_LICENSE_FILE") {
+            self.license_file = Some(val.into());
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -302,57 +307,60 @@ impl Config {
     }
 
     pub async fn new(args: Option<Args>) -> ConfigResult<Self> {
-        match load_license().await {
+        let mut config = Config {
+            instance_name: None,
+            ws_endpoint: Some(WsEndpoint {
+                endpoint: Endpoint {
+                    tls: false,
+                    bind_addr: [127, 0, 0, 1].into(),
+                    port: 8080,
+                },
+                public_addr: "localhost".to_owned(),
+            }),
+            tcp_endpoint: Some(Endpoint {
+                tls: false,
+                bind_addr: [127, 0, 0, 1].into(),
+                port: 8081,
+            }),
+            #[cfg(target_family = "unix")]
+            unix_endpoint: None,
+            use_persistence: false,
+            persistence_interval: Duration::from_secs(30),
+            persistence_mode: PersistenceMode::Json,
+            data_dir: "./data".into(),
+            single_threaded: false,
+            web_root_path: None,
+            keepalive_time: None,
+            keepalive_interval: None,
+            keepalive_retries: None,
+            send_timeout: None,
+            channel_buffer_size: 1_000,
+            extended_monitoring: true,
+            auth_token_key: None,
+            license: License::default(),
+            shutdown_timeout: Duration::from_secs(1),
+            follower: false,
+            leader: false,
+            sync_port: None,
+            leader_address: None,
+            default_export_file_name: None,
+            cors_allowed_origins: None,
+            print_endpoints: false,
+            ws_disabled: false,
+            tcp_disabled: false,
+            #[cfg(target_family = "unix")]
+            unix_disabled: false,
+            exit_on_stdin_close: false,
+            license_file: None,
+        };
+        config.load_env()?;
+        if let Some(args) = args {
+            config.apply_args(args);
+        }
+
+        match load_license(config.license_file.as_deref()).await {
             Ok(license) => {
-                let mut config = Config {
-                    instance_name: None,
-                    ws_endpoint: Some(WsEndpoint {
-                        endpoint: Endpoint {
-                            tls: false,
-                            bind_addr: [127, 0, 0, 1].into(),
-                            port: 8080,
-                        },
-                        public_addr: "localhost".to_owned(),
-                    }),
-                    tcp_endpoint: Some(Endpoint {
-                        tls: false,
-                        bind_addr: [127, 0, 0, 1].into(),
-                        port: 8081,
-                    }),
-                    #[cfg(target_family = "unix")]
-                    unix_endpoint: None,
-                    use_persistence: false,
-                    persistence_interval: Duration::from_secs(30),
-                    persistence_mode: PersistenceMode::Json,
-                    data_dir: "./data".into(),
-                    single_threaded: false,
-                    web_root_path: None,
-                    keepalive_time: None,
-                    keepalive_interval: None,
-                    keepalive_retries: None,
-                    send_timeout: None,
-                    channel_buffer_size: 1_000,
-                    extended_monitoring: true,
-                    auth_token_key: None,
-                    license,
-                    shutdown_timeout: Duration::from_secs(1),
-                    follower: false,
-                    leader: false,
-                    sync_port: None,
-                    leader_address: None,
-                    default_export_file_name: None,
-                    cors_allowed_origins: None,
-                    print_endpoints: false,
-                    ws_disabled: false,
-                    tcp_disabled: false,
-                    #[cfg(target_family = "unix")]
-                    unix_disabled: false,
-                    exit_on_stdin_close: false,
-                };
-                config.load_env()?;
-                if let Some(args) = args {
-                    config.apply_args(args);
-                }
+                config.license = license;
                 Ok(config)
             }
             Err(e) => Err(ConfigError::InvalidLicense(e.to_string())),

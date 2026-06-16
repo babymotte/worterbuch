@@ -17,8 +17,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::PersistenceMode;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::str;
+use worterbuch_common::KeyValuePairs;
+use worterbuch_common::error::ConfigResult;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +33,8 @@ pub struct Features {
     pub clustering: bool,
     #[serde(default = "Default::default")]
     pub extended_monitoring: bool,
+    #[serde(default = "Default::default")]
+    pub persistence: Vec<PersistenceMode>,
 }
 
 impl Default for Features {
@@ -37,6 +43,7 @@ impl Default for Features {
             jwt_authorization: true,
             clustering: true,
             extended_monitoring: true,
+            persistence: vec![PersistenceMode::Json],
         }
     }
 }
@@ -60,11 +67,17 @@ pub struct License {
     pub iat: u64,
     pub exp: u64,
     pub plan: Plan,
-    pub versions: (usize, usize),
+    pub versions: ((u32, u32), (u32, u32)),
     pub features: Features,
+    pub license_validation: Option<KeyValuePairs>,
 }
 
-#[cfg(not(feature = "commercial"))]
+impl Default for License {
+    fn default() -> Self {
+        Self::foss()
+    }
+}
+
 impl License {
     fn foss() -> Self {
         Self {
@@ -73,24 +86,35 @@ impl License {
             iat: 1708291670,
             exp: 999999999999,
             plan: Plan::Foss,
-            versions: (1, 99999),
+            versions: ((0, 0), (99999, 99999)),
             features: Features {
                 clustering: true,
                 extended_monitoring: true,
                 jwt_authorization: true,
+                #[cfg(not(feature = "turso"))]
+                persistence: vec![
+                    PersistenceMode::Json,
+                    #[cfg(feature = "redb")]
+                    PersistenceMode::ReDB,
+                    #[cfg(feature = "sqlite")]
+                    PersistenceMode::SQLite,
+                    #[cfg(feature = "turso")]
+                    PersistenceMode::Turso,
+                ],
             },
+            license_validation: None,
         }
     }
 }
 
 #[cfg(not(feature = "commercial"))]
-pub async fn load_license() -> miette::Result<License> {
+pub async fn load_license(_: Option<&Path>) -> ConfigResult<License> {
     Ok(License::foss())
 }
 
 #[cfg(feature = "commercial")]
-pub async fn load_license() -> miette::Result<License> {
-    commercial::load_license().await
+pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<License> {
+    commercial::load_license(license_file_path).await
 }
 
 #[cfg(feature = "commercial")]
@@ -98,29 +122,54 @@ pub mod commercial {
 
     use super::License;
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
-    use miette::{Context, IntoDiagnostic};
-    use std::{env, str};
+    use std::{env, path::Path, str};
     use tokio::fs;
+    use worterbuch_common::{
+        WorterbuchVersion,
+        error::{ConfigError, ConfigResult},
+    };
 
     pub const LICENSE_PUBLIC_KEY: &str = env!("WORTERBUCH_LICENSE_PUBLIC_KEY");
+    pub const WORTERBUCH_VERSION: (&str, &str, &str) = (
+        env!("CARGO_PKG_VERSION_MAJOR"),
+        env!("CARGO_PKG_VERSION_MINOR"),
+        env!("CARGO_PKG_VERSION_PATCH"),
+    );
 
-    pub async fn load_license() -> miette::Result<License> {
-        // TODO get from config
-        let license_file = env::var("WORTERBUCH_LICENSE_FILE")
-            .into_diagnostic()
-            .wrap_err("WORTERBUCH_LICENSE_FILE is not set")?;
+    pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<License> {
+        let license_file = license_file_path.unwrap_or_else(|| Path::new("./license"));
 
-        let license_file = fs::read_to_string(license_file)
-            .await
-            .into_diagnostic()
-            .wrap_err("Could not read license file")?;
+        let license_file = fs::read_to_string(license_file).await.map_err(|e| {
+            ConfigError::InvalidLicense(format!("License file could not be read: {e}"))
+        })?;
 
         let validation = Validation::new(Algorithm::EdDSA);
-        let key = DecodingKey::from_ed_pem(LICENSE_PUBLIC_KEY.as_ref()).into_diagnostic()?;
+        let key = DecodingKey::from_ed_pem(LICENSE_PUBLIC_KEY.as_ref()).map_err(|e| {
+            ConfigError::InvalidLicense(format!("License key could not be read: {e}"))
+        })?;
 
-        let token = decode::<License>(&license_file, &key, &validation)
-            .into_diagnostic()
-            .wrap_err("Validity of license token could not be confirmed")?;
+        let token = decode::<License>(&license_file, &key, &validation).map_err(|e| {
+            ConfigError::InvalidLicense(format!(
+                "Validity of license token could not be confirmed: {e}"
+            ))
+        })?;
+
+        let wb_version = WorterbuchVersion(
+            WORTERBUCH_VERSION
+                .0
+                .parse::<u32>()
+                .expect("invalid cargo version"),
+            WORTERBUCH_VERSION
+                .1
+                .parse::<u32>()
+                .expect("invalid cargo version"),
+            WORTERBUCH_VERSION
+                .2
+                .parse::<u32>()
+                .expect("invalid cargo version"),
+        );
+
+        wb_version.check_covered_by_license(token.claims.versions.0, token.claims.versions.1)?;
 
         Ok(token.claims)
     }
@@ -143,7 +192,8 @@ mod test {
             Features {
                 clustering: true,
                 extended_monitoring: false,
-                jwt_authorization: false
+                jwt_authorization: false,
+                persistence: vec![],
             }
         )
     }
@@ -157,7 +207,8 @@ mod test {
             Features {
                 clustering: true,
                 extended_monitoring: false,
-                jwt_authorization: false
+                jwt_authorization: false,
+                persistence: vec![],
             }
         )
     }

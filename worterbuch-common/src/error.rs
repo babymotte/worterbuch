@@ -52,6 +52,8 @@ pub enum ConfigError {
     InvalidInterval(ParseIntError),
     #[error("license file could not be loaded: {0}")]
     InvalidLicense(String),
+    #[error("{0}")]
+    InsufficientLicense(String),
     #[error("could not load config file: {0}")]
     IoError(#[from] io::Error),
     #[error("could not load config file: {0}")]

@@ -307,24 +307,71 @@ async fn get_storage_instance(
 
     let flush_periodically = !config.follower;
 
-    let storage =
-        match config.persistence_mode {
-            PersistenceMode::Json => PersistentStorageImpl::Json(Box::new(
-                PersistentJsonStorage::new(subsys, config.clone(), api.clone(), flush_periodically),
-            )),
-            #[cfg(feature = "redb")]
-            PersistenceMode::ReDB => PersistentStorageImpl::ReDB(Box::new(
-                PersistentRedbStore::new(subsys, config).await?,
-            )),
-            #[cfg(feature = "sqlite")]
-            PersistenceMode::SQLite => PersistentStorageImpl::SQLite(Box::new(
+    let storage = match config.persistence_mode {
+        PersistenceMode::Json => {
+            if !config
+                .license
+                .features
+                .persistence
+                .contains(&PersistenceMode::Json)
+            {
+                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                    PersistenceMode::Json,
+                ));
+            }
+
+            PersistentStorageImpl::Json(Box::new(PersistentJsonStorage::new(
+                subsys,
+                config.clone(),
+                api.clone(),
+                flush_periodically,
+            )))
+        }
+        #[cfg(feature = "redb")]
+        PersistenceMode::ReDB => {
+            if !config
+                .license
+                .features
+                .persistence
+                .contains(&PersistenceMode::ReDB)
+            {
+                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                    PersistenceMode::ReDB,
+                ));
+            }
+            PersistentStorageImpl::ReDB(Box::new(PersistentRedbStore::new(subsys, config).await?))
+        }
+        #[cfg(feature = "sqlite")]
+        PersistenceMode::SQLite => {
+            if !config
+                .license
+                .features
+                .persistence
+                .contains(&PersistenceMode::SQLite)
+            {
+                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                    PersistenceMode::SQLite,
+                ));
+            }
+            PersistentStorageImpl::SQLite(Box::new(
                 PersistentSQLiteStore::new(subsys, config).await?,
-            )),
-            #[cfg(feature = "turso")]
-            PersistenceMode::Turso => PersistentStorageImpl::Turso(Box::new(
-                PersistentTursoStore::new(subsys, config).await?,
-            )),
-        };
+            ))
+        }
+        #[cfg(feature = "turso")]
+        PersistenceMode::Turso => {
+            if !config
+                .license
+                .features
+                .persistence
+                .contains(&PersistenceMode::Turso)
+            {
+                return Err(crate::persistence::error::PersistenceError::NoLicense(
+                    PersistenceMode::Turso,
+                ));
+            }
+            PersistentStorageImpl::Turso(Box::new(PersistentTursoStore::new(subsys, config).await?))
+        }
+    };
 
     Ok(storage)
 }

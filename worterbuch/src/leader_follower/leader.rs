@@ -55,6 +55,13 @@ pub(crate) async fn run_in_leader_mode(
     tcp_server: Option<SubsystemHandle>,
     unix_socket: Option<SubsystemHandle>,
 ) -> WorterbuchAppResult<()> {
+    #[cfg(feature = "commercial")]
+    if !config.license.features.clustering {
+        return Err(crate::error::WorterbuchAppError::NoLicense(
+            "clustering".to_owned(),
+        ));
+    }
+
     info!("Running in LEADER mode.");
 
     worterbuch

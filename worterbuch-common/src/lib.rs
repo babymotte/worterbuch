@@ -35,6 +35,8 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::Span;
 use uuid::Uuid;
 
+use crate::error::{ConfigError, ConfigResult};
+
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
 #[cfg(feature = "jemalloc")]
@@ -79,6 +81,12 @@ pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type MetaData = String;
 pub type Path = String;
+
+pub type WorterbuchVersionSegment = u32;
+pub type WorterbuchMajorVersion = WorterbuchVersionSegment;
+pub type WorterbuchMinorVersion = WorterbuchVersionSegment;
+pub type WorterbuchPatchVersion = WorterbuchVersionSegment;
+
 pub type ProtocolVersionSegment = u32;
 pub type ProtocolMajorVersion = ProtocolVersionSegment;
 pub type ProtocolVersions = Vec<ProtocolVersion>;
@@ -90,6 +98,48 @@ pub type AuthToken = String;
 pub type AuthTokenKey = String;
 pub type CasVersion = u64;
 pub type ClientId = Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorterbuchVersion(
+    pub WorterbuchMajorVersion,
+    pub WorterbuchMinorVersion,
+    pub WorterbuchPatchVersion,
+);
+
+impl WorterbuchVersion {
+    pub fn check_covered_by_license(
+        &self,
+        license_min: (WorterbuchVersionSegment, WorterbuchVersionSegment),
+        license_max: (WorterbuchVersionSegment, WorterbuchVersionSegment),
+    ) -> ConfigResult<()> {
+        if license_min.0 == self.0 && license_min.1 > self.1 {
+            return Err(ConfigError::InsufficientLicense(format!(
+                "License is only valid for Wörterbuch versions {}.{} and later, but this is version {}.{}",
+                license_min.0, license_min.1, self.0, self.1,
+            )));
+        }
+        if license_max.0 == self.0 && license_max.1 <= self.1 {
+            return Err(ConfigError::InsufficientLicense(format!(
+                "License is only valid for Wörterbuch versions earlier than {}.{}, but this is version {}.{}",
+                license_max.0, license_max.1, self.0, self.1,
+            )));
+        }
+        if license_min.0 > self.0 {
+            return Err(ConfigError::InsufficientLicense(format!(
+                "License is only valid for Wörterbuch versions {}.{} and later, but this is version {}.{}",
+                license_min.0, license_min.1, self.0, self.1,
+            )));
+        }
+        if license_max.0 < self.0 {
+            return Err(ConfigError::InsufficientLicense(format!(
+                "License is only valid for Wörterbuch versions earlier than {}.{}, but this is version {}.{}",
+                license_max.0, license_max.1, self.0, self.1,
+            )));
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValueEntry {
@@ -710,7 +760,7 @@ mod test {
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
-    use crate::{ErrorCode, ProtocolVersion};
+    use super::*;
     use serde_json::json;
 
     #[test]
@@ -783,5 +833,139 @@ mod test {
             .iter()
             .find(|v| client_version.is_compatible_with_server(v));
         assert_eq!(compatible_version, Some(&server_versions[1]))
+    }
+
+    #[test]
+    fn major_version_too_old_for_license_is_rejected() {
+        let license_min = (2, 0);
+        let license_max = (3, 0);
+        assert!(
+            WorterbuchVersion(0, 0, 1)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+
+        assert!(
+            WorterbuchVersion(1, 5, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn minor_version_too_old_for_license_is_rejected() {
+        let license_min = (2, 6);
+        let license_max = (3, 0);
+        assert!(
+            WorterbuchVersion(2, 0, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+        assert!(
+            WorterbuchVersion(2, 5, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+        assert!(
+            WorterbuchVersion(2, 5, 9999)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn major_version_too_new_for_license_is_rejected() {
+        let license_min = (2, 0);
+        let license_max = (3, 0);
+        assert!(
+            WorterbuchVersion(4, 5, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+        assert!(
+            WorterbuchVersion(9999, 9999, 9999)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn minor_version_too_new_for_license_is_rejected() {
+        let license_min = (2, 0);
+        let license_max = (2, 6);
+        assert!(
+            WorterbuchVersion(2, 7, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn major_version_in_range_is_accepted() {
+        let license_min = (1, 0);
+        let license_max = (3, 0);
+        assert!(
+            WorterbuchVersion(1, 1, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+        assert!(
+            WorterbuchVersion(2, 0, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+        assert!(
+            WorterbuchVersion(2, 5, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+        assert!(
+            WorterbuchVersion(2, 99999, 99999)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn minor_version_in_range_is_accepted() {
+        let license_min = (2, 1);
+        let license_max = (2, 6);
+        assert!(
+            WorterbuchVersion(2, 5, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn version_equal_to_min_version_is_accepted() {
+        let license_min = (2, 1);
+        let license_max = (2, 6);
+        assert!(
+            WorterbuchVersion(2, 1, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+        assert!(
+            WorterbuchVersion(2, 1, 5)
+                .check_covered_by_license(license_min, license_max)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn version_equal_to_max_version_is_rejected() {
+        let license_min = (1, 0);
+        let license_max = (2, 6);
+        assert!(
+            WorterbuchVersion(2, 6, 0)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
+        assert!(
+            WorterbuchVersion(2, 6, 1)
+                .check_covered_by_license(license_min, license_max)
+                .is_err()
+        );
     }
 }
