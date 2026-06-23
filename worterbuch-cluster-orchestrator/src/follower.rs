@@ -123,11 +123,11 @@ fn cmd(leader: SocketAddr, config: &Config) -> CommandDefinition {
     CommandDefinition::new(
         config.worterbuch_executable.to_owned(),
         vec![
-            "--follower".to_owned(),
-            "--leader-address".to_owned(),
-            leader.to_string(),
             "--instance-name".to_owned(),
             config.node_id.to_owned(),
+            "follower".to_owned(),
+            "--leader-address".to_owned(),
+            leader.to_string(),
         ],
     )
 }

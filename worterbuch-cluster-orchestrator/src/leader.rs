@@ -179,11 +179,11 @@ fn cmd(config: &Config) -> CommandDefinition {
     CommandDefinition::new(
         config.worterbuch_executable.to_owned(),
         vec![
-            "--leader".to_owned(),
-            "--sync-port".to_owned(),
-            config.sync_port.to_string(),
             "--instance-name".to_owned(),
             config.node_id.to_owned(),
+            "leader".to_owned(),
+            "--sync-port".to_owned(),
+            config.sync_port.to_string(),
         ],
     )
 }
