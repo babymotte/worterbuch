@@ -14,6 +14,7 @@ default-run = "worterbuch"
 [features]
 jemalloc = ["worterbuch-common/jemalloc", "tikv-jemalloc-ctl"]
 telemetry = [
+    "worterbuch-common/telemetry",
     "opentelemetry",
     "opentelemetry-otlp",
     "opentelemetry-resource-detectors",
@@ -21,10 +22,9 @@ telemetry = [
     "opentelemetry_sdk",
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
-    "worterbuch-common/telemetry",
 ]
 commercial = []
-redb = ["dep:redb"]
+redb = ["worterbuch-common/redb", "dep:redb"]
 sqlite = ["dep:rusqlite"]
 turso = ["dep:turso"]
 default = ["jemalloc", "telemetry", "redb", "sqlite"]
@@ -82,7 +82,7 @@ tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 turso = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
-worterbuch-common = { workspace = true, features = ["axum-errors", "redb"] }
+worterbuch-common = { workspace = true, features = ["axum-errors"] }
 
 [lints.rust]
 # unsafe_code = "forbid"

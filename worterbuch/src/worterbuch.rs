@@ -22,7 +22,7 @@ use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
-    persistence::{PersistentStorageImpl, error::PersistenceResult, unlock_persistence},
+    persistence::{PersistentStorageImpl, error::PersistenceResult},
     store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };

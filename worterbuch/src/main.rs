@@ -20,7 +20,7 @@
 use clap::Parser;
 use miette::{IntoDiagnostic, Result};
 use std::env;
-use worterbuch::{Args, Commands, Config, run_worterbuch};
+use worterbuch::{Args, Config, run_worterbuch};
 
 fn main() -> Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -61,7 +61,7 @@ async fn start() -> Result<()> {
 
     #[cfg(feature = "telemetry")]
     let shutdown_telemetry = {
-        use worterbuch::telemetry;
+        use worterbuch::{Commands, telemetry};
 
         let hostname = hostname::get().into_diagnostic()?;
         let cluster_role = match args.command {

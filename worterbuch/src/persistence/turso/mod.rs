@@ -51,7 +51,7 @@ pub struct PersistentTursoStore {
 }
 
 impl PersistentTursoStore {
-    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.turso.db");
         let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
@@ -79,6 +79,8 @@ impl PersistentTursoStore {
             }
             Ok::<(), miette::Report>(())
         });
+
+        spawn(run(db, rx, config, timestamp_file_path));
 
         Ok(Self { tx })
     }

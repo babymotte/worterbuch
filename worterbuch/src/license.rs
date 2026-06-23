@@ -91,7 +91,6 @@ impl License {
                 clustering: true,
                 extended_monitoring: true,
                 jwt_authorization: true,
-                #[cfg(not(feature = "turso"))]
                 persistence: vec![
                     PersistenceMode::Json,
                     #[cfg(feature = "redb")]
