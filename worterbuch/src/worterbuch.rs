@@ -22,7 +22,7 @@ use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
-    persistence::{PersistentStorageImpl, error::PersistenceResult},
+    persistence::{PersistentStorageImpl, error::PersistenceResult, unlock_persistence},
     store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
@@ -1393,13 +1393,39 @@ impl Worterbuch {
     }
 
     pub(crate) async fn reset_store(&mut self, data: StoreNode) -> WorterbuchResult<()> {
-        self.store.reset(data);
         self.persistent_storage.clear().await.map_err(|e| {
             WorterbuchError::IoError(io::Error::other(e), "Failed to clear storage".to_owned())
         })?;
-        self.flush().await.map_err(|e| {
-            WorterbuchError::IoError(io::Error::other(e), "Failed to flush storage".to_owned())
-        })?;
+
+        let mut stack: Vec<(&StoreNode, Vec<&RegularKeySegment>)> = vec![(&data, vec![])];
+        while let Some((node, path)) = stack.pop() {
+            if let Some(value) = node.value() {
+                let key = path
+                    .iter()
+                    .map(|s| s.to_owned().to_owned())
+                    .reduce(|a, b| format!("{a}/{b}"))
+                    .unwrap_or_else(|| "".to_owned());
+                self.persistent_storage
+                    .update_value(&key, value, None)
+                    .await
+                    .map_err(|e| {
+                        WorterbuchError::IoError(
+                            io::Error::other(e),
+                            "Failed to insert value into persistent storage".to_owned(),
+                        )
+                    })?;
+            }
+            if let Some(children) = &node.tree {
+                for (key, child) in children.iter() {
+                    let mut child_path = path.clone();
+                    child_path.push(key);
+                    stack.push((child, child_path));
+                }
+            }
+        }
+
+        self.store.reset(data);
+
         Ok(())
     }
 

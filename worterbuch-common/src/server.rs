@@ -32,7 +32,7 @@ use tokio::{
     io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
     time::timeout,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -416,7 +416,10 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
 ) -> ConnectionResult<Option<T>> {
     let read = rx.next_line().await;
     match read {
-        Ok(None) => Ok(None),
+        Ok(None) => {
+            warn!("No data received, connection closed by remote peer");
+            Ok(None)
+        }
         Ok(Some(json)) => {
             debug!("Received message: {json}");
             let sm = serde_json::from_str(&json);

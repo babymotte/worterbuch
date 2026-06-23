@@ -18,12 +18,11 @@
  */
 
 use crate::{
-    Config, INTERNAL_CLIENT_ID, Worterbuch,
-    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
+    Config, INTERNAL_CLIENT_ID, Servers, Worterbuch,
+    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, shutdown},
     error::{WorterbuchAppError, WorterbuchAppResult},
     persistence::unlock_persistence,
     server::common::WbFunction,
-    shutdown,
 };
 use serde_json::json;
 use std::ops::ControlFlow;
@@ -34,19 +33,20 @@ use tokio::{
     sync::mpsc,
 };
 use tosub::SubsystemHandle;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
     error::{ConnectionResult, WorterbuchError},
     receive_msg, topic, while_select,
 };
 
-pub(crate) async fn run_in_follower_mode(
+pub(crate) async fn run(
     subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<SubsystemHandle>,
+    leader_address: String,
 ) -> WorterbuchAppResult<()> {
     #[cfg(feature = "commercial")]
     if !config.license.features.clustering {
@@ -55,15 +55,7 @@ pub(crate) async fn run_in_follower_mode(
         ));
     }
 
-    let leader_addr = if let Some(it) = &config.leader_address {
-        it
-    } else {
-        return Err(WorterbuchAppError::ConfigError(
-            "No valid leader address configured.".to_owned(),
-        ));
-    };
-
-    info!("Running in FOLLOWER mode. Leader: {}", leader_addr,);
+    info!("Running in FOLLOWER mode. Leader: {}", leader_address,);
 
     worterbuch
         .set(
@@ -76,29 +68,35 @@ pub(crate) async fn run_in_follower_mode(
 
     let mut persistence_interval = config.persistence_interval();
 
-    let stream = TcpStream::connect(leader_addr).await?;
+    let stream = TcpStream::connect(leader_address).await?;
 
     let mut lines = BufReader::new(stream).lines();
 
     info!("Waiting for initial sync message from leader …");
     select! {
-        recv = receive_msg(&mut lines) => match recv {
-            Ok(Some(msg)) => {
-                if let LeaderSyncMessage::Init(state) = msg {
-                    initial_sync(state, &mut worterbuch).await?;
-                    unlock_persistence();
-                    persistence_interval.reset();
-                    worterbuch.flush().await?;
-                } else {
-                    return Err(WorterbuchAppError::ClusterError("first message from leader is supposed to be the initial sync, but it wasn't".to_owned()));
+        recv = receive_msg(&mut lines) => {
+            debug!("Received leader message");
+            match recv {
+                Ok(Some(msg)) => {
+                    if let LeaderSyncMessage::Init(state) = msg {
+                        debug!("Received initial sync message from leader: {state:?}");
+                        initial_sync(state, &mut worterbuch).await?;
+                        persistence_interval.reset();
+                        worterbuch.flush().await?;
+                    } else {
+                        return Err(WorterbuchAppError::ClusterError("first message from leader is supposed to be the initial sync, but it wasn't".to_owned()));
+                    }
+                },
+                Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
+                Err(e) => {
+                    return Err(WorterbuchAppError::ClusterError(format!("error receiving update from leader: {e}")));
                 }
-            },
-            Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
-            Err(e) => {
-                return Err(WorterbuchAppError::ClusterError(format!("error receiving update from leader: {e}")));
             }
         },
-        _ = subsys.shutdown_requested() => return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned())),
+        _ = subsys.shutdown_requested() => {
+            warn!("Shutdown requested before initial sync completed.");
+            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
+        },
     }
     info!("Successfully synced with leader.");
 
@@ -110,7 +108,16 @@ pub(crate) async fn run_in_follower_mode(
         recv = api_rx.recv() => try_process_api_call(recv, &mut worterbuch).await?,
     }
 
-    shutdown(subsys, worterbuch, config, web_server, None, None).await
+    shutdown(
+        subsys,
+        worterbuch,
+        config,
+        Servers {
+            web_server,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 async fn try_process_leader_message(
@@ -162,6 +169,12 @@ async fn initial_sync(
             true,
         )
         .await?;
+
+    unlock_persistence();
+
+    worterbuch.flush().await.map_err(|e| {
+        WorterbuchAppError::ClusterError(format!("Failed to flush storage after initial sync: {e}"))
+    })?;
     Ok(())
 }
 

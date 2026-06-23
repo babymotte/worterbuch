@@ -1,6 +1,7 @@
 use crate::persistence::error::PersistenceResult;
 use rusqlite::{Connection, params};
 use std::{collections::HashMap, io, path::Path};
+use tracing::trace;
 use worterbuch_common::{KeyValuePair, ValueEntry};
 
 const ROOT_ID: i64 = 0;
@@ -12,9 +13,18 @@ pub struct SqliTrie {
 }
 
 impl SqliTrie {
+    pub fn new(path: impl AsRef<Path>) -> PersistenceResult<Self> {
+        let conn = Connection::open(path)?;
+        let trie = Self {
+            conn,
+            node_cache: HashMap::new(),
+        };
+        Ok(trie)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> PersistenceResult<Self> {
         let conn = Connection::open(path)?;
-        let mut trie = Self {
+        let trie = Self {
             conn,
             node_cache: HashMap::new(),
         };
@@ -22,9 +32,14 @@ impl SqliTrie {
         Ok(trie)
     }
 
-    fn setup(&mut self) -> PersistenceResult<()> {
+    fn setup(&self) -> PersistenceResult<()> {
         // PRAGMAs before table creation; foreign_keys OFF lets the self-referential
         // sentinel row (id=0, parent_id=0) insert without a constraint violation.
+        trace!("Setting up SQLite database with WAL journal mode, normal sync, and memory cache");
+        trace!(
+            "Creating 'worterbuch', 'grave_goods', and 'last_wills' tables if they do not exist"
+        );
+        trace!("Inserting sentinel root node (id=0, parent_id=0, key_segment='')");
         self.conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -223,11 +238,13 @@ impl SqliTrie {
     }
 
     pub(crate) fn clear(&self) -> PersistenceResult<()> {
+        trace!("Dropping 'worterbuch', 'grave_goods', and 'last_wills' tables");
         self.conn.execute_batch(
-            "DELETE FROM worterbuch;
-             DELETE FROM grave_goods;
-             DELETE FROM last_wills;",
+            "DROP TABLE IF EXISTS worterbuch;
+             DROP TABLE IF EXISTS grave_goods;
+             DROP TABLE IF EXISTS last_wills;",
         )?;
+        self.setup()?;
         Ok(())
     }
 

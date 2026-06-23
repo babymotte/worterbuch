@@ -22,7 +22,7 @@ use lazy_static::lazy_static;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
     ClientId, GraveGoods, INTERNAL_CLIENT_ID, Key, LastWill, SYSTEM_TOPIC_CLIENTS,
     SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
@@ -40,6 +40,7 @@ pub fn is_persistence_locked() -> bool {
 }
 
 pub fn unlock_persistence() {
+    debug!("Unlocking persistence");
     PERSISTENCE_LOCKED.store(false, Ordering::Release);
 }
 
@@ -187,20 +188,16 @@ impl PersistentStorageImpl {
         }
     }
 
-    pub async fn load(&self, config: &Config) -> Worterbuch {
-        let res = if config.follower {
-            Ok(Worterbuch::with_config(config.clone()))
-        } else {
-            match self {
-                PersistentStorageImpl::Json(s) => s.load(config).await,
-                #[cfg(feature = "redb")]
-                PersistentStorageImpl::ReDB(s) => s.load(config).await,
-                #[cfg(feature = "sqlite")]
-                PersistentStorageImpl::SQLite(s) => s.load(config).await,
-                #[cfg(feature = "turso")]
-                PersistentStorageImpl::Turso(s) => s.load(config).await,
-                PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
-            }
+    pub async fn load(&self, config: Config) -> Worterbuch {
+        let res = match self {
+            PersistentStorageImpl::Json(s) => s.load(&config).await,
+            #[cfg(feature = "redb")]
+            PersistentStorageImpl::ReDB(s) => s.load(&config).await,
+            #[cfg(feature = "sqlite")]
+            PersistentStorageImpl::SQLite(s) => s.load(&config).await,
+            #[cfg(feature = "turso")]
+            PersistentStorageImpl::Turso(s) => s.load(&config).await,
+            PersistentStorageImpl::Noop => Ok(Worterbuch::with_config(config.clone())),
         };
 
         match res {
@@ -208,7 +205,7 @@ impl PersistentStorageImpl {
             Err(e) => {
                 warn!("Could not restore worterbuch from persistence: {e}");
                 info!("Starting empty instace.");
-                Worterbuch::with_config(config.clone())
+                Worterbuch::with_config(config)
             }
         }
     }
@@ -279,11 +276,21 @@ fn is_last_will_topic(key: &str) -> bool {
 
 pub(crate) async fn restore(
     subsys: &SubsystemHandle,
-    config: &Config,
-    api: &CloneableWbApi,
+    config: Config,
+    api: CloneableWbApi,
 ) -> PersistenceResult<Worterbuch> {
-    let persistent_storage = get_storage_instance(subsys, config, api).await?;
-    let mut wb = persistent_storage.load(config).await;
+    let persistent_storage = get_storage_instance(subsys, config.clone(), api).await?;
+
+    let restore = config.role.restore_from_persistence();
+
+    let mut wb = if restore {
+        debug!("Restoring worterbuch from persistence …");
+        persistent_storage.load(config.clone()).await
+    } else {
+        debug!("Persistence is disabled, starting empty worterbuch instance.");
+        Worterbuch::with_config(config.clone())
+    };
+
     wb.set_persistent_storage(persistent_storage);
     wb.set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_MODE),
@@ -292,20 +299,22 @@ pub(crate) async fn restore(
         true,
     )
     .await?;
-    unlock_persistence();
+
+    if restore {
+        unlock_persistence();
+    }
+
     Ok(wb)
 }
 
 async fn get_storage_instance(
     subsys: &SubsystemHandle,
-    config: &Config,
-    api: &CloneableWbApi,
+    config: Config,
+    api: CloneableWbApi,
 ) -> PersistenceResult<PersistentStorageImpl> {
     if !config.use_persistence {
         return Ok(PersistentStorageImpl::Noop);
     }
-
-    let flush_periodically = !config.follower;
 
     let storage = match config.persistence_mode {
         PersistenceMode::Json => {
@@ -320,12 +329,7 @@ async fn get_storage_instance(
                 ));
             }
 
-            PersistentStorageImpl::Json(Box::new(PersistentJsonStorage::new(
-                subsys,
-                config.clone(),
-                api.clone(),
-                flush_periodically,
-            )))
+            PersistentStorageImpl::Json(Box::new(PersistentJsonStorage::new(subsys, config, api)))
         }
         PersistenceMode::ReDB => {
             #[cfg(not(feature = "redb"))]

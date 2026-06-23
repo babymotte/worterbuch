@@ -20,15 +20,15 @@
 use super::*;
 
 #[instrument(skip(config) fields(version=1), err)]
-pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
-    let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(config);
+pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
+    let (json_temp_path, json_path, sha_temp_path, sha_path) = file_paths(&config);
 
     if !json_path.exists() && !json_temp_path.exists() {
         info!("No persistence file found, starting empty instance.");
-        return Ok(Worterbuch::with_config(config.clone()));
+        return Ok(Worterbuch::with_config(config));
     }
 
-    match try_load(&json_path, &sha_path, config).await {
+    match try_load(&json_path, &sha_path, config.clone()).await {
         Ok(worterbuch) => {
             info!("Wörterbuch successfully restored form persistence.");
             Ok(worterbuch)
@@ -46,7 +46,7 @@ pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
 async fn try_load(
     json_path: &PathBuf,
     sha_path: &PathBuf,
-    config: &Config,
+    config: Config,
 ) -> PersistenceResult<Worterbuch> {
     let json = fs::read_to_string(json_path).await?;
     let sha = fs::read_to_string(sha_path).await?;
@@ -60,7 +60,7 @@ async fn try_load(
         Err(PersistenceError::ChecksumMismatch)
     } else {
         let store = serde_json::from_str(&json)?;
-        let worterbuch = Worterbuch::from_persistence(store, config.to_owned());
+        let worterbuch = Worterbuch::from_persistence(store, config);
         Ok(worterbuch)
     }
 }

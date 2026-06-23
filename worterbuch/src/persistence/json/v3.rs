@@ -183,28 +183,28 @@ async fn validate_file_content<P: AsRef<Path> + Debug>(
 }
 
 #[instrument(skip(config) fields(version=3), err)]
-pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
+pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
     let (
         store_path,
         store_path_checksum,
         grave_goods_last_will_path,
         grave_goods_last_will_path_checksum,
         _,
-    ) = file_paths(config, false).await?;
+    ) = file_paths(&config, false).await?;
 
-    let mut wb = match try_load(&store_path, &store_path_checksum, config).await {
+    let mut wb = match try_load(&store_path, &store_path_checksum, config.clone()).await {
         Ok(worterbuch) => Ok(worterbuch),
         Err(e) => {
             warn!(
                 "Could not load persistence file {}: {e}",
                 store_path.to_string_lossy()
             );
-            let (store_path, store_path_checksum, _, _, _) = file_paths(config, true).await?;
+            let (store_path, store_path_checksum, _, _, _) = file_paths(&config, true).await?;
             info!(
                 "Trying to load persistence file {} …",
                 store_path.to_string_lossy()
             );
-            try_load(&store_path, &store_path_checksum, config).await
+            try_load(&store_path, &store_path_checksum, config.clone()).await
         }
     }?;
 
@@ -221,7 +221,7 @@ pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
                 grave_goods_last_will_path.to_string_lossy()
             );
             let (_, _, grave_goods_last_will_path, grave_goods_last_will_path_checksum, _) =
-                file_paths(config, true).await?;
+                file_paths(&config, true).await?;
             info!(
                 "Trying to load persistence file {} …",
                 grave_goods_last_will_path.to_string_lossy()
@@ -241,10 +241,10 @@ pub async fn load(config: &Config) -> PersistenceResult<Worterbuch> {
     Ok(wb)
 }
 
-async fn try_load(path: &Path, checksum: &Path, config: &Config) -> PersistenceResult<Worterbuch> {
+async fn try_load(path: &Path, checksum: &Path, config: Config) -> PersistenceResult<Worterbuch> {
     let json = read_json_from_file(path, checksum).await?;
     let store = serde_json::from_str(&json)?;
-    let worterbuch = Worterbuch::from_persistence(store, config.to_owned());
+    let worterbuch = Worterbuch::from_persistence(store, config);
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }

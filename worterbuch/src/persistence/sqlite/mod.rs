@@ -51,7 +51,7 @@ pub struct PersistentSQLiteStore {
 }
 
 impl PersistentSQLiteStore {
-    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.sqlite.db");
         let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
@@ -59,7 +59,11 @@ impl PersistentSQLiteStore {
 
         tokio::fs::create_dir_all(&config.data_dir).await?;
 
-        let db = SqliTrie::open(path)?;
+        let db = if config.role.restore_from_persistence() {
+            SqliTrie::open(path)?
+        } else {
+            SqliTrie::new(path)?
+        };
 
         let (tx, rx) = mpsc::channel(config.channel_buffer_size);
 
@@ -80,8 +84,7 @@ impl PersistentSQLiteStore {
             Ok::<(), miette::Report>(())
         });
 
-        let cfg = config.clone();
-        thread::spawn(move || run(db, rx, cfg, timestamp_file_path));
+        thread::spawn(move || run(db, rx, config, timestamp_file_path));
 
         Ok(Self { tx })
     }

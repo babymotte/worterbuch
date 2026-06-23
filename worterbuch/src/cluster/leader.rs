@@ -19,11 +19,12 @@
 
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
-    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync},
+    cluster::{
+        ClientWriteCommand, LeaderSyncMessage, Mode, Servers, StateSync, process_api_call, shutdown,
+    },
     error::WorterbuchAppResult,
-    forward_api_call, forward_to_followers, process_api_call,
+    forward_api_call, forward_to_followers,
     server::common::WbFunction,
-    shutdown,
 };
 use miette::{Error, IntoDiagnostic, Result};
 use serde_json::json;
@@ -45,14 +46,13 @@ use worterbuch_common::{
     write_line_and_flush,
 };
 
-pub(crate) async fn run_in_leader_mode(
+pub(crate) async fn run(
     subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
-    web_server: Option<SubsystemHandle>,
-    tcp_server: Option<SubsystemHandle>,
-    unix_socket: Option<SubsystemHandle>,
+    servers: Servers,
+    sync_port: u16,
 ) -> WorterbuchAppResult<()> {
     #[cfg(feature = "commercial")]
     if !config.license.features.clustering {
@@ -82,7 +82,7 @@ pub(crate) async fn run_in_leader_mode(
 
     let cfg = config.clone();
     subsys.spawn("cluster_sync_port", async move |s| {
-        run_cluster_sync_port(s, cfg, follower_connected_tx).await
+        run_cluster_sync_port(s, cfg, follower_connected_tx, sync_port).await
     });
 
     let (mut grave_goods_rx, _) = worterbuch
@@ -123,15 +123,7 @@ pub(crate) async fn run_in_leader_mode(
         recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch, &mut client_write_txs, &mut dead).await?,
     }
 
-    shutdown(
-        subsys,
-        worterbuch,
-        config,
-        web_server,
-        tcp_server,
-        unix_socket,
-    )
-    .await
+    shutdown(subsys, worterbuch, config, servers).await
 }
 
 async fn try_forward_grave_goods_change(
@@ -293,8 +285,8 @@ async fn run_cluster_sync_port(
     on_follower_connected: mpsc::Sender<
         oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
     >,
+    port: u16,
 ) -> Result<()> {
-    let port = config.sync_port.expect("no cluster sync port configured");
     let ip = config
         .tcp_endpoint
         .clone()

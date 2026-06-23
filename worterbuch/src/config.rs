@@ -71,6 +71,12 @@ pub enum Commands {
         #[arg(long, short, value_name = "HOST:PORT")]
         leader_address: String,
     },
+    /// Start server in proxy mode
+    Proxy {
+        /// Socket addresses of potential leader nodes to sync to
+        #[arg(long, short, value_name = "HOST:PORT")]
+        leader_addresses: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -90,6 +96,45 @@ pub struct WsEndpoint {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UnixEndpoint {
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub enum ClusterRole {
+    #[default]
+    Standalone,
+    Leader {
+        sync_port: u16,
+    },
+    Follower {
+        leader_address: String,
+    },
+    Proxy {
+        leader_addresses: Vec<String>,
+    },
+}
+
+impl ClusterRole {
+    pub fn is_orchestrated(&self) -> bool {
+        matches!(
+            self,
+            ClusterRole::Leader { .. } | ClusterRole::Follower { .. }
+        )
+    }
+
+    pub fn accept_client_connections(&self) -> bool {
+        matches!(
+            self,
+            ClusterRole::Standalone | ClusterRole::Leader { .. } | ClusterRole::Proxy { .. }
+        )
+    }
+
+    pub fn provide_server_metadata(&self) -> bool {
+        matches!(self, ClusterRole::Standalone | ClusterRole::Leader { .. })
+    }
+
+    pub fn restore_from_persistence(&self) -> bool {
+        matches!(self, ClusterRole::Standalone | ClusterRole::Leader { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -114,10 +159,7 @@ pub struct Config {
     pub auth_token_key: Option<AuthTokenKey>,
     pub license: License,
     pub shutdown_timeout: Duration,
-    pub leader: bool,
-    pub follower: bool,
-    pub sync_port: Option<u16>,
-    pub leader_address: Option<String>,
+    pub role: ClusterRole,
     pub default_export_file_name: Option<String>,
     pub cors_allowed_origins: Option<Vec<String>>,
     pub print_endpoints: bool,
@@ -180,7 +222,10 @@ impl Config {
             }
         }
 
-        if self.follower || self.leader {
+        if matches!(
+            self.role,
+            ClusterRole::Leader { .. } | ClusterRole::Follower { .. }
+        ) {
             self.use_persistence = true;
         } else if let Ok(val) = env::var(prefix.to_owned() + "_USE_PERSISTENCE") {
             self.use_persistence = val.to_lowercase() == "true";
@@ -332,10 +377,7 @@ impl Config {
             auth_token_key: None,
             license: License::default(),
             shutdown_timeout: Duration::from_secs(1),
-            follower: false,
-            leader: false,
-            sync_port: None,
-            leader_address: None,
+            role: ClusterRole::Standalone,
             default_export_file_name: None,
             cors_allowed_origins: None,
             print_endpoints: false,
@@ -363,18 +405,16 @@ impl Config {
     fn apply_args(&mut self, args: Args) {
         match args.command {
             Some(Commands::Leader { sync_port }) => {
-                self.leader = true;
-                self.sync_port = Some(sync_port);
-                self.follower = false;
+                self.role = ClusterRole::Leader { sync_port };
             }
             Some(Commands::Follower { leader_address }) => {
-                self.follower = true;
-                self.leader_address = Some(leader_address);
-                self.leader = false;
+                self.role = ClusterRole::Follower { leader_address };
+            }
+            Some(Commands::Proxy { leader_addresses }) => {
+                self.role = ClusterRole::Proxy { leader_addresses };
             }
             None => {
-                self.leader = false;
-                self.follower = false;
+                self.role = ClusterRole::Standalone;
             }
         }
 
@@ -388,6 +428,11 @@ impl Config {
         );
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         interval
+    }
+
+    pub fn start_persistence_backend(&self) -> bool {
+        // a follower's sole purpose is to write the leader's state to persistence, so it should always start the persistence backend
+        self.use_persistence || matches!(self.role, ClusterRole::Follower { .. })
     }
 }
 

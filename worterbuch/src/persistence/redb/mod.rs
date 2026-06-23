@@ -59,7 +59,7 @@ pub struct PersistentRedbStore {
 }
 
 impl PersistentRedbStore {
-    pub async fn new(subsys: &SubsystemHandle, config: &Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &SubsystemHandle, config: Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.re.db");
         let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 
@@ -87,7 +87,7 @@ impl PersistentRedbStore {
             Ok::<(), miette::Report>(())
         });
 
-        spawn(run(db, rx, config.clone(), timestamp_file_path));
+        spawn(run(db, rx, config, timestamp_file_path));
 
         Ok(Self { tx })
     }

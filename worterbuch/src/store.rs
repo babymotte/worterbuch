@@ -22,16 +22,14 @@ use hashbrown::{
     HashMap, HashSet,
     hash_map::{Entry, Keys},
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
-    hash::Hash,
-    marker::PhantomData,
     mem::{self},
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
-use tracing::{Level, debug, instrument, warn};
+use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
     CasVersion, ClientId, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment,
     SYSTEM_TOPIC_ROOT, SubscriptionId, Value, ValueEntry,
@@ -39,13 +37,13 @@ use worterbuch_common::{
     format_path,
 };
 
-type Tree<K, V> = HashMap<RegularKeySegment, Node<K, V>>;
+type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
-pub type StoreNode = Node<RegularKeySegment, ValueEntry>;
-type LockNode = Node<RegularKeySegment, Lock>;
+pub type StoreNode = Node<ValueEntry>;
+type LockNode = Node<Lock>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistedStore {
@@ -134,29 +132,21 @@ impl From<StoreError> for WorterbuchError {
 pub type StoreResult<T> = Result<T, StoreError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Node<K, V>
-where
-    K: Eq + Hash,
-{
+pub struct Node<V> {
     #[serde(rename = "v")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<V>,
+    pub value: Option<V>,
     #[serde(rename = "t")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    tree: Option<Tree<K, V>>,
-    #[serde(skip, default)]
-    _key_type: PhantomData<K>,
+    pub tree: Option<Tree<V>>,
 }
 
-impl<K, V> Node<K, V>
-where
-    K: DeserializeOwned + Eq + Hash,
-{
-    fn into_sub_tree(self) -> Option<Tree<K, V>> {
+impl<V> Node<V> {
+    fn into_sub_tree(self) -> Option<Tree<V>> {
         self.tree
     }
 
-    fn sub_tree(&self) -> Option<&Tree<K, V>> {
+    fn sub_tree(&self) -> Option<&Tree<V>> {
         self.tree.as_ref()
     }
 
@@ -166,15 +156,15 @@ where
         }
     }
 
-    fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<K, V>> {
+    fn get_child(&self, key: impl AsRef<str>) -> Option<&Node<V>> {
         self.tree.as_ref()?.get(key.as_ref())
     }
 
-    fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<K, V>> {
+    fn get_child_mut(&mut self, key: impl AsRef<str>) -> Option<&mut Node<V>> {
         self.tree.as_mut()?.get_mut(key.as_ref())
     }
 
-    fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<K, V>, bool) {
+    fn get_or_create_child(&mut self, key: RegularKeySegment) -> (&mut Node<V>, bool) {
         if self.tree.is_none() {
             self.tree = Some(Tree::new());
         }
@@ -185,7 +175,7 @@ where
         }
     }
 
-    fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<K, V>>> {
+    fn ls<'a>(&'a self) -> Option<Keys<'a, RegularKeySegment, Node<V>>> {
         self.tree.as_ref().map(|t| t.keys())
     }
 
@@ -237,37 +227,33 @@ where
         }
     }
 
-    fn value(&self) -> Option<&V> {
+    pub fn value(&self) -> Option<&V> {
         self.value.as_ref()
     }
 
-    fn value_mut(&mut self) -> Option<&mut V> {
+    pub fn value_mut(&mut self) -> Option<&mut V> {
         self.value.as_mut()
     }
 
-    fn take_value(&mut self) -> Option<V> {
+    pub fn take_value(&mut self) -> Option<V> {
         self.value.take()
     }
 
-    fn set_value(&mut self, value: V) {
+    pub fn set_value(&mut self, value: V) {
         self.value = Some(value)
     }
 
-    fn drop_children(&mut self) {
+    pub fn drop_children(&mut self) {
         self.tree = None;
         self.value = None;
     }
 }
 
-impl<K, T> Default for Node<K, T>
-where
-    K: DeserializeOwned + Eq + Hash,
-{
+impl<V> Default for Node<V> {
     fn default() -> Self {
         Self {
             value: None,
             tree: None,
-            _key_type: PhantomData,
         }
     }
 }
@@ -384,7 +370,7 @@ impl Store {
     }
 
     /// retrieve values for a key containing at least one single-level wildcard and possibly a multi-level wildcard
-    pub fn get_matches(&self, path: &[KeySegment]) -> StoreResult<Vec<KeyValuePair>> {
+    pub fn get_matches(&self, path: &[KeySegment]) -> StoreResult<KeyValuePairs> {
         let mut matches = Vec::new();
         let traversed = vec![];
         Store::ncollect_matches(&self.data, traversed, path, &mut matches, None, &mut None)?;
@@ -1075,6 +1061,7 @@ impl Store {
     }
 
     pub(crate) fn reset(&mut self, data: StoreNode) {
+        trace!("Resetting store to {data:?} …");
         self.data = data;
         self.count_entries();
     }
