@@ -689,6 +689,7 @@ mod macros {
         };
     }
 
+    #[cfg(test)]
     mod test {
 
         #![allow(clippy::as_conversions)]
