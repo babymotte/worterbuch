@@ -25,12 +25,13 @@ pub mod protocol;
 
 use crate::{
     error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
-    protocol::client_server::{PStateEvent, StateEvent},
+    protocol::client_server::{
+        CasVersion, ClientId, Key, KeyValuePair, KeyValuePairs, PStateEvent, ProtocolMajorVersion,
+        ProtocolVersion, RequestPattern, RequestPatterns, StateEvent, TransactionId, Value,
+    },
 };
 use error::WorterbuchResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::json;
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     fmt::{self, Display},
     io,
@@ -44,7 +45,6 @@ use tokio::{
     time::timeout,
 };
 use tracing::{Span, debug, error, trace, warn};
-use uuid::Uuid;
 
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
@@ -55,58 +55,14 @@ pub mod redb;
 
 pub const INTERNAL_CLIENT_ID: ClientId = ClientId::nil();
 
-pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
-pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
-pub const SYSTEM_TOPIC_NAME: &str = "name";
-pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
-pub const SYSTEM_TOPIC_VERSION: &str = "version";
-pub const SYSTEM_TOPIC_LICENSE: &str = "license";
-pub const SYSTEM_TOPIC_SOURCES: &str = "source-code";
-pub const SYSTEM_TOPIC_SUBSCRIPTIONS: &str = "subscriptions";
-pub const SYSTEM_TOPIC_LOCKS: &str = "locks";
-pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL: &str = "protocol";
-pub const SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION: &str = "protocolVersion";
-pub const SYSTEM_TOPIC_CLIENTS_ADDRESS: &str = "address";
-pub const SYSTEM_TOPIC_CLIENTS_TIMESTAMP: &str = "connectedSince";
-pub const SYSTEM_TOPIC_LAST_WILL: &str = "lastWill";
-pub const SYSTEM_TOPIC_GRAVE_GOODS: &str = "graveGoods";
-pub const SYSTEM_TOPIC_CLIENT_NAME: &str = "clientName";
-pub const SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION: &str = "protocolVersion";
-pub const SYSTEM_TOPIC_MODE: &str = "mode";
-pub const SYSTEM_TOPIC_UPTIME: &str = "uptime";
-pub const SYSTEM_TOPIC_STORE: &str = "store";
-pub const SYSTEM_TOPIC_VALUES: &str = "values";
-pub const SYSTEM_TOPIC_COUNT: &str = "count";
-pub const SYSTEM_TOPIC_JEMALLOC: &str = "jemalloc";
-pub const SYSTEM_TOPIC_RAW: &str = "raw";
-pub const SYSTEM_TOPIC_FORMATTED: &str = "formatted";
-
-pub type TransactionId = u64;
-pub type RequestPattern = String;
-pub type RequestPatterns = Vec<RequestPattern>;
-pub type Key = String;
-pub type Value = serde_json::Value;
-pub type KeyValuePairs = Vec<KeyValuePair>;
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
-pub type MetaData = String;
 pub type Path = String;
-
+pub type LastWill = KeyValuePairs;
+pub type GraveGoods = RequestPatterns;
 pub type WorterbuchVersionSegment = u32;
 pub type WorterbuchMajorVersion = WorterbuchVersionSegment;
 pub type WorterbuchMinorVersion = WorterbuchVersionSegment;
 pub type WorterbuchPatchVersion = WorterbuchVersionSegment;
-
-pub type ProtocolVersionSegment = u32;
-pub type ProtocolMajorVersion = ProtocolVersionSegment;
-pub type ProtocolVersions = Vec<ProtocolVersion>;
-pub type LastWill = KeyValuePairs;
-pub type GraveGoods = RequestPatterns;
-pub type UniqueFlag = bool;
-pub type LiveOnlyFlag = bool;
-pub type AuthToken = String;
-pub type AuthTokenKey = String;
-pub type CasVersion = u64;
-pub type ClientId = Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorterbuchVersion(
@@ -235,44 +191,6 @@ impl fmt::Display for AuthCheckOwned {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub enum ErrorCode {
-    IllegalWildcard = 0,
-    IllegalMultiWildcard = 1,
-    MultiWildcardAtIllegalPosition = 2,
-    IoError = 3,
-    SerdeError = 4,
-    NoSuchValue = 5,
-    NotSubscribed = 6,
-    ProtocolNegotiationFailed = 7,
-    InvalidServerResponse = 8,
-    ReadOnlyKey = 9,
-    AuthorizationFailed = 10,
-    AuthorizationRequired = 11,
-    AlreadyAuthorized = 12,
-    MissingValue = 13,
-    Unauthorized = 14,
-    NoPubStream = 15,
-    NotLeader = 16,
-    Cas = 17,
-    CasVersionMismatch = 18,
-    NotImplemented = 19,
-    KeyIsLocked = 20,
-    KeyIsNotLocked = 21,
-    LockAcquisitionCancelled = 22,
-    FeatureDisabled = 23,
-    ClientIDCollision = 24,
-    EmptyKey = 25,
-    Other = u8::MAX,
-}
-
-impl fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.to_owned() as u8).fmt(f)
-    }
-}
-
 #[macro_export]
 macro_rules! topic {
     ($first:expr $(, $rest:expr)*) => {{
@@ -287,80 +205,12 @@ macro_rules! topic {
     }};
 }
 
-pub type Version = String;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProtocolVersion(ProtocolVersionSegment, ProtocolVersionSegment);
-
-impl ProtocolVersion {
-    pub const fn new(major: ProtocolVersionSegment, minor: ProtocolVersionSegment) -> Self {
-        Self(major, minor)
-    }
-
-    pub const fn major(&self) -> ProtocolVersionSegment {
-        self.0
-    }
-
-    pub const fn minor(&self) -> ProtocolVersionSegment {
-        self.1
-    }
-
-    pub fn is_compatible_with_server(&self, server_version: &ProtocolVersion) -> bool {
-        self.major() == server_version.major() && self.minor() <= server_version.minor()
-    }
-
-    pub fn is_compatible_with_client_version(&self, client_version: &ProtocolVersion) -> bool {
-        self.major() == client_version.major() && self.minor() >= client_version.minor()
-    }
-}
-
-impl fmt::Display for ProtocolVersion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.0, self.1)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
 pub enum Protocol {
     TCP,
     WS,
     HTTP,
     UNIX,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KeyValuePair {
-    pub key: Key,
-    pub value: Value,
-}
-
-impl fmt::Display for KeyValuePair {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}={}", self.key, self.value)
-    }
-}
-
-impl From<KeyValuePair> for Option<Value> {
-    fn from(kvp: KeyValuePair) -> Self {
-        Some(kvp.value)
-    }
-}
-
-impl From<KeyValuePair> for Value {
-    fn from(kvp: KeyValuePair) -> Self {
-        kvp.value
-    }
-}
-
-impl KeyValuePair {
-    pub fn new(key: String, value: Value) -> Self {
-        KeyValuePair { key, value }
-    }
-
-    pub fn of<S: Serialize>(key: impl Into<String>, value: S) -> Self {
-        KeyValuePair::new(key.into(), json!(value))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,22 +231,76 @@ impl<T: DeserializeOwned> TryFrom<KeyValuePair> for TypedKeyValuePair<T> {
     }
 }
 
-impl<S: Serialize> From<(String, S)> for KeyValuePair {
-    fn from((key, value): (String, S)) -> Self {
-        let value = json!(value);
-        KeyValuePair { key, value }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypedPStateEvent<T: DeserializeOwned> {
+    KeyValuePairs(TypedKeyValuePairs<T>),
+    Deleted(TypedKeyValuePairs<T>),
 }
 
-impl<S: Serialize> From<(&str, S)> for KeyValuePair {
-    fn from((key, value): (&str, S)) -> Self {
-        let value = json!(value);
-        KeyValuePair {
-            key: key.to_owned(),
-            value,
+impl<T: DeserializeOwned> TryFrom<PStateEvent> for TypedPStateEvent<T> {
+    type Error = serde_json::Error;
+
+    fn try_from(value: PStateEvent) -> Result<Self, Self::Error> {
+        match value {
+            PStateEvent::KeyValuePairs(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
+                try_to_typed_key_value_pairs(kvps)?,
+            )),
+            PStateEvent::Deleted(kvps) => Ok(TypedPStateEvent::Deleted(
+                try_to_typed_key_value_pairs(kvps)?,
+            )),
         }
     }
 }
+
+fn try_to_typed_key_value_pairs<T: DeserializeOwned>(
+    kvps: KeyValuePairs,
+) -> Result<TypedKeyValuePairs<T>, serde_json::Error> {
+    let mut out = vec![];
+
+    for kvp in kvps {
+        out.push(kvp.try_into()?);
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypedStateEvent<T: DeserializeOwned> {
+    Value(T),
+    Deleted(T),
+}
+
+impl<T: DeserializeOwned> From<TypedStateEvent<T>> for Option<T> {
+    fn from(e: TypedStateEvent<T>) -> Self {
+        match e {
+            TypedStateEvent::Value(v) => Some(v),
+            TypedStateEvent::Deleted(_) => None,
+        }
+    }
+}
+
+impl<T: DeserializeOwned> From<TypedKeyValuePair<T>> for TypedStateEvent<T> {
+    fn from(kvp: TypedKeyValuePair<T>) -> Self {
+        TypedStateEvent::Value(kvp.value)
+    }
+}
+
+impl<T: DeserializeOwned + TryFrom<Value, Error = serde_json::Error>> TryFrom<StateEvent>
+    for TypedStateEvent<T>
+{
+    type Error = serde_json::Error;
+
+    fn try_from(e: StateEvent) -> Result<Self, Self::Error> {
+        match e {
+            StateEvent::Value(v) => Ok(TypedStateEvent::Value(v.try_into()?)),
+            StateEvent::Deleted(v) => Ok(TypedStateEvent::Deleted(v.try_into()?)),
+        }
+    }
+}
+
+pub type TypedStateEvents<T> = Vec<TypedStateEvent<T>>;
+
+pub type TypedPStateEvents<T> = Vec<TypedPStateEvent<T>>;
 
 // #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Tags)]
 pub type RegularKeySegment = String;
@@ -857,31 +761,6 @@ mod test {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn protocol_versions_are_sorted_correctly() {
-        assert!(ProtocolVersion::new(1, 2) < ProtocolVersion::new(3, 2));
-        assert!(ProtocolVersion::new(1, 2) == ProtocolVersion::new(1, 2));
-        assert!(ProtocolVersion::new(2, 1) > ProtocolVersion::new(1, 9));
-
-        let mut versions = vec![
-            ProtocolVersion::new(1, 2),
-            ProtocolVersion::new(0, 456),
-            ProtocolVersion::new(9, 0),
-            ProtocolVersion::new(3, 15),
-        ];
-        versions.sort();
-        assert_eq!(
-            vec![
-                ProtocolVersion::new(0, 456),
-                ProtocolVersion::new(1, 2),
-                ProtocolVersion::new(3, 15),
-                ProtocolVersion::new(9, 0)
-            ],
-            versions
-        );
-    }
 
     #[test]
     fn topic_macro_generates_topic_correctly() {
@@ -889,46 +768,6 @@ mod test {
             "hello/world/foo/bar",
             topic!("hello", "world", "foo", "bar")
         );
-    }
-
-    #[test]
-    fn error_codes_are_serialized_as_numbers() {
-        assert_eq!(
-            "1",
-            serde_json::to_string(&ErrorCode::IllegalMultiWildcard).unwrap()
-        )
-    }
-
-    #[test]
-    fn error_codes_are_deserialized_from_numbers() {
-        assert_eq!(
-            ErrorCode::ProtocolNegotiationFailed,
-            serde_json::from_str("7").unwrap()
-        )
-    }
-
-    #[test]
-    fn protocol_version_get_serialized_correctly() {
-        assert_eq!(&json!(ProtocolVersion::new(2, 1)).to_string(), "[2,1]")
-    }
-
-    #[test]
-    fn protocol_version_get_formatted_correctly() {
-        assert_eq!(&ProtocolVersion::new(2, 1).to_string(), "2.1")
-    }
-
-    #[test]
-    fn compatible_version_is_selected_correctly() {
-        let client_version = ProtocolVersion::new(1, 2);
-        let server_versions = [
-            ProtocolVersion::new(0, 11),
-            ProtocolVersion::new(1, 6),
-            ProtocolVersion::new(2, 0),
-        ];
-        let compatible_version = server_versions
-            .iter()
-            .find(|v| client_version.is_compatible_with_server(v));
-        assert_eq!(compatible_version, Some(&server_versions[1]))
     }
 
     #[test]

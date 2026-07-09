@@ -29,7 +29,10 @@ use tokio::{
     time::sleep,
 };
 use tracing::error;
-use worterbuch_common::{Key, KeyValuePair, Value, error::ConnectionResult};
+use worterbuch_common::{
+    error::ConnectionResult,
+    protocol::client_server::{Key, KeyValuePair, Value},
+};
 
 type Buffer = Arc<Mutex<HashMap<Key, Value>>>;
 

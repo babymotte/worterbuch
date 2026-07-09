@@ -18,9 +18,8 @@
  */
 
 use crate::{
-    AuthCheckOwned, ClientId, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
-    RequestPattern, TransactionId,
-    protocol::client_server::{ClientMessage, Err},
+    AuthCheckOwned, ClientId, Key, Privilege, RequestPattern, TransactionId,
+    protocol::client_server::{ClientMessage, Err, ErrorCode, MetaData, ProtocolVersionSegment},
 };
 use http::StatusCode;
 #[cfg(feature = "ws")]

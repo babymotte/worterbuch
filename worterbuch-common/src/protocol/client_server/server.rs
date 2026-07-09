@@ -17,24 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    CasVersion, ErrorCode, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
-    TransactionId, TypedKeyValuePair, TypedKeyValuePairs, Value, Version,
-    error::{ConnectionError, ConnectionResult},
+use crate::protocol::client_server::{
+    CasVersion, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
+    TransactionId, Value, Version,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{
-    fmt::{self, Display},
-    io,
-    time::Duration,
-};
-use tokio::{
-    io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
-    time::timeout,
-};
-use tracing::{debug, error, trace, warn};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ServerMessage {
     Welcome(Welcome),
@@ -62,14 +54,14 @@ impl ServerMessage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Welcome {
     pub info: ServerInfo,
     pub client_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PState {
     pub transaction_id: TransactionId,
@@ -78,47 +70,12 @@ pub struct PState {
     pub event: PStateEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PStateEvent {
     KeyValuePairs(KeyValuePairs),
     Deleted(KeyValuePairs),
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypedPStateEvent<T: DeserializeOwned> {
-    KeyValuePairs(TypedKeyValuePairs<T>),
-    Deleted(TypedKeyValuePairs<T>),
-}
-
-impl<T: DeserializeOwned> TryFrom<PStateEvent> for TypedPStateEvent<T> {
-    type Error = serde_json::Error;
-
-    fn try_from(value: PStateEvent) -> Result<Self, Self::Error> {
-        match value {
-            PStateEvent::KeyValuePairs(kvps) => Ok(TypedPStateEvent::KeyValuePairs(
-                try_to_typed_key_value_pairs(kvps)?,
-            )),
-            PStateEvent::Deleted(kvps) => Ok(TypedPStateEvent::Deleted(
-                try_to_typed_key_value_pairs(kvps)?,
-            )),
-        }
-    }
-}
-
-fn try_to_typed_key_value_pairs<T: DeserializeOwned>(
-    kvps: KeyValuePairs,
-) -> Result<TypedKeyValuePairs<T>, serde_json::Error> {
-    let mut out = vec![];
-
-    for kvp in kvps {
-        out.push(kvp.try_into()?);
-    }
-
-    Ok(out)
-}
-
-pub type TypedPStateEvents<T> = Vec<TypedPStateEvent<T>>;
 
 impl From<PStateEvent> for Vec<Option<Value>> {
     fn from(e: PStateEvent) -> Self {
@@ -158,7 +115,7 @@ impl fmt::Display for PState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Ack {
     pub transaction_id: TransactionId,
@@ -170,7 +127,7 @@ impl fmt::Display for Ack {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
     pub transaction_id: TransactionId,
@@ -178,14 +135,14 @@ pub struct State {
     pub event: StateEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum StateEvent {
     Value(Value),
     Deleted(Value),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CState {
     pub transaction_id: TransactionId,
@@ -193,7 +150,7 @@ pub struct CState {
     pub event: CStateEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CStateEvent {
     pub value: Value,
@@ -215,42 +172,6 @@ impl From<State> for Option<Value> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypedStateEvent<T: DeserializeOwned> {
-    Value(T),
-    Deleted(T),
-}
-
-impl<T: DeserializeOwned> From<TypedStateEvent<T>> for Option<T> {
-    fn from(e: TypedStateEvent<T>) -> Self {
-        match e {
-            TypedStateEvent::Value(v) => Some(v),
-            TypedStateEvent::Deleted(_) => None,
-        }
-    }
-}
-
-impl<T: DeserializeOwned> From<TypedKeyValuePair<T>> for TypedStateEvent<T> {
-    fn from(kvp: TypedKeyValuePair<T>) -> Self {
-        TypedStateEvent::Value(kvp.value)
-    }
-}
-
-impl<T: DeserializeOwned + TryFrom<Value, Error = serde_json::Error>> TryFrom<StateEvent>
-    for TypedStateEvent<T>
-{
-    type Error = serde_json::Error;
-
-    fn try_from(e: StateEvent) -> Result<Self, Self::Error> {
-        match e {
-            StateEvent::Value(v) => Ok(TypedStateEvent::Value(v.try_into()?)),
-            StateEvent::Deleted(v) => Ok(TypedStateEvent::Deleted(v.try_into()?)),
-        }
-    }
-}
-
-pub type TypedStateEvents<T> = Vec<TypedStateEvent<T>>;
-
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.event {
@@ -260,7 +181,7 @@ impl fmt::Display for State {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Err {
     pub transaction_id: TransactionId,
@@ -276,7 +197,7 @@ impl fmt::Display for Err {
 
 impl std::error::Error for Err {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Handshake {
     pub protocol_version: ProtocolVersion,
@@ -292,7 +213,7 @@ impl fmt::Display for Handshake {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LsState {
     pub transaction_id: TransactionId,
@@ -328,7 +249,7 @@ fn escape_path_segment(str: impl AsRef<str>) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     pub version: Version,
@@ -351,6 +272,44 @@ impl ServerInfo {
             protocol_version: "0.11".to_owned(),
             authorization_required,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr, JsonSchema)]
+#[repr(u8)]
+pub enum ErrorCode {
+    IllegalWildcard = 0,
+    IllegalMultiWildcard = 1,
+    MultiWildcardAtIllegalPosition = 2,
+    IoError = 3,
+    SerdeError = 4,
+    NoSuchValue = 5,
+    NotSubscribed = 6,
+    ProtocolNegotiationFailed = 7,
+    InvalidServerResponse = 8,
+    ReadOnlyKey = 9,
+    AuthorizationFailed = 10,
+    AuthorizationRequired = 11,
+    AlreadyAuthorized = 12,
+    MissingValue = 13,
+    Unauthorized = 14,
+    NoPubStream = 15,
+    NotLeader = 16,
+    Cas = 17,
+    CasVersionMismatch = 18,
+    NotImplemented = 19,
+    KeyIsLocked = 20,
+    KeyIsNotLocked = 21,
+    LockAcquisitionCancelled = 22,
+    FeatureDisabled = 23,
+    ClientIDCollision = 24,
+    EmptyKey = 25,
+    Other = u8::MAX,
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (self.to_owned() as u8).fmt(f)
     }
 }
 

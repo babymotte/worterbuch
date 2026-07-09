@@ -42,6 +42,7 @@ pprof_util = { workspace = true, optional = true }
 random_word = { workspace = true, optional = true }
 redb = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
+schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_repr = { workspace = true }
@@ -67,3 +68,9 @@ enum_glob_use = "deny"
 # pedantic = "deny"
 # nursery = "deny"
 unwrap_used = "deny"
+
+[[bin]]
+name = "generate-schemas"
+test = false
+bench = false
+path = "src/bin/generate_schemas.rs"
