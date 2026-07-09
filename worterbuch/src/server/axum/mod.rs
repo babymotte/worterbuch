@@ -81,9 +81,10 @@ use tower_http::{
 use tracing::{debug, debug_span, error, info, instrument, warn};
 use websocket::serve;
 use worterbuch_common::{
-    AuthCheck, ClientId, Key, KeyValuePairs, Privilege, Protocol, RegularKeySegment, WbApi,
+    AuthCheck, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::client_server::{ServerInfo, StateEvent},
+    protocol::{ClientId, Key, KeyValuePairs},
+    protocol::{ServerInfo, StateEvent},
 };
 
 async fn ws(

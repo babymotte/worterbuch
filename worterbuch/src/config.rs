@@ -33,8 +33,9 @@ use strum::EnumString;
 use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at};
 use tracing::debug;
 use worterbuch_common::{
-    AuthTokenKey, Path,
+    Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
+    protocol::AuthTokenKey,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]

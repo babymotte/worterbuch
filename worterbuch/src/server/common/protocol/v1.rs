@@ -3,10 +3,10 @@ use crate::auth::JwtClaims;
 use tokio::spawn;
 use tracing::{Level, debug, instrument, trace};
 use worterbuch_common::{
-    ErrorCode, Privilege, WbApi,
+    Privilege, WbApi,
     error::{Context, WorterbuchResult},
-    protocol::client_server::{
-        Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, Get, Lock, ServerMessage,
+    protocol::{
+        Ack, CSet, CState, CStateEvent, ClientMessage, Err, ErrorCode, Get, Lock, ServerMessage,
     },
 };
 
@@ -23,11 +23,11 @@ impl V1 {
     #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v1", client_id=%self.v0.client_id))]
     pub async fn process_incoming_message(
         &self,
-        msg: CM,
+        msg: ClientMessage,
         authorized: &mut Option<JwtClaims>,
     ) -> WorterbuchResult<()> {
         match msg {
-            CM::CGet(msg) => {
+            ClientMessage::CGet(msg) => {
                 if self
                     .v0
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
@@ -38,7 +38,7 @@ impl V1 {
                     trace!("Getting CAS value for client {} done.", self.v0.client_id);
                 }
             }
-            CM::CSet(msg) => {
+            ClientMessage::CSet(msg) => {
                 if self
                     .v0
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
@@ -49,7 +49,7 @@ impl V1 {
                     trace!("Setting cas value for client {} done.", self.v0.client_id);
                 }
             }
-            CM::Lock(msg) => {
+            ClientMessage::Lock(msg) => {
                 if self
                     .v0
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
@@ -60,7 +60,7 @@ impl V1 {
                     trace!("Locking key for client {} done.", self.v0.client_id);
                 }
             }
-            CM::AcquireLock(msg) => {
+            ClientMessage::AcquireLock(msg) => {
                 if self
                     .v0
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
@@ -71,7 +71,7 @@ impl V1 {
                     trace!("Locking key for client {} done.", self.v0.client_id);
                 }
             }
-            CM::ReleaseLock(msg) => {
+            ClientMessage::ReleaseLock(msg) => {
                 if self
                     .v0
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)

@@ -31,10 +31,10 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
-    CasVersion, ClientId, KeySegment, KeyValuePair, KeyValuePairs, RegularKeySegment,
-    SYSTEM_TOPIC_ROOT, SubscriptionId, Value, ValueEntry,
+    KeySegment, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
+    protocol::{CasVersion, ClientId, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
 };
 
 type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
@@ -1088,7 +1088,7 @@ mod test {
     use super::*;
     use serde_json::json;
     use tokio::sync::mpsc;
-    use worterbuch_common::{ClientId, parse_segments};
+    use worterbuch_common::parse_segments;
 
     fn reg_key_segs(key: &str) -> Box<[RegularKeySegment]> {
         parse_segments(key).unwrap().into()

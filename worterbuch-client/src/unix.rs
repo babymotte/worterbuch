@@ -26,7 +26,7 @@ use tokio::{
 use tracing::{debug, error};
 use worterbuch_common::{
     error::ConnectionResult,
-    protocol::client_server::{ClientMessage, ServerMessage},
+    protocol::{ClientMessage, ServerMessage},
     write_line_and_flush,
 };
 

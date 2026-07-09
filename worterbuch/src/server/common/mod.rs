@@ -29,11 +29,13 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, instrument, trace};
 use worterbuch_common::{
-    CasVersion, ClientId, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, Protocol,
-    ProtocolMajorVersion, ProtocolVersion, RegularKeySegment, RequestPattern, SubscriptionId,
-    TransactionId, UniqueFlag, Value, ValueEntry, WbApi,
+    Protocol, RegularKeySegment, SubscriptionId, ValueEntry, WbApi,
     error::WorterbuchResult,
-    protocol::client_server::{PStateEvent, StateEvent},
+    protocol::{
+        CasVersion, ClientId, GraveGoods, Key, KeyValuePairs, LastWill, LiveOnlyFlag, PStateEvent,
+        ProtocolMajorVersion, ProtocolVersion, RequestPattern, StateEvent, TransactionId,
+        UniqueFlag, Value,
+    },
 };
 
 pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =

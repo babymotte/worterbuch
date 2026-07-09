@@ -15,7 +15,8 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
-    ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
+    KeySegment, ValueEntry, parse_segments,
+    protocol::{ClientId, GraveGoods, Key, KeyValuePair, LastWill},
 };
 
 enum StoreAction {

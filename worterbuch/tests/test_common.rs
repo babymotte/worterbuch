@@ -8,9 +8,9 @@ use std::{
     process::{Child, Command, Stdio},
     time::Duration,
 };
-use worterbuch_common::{
-    ErrorCode, Key, KeyValuePair, TransactionId,
-    protocol::client_server::{ClientMessage, Get, ServerMessage, State, StateEvent},
+use worterbuch_common::protocol::{
+    ClientMessage, ErrorCode, Get, Key, KeyValuePair, ServerMessage, State, StateEvent,
+    TransactionId,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

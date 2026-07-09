@@ -21,8 +21,7 @@ use crate::PersistenceMode;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::str;
-use worterbuch_common::KeyValuePairs;
-use worterbuch_common::error::ConfigResult;
+use worterbuch_common::{error::ConfigResult, protocol::KeyValuePairs};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

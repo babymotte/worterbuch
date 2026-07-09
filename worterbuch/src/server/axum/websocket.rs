@@ -32,8 +32,8 @@ use std::{net::SocketAddr, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
-    ClientId, Protocol, WbApi,
-    protocol::client_server::{ServerInfo, ServerMessage, Welcome},
+    Protocol, WbApi,
+    protocol::{ClientId, ServerInfo, ServerMessage, Welcome},
 };
 
 pub(crate) async fn serve(

@@ -44,23 +44,25 @@ pub mod telemetry;
 mod worterbuch;
 
 use crate::{
-    cluster::{follower, leader, proxy, standalone},
+    cluster::{follower, leader, protocol::ClientWriteCommand, proxy, standalone},
     error::WorterbuchAppResult,
     server::{CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
     stats::track_stats,
     worterbuch::Worterbuch,
-};
-use cluster::ClientWriteCommand;
-use common::{
-    SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Value,
-    topic,
 };
 use serde_json::json;
 use server::common::WbFunction;
 use tokio::sync::{mpsc, oneshot};
 use tosub::SubsystemHandle;
 use tracing::{debug, info};
-use worterbuch_common::{INTERNAL_CLIENT_ID, SYSTEM_TOPIC_NAME};
+use worterbuch_common::{
+    INTERNAL_CLIENT_ID,
+    protocol::{
+        SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+        SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Value,
+    },
+    topic,
+};
 
 pub use config::*;
 pub use worterbuch_common as common;

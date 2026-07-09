@@ -45,8 +45,8 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    ClientId, Protocol, WbApi,
-    protocol::client_server::{ServerInfo, ServerMessage, Welcome},
+    Protocol, WbApi,
+    protocol::{ClientId, ServerInfo, ServerMessage, Welcome},
     write_line_and_flush,
 };
 

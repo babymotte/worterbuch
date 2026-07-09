@@ -25,12 +25,13 @@ pub mod protocol;
 
 use crate::{
     error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
-    protocol::client_server::{
-        CasVersion, ClientId, Key, KeyValuePair, KeyValuePairs, PStateEvent, ProtocolMajorVersion,
-        ProtocolVersion, RequestPattern, RequestPatterns, StateEvent, TransactionId, Value,
+    protocol::{
+        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, PStateEvent,
+        ProtocolMajorVersion, ProtocolVersion, RequestPattern, StateEvent, TransactionId, Value,
     },
 };
 use error::WorterbuchResult;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fmt::{self, Display},
@@ -57,8 +58,6 @@ pub const INTERNAL_CLIENT_ID: ClientId = ClientId::nil();
 
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type Path = String;
-pub type LastWill = KeyValuePairs;
-pub type GraveGoods = RequestPatterns;
 pub type WorterbuchVersionSegment = u32;
 pub type WorterbuchMajorVersion = WorterbuchVersionSegment;
 pub type WorterbuchMinorVersion = WorterbuchVersionSegment;
@@ -106,7 +105,7 @@ impl WorterbuchVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum ValueEntry {
     Cas(Value, u64),
     #[serde(untagged)]

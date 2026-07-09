@@ -19,7 +19,11 @@
 
 use crate::{
     Config, INTERNAL_CLIENT_ID, Servers, Worterbuch,
-    cluster::{ClientWriteCommand, LeaderSyncMessage, Mode, StateSync, shutdown},
+    cluster::{
+        Mode,
+        protocol::{ClientWriteCommand, LeaderSyncMessage, StateSync},
+        shutdown,
+    },
     error::{WorterbuchAppError, WorterbuchAppResult},
     persistence::unlock_persistence,
     server::common::WbFunction,
@@ -35,8 +39,8 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
     error::{ConnectionResult, WorterbuchError},
+    protocol::{SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT},
     receive_msg, topic, while_select,
 };
 

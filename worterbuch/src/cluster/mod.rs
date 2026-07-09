@@ -19,17 +19,16 @@
 
 pub(crate) mod follower;
 pub(crate) mod leader;
+pub(crate) mod protocol;
 pub(crate) mod proxy;
 pub(crate) mod standalone;
 
 use crate::{
-    Config, Servers, error::WorterbuchAppResult, server::common::WbFunction, store::StoreNode,
-    worterbuch::Worterbuch,
+    Config, Servers, error::WorterbuchAppResult, server::common::WbFunction, worterbuch::Worterbuch,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};
-use worterbuch_common::{CasVersion, GraveGoods, Key, LastWill, RequestPattern, Value};
 
 #[derive(Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -39,26 +38,6 @@ pub enum Mode {
     Follower,
     Proxy,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum LeaderSyncMessage {
-    Init(StateSync),
-    Mut(ClientWriteCommand),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ClientWriteCommand {
-    Set(Key, Value, bool),
-    CSet(Key, Value, CasVersion, bool),
-    Delete(Key),
-    PDelete(RequestPattern),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
 
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     match function {

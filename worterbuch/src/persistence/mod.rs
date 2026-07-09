@@ -24,9 +24,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
 use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
-    ClientId, GraveGoods, INTERNAL_CLIENT_ID, Key, LastWill, SYSTEM_TOPIC_CLIENTS,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, ValueEntry, topic,
+    INTERNAL_CLIENT_ID, ValueEntry,
+    protocol::{
+        ClientId, GraveGoods, Key, LastWill, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+        SYSTEM_TOPIC_STORE,
+    },
+    topic,
 };
 
 pub const TIMESTAMP_FILE_NAME: &str = "last-persisted";

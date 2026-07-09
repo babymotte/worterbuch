@@ -41,7 +41,10 @@ use tokio::{
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
-use worterbuch_common::{ClientId, GraveGoods, Key, LastWill, ValueEntry};
+use worterbuch_common::{
+    ValueEntry,
+    protocol::{ClientId, GraveGoods, Key, LastWill},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {

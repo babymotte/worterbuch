@@ -46,16 +46,18 @@ use tokio::{
 };
 use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
 use worterbuch_common::{
-    CasVersion, ClientId, GraveGoods, Key, KeySegment, KeyValuePair, KeyValuePairs, LastWill,
-    Protocol, ProtocolMajorVersion, RegularKeySegment, RequestPattern, SYSTEM_TOPIC_CLIENT_NAME,
-    SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
-    SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS_TIMESTAMP,
-    SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT,
-    SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, SubscriptionId, TransactionId,
-    ValueEntry,
+    KeySegment, Protocol, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments,
-    protocol::client_server::{PState, PStateEvent, ServerMessage, StateEvent},
+    protocol::{
+        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, PState,
+        PStateEvent, ProtocolMajorVersion, RequestPattern, SYSTEM_TOPIC_CLIENT_NAME,
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
+        SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS_TIMESTAMP,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent,
+        TransactionId,
+    },
     topic,
 };
 
@@ -916,7 +918,7 @@ impl Worterbuch {
         pattern: RequestPattern,
         skip_read_only_check: bool,
         client_id: ClientId,
-    ) -> Result<Vec<worterbuch_common::KeyValuePair>, WorterbuchError> {
+    ) -> Result<Vec<KeyValuePair>, WorterbuchError> {
         if !skip_read_only_check {
             check_for_read_only_key(&pattern, client_id)?;
         }

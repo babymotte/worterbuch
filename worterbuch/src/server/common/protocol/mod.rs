@@ -5,9 +5,10 @@ use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    ClientId, ProtocolVersionSegment, WbApi,
+    WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
-    protocol::client_server::{Ack, ClientMessage, ServerMessage},
+    protocol::{Ack, ClientMessage, ServerMessage},
+    protocol::{ClientId, ProtocolVersionSegment},
 };
 
 mod v0;

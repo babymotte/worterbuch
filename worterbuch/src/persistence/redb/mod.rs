@@ -14,7 +14,8 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
+    KeySegment, ValueEntry, parse_segments,
+    protocol::{ClientId, GraveGoods, Key, KeyValuePair, LastWill},
 };
 
 const TABLE_V1: TableDefinition<Key, String> = TableDefinition::new("worterbuch");

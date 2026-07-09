@@ -17,9 +17,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::client_server::{
-    AuthToken, Key, LiveOnlyFlag, ProtocolVersionSegment, RequestPattern, TransactionId,
-    UniqueFlag, Value,
+use crate::protocol::{
+    AggregationDuration, AuthToken, Key, LiveOnlyFlag, ProtocolVersionSegment, QuietFlag,
+    RequestPattern, TransactionId, UniqueFlag, Value,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ pub enum ClientMessage {
     Lock(Lock),
     AcquireLock(Lock),
     ReleaseLock(Lock),
-    Transform(Transform),
+    // Transform(Transform),
 }
 
 impl ClientMessage {
@@ -77,158 +77,225 @@ impl ClientMessage {
             ClientMessage::Lock(m) => Some(m.transaction_id),
             ClientMessage::AcquireLock(m) => Some(m.transaction_id),
             ClientMessage::ReleaseLock(m) => Some(m.transaction_id),
-            ClientMessage::Transform(m) => Some(m.transaction_id),
+            // ClientMessage::Transform(m) => Some(m.transaction_id),
         }
     }
 }
+
+/// A message sent by a client to request switching to the specified protocol major version
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolSwitchRequest {
     pub version: ProtocolVersionSegment,
 }
 
+/// A message sent by a client to acquire authorization from the server
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationRequest {
     pub auth_token: AuthToken,
 }
 
+/// A message sent by a client to request the value of the provided key from the server
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Get {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
     pub key: Key,
 }
 
+/// A message sent by a client to request the values of all keys matching the provided pattern from the server
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PGet {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
     pub request_pattern: RequestPattern,
 }
 
+/// A message sent by a client to set a new value for a key
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Set {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key for which to set the value
     pub key: Key,
+    /// The new value for the key
     pub value: Value,
 }
 
+/// A message sent by a client to set a new value for a key using compare and swap
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CSet {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key for which to set the value
     pub key: Key,
+    /// The new value for the key
     pub value: Value,
+    /// The expected current value version or 0 if the value is not expected to exist yet
     pub version: u64,
 }
 
+/// A message sent by a client to initiate a new publish stream
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SPubInit {
+    /// A unique transaction ID. This transaction ID will be used instead of a key for all subsequent publish messages in this stream.
     pub transaction_id: TransactionId,
+    /// The key this stream will publish to
     pub key: Key,
 }
 
+/// A message sent by a client to publish to an existing pub stream
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SPub {
+    /// The transaction ID of the pub stream to publish to
     pub transaction_id: TransactionId,
+    /// The value to be published
     pub value: Value,
 }
 
+/// A message sent by a client to publish a new value for a key. The value will not be persisted on the server
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Publish {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key for which to publish the value
     pub key: Key,
+    /// The value to be published for the key
     pub value: Value,
 }
+
+/// A message sent by a client to subscribe to values of the provided key
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscribe {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key to subscribe to
     pub key: RequestPattern,
-    pub unique: UniqueFlag,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Indicate whether all or only unique values should be received
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub unique: Option<UniqueFlag>,
+    /// Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub live_only: Option<LiveOnlyFlag>,
 }
 
+/// A message sent by a client to subscribe to values of all keys matching the provided pattern
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PSubscribe {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The pattern to subscribe to
     pub request_pattern: RequestPattern,
-    pub unique: UniqueFlag,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub aggregate_events: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Indicate whether all or only unique values should be received
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub unique: Option<UniqueFlag>,
+    /// Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub live_only: Option<LiveOnlyFlag>,
+    /// Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub aggregate_events: Option<AggregationDuration>,
 }
 
+/// A message sent by a client to request the cancellation of the subscription
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Unsubscribe {
+    /// The transaction ID of the subscription to be cancelled
     pub transaction_id: TransactionId,
 }
 
+/// A message sent by a client to request the deletion of the value of the provided key
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Delete {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key to subscribe to
     pub key: Key,
 }
 
+/// A message sent by a client to request the deletion of the values of all keys matching the provided pattern
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PDelete {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The deletion pattern
     pub request_pattern: RequestPattern,
-    pub quiet: Option<bool>,
+    /// If true, the server will not send the deleted values back to the client
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub quiet: Option<QuietFlag>,
 }
 
+/// A message sent by a client to list all direct sub-key segments of the provided partial key
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Ls {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The parent partial key for which to list sub-key segments
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parent: Option<Key>,
 }
 
+/// A message sent by a client to list all direct sub-key segments of all partial keys matching the provided pattern
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PLs {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// A pattern describing the parent partial keys for which to list sub-key segments
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parent_pattern: Option<RequestPattern>,
 }
 
+/// A message sent by a client to request a subscription to all direct sub-key segments of the provided partial key
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeLs {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The parent partial key for which to list sub-key segments
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parent: Option<Key>,
 }
 
+/// A message sent by a client to request the cancellation of an ls subscription
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnsubscribeLs {
+    /// The transaction ID of the ls subscription to be cancelled
     pub transaction_id: TransactionId,
 }
 
+/// A message sent by a client to request a lock on the specified key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Lock {
+    /// A unique transaction ID
     pub transaction_id: TransactionId,
+    /// The key to get a lock on
     pub key: Key,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Transform {
-    pub transaction_id: TransactionId,
-    pub key: Key,
-    pub template: Value,
-}
+// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+// #[serde(rename_all = "camelCase")]
+// pub struct Transform {
+//     pub transaction_id: TransactionId,
+//     pub key: Key,
+//     pub template: Value,
+// }
 
 #[cfg(test)]
 mod test {
@@ -284,7 +351,7 @@ mod test {
         let msg = ClientMessage::PSubscribe(PSubscribe {
             transaction_id: 1,
             request_pattern: "hello/world".to_owned(),
-            unique: true,
+            unique: Some(true),
             aggregate_events: None,
             live_only: None,
         });
@@ -301,7 +368,7 @@ mod test {
         let msg = ClientMessage::PSubscribe(PSubscribe {
             transaction_id: 1,
             request_pattern: "hello/world".to_owned(),
-            unique: true,
+            unique: Some(true),
             aggregate_events: Some(10),
             live_only: Some(true),
         });
@@ -309,7 +376,7 @@ mod test {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"aggregateEvents":10,"liveOnly":true}}"#
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"liveOnly":true,"aggregateEvents":10}}"#
         );
     }
 
@@ -324,7 +391,7 @@ mod test {
             ClientMessage::PSubscribe(PSubscribe {
                 transaction_id: 1,
                 request_pattern: "hello/world".to_owned(),
-                unique: true,
+                unique: Some(true),
                 aggregate_events: None,
                 live_only: None,
             })
@@ -341,73 +408,73 @@ mod test {
             ClientMessage::PSubscribe(PSubscribe {
                 transaction_id: 1,
                 request_pattern: "hello/world".to_owned(),
-                unique: true,
+                unique: Some(true),
                 aggregate_events: Some(10),
                 live_only: Some(false),
             })
         );
     }
 
-    #[test]
-    fn transform_is_serialized_correctly() {
-        let msg = ClientMessage::Transform(Transform {
-            transaction_id: 123,
-            key: "test/transformed/key".to_owned(),
-            template: json!({
-              "name": "@some/person/name",
-              "email": "@some/person/email",
-              "phone": "@some/person/phone",
-              "meta": {
-                "nested": "@some/completely/unrelated/key",
-                "info": "this is not a key reference and will remain in the transformed state"
-              }
-            }),
-        });
+    // #[test]
+    // fn transform_is_serialized_correctly() {
+    //     let msg = ClientMessage::Transform(Transform {
+    //         transaction_id: 123,
+    //         key: "test/transformed/key".to_owned(),
+    //         template: json!({
+    //           "name": "@some/person/name",
+    //           "email": "@some/person/email",
+    //           "phone": "@some/person/phone",
+    //           "meta": {
+    //             "nested": "@some/completely/unrelated/key",
+    //             "info": "this is not a key reference and will remain in the transformed state"
+    //           }
+    //         }),
+    //     });
 
-        let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(
-            json,
-            r#"{"transform":{"transactionId":123,"key":"test/transformed/key","template":{"email":"@some/person/email","meta":{"info":"this is not a key reference and will remain in the transformed state","nested":"@some/completely/unrelated/key"},"name":"@some/person/name","phone":"@some/person/phone"}}}"#
-        );
-    }
+    //     let json = serde_json::to_string(&msg).unwrap();
+    //     assert_eq!(
+    //         json,
+    //         r#"{"transform":{"transactionId":123,"key":"test/transformed/key","template":{"email":"@some/person/email","meta":{"info":"this is not a key reference and will remain in the transformed state","nested":"@some/completely/unrelated/key"},"name":"@some/person/name","phone":"@some/person/phone"}}}"#
+    //     );
+    // }
 
-    #[test]
-    fn transform_is_deserialized_correctly() {
-        let json = r#"{
-                "transform": {
-                  "transactionId": 123,
-                  "key": "test/transformed/key",
-                  "template": {
-                    "name": "@some/person/name",
-                    "email": "@some/person/email",
-                    "phone": "@some/person/phone",
-                    "meta": {
-                      "nested": "@some/completely/unrelated/key",
-                      "info": "this is not a key reference and will remain in the transformed state"
-                    }
-                  }
-                }
-              }
-              "#;
-        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+    // #[test]
+    // fn transform_is_deserialized_correctly() {
+    //     let json = r#"{
+    //             "transform": {
+    //               "transactionId": 123,
+    //               "key": "test/transformed/key",
+    //               "template": {
+    //                 "name": "@some/person/name",
+    //                 "email": "@some/person/email",
+    //                 "phone": "@some/person/phone",
+    //                 "meta": {
+    //                   "nested": "@some/completely/unrelated/key",
+    //                   "info": "this is not a key reference and will remain in the transformed state"
+    //                 }
+    //               }
+    //             }
+    //           }
+    //           "#;
+    //     let msg: ClientMessage = serde_json::from_str(json).unwrap();
 
-        assert_eq!(
-            msg,
-            ClientMessage::Transform(Transform {
-                transaction_id: 123,
-                key: "test/transformed/key".to_owned(),
-                template: json!({
-                  "name": "@some/person/name",
-                  "email": "@some/person/email",
-                  "phone": "@some/person/phone",
-                  "meta": {
-                    "nested": "@some/completely/unrelated/key",
-                    "info": "this is not a key reference and will remain in the transformed state"
-                  }
-                }),
-            })
-        );
-    }
+    //     assert_eq!(
+    //         msg,
+    //         ClientMessage::Transform(Transform {
+    //             transaction_id: 123,
+    //             key: "test/transformed/key".to_owned(),
+    //             template: json!({
+    //               "name": "@some/person/name",
+    //               "email": "@some/person/email",
+    //               "phone": "@some/person/phone",
+    //               "meta": {
+    //                 "nested": "@some/completely/unrelated/key",
+    //                 "info": "this is not a key reference and will remain in the transformed state"
+    //               }
+    //             }),
+    //         })
+    //     );
+    // }
 
     #[test]
     fn spub_init_is_deserialized_correctly() {

@@ -23,7 +23,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
 use worterbuch_common::{
     KeySegment, RegularKeySegment, SubscriptionId,
-    protocol::client_server::{PStateEvent, StateEvent},
+    protocol::{PStateEvent, StateEvent},
 };
 
 type Subs = Vec<Subscriber>;
@@ -232,7 +232,7 @@ mod test {
 
     use super::*;
     use tokio::sync::mpsc::channel;
-    use worterbuch_common::{ClientId, parse_segments};
+    use worterbuch_common::{parse_segments, protocol::ClientId};
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
         parse_segments(key).unwrap()

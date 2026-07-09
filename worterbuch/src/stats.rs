@@ -24,10 +24,13 @@ use tokio::time::{Instant, interval};
 use tosub::SubsystemHandle;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
-use worterbuch_common::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
-    SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE,
-    SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION, WbApi, error::WorterbuchResult,
+    WbApi,
+    error::WorterbuchResult,
+    protocol::{
+        SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES,
+        SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
+    },
     topic, while_select,
 };
 
@@ -131,7 +134,9 @@ async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
 async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     use tikv_jemalloc_ctl::{epoch, stats};
-    use worterbuch_common::{SYSTEM_TOPIC_FORMATTED, SYSTEM_TOPIC_JEMALLOC, SYSTEM_TOPIC_RAW};
+    use worterbuch_common::protocol::{
+        SYSTEM_TOPIC_FORMATTED, SYSTEM_TOPIC_JEMALLOC, SYSTEM_TOPIC_RAW,
+    };
 
     // Advance the epoch to refresh stats
     epoch::advance().into_diagnostic()?;

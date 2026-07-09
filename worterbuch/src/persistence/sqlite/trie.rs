@@ -2,7 +2,7 @@ use crate::persistence::error::PersistenceResult;
 use rusqlite::{Connection, params};
 use std::{collections::HashMap, io, path::Path};
 use tracing::trace;
-use worterbuch_common::{KeyValuePair, ValueEntry};
+use worterbuch_common::{ValueEntry, protocol::KeyValuePair};
 
 const ROOT_ID: i64 = 0;
 
@@ -251,7 +251,7 @@ impl SqliTrie {
     pub(crate) fn insert_last_will(
         &self,
         client_id: uuid::Uuid,
-        last_will: Option<Vec<worterbuch_common::KeyValuePair>>,
+        last_will: Option<Vec<KeyValuePair>>,
     ) -> PersistenceResult<()> {
         let client_id = client_id.to_string();
 

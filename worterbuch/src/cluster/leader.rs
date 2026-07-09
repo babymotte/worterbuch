@@ -20,7 +20,9 @@
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     cluster::{
-        ClientWriteCommand, LeaderSyncMessage, Mode, Servers, StateSync, process_api_call, shutdown,
+        Mode, Servers, process_api_call,
+        protocol::{ClientWriteCommand, LeaderSyncMessage, StateSync},
+        shutdown,
     },
     error::WorterbuchAppResult,
     forward_api_call, forward_to_followers,
@@ -41,9 +43,13 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{Level, debug, error, info, span};
 use worterbuch_common::{
-    KeySegment, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-    SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, ValueEntry, protocol::client_server::PStateEvent, topic,
-    while_select, write_line_and_flush,
+    KeySegment, ValueEntry,
+    protocol::PStateEvent,
+    protocol::{
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
+        SYSTEM_TOPIC_ROOT,
+    },
+    topic, while_select, write_line_and_flush,
 };
 
 pub(crate) async fn run(

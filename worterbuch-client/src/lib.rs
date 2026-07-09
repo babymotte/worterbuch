@@ -73,9 +73,7 @@ use worterbuch_common::error::{ConnectionError, ConnectionResult, WorterbuchErro
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
-pub use worterbuch_common::protocol::client_server::client::*;
-pub use worterbuch_common::protocol::client_server::server::*;
-pub use worterbuch_common::protocol::client_server::*;
+pub use worterbuch_common::protocol::*;
 pub use worterbuch_common::*;
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
@@ -2116,7 +2114,7 @@ async fn process_incoming_command(
                 Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
-                    unique,
+                    unique: Some(unique),
                     live_only: Some(live_only),
                 }))
             }
@@ -2125,7 +2123,7 @@ async fn process_incoming_command(
                 Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
-                    unique,
+                    unique: Some(unique),
                     live_only: Some(live_only),
                 }))
             }
@@ -2142,7 +2140,7 @@ async fn process_incoming_command(
                 Some(ClientMessage::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
-                    unique,
+                    unique: Some(unique),
                     aggregate_events,
                     live_only: Some(live_only),
                 }))
@@ -2158,7 +2156,7 @@ async fn process_incoming_command(
                 Some(ClientMessage::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
-                    unique,
+                    unique: Some(unique),
                     aggregate_events,
                     live_only: Some(live_only),
                 }))

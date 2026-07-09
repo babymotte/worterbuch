@@ -9,13 +9,14 @@ use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
 use worterbuch_common::{
-    AuthCheck, ClientId, ErrorCode, Privilege, SubscriptionId, TransactionId, WbApi,
+    AuthCheck, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
-    protocol::client_server::{
+    protocol::{
         Ack, AuthorizationRequest, ClientMessage, Delete, Err, Get, Ls, LsState, PDelete, PGet,
         PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit, ServerMessage, Set, State,
         StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
     },
+    protocol::{ClientId, ErrorCode, TransactionId},
 };
 
 #[derive(Clone)]
@@ -220,7 +221,7 @@ impl V0 {
             ClientMessage::ProtocolSwitchRequest(_)
             | ClientMessage::CGet(_)
             | ClientMessage::CSet(_)
-            | ClientMessage::Transform(_)
+            // | ClientMessage::Transform(_)
             | ClientMessage::Lock(_)
             | ClientMessage::AcquireLock(_)
             | ClientMessage::ReleaseLock(_) => {
@@ -463,7 +464,7 @@ impl V0 {
                 self.client_id,
                 msg.transaction_id,
                 msg.key.clone(),
-                msg.unique,
+                msg.unique.unwrap_or(false),
                 msg.live_only.unwrap_or(false),
             )
             .await
@@ -530,7 +531,7 @@ impl V0 {
                 self.client_id,
                 msg.transaction_id,
                 msg.request_pattern.clone(),
-                msg.unique,
+                msg.unique.unwrap_or(false),
                 live_only,
             )
             .await

@@ -6,7 +6,7 @@ use tokio::{
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, RegularKeySegment, WbApi,
     error::{ConnectionResult, WorterbuchError},
-    protocol::client_server::{
+    protocol::{
         Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, ErrorCode, Get, Lock, Ls,
         LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, RequestPattern,
         SPub, SPubInit, ServerInfo, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,
@@ -186,7 +186,7 @@ async fn forward_loop(
                     INTERNAL_CLIENT_ID,
                     transaction_id,
                     key,
-                    unique,
+                    unique.unwrap_or(false),
                     live_only.unwrap_or(false),
                 )
                 .await
@@ -208,7 +208,7 @@ async fn forward_loop(
                     INTERNAL_CLIENT_ID,
                     transaction_id,
                     request_pattern.clone(),
-                    unique,
+                    unique.unwrap_or(false),
                     live_only.unwrap_or(false),
                 )
                 .await
@@ -341,7 +341,7 @@ async fn forward_loop(
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
-            ClientMessage::Transform(_) => todo!(),
+            // ClientMessage::Transform(_) => todo!(),
         }
     }
 }
