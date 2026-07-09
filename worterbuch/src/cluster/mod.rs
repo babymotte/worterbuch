@@ -34,8 +34,10 @@ use worterbuch_common::{CasVersion, GraveGoods, Key, LastWill, RequestPattern, V
 #[derive(Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Mode {
+    Standalone,
     Leader,
     Follower,
+    Proxy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

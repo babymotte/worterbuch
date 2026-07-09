@@ -62,19 +62,19 @@ pub enum Commands {
     /// Start server in leader mode
     Leader {
         /// Port at which to listen for cluster peer sync connections
-        #[arg(long, short, value_name = "PORT")]
+        #[arg(long, short, value_name = "PORT", required = true)]
         sync_port: u16,
     },
     /// Start server in follower mode
     Follower {
         /// Socket address of the leader node to sync to
-        #[arg(long, short, value_name = "HOST:PORT")]
+        #[arg(long, short, value_name = "HOST:PORT", required = true)]
         leader_address: String,
     },
     /// Start server in proxy mode
     Proxy {
         /// Socket addresses of potential leader nodes to sync to
-        #[arg(long, short, value_name = "HOST:PORT")]
+        #[arg(long, short, value_name = "HOST:PORT", required = true)]
         leader_addresses: Vec<String>,
     },
 }
@@ -169,6 +169,7 @@ pub struct Config {
     pub unix_disabled: bool,
     pub exit_on_stdin_close: bool,
     pub license_file: Option<PathBuf>,
+    pub initial_sync_timeout: Option<Duration>,
 }
 
 impl Config {
@@ -336,6 +337,11 @@ impl Config {
             self.license_file = Some(val.into());
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_INITIAL_SYNC_TIMEOUT") {
+            let secs = val.parse().to_interval()?;
+            self.initial_sync_timeout = Some(Duration::from_secs(secs));
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -387,6 +393,7 @@ impl Config {
             unix_disabled: false,
             exit_on_stdin_close: false,
             license_file: None,
+            initial_sync_timeout: None,
         };
         config.load_env()?;
         if let Some(args) = args {

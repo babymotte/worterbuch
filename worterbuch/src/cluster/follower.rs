@@ -68,13 +68,20 @@ pub(crate) async fn run(
 
     let mut persistence_interval = config.persistence_interval();
 
-    let stream = TcpStream::connect(leader_address).await?;
+    let stream = TcpStream::connect(&leader_address).await?;
 
     let mut lines = BufReader::new(stream).lines();
 
-    info!("Waiting for initial sync message from leader …");
+    let timeout = config.initial_sync_timeout;
+
+    info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
     select! {
-        recv = receive_msg(&mut lines) => {
+        biased;
+        _ = subsys.shutdown_requested() => {
+            warn!("Shutdown requested before initial sync completed.");
+            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
+        },
+        recv = receive_msg(&mut lines, timeout) => {
             debug!("Received leader message");
             match recv {
                 Ok(Some(msg)) => {
@@ -89,13 +96,9 @@ pub(crate) async fn run(
                 },
                 Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
                 Err(e) => {
-                    return Err(WorterbuchAppError::ClusterError(format!("error receiving update from leader: {e}")));
+                    return Err(WorterbuchAppError::ClusterError(format!("error receiving initial sync message from leader: {e}")));
                 }
             }
-        },
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before initial sync completed.");
-            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
         },
     }
     info!("Successfully synced with leader.");
@@ -104,7 +107,7 @@ pub(crate) async fn run(
         biased;
         _ = subsys.shutdown_requested() => break,
         _ = persistence_interval.tick() => try_flush(&mut worterbuch).await?,
-        recv = receive_msg(&mut lines) => try_process_leader_message(recv, &mut worterbuch).await?,
+        recv = receive_msg(&mut lines, None) => try_process_leader_message(recv, &mut worterbuch).await?,
         recv = api_rx.recv() => try_process_api_call(recv, &mut worterbuch).await?,
     }
 
@@ -120,7 +123,7 @@ pub(crate) async fn run(
     .await
 }
 
-async fn try_process_leader_message(
+pub(crate) async fn try_process_leader_message(
     recv: ConnectionResult<Option<LeaderSyncMessage>>,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
