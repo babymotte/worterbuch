@@ -9,11 +9,13 @@ use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
 use worterbuch_common::{
-    Ack, AuthCheck, AuthorizationRequest, ClientId, ClientMessage as CM, Delete, Err, ErrorCode,
-    Get, Ls, LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Privilege, Publish,
-    SPub, SPubInit, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, SubscriptionId,
-    TransactionId, Unsubscribe, UnsubscribeLs, WbApi,
+    AuthCheck, ClientId, ErrorCode, Privilege, SubscriptionId, TransactionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
+    protocol::client_server::{
+        Ack, AuthorizationRequest, ClientMessage, Delete, Err, Get, Ls, LsState, PDelete, PGet,
+        PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit, ServerMessage, Set, State,
+        StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
+    },
 };
 
 #[derive(Clone)]
@@ -29,11 +31,11 @@ impl V0 {
     #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v0", client_id=%self.client_id))]
     pub async fn process_incoming_message(
         &self,
-        msg: CM,
+        msg: ClientMessage,
         authorized: &mut Option<JwtClaims>,
     ) -> WorterbuchResult<()> {
         match msg {
-            CM::AuthorizationRequest(msg) => {
+            ClientMessage::AuthorizationRequest(msg) => {
                 if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);
                 }
@@ -41,7 +43,7 @@ impl V0 {
                 *authorized = Some(self.authorize(msg).await?);
                 trace!("Authorizing client {} done.", self.client_id);
             }
-            CM::Get(msg) => {
+            ClientMessage::Get(msg) => {
                 if self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -51,7 +53,7 @@ impl V0 {
                     trace!("Getting value for client {} done.", self.client_id);
                 }
             }
-            CM::PGet(msg) => {
+            ClientMessage::PGet(msg) => {
                 if self
                     .check_auth(
                         Privilege::Read,
@@ -66,7 +68,7 @@ impl V0 {
                     trace!("PGetting values for client {} done.", self.client_id);
                 }
             }
-            CM::Set(msg) => {
+            ClientMessage::Set(msg) => {
                 if self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -76,7 +78,7 @@ impl V0 {
                     trace!("Setting value for client {} done.", self.client_id);
                 }
             }
-            CM::SPubInit(msg) => {
+            ClientMessage::SPubInit(msg) => {
                 if self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -92,12 +94,12 @@ impl V0 {
                     );
                 }
             }
-            CM::SPub(msg) => {
+            ClientMessage::SPub(msg) => {
                 trace!("Setting value for client {} …", self.client_id);
                 self.spub(msg).await?;
                 trace!("Setting value for client {} done.", self.client_id);
             }
-            CM::Publish(msg) => {
+            ClientMessage::Publish(msg) => {
                 if self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -107,7 +109,7 @@ impl V0 {
                     trace!("Publishing value for client {} done.", self.client_id);
                 }
             }
-            CM::Subscribe(msg) => {
+            ClientMessage::Subscribe(msg) => {
                 if self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -117,7 +119,7 @@ impl V0 {
                     trace!("Making subscription for client {} done.", self.client_id);
                 }
             }
-            CM::PSubscribe(msg) => {
+            ClientMessage::PSubscribe(msg) => {
                 if self
                     .check_auth(
                         Privilege::Read,
@@ -132,8 +134,8 @@ impl V0 {
                     trace!("Making psubscription for client {} done.", self.client_id);
                 }
             }
-            CM::Unsubscribe(msg) => self.unsubscribe(msg).await?,
-            CM::Delete(msg) => {
+            ClientMessage::Unsubscribe(msg) => self.unsubscribe(msg).await?,
+            ClientMessage::Delete(msg) => {
                 if self
                     .check_auth(Privilege::Delete, &msg.key, authorized, msg.transaction_id)
                     .await?
@@ -143,7 +145,7 @@ impl V0 {
                     trace!("Deleting value for client {} done.", self.client_id);
                 }
             }
-            CM::PDelete(msg) => {
+            ClientMessage::PDelete(msg) => {
                 if self
                     .check_auth(
                         Privilege::Delete,
@@ -158,7 +160,7 @@ impl V0 {
                     trace!("PDeleting value for client {} done.", self.client_id);
                 }
             }
-            CM::Ls(msg) => {
+            ClientMessage::Ls(msg) => {
                 let pattern = &msg
                     .parent
                     .as_ref()
@@ -173,7 +175,7 @@ impl V0 {
                     trace!("Listing subkeys for client {} done.", self.client_id);
                 }
             }
-            CM::PLs(msg) => {
+            ClientMessage::PLs(msg) => {
                 let pattern = &msg
                     .parent_pattern
                     .as_ref()
@@ -191,7 +193,7 @@ impl V0 {
                     );
                 }
             }
-            CM::SubscribeLs(msg) => {
+            ClientMessage::SubscribeLs(msg) => {
                 let pattern = &msg
                     .parent
                     .as_ref()
@@ -206,7 +208,7 @@ impl V0 {
                     trace!("Subscribing to subkeys for client {} done.", self.client_id);
                 }
             }
-            CM::UnsubscribeLs(msg) => {
+            ClientMessage::UnsubscribeLs(msg) => {
                 trace!("Unsubscribing from subkeys for client {} …", self.client_id);
                 self.unsubscribe_ls(msg).await?;
                 trace!(
@@ -215,13 +217,13 @@ impl V0 {
                 );
             }
 
-            CM::ProtocolSwitchRequest(_)
-            | CM::CGet(_)
-            | CM::CSet(_)
-            | CM::Transform(_)
-            | CM::Lock(_)
-            | CM::AcquireLock(_)
-            | CM::ReleaseLock(_) => {
+            ClientMessage::ProtocolSwitchRequest(_)
+            | ClientMessage::CGet(_)
+            | ClientMessage::CSet(_)
+            | ClientMessage::Transform(_)
+            | ClientMessage::Lock(_)
+            | ClientMessage::AcquireLock(_)
+            | ClientMessage::ReleaseLock(_) => {
                 return Err(WorterbuchError::NotImplemented);
             }
         };

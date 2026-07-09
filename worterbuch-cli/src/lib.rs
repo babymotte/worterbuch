@@ -30,8 +30,10 @@ use tokio::{select, spawn, sync::mpsc, time::sleep};
 use tosub::SubsystemHandle;
 use tracing::error;
 use worterbuch_client::{
-    Err, Key, KeyValuePair, KeyValuePairs, LsState, PState, PStateEvent, ServerMessage as SM,
-    State, StateEvent,
+    Key, KeyValuePair, KeyValuePairs,
+    protocol::client_server::{
+        Err, LsState, PState, PStateEvent, ServerMessage, State, StateEvent,
+    },
 };
 
 pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {
@@ -204,30 +206,30 @@ async fn provide_key_value_pair(
     ControlFlow::Continue(())
 }
 
-pub fn print_message(msg: &SM, json: bool, raw: bool) {
+pub fn print_message(msg: &ServerMessage, json: bool, raw: bool) {
     match msg {
-        SM::PState(msg) => print_pstate(msg, json, raw),
-        SM::State(msg) => print_state(msg, json, raw),
-        SM::Err(msg) => print_err(msg, json),
-        SM::LsState(msg) => print_ls(msg, json),
+        ServerMessage::PState(msg) => print_pstate(msg, json, raw),
+        ServerMessage::State(msg) => print_state(msg, json, raw),
+        ServerMessage::Err(msg) => print_err(msg, json),
+        ServerMessage::LsState(msg) => print_ls(msg, json),
         _ => (),
     }
 }
 
-pub fn print_change_event(msg: &SM, json: bool) {
+pub fn print_change_event(msg: &ServerMessage, json: bool) {
     match msg {
-        SM::PState(msg) => print_pstate_change(msg, json),
-        SM::State(msg) => print_state_change(msg, json),
-        SM::Err(msg) => print_err(msg, json),
+        ServerMessage::PState(msg) => print_pstate_change(msg, json),
+        ServerMessage::State(msg) => print_state_change(msg, json),
+        ServerMessage::Err(msg) => print_err(msg, json),
         _ => (),
     }
 }
 
-pub fn print_del_event(msg: &SM, json: bool) {
+pub fn print_del_event(msg: &ServerMessage, json: bool) {
     match msg {
-        SM::PState(msg) => print_pstate_del(msg, json),
-        SM::State(msg) => print_state_del(msg, json),
-        SM::Err(msg) => print_err(msg, json),
+        ServerMessage::PState(msg) => print_pstate_del(msg, json),
+        ServerMessage::State(msg) => print_state_del(msg, json),
+        ServerMessage::Err(msg) => print_err(msg, json),
         _ => (),
     }
 }

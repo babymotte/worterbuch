@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 use worterbuch_common::{
-    ClientMessage, ErrorCode, Get, Key, KeyValuePair, ServerMessage, State, StateEvent,
-    TransactionId,
+    ErrorCode, Key, KeyValuePair, TransactionId,
+    protocol::client_server::{ClientMessage, Get, ServerMessage, State, StateEvent},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

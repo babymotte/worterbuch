@@ -32,7 +32,10 @@ use tokio_tungstenite::{
 use tokio_tungstenite_wasm::{Message, WebSocketStream};
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use tracing::debug;
-use worterbuch_common::{ClientMessage, ServerMessage, error::ConnectionResult};
+use worterbuch_common::{
+    error::ConnectionResult,
+    protocol::client_server::{ClientMessage, ServerMessage},
+};
 
 pub struct WsClientSocket {
     #[cfg(feature = "ws")]

@@ -3,9 +3,11 @@ use crate::auth::JwtClaims;
 use tokio::spawn;
 use tracing::{Level, debug, instrument, trace};
 use worterbuch_common::{
-    Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, ErrorCode, Get, Lock, Privilege,
-    ServerMessage, WbApi,
+    ErrorCode, Privilege, WbApi,
     error::{Context, WorterbuchResult},
+    protocol::client_server::{
+        Ack, CSet, CState, CStateEvent, ClientMessage as CM, Err, Get, Lock, ServerMessage,
+    },
 };
 
 #[derive(Clone)]

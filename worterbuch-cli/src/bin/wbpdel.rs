@@ -42,7 +42,7 @@ struct Args {
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
-    /// Patterns to be deleted from Wörterbuch in the form "PATTERN1 PATTERN2 PATTERN3 ...". When omitted, patterns will be read from stdin. When reading patterns from stdin, one pattern is expected per line.
+    /// Patterns to be deleted from Wörterbuch in the form "PATTERN1 PATTERN2 PATTERN3  …". When omitted, patterns will be read from stdin. When reading patterns from stdin, one pattern is expected per line.
     patterns: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]

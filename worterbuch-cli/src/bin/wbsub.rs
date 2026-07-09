@@ -42,7 +42,7 @@ struct Args {
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
-    /// Wörterbuch keys to be subscribed to in the form "PATTERN1 PATTERN2 PATTERN3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
+    /// Wörterbuch keys to be subscribed to in the form "PATTERN1 PATTERN2 PATTERN3  …". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
     keys: Option<Vec<String>>,
     /// Only receive unique values, i.e. skip notifications when a key is set to a value it already has.
     #[arg(short, long)]

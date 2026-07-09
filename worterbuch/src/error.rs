@@ -3,7 +3,7 @@ use std::io;
 use crate::persistence::error::PersistenceError;
 use miette::Diagnostic;
 use tokio::sync::oneshot;
-use worterbuch_common::error::WorterbuchError;
+use worterbuch_common::error::{ConfigError, WorterbuchError};
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
 pub enum WorterbuchAppError {
@@ -12,7 +12,7 @@ pub enum WorterbuchAppError {
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] WorterbuchError),
     #[error("Config error: {0}")]
-    ConfigError(String),
+    ConfigError(ConfigError),
     #[error("Cluster error: {0}")]
     ClusterError(String),
     #[error("I/O error: {0}")]

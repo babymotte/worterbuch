@@ -4,11 +4,14 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use worterbuch_common::{
-    Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, ErrorCode, Get, INTERNAL_CLIENT_ID,
-    Lock, Ls, LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish,
-    RegularKeySegment, RequestPattern, SPub, SPubInit, ServerInfo, ServerMessage, Set, State,
-    StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe, UnsubscribeLs, WbApi, Welcome,
+    ErrorCode, INTERNAL_CLIENT_ID, RegularKeySegment, RequestPattern, TransactionId, WbApi,
     error::{ConnectionResult, WorterbuchError},
+    protocol::client_server::{
+        Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, Get, Lock, Ls, LsState,
+        PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit, ServerInfo,
+        ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
+        Welcome,
+    },
 };
 
 pub struct LocalClientSocket {

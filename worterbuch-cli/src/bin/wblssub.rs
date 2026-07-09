@@ -42,7 +42,7 @@ struct Args {
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
-    /// Wörterbuch paths to be subscribed to in the form "PATH1 PATH2 PATH3 ...". When omitted, paths will be read from stdin. When reading paths from stdin, one path is expected per line.
+    /// Wörterbuch paths to be subscribed to in the form "PATH1 PATH2 PATH3  …". When omitted, paths will be read from stdin. When reading paths from stdin, one path is expected per line.
     paths: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]

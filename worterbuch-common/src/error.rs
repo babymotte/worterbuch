@@ -18,8 +18,9 @@
  */
 
 use crate::{
-    AuthCheckOwned, ClientId, ClientMessage, ErrorCode, Key, MetaData, Privilege,
-    ProtocolVersionSegment, RequestPattern, TransactionId, server::Err,
+    AuthCheckOwned, ClientId, ErrorCode, Key, MetaData, Privilege, ProtocolVersionSegment,
+    RequestPattern, TransactionId,
+    protocol::client_server::{ClientMessage, Err},
 };
 use http::StatusCode;
 #[cfg(feature = "ws")]
@@ -61,8 +62,10 @@ pub enum ConfigError {
     #[cfg(feature = "telemetry")]
     #[error("error setting up telemetry: {0}")]
     ExporterBuildError(#[from] ExporterBuildError),
-    #[error("Parse error: {0}")]
+    #[error("parse error: {0}")]
     ParseError(#[from] serde_json::Error),
+    #[error("invalid leader address(es) {1:?}: {0}")]
+    InvalidLeaderAddress(io::Error, Vec<String>),
 }
 
 pub trait ConfigIntContext<I> {

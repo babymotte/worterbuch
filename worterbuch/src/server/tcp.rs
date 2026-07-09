@@ -45,7 +45,9 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    ClientId, Protocol, ServerInfo, ServerMessage, WbApi, Welcome, write_line_and_flush,
+    ClientId, Protocol, WbApi,
+    protocol::client_server::{ServerInfo, ServerMessage, Welcome},
+    write_line_and_flush,
 };
 
 enum SocketEvent {

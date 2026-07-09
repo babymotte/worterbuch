@@ -21,7 +21,10 @@ use hashbrown::{HashMap, hash_map::Entry};
 use miette::{IntoDiagnostic, Result, miette};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
-use worterbuch_common::{KeySegment, PStateEvent, RegularKeySegment, StateEvent, SubscriptionId};
+use worterbuch_common::{
+    KeySegment, RegularKeySegment, SubscriptionId,
+    protocol::client_server::{PStateEvent, StateEvent},
+};
 
 type Subs = Vec<Subscriber>;
 type Tree = HashMap<KeySegment, Node>;

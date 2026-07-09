@@ -42,7 +42,7 @@ struct Args {
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
-    /// Keys to be fetched from Wörterbuch in the form "KEY1 KEY2 KEY3 ...". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
+    /// Keys to be fetched from Wörterbuch in the form "KEY1 KEY2 KEY3  …". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
     keys: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]

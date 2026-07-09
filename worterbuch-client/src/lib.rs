@@ -68,17 +68,22 @@ use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
-use worterbuch_common::error::WorterbuchError;
+#[cfg(any(feature = "ws", feature = "wasm"))]
+use worterbuch_common::protocol::client_server::{
+    AuthorizationRequest, ProtocolSwitchRequest, Welcome,
+};
+use worterbuch_common::{
+    error::{ConnectionError, ConnectionResult, WorterbuchError},
+    protocol::client_server::{
+        Ack, CSet, CState, ClientMessage, Delete, Err, Get, Lock, Ls, LsState, PDelete, PGet, PLs,
+        PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit, ServerMessage, Set, State,
+        StateEvent, Subscribe, SubscribeLs, TypedPStateEvent, Unsubscribe, UnsubscribeLs,
+    },
+};
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
 pub use worterbuch_common::*;
-pub use worterbuch_common::{
-    self, Ack, AuthorizationRequest, ClientMessage as CM, Delete, Err, Get, GraveGoods, Key,
-    KeyValuePairs, LastWill, LsState, PState, PStateEvent, ProtocolVersion, RegularKeySegment,
-    ServerMessage as SM, Set, State, StateEvent, TransactionId,
-    error::{ConnectionError, ConnectionResult},
-};
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
 
@@ -155,7 +160,7 @@ enum ClientSocket {
 
 impl ClientSocket {
     #[instrument(skip(self), level = "trace", err)]
-    pub async fn send_msg(&mut self, msg: CM, wait: bool) -> ConnectionResult<()> {
+    pub async fn send_msg(&mut self, msg: ClientMessage, wait: bool) -> ConnectionResult<()> {
         match self {
             #[cfg(feature = "tcp")]
             ClientSocket::Tcp(sock) => sock.send_msg(msg, wait).await,
@@ -1314,8 +1319,8 @@ async fn connect_ws(
 
     let Welcome { client_id, info } = match websocket.next().await {
         Some(Ok(msg)) => match msg.to_text() {
-            Ok(data) => match json::from_str::<SM>(data) {
-                Ok(SM::Welcome(welcome)) => {
+            Ok(data) => match json::from_str::<ServerMessage>(data) {
+                Ok(ServerMessage::Welcome(welcome)) => {
                     debug!("Welcome message received: {welcome:?}");
                     welcome
                 }
@@ -1365,17 +1370,17 @@ async fn connect_ws(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    let msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
     debug!("Sending protocol switch message: {msg}");
     websocket.send(Message::Text(msg.into())).await?;
 
     match websocket.next().await {
         Some(msg) => match msg? {
             Message::Text(msg) => match serde_json::from_str(&msg) {
-                Ok(SM::Ack(_)) => {
+                Ok(ServerMessage::Ack(_)) => {
                     debug!("Protocol switched to v{}.", proto_version.major());
                 }
-                Ok(SM::Err(e)) => {
+                Ok(ServerMessage::Err(e)) => {
                     error!("Protocol switch failed: {e}");
                     return Err(ConnectionError::WorterbuchError(Box::new(
                         WorterbuchError::ServerResponse(e),
@@ -1413,14 +1418,14 @@ async fn connect_ws(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
+            let msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
             debug!("Sending authorization message: {msg}");
             websocket.send(Message::Text(msg.into())).await?;
 
             match websocket.next().await {
                 Some(Err(e)) => Err(e.into()),
                 Some(Ok(Message::Text(msg))) => match serde_json::from_str(&msg) {
-                    Ok(SM::Authorized(_)) => {
+                    Ok(ServerMessage::Authorized(_)) => {
                         debug!("Authorization accepted.");
                         connected(
                             ClientSocket::Ws(WsClientSocket::new(websocket)),
@@ -1429,7 +1434,7 @@ async fn connect_ws(
                             client_id,
                         )
                     }
-                    Ok(SM::Err(e)) => {
+                    Ok(ServerMessage::Err(e)) => {
                         error!("Authorization failed: {e}");
                         Err(ConnectionError::WorterbuchError(Box::new(
                             WorterbuchError::ServerResponse(e),
@@ -1437,7 +1442,7 @@ async fn connect_ws(
                     }
                     Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("server sent invalid authetication response: {msg:?}"),
+                        format!("server sent invalid authentication response: {msg:?}"),
                     )))),
                     Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1502,9 +1507,9 @@ async fn connect_tcp(
                 ))))
             }
             Ok(Some(line)) => {
-                let msg = json::from_str::<SM>(&line);
+                let msg = json::from_str::<ServerMessage>(&line);
                 match msg {
-                    Ok(SM::Welcome(welcome)) => {
+                    Ok(ServerMessage::Welcome(welcome)) => {
                         debug!("Welcome message received: {welcome:?}");
                         welcome
                     }
@@ -1546,7 +1551,7 @@ async fn connect_tcp(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
     msg.push('\n');
     debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
@@ -1559,10 +1564,10 @@ async fn connect_tcp(
             ))));
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
-            Ok(SM::Ack(_)) => {
+            Ok(ServerMessage::Ack(_)) => {
                 debug!("Protocol switched to v{}.", proto_version.major());
             }
-            Ok(SM::Err(e)) => {
+            Ok(ServerMessage::Err(e)) => {
                 error!("Protocol switch failed: {e}");
                 return Err(ConnectionError::WorterbuchError(Box::new(
                     WorterbuchError::ServerResponse(e),
@@ -1590,7 +1595,7 @@ async fn connect_tcp(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
+            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
             msg.push('\n');
             debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
@@ -1601,9 +1606,9 @@ async fn connect_tcp(
                     "connection closed before handshake",
                 )))),
                 Ok(Some(line)) => {
-                    let msg = json::from_str::<SM>(&line);
+                    let msg = json::from_str::<ServerMessage>(&line);
                     match msg {
-                        Ok(SM::Authorized(_)) => {
+                        Ok(ServerMessage::Authorized(_)) => {
                             debug!("Authorization accepted.");
                             connected(
                                 ClientSocket::Tcp(
@@ -1620,7 +1625,7 @@ async fn connect_tcp(
                                 client_id,
                             )
                         }
-                        Ok(SM::Err(e)) => {
+                        Ok(ServerMessage::Err(e)) => {
                             error!("Authorization failed: {e}");
                             Err(ConnectionError::WorterbuchError(Box::new(
                                 WorterbuchError::ServerResponse(e),
@@ -1628,7 +1633,7 @@ async fn connect_tcp(
                         }
                         Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("server sent invalid authetication response: {msg:?}"),
+                            format!("server sent invalid authentication response: {msg:?}"),
                         )))),
                         Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -1695,9 +1700,9 @@ async fn connect_unix(
                 ))))
             }
             Ok(Some(line)) => {
-                let msg = json::from_str::<SM>(&line);
+                let msg = json::from_str::<ServerMessage>(&line);
                 match msg {
-                    Ok(SM::Welcome(welcome)) => {
+                    Ok(ServerMessage::Welcome(welcome)) => {
                         debug!("Welcome message received: {welcome:?}");
                         welcome
                     }
@@ -1739,7 +1744,7 @@ async fn connect_unix(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let mut msg = json::to_string(&CM::ProtocolSwitchRequest(proto_switch))?;
+    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
     msg.push('\n');
     debug!("Sending protocol switch message: {msg}");
     tcp_tx.write_all(msg.as_bytes()).await?;
@@ -1752,10 +1757,10 @@ async fn connect_unix(
             ))));
         }
         Ok(Some(line)) => match serde_json::from_str(&line) {
-            Ok(SM::Ack(_)) => {
+            Ok(ServerMessage::Ack(_)) => {
                 debug!("Protocol switched to v{}.", proto_version.major());
             }
-            Ok(SM::Err(e)) => {
+            Ok(ServerMessage::Err(e)) => {
                 error!("Protocol switch failed: {e}");
                 return Err(ConnectionError::WorterbuchError(Box::new(
                     WorterbuchError::ServerResponse(e),
@@ -1783,7 +1788,7 @@ async fn connect_unix(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let mut msg = json::to_string(&CM::AuthorizationRequest(handshake))?;
+            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
             msg.push('\n');
             debug!("Sending authorization message: {msg}");
             tcp_tx.write_all(msg.as_bytes()).await?;
@@ -1794,9 +1799,9 @@ async fn connect_unix(
                     "connection closed before handshake",
                 )))),
                 Ok(Some(line)) => {
-                    let msg = json::from_str::<SM>(&line);
+                    let msg = json::from_str::<ServerMessage>(&line);
                     match msg {
-                        Ok(SM::Authorized(_)) => {
+                        Ok(ServerMessage::Authorized(_)) => {
                             debug!("Authorization accepted.");
                             connected(
                                 ClientSocket::Unix(
@@ -1812,7 +1817,7 @@ async fn connect_unix(
                                 client_id,
                             )
                         }
-                        Ok(SM::Err(e)) => {
+                        Ok(ServerMessage::Err(e)) => {
                             error!("Authorization failed: {e}");
                             Err(ConnectionError::WorterbuchError(Box::new(
                                 WorterbuchError::ServerResponse(e),
@@ -1820,7 +1825,7 @@ async fn connect_unix(
                         }
                         Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("server sent invalid authetication response: {msg:?}"),
+                            format!("server sent invalid authentication response: {msg:?}"),
                         )))),
                         Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -1929,14 +1934,14 @@ async fn process_incoming_command(
     cmd: Option<Command>,
     callbacks: &mut Callbacks,
     transaction_ids: &mut TransactionIds,
-) -> ConnectionResult<ControlFlow<(), Option<CM>>> {
+) -> ConnectionResult<ControlFlow<(), Option<ClientMessage>>> {
     if let Some(command) = cmd {
         debug!("Processing command: {command:?}");
         let transaction_id = transaction_ids.next();
         let cm = match command {
             Command::Set(key, value, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::Set(Set {
+                Some(ClientMessage::Set(Set {
                     transaction_id,
                     key,
                     value,
@@ -1944,7 +1949,7 @@ async fn process_incoming_command(
             }
             Command::SetAsync(key, value, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Set(Set {
+                Some(ClientMessage::Set(Set {
                     transaction_id,
                     key,
                     value,
@@ -1952,7 +1957,7 @@ async fn process_incoming_command(
             }
             Command::CSet(key, value, version, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::CSet(CSet {
+                Some(ClientMessage::CSet(CSet {
                     transaction_id,
                     key,
                     value,
@@ -1961,7 +1966,7 @@ async fn process_incoming_command(
             }
             Command::CSetAsync(key, value, version, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::CSet(CSet {
+                Some(ClientMessage::CSet(CSet {
                     transaction_id,
                     key,
                     value,
@@ -1970,35 +1975,35 @@ async fn process_incoming_command(
             }
             Command::SPubInit(key, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::SPubInit(SPubInit {
+                Some(ClientMessage::SPubInit(SPubInit {
                     transaction_id,
                     key,
                 }))
             }
             Command::SPubInitAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::SPubInit(SPubInit {
+                Some(ClientMessage::SPubInit(SPubInit {
                     transaction_id,
                     key,
                 }))
             }
             Command::SPub(transaction_id, value, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::SPub(SPub {
+                Some(ClientMessage::SPub(SPub {
                     transaction_id,
                     value,
                 }))
             }
             Command::SPubAsync(transaction_id, value, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::SPub(SPub {
+                Some(ClientMessage::SPub(SPub {
                     transaction_id,
                     value,
                 }))
             }
             Command::Publish(key, value, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::Publish(Publish {
+                Some(ClientMessage::Publish(Publish {
                     transaction_id,
                     key,
                     value,
@@ -2006,7 +2011,7 @@ async fn process_incoming_command(
             }
             Command::PublishAsync(key, value, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Publish(Publish {
+                Some(ClientMessage::Publish(Publish {
                     transaction_id,
                     key,
                     value,
@@ -2014,63 +2019,63 @@ async fn process_incoming_command(
             }
             Command::Get(key, callback) => {
                 callbacks.state.insert(transaction_id, callback);
-                Some(CM::Get(Get {
+                Some(ClientMessage::Get(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::GetAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Get(Get {
+                Some(ClientMessage::Get(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::CGet(key, callback) => {
                 callbacks.cstate.insert(transaction_id, callback);
-                Some(CM::CGet(Get {
+                Some(ClientMessage::CGet(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::CGetAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::CGet(Get {
+                Some(ClientMessage::CGet(Get {
                     transaction_id,
                     key,
                 }))
             }
             Command::PGet(request_pattern, callback) => {
                 callbacks.pstate.insert(transaction_id, callback);
-                Some(CM::PGet(PGet {
+                Some(ClientMessage::PGet(PGet {
                     transaction_id,
                     request_pattern,
                 }))
             }
             Command::PGetAsync(request_pattern, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::PGet(PGet {
+                Some(ClientMessage::PGet(PGet {
                     transaction_id,
                     request_pattern,
                 }))
             }
             Command::Delete(key, callback) => {
                 callbacks.state.insert(transaction_id, callback);
-                Some(CM::Delete(Delete {
+                Some(ClientMessage::Delete(Delete {
                     transaction_id,
                     key,
                 }))
             }
             Command::DeleteAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Delete(Delete {
+                Some(ClientMessage::Delete(Delete {
                     transaction_id,
                     key,
                 }))
             }
             Command::PDelete(request_pattern, quiet, callback) => {
                 callbacks.pstate.insert(transaction_id, callback);
-                Some(CM::PDelete(PDelete {
+                Some(ClientMessage::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
                     quiet: Some(quiet),
@@ -2078,7 +2083,7 @@ async fn process_incoming_command(
             }
             Command::PDeleteAsync(request_pattern, quiet, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::PDelete(PDelete {
+                Some(ClientMessage::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
                     quiet: Some(quiet),
@@ -2086,28 +2091,28 @@ async fn process_incoming_command(
             }
             Command::Ls(parent, callback) => {
                 callbacks.lsstate.insert(transaction_id, callback);
-                Some(CM::Ls(Ls {
+                Some(ClientMessage::Ls(Ls {
                     transaction_id,
                     parent,
                 }))
             }
             Command::LsAsync(parent, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Ls(Ls {
+                Some(ClientMessage::Ls(Ls {
                     transaction_id,
                     parent,
                 }))
             }
             Command::PLs(parent_pattern, callback) => {
                 callbacks.lsstate.insert(transaction_id, callback);
-                Some(CM::PLs(PLs {
+                Some(ClientMessage::PLs(PLs {
                     transaction_id,
                     parent_pattern,
                 }))
             }
             Command::PLsAsync(parent_pattern, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::PLs(PLs {
+                Some(ClientMessage::PLs(PLs {
                     transaction_id,
                     parent_pattern,
                 }))
@@ -2115,7 +2120,7 @@ async fn process_incoming_command(
             Command::Subscribe(key, unique, tid_callback, value_callback, live_only) => {
                 callbacks.sub.insert(transaction_id, value_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
-                Some(CM::Subscribe(Subscribe {
+                Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
                     unique,
@@ -2124,7 +2129,7 @@ async fn process_incoming_command(
             }
             Command::SubscribeAsync(key, unique, callback, live_only) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Subscribe(Subscribe {
+                Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
                     unique,
@@ -2141,7 +2146,7 @@ async fn process_incoming_command(
             ) => {
                 callbacks.psub.insert(transaction_id, event_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
-                Some(CM::PSubscribe(PSubscribe {
+                Some(ClientMessage::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
                     unique,
@@ -2157,7 +2162,7 @@ async fn process_incoming_command(
                 live_only,
             ) => {
                 callback.send(transaction_id).ok();
-                Some(CM::PSubscribe(PSubscribe {
+                Some(ClientMessage::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
                     unique,
@@ -2169,25 +2174,25 @@ async fn process_incoming_command(
                 callbacks.ack.insert(transaction_id, callback);
                 callbacks.sub.remove(&transaction_id);
                 callbacks.psub.remove(&transaction_id);
-                Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
+                Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
             Command::UnsubscribeAsync(transaction_id, callback) => {
                 callbacks.sub.remove(&transaction_id);
                 callbacks.psub.remove(&transaction_id);
                 callback.send(transaction_id).ok();
-                Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
+                Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
             Command::SubscribeLs(parent, tid_callback, children_callback) => {
                 callbacks.subls.insert(transaction_id, children_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
-                Some(CM::SubscribeLs(SubscribeLs {
+                Some(ClientMessage::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
                 }))
             }
             Command::SubscribeLsAsync(parent, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::SubscribeLs(SubscribeLs {
+                Some(ClientMessage::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
                 }))
@@ -2195,44 +2200,46 @@ async fn process_incoming_command(
             Command::UnsubscribeLs(transaction_id, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
                 callbacks.subls.remove(&transaction_id);
-                Some(CM::UnsubscribeLs(UnsubscribeLs { transaction_id }))
+                Some(ClientMessage::UnsubscribeLs(UnsubscribeLs {
+                    transaction_id,
+                }))
             }
             Command::UnsubscribeLsAsync(transaction_id, callback) => {
                 callbacks.subls.remove(&transaction_id);
                 callback.send(transaction_id).ok();
-                Some(CM::Unsubscribe(Unsubscribe { transaction_id }))
+                Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
             Command::Lock(key, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::Lock(Lock {
+                Some(ClientMessage::Lock(Lock {
                     transaction_id,
                     key,
                 }))
             }
             Command::LockAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::Lock(Lock {
+                Some(ClientMessage::Lock(Lock {
                     transaction_id,
                     key,
                 }))
             }
             Command::AcquireLock(key, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::AcquireLock(Lock {
+                Some(ClientMessage::AcquireLock(Lock {
                     transaction_id,
                     key,
                 }))
             }
             Command::ReleaseLock(key, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
-                Some(CM::ReleaseLock(Lock {
+                Some(ClientMessage::ReleaseLock(Lock {
                     transaction_id,
                     key,
                 }))
             }
             Command::ReleaseLockAsync(key, callback) => {
                 callback.send(transaction_id).ok();
-                Some(CM::ReleaseLock(Lock {
+                Some(ClientMessage::ReleaseLock(Lock {
                     transaction_id,
                     key,
                 }))
@@ -2258,13 +2265,13 @@ async fn process_incoming_server_message(
         Ok(Some(msg)) => {
             deliver_generic(&msg, callbacks);
             match msg {
-                SM::State(state) => deliver_state(state, callbacks).await?,
-                SM::CState(state) => deliver_cstate(state, callbacks).await?,
-                SM::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
-                SM::LsState(ls) => deliver_ls(ls, callbacks).await?,
-                SM::Err(err) => deliver_err(err, callbacks).await,
-                SM::Ack(ack) => deliver_ack(ack, callbacks).await,
-                SM::Welcome(_) | SM::Authorized(_) => (),
+                ServerMessage::State(state) => deliver_state(state, callbacks).await?,
+                ServerMessage::CState(state) => deliver_cstate(state, callbacks).await?,
+                ServerMessage::PState(pstate) => deliver_pstate(pstate, callbacks).await?,
+                ServerMessage::LsState(ls) => deliver_ls(ls, callbacks).await?,
+                ServerMessage::Err(err) => deliver_err(err, callbacks).await,
+                ServerMessage::Ack(ack) => deliver_ack(ack, callbacks).await,
+                ServerMessage::Welcome(_) | ServerMessage::Authorized(_) => (),
             }
             Ok(ControlFlow::Continue(()))
         }

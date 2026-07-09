@@ -156,7 +156,11 @@ async fn do_run_worterbuch(
                 worterbuch,
                 api_rx,
                 config,
-                web_server,
+                Servers {
+                    web_server,
+                    tcp_server,
+                    unix_socket,
+                },
                 leader_addresses,
             )
             .await?;

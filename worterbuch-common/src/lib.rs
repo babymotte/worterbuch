@@ -19,23 +19,32 @@
 
 #[cfg(feature = "benchmark")]
 pub mod benchmark;
-mod client;
+
 pub mod error;
-mod server;
+pub mod protocol;
 
-pub use client::*;
-use serde_repr::{Deserialize_repr, Serialize_repr};
-pub use server::*;
-
+use crate::{
+    error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
+    protocol::client_server::{PStateEvent, StateEvent},
+};
 use error::WorterbuchResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
-use std::{fmt, net::SocketAddr, ops::Deref};
-use tokio::sync::{mpsc, oneshot};
-use tracing::Span;
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::{
+    fmt::{self, Display},
+    io,
+    net::SocketAddr,
+    ops::Deref,
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
+    sync::{mpsc, oneshot},
+    time::timeout,
+};
+use tracing::{Span, debug, error, trace, warn};
 use uuid::Uuid;
-
-use crate::error::{ConfigError, ConfigResult};
 
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
@@ -665,6 +674,92 @@ pub trait WbApi {
     ) -> impl Future<Output = WorterbuchResult<Vec<(String, (ValueEntry, bool))>>> + Send;
 
     fn entries(&self) -> impl Future<Output = WorterbuchResult<usize>> + Send;
+}
+
+pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
+    rx: &mut Lines<BufReader<R>>,
+    timeout: Option<Duration>,
+) -> ConnectionResult<Option<T>> {
+    let read = if let Some(timeout) = timeout {
+        tokio::time::timeout(timeout, rx.next_line()).await
+    } else {
+        Ok(rx.next_line().await)
+    };
+    match read {
+        Ok(Ok(None)) => {
+            warn!("No data received, connection closed by remote peer");
+            Ok(None)
+        }
+        Ok(Ok(Some(json))) => {
+            debug!("Received message: {json}");
+            let sm = serde_json::from_str(&json);
+            if let Err(e) = &sm {
+                error!("Error deserializing message '{json}': {e}")
+            }
+            Ok(sm?)
+        }
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => Err(ConnectionError::Timeout(Box::new(
+            "timeout while receiving message".to_owned(),
+        ))),
+    }
+}
+
+pub async fn write_line_and_flush(
+    msg: impl Serialize,
+    mut tx: impl AsyncWriteExt + Unpin,
+    send_timeout: Option<Duration>,
+    remote: impl Display,
+) -> ConnectionResult<()> {
+    let mut json = serde_json::to_string(&msg)?;
+    if json.contains('\n') {
+        return Err(ConnectionError::IoError(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid JSON: '{json}' contains line break"),
+        ))));
+    }
+    if json.trim().is_empty() {
+        return Err(ConnectionError::IoError(Box::new(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid JSON: '{json}' is empty"),
+        ))));
+    }
+
+    json.push('\n');
+    let bytes = json.as_bytes();
+
+    debug!("Sending message with timeout {send_timeout:?}: {json}");
+    trace!("Writing line …");
+    for chunk in bytes.chunks(1024) {
+        let mut written = 0;
+        while written < chunk.len() {
+            if let Some(send_timeout) = send_timeout {
+                written += timeout(send_timeout, tx.write(&chunk[written..]))
+                    .await
+                    .map_err(|_| {
+                        ConnectionError::Timeout(Box::new(format!(
+                            "timeout while sending tcp message to {remote}"
+                        )))
+                    })??;
+            } else {
+                written += tx.write(&chunk[written..]).await?;
+            }
+        }
+    }
+    trace!("Writing line done.");
+    trace!("Flushing channel …");
+    if let Some(send_timeout) = send_timeout {
+        timeout(send_timeout, tx.flush()).await.map_err(|_| {
+            ConnectionError::Timeout(Box::new(format!(
+                "timeout while sending tcp message to {remote}"
+            )))
+        })??;
+    } else {
+        tx.flush().await?;
+    }
+    trace!("Flushing channel done.");
+
+    Ok(())
 }
 
 mod macros {
