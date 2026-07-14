@@ -153,6 +153,23 @@ pub enum Interface {
     Local,
 }
 
+#[derive(Debug, Clone)]
+pub struct TraceData {
+    pub transaction_id: TransactionId,
+    pub client_id: ClientId,
+    pub interface: Interface,
+}
+
+impl TraceData {
+    pub fn new(client_id: ClientId, interface: Interface, transaction_id: TransactionId) -> Self {
+        TraceData {
+            transaction_id,
+            client_id,
+            interface,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Trace {
@@ -171,6 +188,17 @@ pub enum Trace {
     },
     #[serde(rename_all = "camelCase")]
     InternalAction(InternalAction),
+}
+
+impl Trace {
+    pub fn client_request(method: Method, trace_data: &TraceData) -> Self {
+        Trace::ClientRequest {
+            client_id: trace_data.client_id,
+            transaction_id: trace_data.transaction_id,
+            method,
+            interface: trace_data.interface.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

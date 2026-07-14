@@ -20,13 +20,14 @@
 use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     cluster::{
-        Mode, Servers, process_api_call,
+        ClusterStateChangeReceiver, ClusterStateChangeSender, Mode, Servers, process_api_call,
         protocol::{ClientWriteCommand, LeaderSyncMessage, StateSync},
         shutdown,
     },
     error::WorterbuchAppResult,
     forward_api_call, forward_to_followers,
     server::common::WbFunction,
+    worterbuch::SubscriptionFlags,
 };
 use miette::{Error, IntoDiagnostic, Result};
 use serde_json::json;
@@ -45,7 +46,7 @@ use tracing::{Level, debug, error, info, span};
 use worterbuch_common::{
     KeySegment, ValueEntry,
     protocol::{
-        ClientId, Interface, InternalAction, Method, PStateEvent, SYSTEM_TOPIC_CLIENTS,
+        Interface, InternalAction, Method, PStateEvent, SYSTEM_TOPIC_CLIENTS,
         SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
         Trace,
     },
@@ -79,13 +80,9 @@ pub(crate) async fn run(
         )
         .await?;
 
-    let mut client_write_txs: Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)> =
-        vec![];
+    let mut client_write_txs: Vec<(usize, ClusterStateChangeSender)> = vec![];
     let (follower_connected_tx, mut follower_connected_rx) = mpsc::channel::<
-        oneshot::Sender<(
-            StateSync,
-            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-        )>,
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
     >(config.channel_buffer_size);
 
     let mut tx_id = 0;
@@ -107,9 +104,7 @@ pub(crate) async fn run(
                 KeySegment::Wildcard,
                 SYSTEM_TOPIC_GRAVE_GOODS
             ),
-            true,
-            false,
-            false,
+            SubscriptionFlags::new(true, false, false),
         )
         .await?;
     let (mut last_will_rx, _) = worterbuch
@@ -123,9 +118,7 @@ pub(crate) async fn run(
                 KeySegment::Wildcard,
                 SYSTEM_TOPIC_LAST_WILL
             ),
-            true,
-            false,
-            false,
+            SubscriptionFlags::new(true, false, false),
         )
         .await?;
 
@@ -143,7 +136,7 @@ pub(crate) async fn run(
 
 async fn try_forward_grave_goods_change(
     recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     if let Some((e, _)) = recv {
@@ -195,7 +188,7 @@ async fn try_forward_grave_goods_change(
 
 async fn try_forward_last_will_change(
     recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     if let Some((e, _)) = recv {
@@ -249,7 +242,7 @@ async fn try_forward_last_will_change(
 async fn try_forward_api_call(
     recv: Option<WbFunction>,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
@@ -294,14 +287,9 @@ async fn try_forward_api_call(
 }
 
 async fn try_forward_follower_connected(
-    recv: Option<
-        oneshot::Sender<(
-            StateSync,
-            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-        )>,
-    >,
+    recv: Option<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     config: &Config,
     tx_id: &mut usize,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
@@ -328,12 +316,7 @@ async fn try_forward_follower_connected(
 async fn run_cluster_sync_port(
     subsys: SubsystemHandle,
     config: Config,
-    on_follower_connected: mpsc::Sender<
-        oneshot::Sender<(
-            StateSync,
-            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-        )>,
-    >,
+    on_follower_connected: mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
     port: u16,
 ) -> Result<()> {
     let ip = config
@@ -373,12 +356,7 @@ async fn accecpt_client(
     client: io::Result<(TcpStream, SocketAddr)>,
     subsys: &SubsystemHandle,
     config: &Config,
-    on_follower_connected: &mpsc::Sender<
-        oneshot::Sender<(
-            StateSync,
-            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-        )>,
-    >,
+    on_follower_connected: &mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
 ) -> ControlFlow<()> {
     match client {
         Ok(client) => {
@@ -396,12 +374,7 @@ async fn accecpt_client(
 async fn serve(
     subsys: &SubsystemHandle,
     client: (TcpStream, SocketAddr),
-    on_follower_connected: &mpsc::Sender<
-        oneshot::Sender<(
-            StateSync,
-            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-        )>,
-    >,
+    on_follower_connected: &mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
     config: Config,
 ) {
     info!("Follower {} connected.", client.1);
@@ -420,10 +393,7 @@ async fn forward_events_to_follower(
     subsys: SubsystemHandle,
     mut tcp_stream: TcpStream,
     follower: SocketAddr,
-    sync_rx: oneshot::Receiver<(
-        StateSync,
-        mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
-    )>,
+    sync_rx: oneshot::Receiver<(StateSync, ClusterStateChangeReceiver)>,
     config: Config,
 ) {
     let (state, mut commands) = match sync_rx.await {
@@ -448,7 +418,7 @@ async fn forward_events_to_follower(
     loop {
         select! {
             recv = commands.recv() => match recv {
-                Some((cmd, client_id, trace)) => if let Err(e) = write_line_and_flush(LeaderSyncMessage::Mut(cmd, client_id, trace), &mut tcp_stream, config.send_timeout, follower).await {
+                Some((cmd, client_id, trace)) => if let Err(e) = write_line_and_flush(LeaderSyncMessage::Mut((cmd, client_id, trace)), &mut tcp_stream, config.send_timeout, follower).await {
                     error!("Could not write command to follower: {e}");
                     break;
                 },

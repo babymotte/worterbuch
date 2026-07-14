@@ -17,19 +17,35 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::store::{SerializeableLockNode, StoreNode};
+use crate::{
+    cluster::ClusterStateChange,
+    store::{SerializeableLockNode, StoreNode},
+};
 use serde::{Deserialize, Serialize};
-use worterbuch_common::protocol::{
-    CasVersion, ClientId, ClientMessage, GraveGoods, Key, LastWill, RequestPattern, ServerMessage,
-    Trace, Value, Welcome,
+use worterbuch_common::{
+    Protocol,
+    protocol::{
+        CasVersion, ClientId, ClientMessage, GraveGoods, Interface, Key, LastWill, RequestPattern,
+        ServerMessage, Value, Welcome,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ProxyRequest {
-    ClientConnected,
-    ClientDisconnected(ClientId),
-    ClientRequest(ClientMessage),
+pub enum ProxyClientRequest {
+    Connected {
+        client_id: ClientId,
+        protocol: Protocol,
+    },
+    Disconnected {
+        client_id: ClientId,
+        protocol: Protocol,
+    },
+    Request {
+        client_id: ClientId,
+        msg: ClientMessage,
+        interface: Interface,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +53,7 @@ pub enum ProxyRequest {
 pub enum LeaderSyncMessage {
     Init(StateSync),
     ClientAccepted(Welcome),
-    Mut(ClientWriteCommand, ClientId, Trace),
+    Mut(ClusterStateChange),
     ClientResponse(ServerMessage),
 }
 

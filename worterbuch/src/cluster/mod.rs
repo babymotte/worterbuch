@@ -24,12 +24,21 @@ pub(crate) mod proxy;
 pub(crate) mod standalone;
 
 use crate::{
-    Config, Servers, error::WorterbuchAppResult, server::common::WbFunction, worterbuch::Worterbuch,
+    Config, Servers,
+    cluster::protocol::ClientWriteCommand,
+    error::WorterbuchAppResult,
+    server::common::WbFunction,
+    worterbuch::{SubscriptionFlags, Worterbuch},
 };
 use serde::Serialize;
+use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};
-use worterbuch_common::protocol::{InternalAction, Trace};
+use worterbuch_common::protocol::{ClientId, InternalAction, Trace, TraceData};
+
+pub type ClusterStateChange = (ClientWriteCommand, ClientId, Trace);
+pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
+pub type ClusterStateChangeSender = mpsc::Sender<ClusterStateChange>;
 
 #[derive(Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -51,7 +60,12 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
             tx.send(
                 worterbuch
-                    .set(key, value, client_id, transaction_id, interface, false)
+                    .set(
+                        key,
+                        value,
+                        false,
+                        TraceData::new(client_id, interface, transaction_id),
+                    )
                     .instrument(span)
                     .await,
             )
@@ -64,10 +78,8 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         key,
                         value,
                         version,
-                        client_id,
-                        transaction_id,
-                        interface,
                         false,
+                        TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
             )
@@ -76,7 +88,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
             tx.send(
                 worterbuch
-                    .spub_init(transaction_id, key, client_id, interface)
+                    .spub_init(key, TraceData::new(client_id, interface, transaction_id))
                     .await,
             )
             .ok();
@@ -88,7 +100,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
             tx.send(
                 worterbuch
-                    .publish(key, value, client_id, transaction_id, interface)
+                    .publish(
+                        key,
+                        value,
+                        TraceData::new(client_id, interface, transaction_id),
+                    )
                     .await,
             )
             .ok();
@@ -115,13 +131,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(
                 worterbuch
                     .subscribe(
-                        client_id,
-                        transaction_id,
-                        interface,
                         key,
-                        unique,
-                        live_only,
-                        send_traces,
+                        SubscriptionFlags::new(unique, live_only, send_traces),
+                        TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
             )
@@ -140,13 +152,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(
                 worterbuch
                     .psubscribe(
-                        client_id,
-                        transaction_id,
-                        interface,
                         pattern,
-                        unique,
-                        live_only,
-                        send_traces,
+                        SubscriptionFlags::new(unique, live_only, send_traces),
+                        TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
             )
@@ -155,7 +163,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::SubscribeLs(client_id, transaction_id, interface, parent, send_traces, tx) => {
             tx.send(
                 worterbuch
-                    .subscribe_ls(client_id, transaction_id, interface, parent, send_traces)
+                    .subscribe_ls(
+                        parent,
+                        send_traces,
+                        TraceData::new(client_id, interface, transaction_id),
+                    )
                     .await,
             )
             .ok();
@@ -163,7 +175,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Unsubscribe(client_id, transaction_id, interface, tx) => {
             tx.send(
                 worterbuch
-                    .unsubscribe(client_id, transaction_id, interface)
+                    .unsubscribe(TraceData::new(client_id, interface, transaction_id))
                     .await,
             )
             .ok();

@@ -44,7 +44,9 @@ pub mod telemetry;
 mod worterbuch;
 
 use crate::{
-    cluster::{follower, leader, protocol::ClientWriteCommand, proxy, standalone},
+    cluster::{
+        ClusterStateChangeSender, follower, leader, protocol::ClientWriteCommand, proxy, standalone,
+    },
     error::WorterbuchAppResult,
     server::{CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
     stats::track_stats,
@@ -292,7 +294,7 @@ async fn server_metadata(
 }
 
 async fn forward_api_call(
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     dead: &mut Vec<usize>,
     function: &WbFunction,
     filter_sys: bool,
@@ -395,7 +397,7 @@ async fn forward_to_followers(
     cmd: ClientWriteCommand,
     client_id: ClientId,
     trace: Trace,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
     dead: &mut Vec<usize>,
 ) {
     for (id, tx) in client_write_txs.iter() {

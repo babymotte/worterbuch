@@ -57,7 +57,7 @@ use worterbuch_common::{
         SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
         SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
         SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-        SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, Trace, TransactionId,
+        SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, Trace, TraceData, TransactionId,
     },
     topic,
 };
@@ -66,6 +66,22 @@ pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
 
 type Map<K, V> = LinkedHashMap<K, V>;
+
+pub struct SubscriptionFlags {
+    unique: bool,
+    live_only: bool,
+    send_traces: bool,
+}
+
+impl SubscriptionFlags {
+    pub fn new(unique: bool, live_only: bool, send_traces: bool) -> Self {
+        Self {
+            unique,
+            live_only,
+            send_traces,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct ClientInfo {
@@ -341,18 +357,12 @@ impl Worterbuch {
         &mut self,
         key: Key,
         value: Value,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
         force: bool,
+        trace_data: TraceData,
     ) -> WorterbuchResult<()> {
-        let cause = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::Set,
-            interface,
-        };
-        self.internal_set(key, value, client_id, cause, force).await
+        let cause = Trace::client_request(Method::Set, &trace_data);
+        self.internal_set(key, value, trace_data.client_id, cause, force)
+            .await
     }
 
     #[instrument(level = Level::TRACE, skip(self))]
@@ -399,19 +409,11 @@ impl Worterbuch {
         key: Key,
         value: Value,
         version: CasVersion,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
         force: bool,
+        trace_data: TraceData,
     ) -> WorterbuchResult<()> {
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::CSet,
-            interface,
-        };
-
-        self.internal_cset(key, value, version, client_id, trace, force)
+        let trace = Trace::client_request(Method::CSet, &trace_data);
+        self.internal_cset(key, value, version, trace_data.client_id, trace, force)
             .await
     }
 
@@ -460,15 +462,14 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn spub_init(
-        &mut self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
-        interface: Interface,
-    ) -> WorterbuchResult<()> {
-        check_for_read_only_key(&key, client_id)?;
-        self.store_key(client_id, transaction_id, key, interface);
+    pub async fn spub_init(&mut self, key: Key, trace_data: TraceData) -> WorterbuchResult<()> {
+        check_for_read_only_key(&key, trace_data.client_id)?;
+        self.store_key(
+            trace_data.client_id,
+            trace_data.transaction_id,
+            key,
+            trace_data.interface.clone(),
+        );
 
         Ok(())
     }
@@ -480,8 +481,16 @@ impl Worterbuch {
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
         if let Some((key, interface)) = self.lookup_key(client_id, transaction_id) {
-            self.publish(key, value, client_id, transaction_id, interface)
-                .await
+            self.publish(
+                key,
+                value,
+                TraceData {
+                    client_id,
+                    transaction_id,
+                    interface,
+                },
+            )
+            .await
         } else {
             Err(WorterbuchError::NoPubStream(transaction_id))
         }
@@ -491,17 +500,10 @@ impl Worterbuch {
         &mut self,
         key: Key,
         value: Value,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
+        trace_data: TraceData,
     ) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::Publish,
-            interface,
-        };
+        let trace = Trace::client_request(Method::Publish, &trace_data);
 
         self.notify_subscribers(&path, &key, &value, true, false, trace)
             .await;
@@ -516,28 +518,17 @@ impl Worterbuch {
 
     pub async fn subscribe(
         &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
         key: Key,
-        unique: bool,
-        live_only: bool,
-        send_traces: bool,
+        flags: SubscriptionFlags,
+        trace_data: TraceData,
     ) -> WorterbuchResult<Subscription> {
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::Subscribe,
-            interface,
-        };
+        let trace = Trace::client_request(Method::Subscribe, &trace_data);
         self.internal_subscribe(
-            client_id,
-            transaction_id,
+            trace_data.client_id,
+            trace_data.transaction_id,
             trace,
             key,
-            unique,
-            live_only,
-            send_traces,
+            flags,
         )
         .await
     }
@@ -548,9 +539,7 @@ impl Worterbuch {
         transaction_id: TransactionId,
         cause: Trace,
         key: Key,
-        unique: bool,
-        live_only: bool,
-        send_traces: bool,
+        flags: SubscriptionFlags,
     ) -> WorterbuchResult<Subscription> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
         let (tx, rx) = channel(self.config.channel_buffer_size);
@@ -559,12 +548,12 @@ impl Worterbuch {
             subscription.clone(),
             path.clone(),
             EventSender::State(tx.clone()),
-            unique,
-            send_traces,
+            flags.unique,
+            flags.send_traces,
         );
         self.subscribers.add_subscriber(&path, subscriber);
 
-        if !live_only {
+        if !flags.live_only {
             let matches = match self.get(&key) {
                 Ok(value) => Some(value),
                 Err(WorterbuchError::NoSuchValue(_)) => None,
@@ -636,28 +625,17 @@ impl Worterbuch {
 
     pub async fn psubscribe(
         &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
         pattern: RequestPattern,
-        unique: bool,
-        live_only: bool,
-        send_traces: bool,
+        flags: SubscriptionFlags,
+        trace_data: TraceData,
     ) -> WorterbuchResult<PSubscription> {
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::PSubscribe,
-            interface,
-        };
+        let trace = Trace::client_request(Method::PSubscribe, &trace_data);
         self.internal_psubscribe(
-            client_id,
-            transaction_id,
+            trace_data.client_id,
+            trace_data.transaction_id,
             trace,
             pattern,
-            unique,
-            live_only,
-            send_traces,
+            flags,
         )
         .await
     }
@@ -668,9 +646,7 @@ impl Worterbuch {
         transaction_id: TransactionId,
         cause: Trace,
         pattern: RequestPattern,
-        unique: bool,
-        live_only: bool,
-        send_traces: bool,
+        flags: SubscriptionFlags,
     ) -> WorterbuchResult<PSubscription> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
         let (tx, rx) = channel(self.config.channel_buffer_size);
@@ -679,11 +655,11 @@ impl Worterbuch {
             subscription.clone(),
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             EventSender::PState(tx.clone()),
-            unique,
-            send_traces,
+            flags.unique,
+            flags.send_traces,
         );
         self.subscribers.add_subscriber(&path, subscriber);
-        if !live_only {
+        if !flags.live_only {
             let matches = self.pget(&pattern)?;
             tx.send((PStateEvent::KeyValuePairs(matches), Some(cause.clone())))
                 .await
@@ -783,31 +759,24 @@ impl Worterbuch {
 
     pub async fn subscribe_ls(
         &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
         parent: Option<Key>,
         send_traces: bool,
+        trace_data: TraceData,
     ) -> WorterbuchResult<LsSubscription> {
+        let trace = Trace::client_request(Method::LsSubscribe, &trace_data);
         let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
         let path: Vec<RegularKeySegment> = parent
             .map(|p| p.split('/').map(ToOwned::to_owned).collect())
             .unwrap_or_default();
         let (tx, rx) = channel(self.config.channel_buffer_size);
-        let subscription = SubscriptionId::new(client_id, transaction_id);
+        let subscription = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
         let subscriber =
             LsSubscriber::new(subscription.clone(), path.clone(), tx.clone(), send_traces);
         self.store.add_ls_subscriber(&path, subscriber);
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::LsSubscribe,
-            interface,
-        };
         tx.send((children, Some(trace.clone())))
             .await
             .expect("rx is neither closed nor dropped");
-        let subscription_id = SubscriptionId::new(client_id, transaction_id);
+        let subscription_id = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
         self.ls_subscriptions.insert(subscription_id, path);
         debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
         Ok((rx, subscription))
@@ -898,20 +867,11 @@ impl Worterbuch {
         Ok(imported_values)
     }
 
-    pub async fn unsubscribe(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        interface: Interface,
-    ) -> WorterbuchResult<()> {
-        let subscription = SubscriptionId::new(client_id, transaction_id);
-        let trace = Trace::ClientRequest {
-            client_id,
-            transaction_id,
-            method: Method::Unsubscribe,
-            interface,
-        };
-        self.do_unsubscribe(&subscription, client_id, trace).await
+    pub async fn unsubscribe(&mut self, trace_data: TraceData) -> WorterbuchResult<()> {
+        let trace = Trace::client_request(Method::Unsubscribe, &trace_data);
+        let subscription = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
+        self.do_unsubscribe(&subscription, trace_data.client_id, trace)
+            .await
     }
 
     async fn do_unsubscribe(
@@ -1952,20 +1912,16 @@ mod test {
         wb.set(
             "hello/world".to_owned(),
             json!("test"),
-            INTERNAL_CLIENT_ID,
-            123,
-            Interface::Local,
             false,
+            TraceData::new(INTERNAL_CLIENT_ID, Interface::Local, 123),
         )
         .await
         .unwrap();
         wb.set(
             "$SYS/something".to_owned(),
             json!("this should not be exported"),
-            INTERNAL_CLIENT_ID,
-            321,
-            Interface::Protocol(Protocol::HTTP),
             false,
+            TraceData::new(INTERNAL_CLIENT_ID, Interface::Protocol(Protocol::HTTP), 321),
         )
         .await
         .unwrap();

@@ -182,7 +182,7 @@ async fn process_leader_message(
                 "already synced".to_owned(),
             ));
         }
-        LeaderSyncMessage::Mut(client_write_command, _, trace) => match client_write_command {
+        LeaderSyncMessage::Mut((client_write_command, _, trace)) => match client_write_command {
             ClientWriteCommand::Set(key, value, force) => {
                 worterbuch
                     .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
