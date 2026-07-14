@@ -357,9 +357,9 @@ mod test {
             }),
         };
 
-        let json = r#"{"transactionId":1,"deleted":2}"#;
+        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientId":"$CLID","transactionId":1,"method":"delete","interface":"local"}}}"#.replace("$CLID", &client_id.to_string());
 
-        assert_eq!(json, &serde_json::to_string(&state).unwrap());
+        assert_eq!(json, serde_json::to_string(&state).unwrap());
     }
 
     #[test]
@@ -386,9 +386,9 @@ mod test {
             }),
         };
 
-        let json = r#"{"transactionId":1,"deleted":2}"#;
+        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientId":"$CLID","transactionId":1,"method":"delete","interface":{"protocol":"TCP"}}}}"#.replace("$CLID", &client_id.to_string());
 
-        assert_eq!(state, serde_json::from_str(json).unwrap());
+        assert_eq!(state, serde_json::from_str(&json).unwrap());
     }
 
     #[test]
@@ -409,15 +409,15 @@ mod test {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
-            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected(
+            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected {
                 client_id,
-                Protocol::TCP,
-            ))),
+                protocol: Protocol::TCP,
+            })),
         };
 
-        let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;
+        let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}],"trace":{"internalAction":{"clientDisconnected":{"clientId":"$CLID","protocol":"TCP"}}}}"#.replace("$CLID", &client_id.to_string());
 
-        assert_eq!(json, &serde_json::to_string(&pstate).unwrap());
+        assert_eq!(json, serde_json::to_string(&pstate).unwrap());
     }
 
     #[test]
@@ -438,14 +438,20 @@ mod test {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
-            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected(
-                client_id,
-                Protocol::HTTP,
-            ))),
+            trace: Some(Trace::InternalAction(
+                InternalAction::SubscriptionsChanged {
+                    cause: Box::new(Trace::ClientRequest {
+                        client_id,
+                        transaction_id: 123,
+                        method: Method::Unsubscribe,
+                        interface: Interface::Local,
+                    }),
+                },
+            )),
         };
 
-        let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;
+        let json = r#"{"deleted":[{"key":"$SYS/clients","value":2}],"requestPattern":"$SYS/clients","trace":{"internalAction":{"subscriptionsChanged":{"cause":{"clientRequest":{"clientId":"$CLID","interface":"local","method":"unsubscribe","transactionId":123}}}}},"transactionId":1}"#.replace("$CLID", &client_id.to_string());
 
-        assert_eq!(pstate, serde_json::from_str(json).unwrap());
+        assert_eq!(pstate, serde_json::from_str(&json).unwrap());
     }
 }

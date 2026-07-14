@@ -156,17 +156,20 @@ pub enum Interface {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Trace {
+    #[serde(rename_all = "camelCase")]
     ClientRequest {
         client_id: ClientId,
         transaction_id: TransactionId,
         method: Method,
         interface: Interface,
     },
+    #[serde(rename_all = "camelCase")]
     ProtocolSwitch {
         client_id: ClientId,
         protocol_version: ProtocolMajorVersion,
         interface: Interface,
     },
+    #[serde(rename_all = "camelCase")]
     InternalAction(InternalAction),
 }
 
@@ -191,12 +194,32 @@ pub enum Method {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum InternalAction {
-    ClientConnected(ClientId, Protocol),
-    ClientDisconnected(ClientId, Protocol),
-    SubscriptionsChanged { cause: Box<Trace> },
-    LocksChanged { cause: Box<Trace> },
-    ApplyingGraveGoods { cause: Box<Trace> },
-    ApplyingLastWill { cause: Box<Trace> },
+    #[serde(rename_all = "camelCase")]
+    ClientConnected {
+        client_id: ClientId,
+        protocol: Protocol,
+    },
+    #[serde(rename_all = "camelCase")]
+    ClientDisconnected {
+        client_id: ClientId,
+        protocol: Protocol,
+    },
+    #[serde(rename_all = "camelCase")]
+    SubscriptionsChanged {
+        cause: Box<Trace>,
+    },
+    #[serde(rename_all = "camelCase")]
+    LocksChanged {
+        cause: Box<Trace>,
+    },
+    #[serde(rename_all = "camelCase")]
+    ApplyingGraveGoods {
+        cause: Box<Trace>,
+    },
+    #[serde(rename_all = "camelCase")]
+    ApplyingLastWill {
+        cause: Box<Trace>,
+    },
     Startup,
     LeaderSync,
     Shutdown,

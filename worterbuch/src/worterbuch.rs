@@ -1363,8 +1363,10 @@ impl Worterbuch {
 
         self.clients.insert(client_id, ClientInfo::new());
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
-        let trace =
-            Trace::InternalAction(InternalAction::ClientConnected(client_id, protocol.clone()));
+        let trace = Trace::InternalAction(InternalAction::ClientConnected {
+            client_id,
+            protocol: protocol.clone(),
+        });
         if let Err(e) = self
             .internal_set(
                 client_count_key,
@@ -1559,7 +1561,10 @@ impl Worterbuch {
             );
         }
 
-        let trace = Trace::InternalAction(InternalAction::ClientDisconnected(client_id, protocol));
+        let trace = Trace::InternalAction(InternalAction::ClientDisconnected {
+            client_id,
+            protocol,
+        });
 
         if let Some(keys) = self.store.unlock_all(client_id).await
             && self.config.extended_monitoring

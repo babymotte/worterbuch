@@ -61,9 +61,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    #[serde(skip_serializing_if = "Option::is_none", default = "Default::default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agents: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none", default = "Default::default")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target_rate: Option<usize>,
 }
 

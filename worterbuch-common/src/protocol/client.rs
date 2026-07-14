@@ -200,16 +200,16 @@ pub struct PSubscribe {
     /// The pattern to subscribe to
     pub request_pattern: RequestPattern,
     /// Indicate whether all or only unique values should be received
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unique: Option<UniqueFlag>,
     /// Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub live_only: Option<LiveOnlyFlag>,
     /// Indicate whether the server should include trace data in the subscription events
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub send_traces: Option<SendTracesFlag>,
     /// Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_events: Option<AggregationDuration>,
 }
 
@@ -387,7 +387,7 @@ mod test {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"liveOnly":true,"aggregateEvents":10}}"#
+            r#"{"pSubscribe":{"transactionId":1,"requestPattern":"hello/world","unique":true,"liveOnly":true,"sendTraces":true,"aggregateEvents":10}}"#
         );
     }
 
@@ -423,7 +423,7 @@ mod test {
                 unique: Some(true),
                 aggregate_events: Some(10),
                 live_only: Some(false),
-                send_traces: Some(false),
+                send_traces: None,
             })
         );
     }
