@@ -27,3 +27,7 @@ Proxy instances that just re-connected to a new leader must try to re-acquire an
 Normally grave goods and last wills are stored in the persistence file so that in case of a server restart (which implies that all client connections break) they can all be triggered before the server accepts any new connections. In a scenario where there are proxy instances a server restart does not necessarily mean that any client connections break, so triggering grave goods and las wills on the new leader is probably not desired. It would probably make sense to add a config entry that allows skipping the trigger of grave goods and last wills on server start iff the server is starting in leader mode.
 
 I'm also considering making grave goods and last wills a first class citizen in the client protocol since a breaking change in the client protocol will be introduced by the locking API anyway
+
+### Authentication
+
+Currently leader sync ports do not require authentication since it is assumed they will not be exposed to the public. However with proxy mode it may become necessary to expose the sync port on a public network which means the sync port would provide unauthorized access to protected data.
