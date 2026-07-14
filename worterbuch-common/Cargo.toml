@@ -42,7 +42,7 @@ pprof_util = { workspace = true, optional = true }
 random_word = { workspace = true, optional = true }
 redb = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
-schemars = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, features = ["derive", "uuid1"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_repr = { workspace = true }
@@ -54,7 +54,7 @@ tokio = { workspace = true, features = ["sync", "io-util", "time", "macros"] }
 tokio-tungstenite-wasm = { workspace = true, optional = true }
 tracing = { workspace = true }
 tungstenite = { workspace = true, optional = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

@@ -179,7 +179,9 @@ async fn serve(
 
     info!("Client disconnected: {client_id} ({remote_addr:?})");
 
-    worterbuch.disconnected(client_id, None).await?;
+    worterbuch
+        .disconnected(client_id, Protocol::UNIX, None)
+        .await?;
 
     Ok(())
 }

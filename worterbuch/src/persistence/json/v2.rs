@@ -17,6 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use worterbuch_common::protocol::{InternalAction, Trace};
+
 use super::*;
 
 #[instrument(skip(config) fields(version=2), err)]
@@ -56,9 +58,16 @@ pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
             }
         }
     {
-        wb.apply_grave_goods(grave_goods_last_will.grave_goods)
-            .await;
-        wb.apply_last_wills(grave_goods_last_will.last_will).await;
+        wb.apply_grave_goods(
+            grave_goods_last_will.grave_goods,
+            Trace::InternalAction(InternalAction::Startup),
+        )
+        .await;
+        wb.apply_last_wills(
+            grave_goods_last_will.last_will,
+            Trace::InternalAction(InternalAction::Startup),
+        )
+        .await;
     }
 
     Ok(wb)

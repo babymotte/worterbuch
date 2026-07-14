@@ -26,8 +26,9 @@ pub mod protocol;
 use crate::{
     error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
     protocol::{
-        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, PStateEvent,
-        ProtocolMajorVersion, ProtocolVersion, RequestPattern, StateEvent, TransactionId, Value,
+        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
+        PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag,
+        StateEvent, Trace, TransactionId, UniqueFlag, Value,
     },
 };
 use error::WorterbuchResult;
@@ -62,6 +63,17 @@ pub type WorterbuchVersionSegment = u32;
 pub type WorterbuchMajorVersion = WorterbuchVersionSegment;
 pub type WorterbuchMinorVersion = WorterbuchVersionSegment;
 pub type WorterbuchPatchVersion = WorterbuchVersionSegment;
+
+pub type SubscriptionReceiver = mpsc::Receiver<(StateEvent, Option<Trace>)>;
+pub type PSubscriptionReceiver = mpsc::Receiver<(PStateEvent, Option<Trace>)>;
+pub type LsSubscriptionReceiver = mpsc::Receiver<(Vec<RegularKeySegment>, Option<Trace>)>;
+pub type SubscriptionSender = mpsc::Sender<(StateEvent, Option<Trace>)>;
+pub type PSubscriptionSender = mpsc::Sender<(PStateEvent, Option<Trace>)>;
+pub type LsSubscriptionSender = mpsc::Sender<(Vec<RegularKeySegment>, Option<Trace>)>;
+
+pub type Subscription = (SubscriptionReceiver, SubscriptionId);
+pub type PSubscription = (PSubscriptionReceiver, SubscriptionId);
+pub type LsSubscription = (LsSubscriptionReceiver, SubscriptionId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorterbuchVersion(
@@ -204,7 +216,7 @@ macro_rules! topic {
     }};
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize, JsonSchema)]
 pub enum Protocol {
     TCP,
     WS,
@@ -439,6 +451,7 @@ pub trait WbApi {
 
     fn set(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         value: Value,
         client_id: ClientId,
@@ -446,6 +459,7 @@ pub trait WbApi {
 
     fn cset(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         value: Value,
         version: CasVersion,
@@ -454,18 +468,21 @@ pub trait WbApi {
 
     fn lock(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn acquire_lock(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<oneshot::Receiver<()>>> + Send;
 
     fn release_lock(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
@@ -484,7 +501,13 @@ pub trait WbApi {
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
-    fn publish(&self, key: Key, value: Value) -> impl Future<Output = WorterbuchResult<()>> + Send;
+    fn publish(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        value: Value,
+        client_id: ClientId,
+    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn ls(
         &self,
@@ -501,27 +524,28 @@ pub trait WbApi {
         client_id: ClientId,
         transaction_id: TransactionId,
         key: Key,
-        unique: bool,
-        live_only: bool,
-    ) -> impl Future<Output = WorterbuchResult<(mpsc::Receiver<StateEvent>, SubscriptionId)>> + Send;
+        unique: UniqueFlag,
+        live_only: LiveOnlyFlag,
+        send_traces: SendTracesFlag,
+    ) -> impl Future<Output = WorterbuchResult<Subscription>> + Send;
 
     fn psubscribe(
         &self,
         client_id: ClientId,
         transaction_id: TransactionId,
         pattern: RequestPattern,
-        unique: bool,
-        live_only: bool,
-    ) -> impl Future<Output = WorterbuchResult<(mpsc::Receiver<PStateEvent>, SubscriptionId)>> + Send;
+        unique: UniqueFlag,
+        live_only: LiveOnlyFlag,
+        send_traces: SendTracesFlag,
+    ) -> impl Future<Output = WorterbuchResult<PSubscription>> + Send;
 
     fn subscribe_ls(
         &self,
         client_id: ClientId,
         transaction_id: TransactionId,
         parent: Option<Key>,
-    ) -> impl Future<
-        Output = WorterbuchResult<(mpsc::Receiver<Vec<RegularKeySegment>>, SubscriptionId)>,
-    > + Send;
+        send_traces: SendTracesFlag,
+    ) -> impl Future<Output = WorterbuchResult<LsSubscription>> + Send;
 
     fn unsubscribe(
         &self,
@@ -537,12 +561,14 @@ pub trait WbApi {
 
     fn delete(
         &self,
+        transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<Value>> + Send;
 
     fn pdelete(
         &self,
+        transaction_id: TransactionId,
         pattern: RequestPattern,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
@@ -563,6 +589,7 @@ pub trait WbApi {
     fn disconnected(
         &self,
         client_id: ClientId,
+        protocol: Protocol,
         remote_addr: Option<SocketAddr>,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
@@ -573,6 +600,8 @@ pub trait WbApi {
 
     fn import(
         &self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
         json: String,
     ) -> impl Future<Output = WorterbuchResult<Vec<(String, (ValueEntry, bool))>>> + Send;
 

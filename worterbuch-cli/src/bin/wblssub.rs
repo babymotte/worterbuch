@@ -42,6 +42,9 @@ struct Args {
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
+    /// Request that the server send trace data for subscription events
+    #[arg(short, long)]
+    trace: bool,
     /// Wörterbuch paths to be subscribed to in the form "PATH1 PATH2 PATH3  …". When omitted, paths will be read from stdin. When reading paths from stdin, one path is expected per line.
     paths: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
@@ -89,6 +92,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         })
         .unwrap_or(config.servers);
     let json = args.json;
+    let send_traces = args.trace;
     let paths = args.paths;
 
     let (wb, mut on_disconnect) = connect(config).await?;
@@ -116,7 +120,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(path ) => {
-                    wb.subscribe_ls_async(if path.is_empty() {None} else {Some(path)}).await?;
+                    wb.subscribe_ls_async(if path.is_empty() {None} else {Some(path)}, send_traces).await?;
                 },
                 None => done = true,
             },

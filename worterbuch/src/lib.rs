@@ -58,8 +58,8 @@ use tracing::{debug, info};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
     protocol::{
-        SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-        SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Value,
+        ClientId, Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
     },
     topic,
 };
@@ -95,7 +95,7 @@ async fn do_run_worterbuch(
 ) -> WorterbuchAppResult<()> {
     let channel_buffer_size = config.channel_buffer_size;
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
-    let api = CloneableWbApi::new(api_tx, config.clone());
+    let api = CloneableWbApi::new(api_tx, config.clone(), Interface::Local);
 
     wb_api_created(&api, tx);
 
@@ -142,15 +142,7 @@ async fn do_run_worterbuch(
             .await?;
         }
         ClusterRole::Follower { leader_address } => {
-            follower::run(
-                &subsys,
-                worterbuch,
-                api_rx,
-                config,
-                web_server,
-                leader_address,
-            )
-            .await?;
+            follower::run(&subsys, worterbuch, config, web_server, leader_address).await?;
         }
         ClusterRole::Proxy { leader_addresses } => {
             proxy::run(
@@ -187,7 +179,15 @@ async fn set_instance_name(
     if let Some(name) = config.instance_name.as_ref() {
         let key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_NAME);
         let value = json!(name);
-        worterbuch.set(key, value, INTERNAL_CLIENT_ID, true).await?;
+        worterbuch
+            .internal_set(
+                key,
+                value,
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::Startup),
+                true,
+            )
+            .await?;
     }
     Ok(())
 }
@@ -276,11 +276,12 @@ async fn server_metadata(
     subsys: &SubsystemHandle,
 ) -> Result<(), error::WorterbuchAppError> {
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
             serde_json::to_value(SUPPORTED_PROTOCOL_VERSIONS)
                 .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::Startup),
             true,
         )
         .await?;
@@ -291,84 +292,118 @@ async fn server_metadata(
 }
 
 async fn forward_api_call(
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     dead: &mut Vec<usize>,
     function: &WbFunction,
     filter_sys: bool,
 ) {
-    if let Some(cmd) = match function {
+    if let Some((cmd, client_id, trace)) = match function {
         WbFunction::Get(_, _)
         | WbFunction::CGet(_, _)
-        | WbFunction::SPubInit(_, _, _, _)
+        | WbFunction::SPubInit(_, _, _, _, _)
         | WbFunction::SPub(_, _, _, _)
-        | WbFunction::Publish(_, _, _)
+        | WbFunction::Publish(_, _, _, _, _, _)
         | WbFunction::Ls(_, _)
         | WbFunction::PLs(_, _)
         | WbFunction::PGet(_, _)
-        | WbFunction::Subscribe(_, _, _, _, _, _)
-        | WbFunction::PSubscribe(_, _, _, _, _, _)
-        | WbFunction::SubscribeLs(_, _, _, _)
-        | WbFunction::Unsubscribe(_, _, _)
+        | WbFunction::Subscribe(_, _, _, _, _, _, _, _)
+        | WbFunction::PSubscribe(_, _, _, _, _, _, _, _)
+        | WbFunction::SubscribeLs(_, _, _, _, _, _)
+        | WbFunction::Unsubscribe(_, _, _, _)
         | WbFunction::UnsubscribeLs(_, _, _)
         | WbFunction::Connected(_, _, _, _)
-        | WbFunction::ProtocolSwitched(_, _)
-        | WbFunction::Disconnected(_, _)
+        | WbFunction::ProtocolSwitched(_, _, _)
+        | WbFunction::Disconnected(_, _, _)
         | WbFunction::Config(_)
         | WbFunction::Export(_, _)
-        | WbFunction::Import(_, _)
+        | WbFunction::Import(_, _, _, _, _)
         | WbFunction::Len(_)
-        | WbFunction::Lock(_, _, _)
-        | WbFunction::AcquireLock(_, _, _)
-        | WbFunction::ReleaseLock(_, _, _) => None,
-        WbFunction::Set(key, value, _, _, _) => {
+        | WbFunction::Lock(_, _, _, _, _)
+        | WbFunction::AcquireLock(_, _, _, _, _)
+        | WbFunction::ReleaseLock(_, _, _, _, _) => None,
+        WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                Some(ClientWriteCommand::Set(
-                    key.to_owned(),
-                    value.to_owned(),
-                    false,
-                ))
+                let cmd = ClientWriteCommand::Set(key.to_owned(), value.to_owned(), false);
+                let client_id = *client_id;
+                let trace = Trace::ClientRequest {
+                    client_id,
+                    transaction_id: *transaction_id,
+                    method: Method::Set,
+                    interface: interface.to_owned(),
+                };
+                Some((cmd, client_id, trace))
             } else {
                 None
             }
         }
-        WbFunction::CSet(key, value, version, _, _) => {
+        WbFunction::CSet(transaction_id, interface, key, value, version, client_id, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                Some(ClientWriteCommand::CSet(
+                let cmd = ClientWriteCommand::CSet(
                     key.to_owned(),
                     value.to_owned(),
                     version.to_owned(),
                     false,
-                ))
+                );
+                let client_id = *client_id;
+                let trace = Trace::ClientRequest {
+                    client_id,
+                    transaction_id: *transaction_id,
+                    method: Method::CSet,
+                    interface: interface.to_owned(),
+                };
+                Some((cmd, client_id, trace))
             } else {
                 None
             }
         }
-        WbFunction::Delete(key, _, _) => {
+        WbFunction::Delete(transaction_id, interface, key, client_id, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                Some(ClientWriteCommand::Delete(key.to_owned()))
+                let cmd = ClientWriteCommand::Delete(key.to_owned());
+                let client_id = *client_id;
+                let trace = Trace::ClientRequest {
+                    client_id,
+                    transaction_id: *transaction_id,
+                    method: Method::Delete,
+                    interface: interface.to_owned(),
+                };
+                Some((cmd, client_id, trace))
             } else {
                 None
             }
         }
-        WbFunction::PDelete(pattern, _, _) => {
+        WbFunction::PDelete(transaction_id, interface, pattern, client_id, _) => {
             if !filter_sys || !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                Some(ClientWriteCommand::PDelete(pattern.to_owned()))
+                let cmd = ClientWriteCommand::PDelete(pattern.to_owned());
+                let client_id = *client_id;
+                let trace = Trace::ClientRequest {
+                    client_id,
+                    transaction_id: *transaction_id,
+                    method: Method::PDelete,
+                    interface: interface.to_owned(),
+                };
+                Some((cmd, client_id, trace))
             } else {
                 None
             }
         }
     } {
-        forward_to_followers(cmd, client_write_txs, dead).await;
+        forward_to_followers(cmd, client_id, trace, client_write_txs, dead).await;
     }
 }
 
 async fn forward_to_followers(
     cmd: ClientWriteCommand,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    client_id: ClientId,
+    trace: Trace,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     dead: &mut Vec<usize>,
 ) {
     for (id, tx) in client_write_txs.iter() {
-        if tx.send(cmd.clone()).await.is_err() {
+        if tx
+            .send((cmd.clone(), client_id, trace.clone()))
+            .await
+            .is_err()
+        {
             dead.push(*id);
         }
     }

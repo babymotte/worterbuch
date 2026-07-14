@@ -50,6 +50,17 @@ struct Args {
     /// Only receive live values, i.e. do not receive a callback for the state currently stored on the broker.
     #[arg(short, long)]
     live_only: bool,
+    /// Request that the server send trace data for subscription events
+    #[arg(short, long)]
+    trace: bool,
+    /// Set an aggregation period for subscription events
+    #[arg(
+        short = 'g',
+        long,
+        conflicts_with = "trace",
+        value_name = "MILLISECONDS"
+    )]
+    aggregate: Option<u64>,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
@@ -102,6 +113,8 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let patterns = args.patterns;
     let unique = args.unique;
     let live_only = args.live_only;
+    let send_traces = args.trace;
+    let aggregation_period = args.aggregate.map(Duration::from_millis);
 
     let (wb, mut on_disconnect) = connect(config).await?;
     if let Some(name) = args.name {
@@ -128,7 +141,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key) => {
-                    wb.psubscribe_async(key, unique,live_only, Some(Duration::from_millis(1))).await?;
+                    wb.psubscribe_async(key, unique, live_only, send_traces, aggregation_period).await?;
                 },
                 None => done = true,
             },

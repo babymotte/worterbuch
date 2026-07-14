@@ -26,9 +26,9 @@ use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, ValueEntry,
     protocol::{
-        ClientId, GraveGoods, Key, LastWill, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
-        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-        SYSTEM_TOPIC_STORE,
+        ClientId, GraveGoods, InternalAction, Key, LastWill, SYSTEM_TOPIC_CLIENTS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, Trace,
     },
     topic,
 };
@@ -296,10 +296,11 @@ pub(crate) async fn restore(
     };
 
     wb.set_persistent_storage(persistent_storage);
-    wb.set(
+    wb.internal_set(
         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_MODE),
         json!(config.persistence_mode),
         INTERNAL_CLIENT_ID,
+        Trace::InternalAction(InternalAction::Startup),
         true,
     )
     .await?;

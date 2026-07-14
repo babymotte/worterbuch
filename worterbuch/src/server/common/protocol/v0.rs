@@ -9,14 +9,14 @@ use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
 use worterbuch_common::{
-    AuthCheck, Privilege, SubscriptionId, WbApi,
+    AuthCheck, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
     protocol::{
-        Ack, AuthorizationRequest, ClientMessage, Delete, Err, Get, Ls, LsState, PDelete, PGet,
-        PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit, ServerMessage, Set, State,
-        StateEvent, Subscribe, SubscribeLs, Unsubscribe, UnsubscribeLs,
+        Ack, AuthorizationRequest, ClientId, ClientMessage, Delete, Err, ErrorCode, Get, Ls,
+        LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
+        ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
+        UnsubscribeLs,
     },
-    protocol::{ClientId, ErrorCode, TransactionId},
 };
 
 #[derive(Clone)]
@@ -309,6 +309,7 @@ impl V0 {
         let response = State {
             transaction_id: msg.transaction_id,
             event: StateEvent::Value(value),
+            trace: None,
         };
 
         self.tx
@@ -337,6 +338,7 @@ impl V0 {
             transaction_id: msg.transaction_id,
             request_pattern: msg.request_pattern,
             event: PStateEvent::KeyValuePairs(values),
+            trace: None,
         };
 
         self.tx
@@ -356,7 +358,7 @@ impl V0 {
     pub async fn set(&self, msg: Set) -> WorterbuchResult<()> {
         if let Err(e) = self
             .worterbuch
-            .set(msg.key, msg.value, self.client_id)
+            .set(msg.transaction_id, msg.key, msg.value, self.client_id)
             .await
         {
             self.handle_store_error(e, msg.transaction_id).await?;
@@ -435,7 +437,11 @@ impl V0 {
     }
 
     pub async fn publish(&self, msg: Publish) -> WorterbuchResult<()> {
-        if let Err(e) = self.worterbuch.publish(msg.key, msg.value).await {
+        if let Err(e) = self
+            .worterbuch
+            .publish(msg.transaction_id, msg.key, msg.value, self.client_id)
+            .await
+        {
             self.handle_store_error(e, msg.transaction_id).await?;
             return Ok(());
         }
@@ -466,6 +472,7 @@ impl V0 {
                 msg.key.clone(),
                 msg.unique.unwrap_or(false),
                 msg.live_only.unwrap_or(false),
+                msg.send_traces.unwrap_or(false),
             )
             .await
         {
@@ -497,10 +504,11 @@ impl V0 {
         let client_id = self.client_id;
         spawn(async move {
             debug!("Receiving events for subscription {subscription:?} …");
-            while let Some(event) = rx.recv().await {
+            while let Some((event, trace)) = rx.recv().await {
                 let state = State {
                     transaction_id,
                     event,
+                    trace,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
                     error!("Error sending STATE message to client: {e}");
@@ -533,6 +541,7 @@ impl V0 {
                 msg.request_pattern.clone(),
                 msg.unique.unwrap_or(false),
                 live_only,
+                msg.send_traces.unwrap_or(false),
             )
             .await
         {
@@ -641,7 +650,11 @@ impl V0 {
     }
 
     pub async fn delete(&self, msg: Delete) -> WorterbuchResult<()> {
-        let value = match self.worterbuch.delete(msg.key, self.client_id).await {
+        let value = match self
+            .worterbuch
+            .delete(msg.transaction_id, msg.key, self.client_id)
+            .await
+        {
             Ok(it) => it,
             Err(e) => {
                 self.handle_store_error(e, msg.transaction_id).await?;
@@ -652,6 +665,7 @@ impl V0 {
         let response = State {
             transaction_id: msg.transaction_id,
             event: StateEvent::Deleted(value),
+            trace: None,
         };
 
         self.tx
@@ -670,7 +684,11 @@ impl V0 {
     pub async fn pdelete(&self, msg: PDelete) -> WorterbuchResult<()> {
         let deleted = match self
             .worterbuch
-            .pdelete(msg.request_pattern.clone(), self.client_id)
+            .pdelete(
+                msg.transaction_id,
+                msg.request_pattern.clone(),
+                self.client_id,
+            )
             .await
         {
             Ok(it) => it,
@@ -688,6 +706,7 @@ impl V0 {
             } else {
                 deleted
             }),
+            trace: None,
         };
 
         self.tx
@@ -715,6 +734,7 @@ impl V0 {
         let response = LsState {
             transaction_id: msg.transaction_id,
             children,
+            trace: None,
         };
 
         self.tx
@@ -742,6 +762,7 @@ impl V0 {
         let response = LsState {
             transaction_id: msg.transaction_id,
             children,
+            trace: None,
         };
 
         self.tx
@@ -760,7 +781,12 @@ impl V0 {
     pub async fn subscribe_ls(&self, msg: SubscribeLs) -> WorterbuchResult<bool> {
         let (mut rx, subscription) = match self
             .worterbuch
-            .subscribe_ls(self.client_id, msg.transaction_id, msg.parent.clone())
+            .subscribe_ls(
+                self.client_id,
+                msg.transaction_id,
+                msg.parent.clone(),
+                msg.send_traces.unwrap_or(false),
+            )
             .await
         {
             Ok(it) => it,
@@ -792,10 +818,11 @@ impl V0 {
 
         spawn(async move {
             debug!("Receiving events for ls subscription {subscription:?} …");
-            while let Some(children) = rx.recv().await {
+            while let Some((children, trace)) = rx.recv().await {
                 let state = LsState {
                     transaction_id,
                     children,
+                    trace,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
                     error!("Error sending STATE message to client: {e}");
@@ -845,18 +872,19 @@ impl V0 {
 }
 
 async fn forward_loop(
-    mut rx: mpsc::Receiver<PStateEvent>,
+    mut rx: PSubscriptionReceiver,
     transaction_id: TransactionId,
     request_pattern: String,
     subscription: SubscriptionId,
     client_sub: mpsc::Sender<ServerMessage>,
 ) {
     debug!("Receiving events for subscription {subscription:?} …");
-    while let Some(event) = rx.recv().await {
+    while let Some((event, trace)) = rx.recv().await {
         let event = PState {
             transaction_id,
             request_pattern: request_pattern.clone(),
             event,
+            trace,
         };
         if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
             error!("Error sending STATE message to client: {e}");
@@ -866,7 +894,7 @@ async fn forward_loop(
 }
 
 async fn aggregate_loop(
-    mut rx: mpsc::Receiver<PStateEvent>,
+    mut rx: PSubscriptionReceiver,
     subscription: SubscriptionInfo,
     client_sub: mpsc::Sender<ServerMessage>,
     client_id: ClientId,
@@ -874,11 +902,12 @@ async fn aggregate_loop(
     if !subscription.live_only {
         debug!("Immediately forwarding current state to new subscription {subscription:?} …");
 
-        if let Some(event) = rx.recv().await {
+        if let Some((event, trace)) = rx.recv().await {
             let event = PState {
                 transaction_id: subscription.transaction_id,
                 request_pattern: subscription.request_pattern.clone(),
                 event,
+                trace,
             };
 
             if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
@@ -901,7 +930,7 @@ async fn aggregate_loop(
         client_id,
     );
 
-    while let Some(event) = rx.recv().await {
+    while let Some((event, _)) = rx.recv().await {
         if let Err(e) = aggregator.aggregate(event).await {
             error!("Error sending STATE message to client: {e}");
             break;

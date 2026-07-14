@@ -18,7 +18,7 @@
  */
 
 use crate::protocol::{
-    CasVersion, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
+    CasVersion, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern, Trace,
     TransactionId, Value, Version,
 };
 use schemars::JsonSchema;
@@ -68,6 +68,8 @@ pub struct PState {
     pub request_pattern: RequestPattern,
     #[serde(flatten)]
     pub event: PStateEvent,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub trace: Option<Trace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -133,6 +135,8 @@ pub struct State {
     pub transaction_id: TransactionId,
     #[serde(flatten)]
     pub event: StateEvent,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub trace: Option<Trace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -218,6 +222,8 @@ impl fmt::Display for Handshake {
 pub struct LsState {
     pub transaction_id: TransactionId,
     pub children: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub trace: Option<Trace>,
 }
 
 impl fmt::Display for LsState {
@@ -320,22 +326,35 @@ mod test {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::{
+        Protocol,
+        protocol::{Interface, InternalAction, Method},
+    };
     use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn state_is_serialized_correctly() {
         let state = State {
             transaction_id: 1,
             event: StateEvent::Value(json!(2)),
+            trace: None,
         };
 
         let json = r#"{"transactionId":1,"value":2}"#;
 
         assert_eq!(json, &serde_json::to_string(&state).unwrap());
 
+        let client_id = Uuid::new_v4();
         let state = State {
             transaction_id: 1,
             event: StateEvent::Deleted(json!(2)),
+            trace: Some(Trace::ClientRequest {
+                client_id,
+                method: Method::Delete,
+                transaction_id: 1,
+                interface: Interface::Local,
+            }),
         };
 
         let json = r#"{"transactionId":1,"deleted":2}"#;
@@ -348,15 +367,23 @@ mod test {
         let state = State {
             transaction_id: 1,
             event: StateEvent::Value(json!(2)),
+            trace: None,
         };
 
         let json = r#"{"transactionId":1,"value":2}"#;
 
         assert_eq!(state, serde_json::from_str(json).unwrap());
 
+        let client_id = Uuid::new_v4();
         let state = State {
             transaction_id: 1,
             event: StateEvent::Deleted(json!(2)),
+            trace: Some(Trace::ClientRequest {
+                client_id,
+                method: Method::Delete,
+                transaction_id: 1,
+                interface: Interface::Protocol(Protocol::TCP),
+            }),
         };
 
         let json = r#"{"transactionId":1,"deleted":2}"#;
@@ -370,16 +397,22 @@ mod test {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::KeyValuePairs(vec![KeyValuePair::of("$SYS/clients", 2)]),
+            trace: None,
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","keyValuePairs":[{"key":"$SYS/clients","value":2}]}"#;
 
         assert_eq!(json, &serde_json::to_string(&pstate).unwrap());
 
+        let client_id = Uuid::new_v4();
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
+            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected(
+                client_id,
+                Protocol::TCP,
+            ))),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;
@@ -393,16 +426,22 @@ mod test {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::KeyValuePairs(vec![KeyValuePair::of("$SYS/clients", 2)]),
+            trace: None,
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","keyValuePairs":[{"key":"$SYS/clients","value":2}]}"#;
 
         assert_eq!(pstate, serde_json::from_str(json).unwrap());
 
+        let client_id = Uuid::new_v4();
         let pstate = PState {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
+            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected(
+                client_id,
+                Protocol::HTTP,
+            ))),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}]}"#;

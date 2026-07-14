@@ -17,16 +17,28 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::store::{SerializeableLockNode, StoreNode};
 use serde::{Deserialize, Serialize};
-use worterbuch_common::protocol::{CasVersion, GraveGoods, Key, LastWill, RequestPattern, Value};
+use worterbuch_common::protocol::{
+    CasVersion, ClientId, ClientMessage, GraveGoods, Key, LastWill, RequestPattern, ServerMessage,
+    Trace, Value, Welcome,
+};
 
-use crate::store::StoreNode;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProxyRequest {
+    ClientConnected,
+    ClientDisconnected(ClientId),
+    ClientRequest(ClientMessage),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LeaderSyncMessage {
     Init(StateSync),
-    Mut(ClientWriteCommand),
+    ClientAccepted(Welcome),
+    Mut(ClientWriteCommand, ClientId, Trace),
+    ClientResponse(ServerMessage),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,4 +52,9 @@ pub enum ClientWriteCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StateSync(pub StoreNode, pub GraveGoods, pub LastWill);
+pub struct StateSync {
+    pub store: StoreNode,
+    pub locks: SerializeableLockNode,
+    pub grave_goods: GraveGoods,
+    pub last_will: LastWill,
+}

@@ -121,7 +121,13 @@ impl V1 {
         if let Err(e) = self
             .v0
             .worterbuch
-            .cset(msg.key, msg.value, msg.version, self.v0.client_id)
+            .cset(
+                msg.transaction_id,
+                msg.key,
+                msg.value,
+                msg.version,
+                self.v0.client_id,
+            )
             .await
         {
             self.v0.handle_store_error(e, msg.transaction_id).await?;
@@ -146,7 +152,12 @@ impl V1 {
     }
 
     pub async fn lock(&self, msg: Lock) -> WorterbuchResult<()> {
-        if let Err(e) = self.v0.worterbuch.lock(msg.key, self.v0.client_id).await {
+        if let Err(e) = self
+            .v0
+            .worterbuch
+            .lock(msg.transaction_id, msg.key, self.v0.client_id)
+            .await
+        {
             self.v0.handle_store_error(e, msg.transaction_id).await?;
             return Ok(());
         }
@@ -172,7 +183,7 @@ impl V1 {
         let rx = match self
             .v0
             .worterbuch
-            .acquire_lock(msg.key, self.v0.client_id)
+            .acquire_lock(msg.transaction_id, msg.key, self.v0.client_id)
             .await
         {
             Err(e) => {
@@ -214,7 +225,7 @@ impl V1 {
         if let Err(e) = self
             .v0
             .worterbuch
-            .release_lock(msg.key, self.v0.client_id)
+            .release_lock(msg.transaction_id, msg.key, self.v0.client_id)
             .await
         {
             self.v0.handle_store_error(e, msg.transaction_id).await?;

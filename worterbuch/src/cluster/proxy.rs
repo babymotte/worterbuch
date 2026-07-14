@@ -47,7 +47,7 @@ use tracing::{debug, info, warn};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
     error::ConfigError,
-    protocol::{SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT},
+    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
     receive_msg, topic, while_select,
 };
 
@@ -80,10 +80,11 @@ pub(crate) async fn run(
     info!("Running in PROXY mode. Leaders: {:?}", leader_addresses);
 
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
             json!(Mode::Proxy),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::Startup),
             true,
         )
         .await?;
@@ -201,12 +202,13 @@ async fn initial_sync(
     // TODO create diff with current state store
     // TODO send out diff to all clients
 
-    worterbuch.reset_store(state_sync.0).await?;
+    worterbuch.reset_store(state_sync.store).await?;
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
             json!(Mode::Follower),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::LeaderSync),
             true,
         )
         .await?;

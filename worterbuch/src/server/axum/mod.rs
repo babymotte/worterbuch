@@ -79,12 +79,12 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing::{debug, debug_span, error, info, instrument, warn};
+use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
     AuthCheck, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::{ClientId, Key, KeyValuePairs},
-    protocol::{ServerInfo, StateEvent},
+    protocol::{ClientId, Key, KeyValuePairs, ServerInfo, StateEvent},
 };
 
 async fn ws(
@@ -226,7 +226,9 @@ async fn import(
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    wb.import(json).await.map(|_| ().into_response())
+    wb.import(Uuid::new_v4(), 1, json)
+        .await
+        .map(|_| ().into_response())
 }
 
 fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
@@ -321,7 +323,7 @@ async fn set(
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
     let client_id = ClientId::new_v4();
-    wb.set(key, value, client_id).await?;
+    wb.set(1, key, value, client_id).await?;
     Ok(Json("Ok"))
 }
 
@@ -334,7 +336,7 @@ async fn publish(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
-    wb.publish(key, value).await?;
+    wb.publish(1, key, value, Uuid::new_v4()).await?;
     Ok(Json("Ok"))
 }
 
@@ -347,7 +349,7 @@ async fn delete_value(
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
     let client_id = ClientId::new_v4();
-    Ok(Json(wb.delete(key, client_id).await?))
+    Ok(Json(wb.delete(1, key, client_id).await?))
 }
 
 async fn pdelete(
@@ -359,7 +361,7 @@ async fn pdelete(
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
     let client_id = ClientId::new_v4();
-    Ok(Json(wb.pdelete(pattern, client_id).await?))
+    Ok(Json(wb.pdelete(1, pattern, client_id).await?))
 }
 
 async fn ls(
@@ -404,10 +406,21 @@ async fn subscribe(
         .get("liveOnly")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
+    let send_traces: bool = params
+        .get("sendTraces")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
     let wb_unsub = wb.clone();
 
     let (mut rx, _) = wb
-        .subscribe(client_id, transaction_id, key, unique, live_only)
+        .subscribe(
+            client_id,
+            transaction_id,
+            key,
+            unique,
+            live_only,
+            send_traces,
+        )
         .await?;
     let (sse_tx, sse_rx) = mpsc::channel(100);
 
@@ -416,7 +429,7 @@ async fn subscribe(
         'recv_loop: loop {
             select! {
                 _ = sse_tx.closed() => break 'recv_loop,
-                recv = rx.recv() => if let Some(state) = recv {
+                recv = rx.recv() => if let Some((state, _)) = recv {
                     match state {
                         StateEvent::Value(value) => {
                             match serde_json::to_string(&value) {
@@ -447,7 +460,10 @@ async fn subscribe(
         if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -477,10 +493,21 @@ async fn psubscribe(
         .get("liveOnly")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
+    let send_traces: bool = params
+        .get("sendTraces")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
     let wb_unsub = wb.clone();
 
     let (mut rx, _) = wb
-        .psubscribe(client_id, transaction_id, key, unique, live_only)
+        .psubscribe(
+            client_id,
+            transaction_id,
+            key,
+            unique,
+            live_only,
+            send_traces,
+        )
         .await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
@@ -511,7 +538,10 @@ async fn psubscribe(
         if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -521,6 +551,7 @@ async fn psubscribe(
 }
 
 async fn subscribels_root(
+    Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
     ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
@@ -531,63 +562,14 @@ async fn subscribels_root(
     let client_id = ClientId::new_v4();
     connected(&wb, client_id, remote_addr).await?;
     let transaction_id = 1;
-    let wb_unsub = wb.clone();
-
-    let (mut rx, _) = wb.subscribe_ls(client_id, transaction_id, None).await?;
-
-    let (sse_tx, sse_rx) = mpsc::channel(100);
-
-    // TODO listen for shutdown requests
-    spawn(async move {
-        'recv_loop: loop {
-            select! {
-                _ = sse_tx.closed() => break 'recv_loop,
-                recv = rx.recv() => if let Some(children) = recv {
-                    match serde_json::to_string(&children) {
-                        Ok(json) => {
-                            if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
-                                error!("Error forwarding state event: {e}");
-                                break 'recv_loop;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Error serializiing state event: {e}");
-                            break 'recv_loop;
-                        }
-                    }
-                } else {
-                    break 'recv_loop;
-                }
-            }
-        }
-        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
-            error!("Error stopping subscription: {e}");
-        }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
-            error!("Error disconnecting client: {e}");
-        }
-    });
-    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
-        sse_rx,
-    )))
-}
-
-async fn subscribels(
-    Path(parent): Path<Key>,
-    State(wb): State<CloneableWbApi>,
-    privileges: Option<JwtClaims>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
-) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
-    if let Some(privileges) = privileges {
-        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
-    }
-    let client_id = ClientId::new_v4();
-    connected(&wb, client_id, remote_addr).await?;
-    let transaction_id = 1;
+    let send_traces: bool = params
+        .get("sendTraces")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
     let wb_unsub = wb.clone();
 
     let (mut rx, _) = wb
-        .subscribe_ls(client_id, transaction_id, Some(parent))
+        .subscribe_ls(client_id, transaction_id, None, send_traces)
         .await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
@@ -618,7 +600,73 @@ async fn subscribels(
         if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub.disconnected(client_id, Some(remote_addr)).await {
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
+            .await
+        {
+            error!("Error disconnecting client: {e}");
+        }
+    });
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(
+        sse_rx,
+    )))
+}
+
+async fn subscribels(
+    Path(parent): Path<Key>,
+    Query(params): Query<HashMap<String, String>>,
+    State(wb): State<CloneableWbApi>,
+    privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
+    if let Some(privileges) = privileges {
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
+    }
+    let client_id = ClientId::new_v4();
+    connected(&wb, client_id, remote_addr).await?;
+    let transaction_id = 1;
+    let send_traces: bool = params
+        .get("sendTraces")
+        .map(|it| it.to_lowercase() != "false")
+        .unwrap_or(false);
+    let wb_unsub = wb.clone();
+
+    let (mut rx, _) = wb
+        .subscribe_ls(client_id, transaction_id, Some(parent), send_traces)
+        .await?;
+
+    let (sse_tx, sse_rx) = mpsc::channel(100);
+
+    // TODO listen for shutdown requests
+    spawn(async move {
+        'recv_loop: loop {
+            select! {
+                _ = sse_tx.closed() => break 'recv_loop,
+                recv = rx.recv() => if let Some(children) = recv {
+                    match serde_json::to_string(&children) {
+                        Ok(json) => {
+                            if let Err(e) = sse_tx.send(Event::default().json_data(json)).await {
+                                error!("Error forwarding state event: {e}");
+                                break 'recv_loop;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error serializiing state event: {e}");
+                            break 'recv_loop;
+                        }
+                    }
+                } else {
+                    break 'recv_loop;
+                }
+            }
+        }
+        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+            error!("Error stopping subscription: {e}");
+        }
+        if let Err(e) = wb_unsub
+            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
+            .await
+        {
             error!("Error disconnecting client: {e}");
         }
     });

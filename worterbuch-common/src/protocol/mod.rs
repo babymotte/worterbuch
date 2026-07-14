@@ -10,6 +10,8 @@ use uuid::Uuid;
 pub use client::*;
 pub use server::*;
 
+use crate::Protocol;
+
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
 pub const SYSTEM_TOPIC_NAME: &str = "name";
@@ -47,6 +49,7 @@ pub type ProtocolMajorVersion = ProtocolVersionSegment;
 pub type ProtocolVersions = Vec<ProtocolVersion>;
 pub type UniqueFlag = bool;
 pub type LiveOnlyFlag = bool;
+pub type SendTracesFlag = bool;
 pub type QuietFlag = bool;
 pub type AggregationDuration = u64;
 pub type AuthToken = String;
@@ -141,6 +144,62 @@ impl fmt::Display for ProtocolVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}", self.0, self.1)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Interface {
+    Protocol(Protocol),
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Trace {
+    ClientRequest {
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        method: Method,
+        interface: Interface,
+    },
+    ProtocolSwitch {
+        client_id: ClientId,
+        protocol_version: ProtocolMajorVersion,
+        interface: Interface,
+    },
+    InternalAction(InternalAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Method {
+    Set,
+    CSet,
+    Publish,
+    Delete,
+    PDelete,
+    Import,
+    Subscribe,
+    PSubscribe,
+    LsSubscribe,
+    Unsubscribe,
+    Lock,
+    AcquireLock,
+    ReleaseLock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum InternalAction {
+    ClientConnected(ClientId, Protocol),
+    ClientDisconnected(ClientId, Protocol),
+    SubscriptionsChanged { cause: Box<Trace> },
+    LocksChanged { cause: Box<Trace> },
+    ApplyingGraveGoods { cause: Box<Trace> },
+    ApplyingLastWill { cause: Box<Trace> },
+    Startup,
+    LeaderSync,
+    Shutdown,
 }
 
 #[cfg(test)]

@@ -26,7 +26,6 @@ use crate::{
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
     persistence::unlock_persistence,
-    server::common::WbFunction,
 };
 use serde_json::json;
 use std::ops::ControlFlow;
@@ -34,20 +33,18 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
     select,
-    sync::mpsc,
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    error::{ConnectionResult, WorterbuchError},
-    protocol::{SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT},
+    error::ConnectionResult,
+    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
     receive_msg, topic, while_select,
 };
 
 pub(crate) async fn run(
     subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
-    mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     web_server: Option<SubsystemHandle>,
     leader_address: String,
@@ -62,10 +59,11 @@ pub(crate) async fn run(
     info!("Running in FOLLOWER mode. Leader: {}", leader_address,);
 
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
             json!(Mode::Follower),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::Startup),
             true,
         )
         .await?;
@@ -112,7 +110,6 @@ pub(crate) async fn run(
         _ = subsys.shutdown_requested() => break,
         _ = persistence_interval.tick() => try_flush(&mut worterbuch).await?,
         recv = receive_msg(&mut lines, None) => try_process_leader_message(recv, &mut worterbuch).await?,
-        recv = api_rx.recv() => try_process_api_call(recv, &mut worterbuch).await?,
     }
 
     shutdown(
@@ -144,19 +141,6 @@ pub(crate) async fn try_process_leader_message(
     }
 }
 
-async fn try_process_api_call(
-    recv: Option<WbFunction>,
-    worterbuch: &mut Worterbuch,
-) -> WorterbuchAppResult<ControlFlow<()>> {
-    match recv {
-        Some(function) => {
-            process_api_call(worterbuch, function).await;
-            Ok(ControlFlow::Continue(()))
-        }
-        None => Ok(ControlFlow::Break(())),
-    }
-}
-
 async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFlow<()>> {
     debug!("Follower persistence interval triggered");
     worterbuch.flush().await?;
@@ -167,12 +151,13 @@ async fn initial_sync(
     state_sync: StateSync,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<()> {
-    worterbuch.reset_store(state_sync.0).await?;
+    worterbuch.reset_store(state_sync.store).await?;
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
             json!(Mode::Follower),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::LeaderSync),
             true,
         )
         .await?;
@@ -197,23 +182,36 @@ async fn process_leader_message(
                 "already synced".to_owned(),
             ));
         }
-        LeaderSyncMessage::Mut(client_write_command) => match client_write_command {
+        LeaderSyncMessage::Mut(client_write_command, _, trace) => match client_write_command {
             ClientWriteCommand::Set(key, value, force) => {
-                worterbuch.set(key, value, INTERNAL_CLIENT_ID, force).await
+                worterbuch
+                    .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
+                    .await
             }
             ClientWriteCommand::CSet(key, value, versions, force) => {
                 worterbuch
-                    .cset(key, value, versions, INTERNAL_CLIENT_ID, force)
+                    .internal_cset(key, value, versions, INTERNAL_CLIENT_ID, trace, force)
                     .await
             }
-            ClientWriteCommand::Delete(key) => {
-                worterbuch.delete(key, INTERNAL_CLIENT_ID).await.map(|_| ())
-            }
+            ClientWriteCommand::Delete(key) => worterbuch
+                .internal_delete(key, INTERNAL_CLIENT_ID, trace)
+                .await
+                .map(|_| ()),
             ClientWriteCommand::PDelete(pattern) => worterbuch
-                .pdelete(pattern, INTERNAL_CLIENT_ID)
+                .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace)
                 .await
                 .map(|_| ()),
         },
+        LeaderSyncMessage::ClientResponse(_) => {
+            return Err(crate::error::WorterbuchAppError::ClusterError(
+                "leader should never send a ClientResponse to a follower".to_owned(),
+            ));
+        }
+        LeaderSyncMessage::ClientAccepted(_) => {
+            return Err(crate::error::WorterbuchAppError::ClusterError(
+                "leader should never send a ClientAccepted to a follower".to_owned(),
+            ));
+        }
     };
 
     if let Err(e) = res {
@@ -221,111 +219,4 @@ async fn process_leader_message(
     }
 
     Ok(())
-}
-
-async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
-    match function {
-        WbFunction::Get(key, tx) => {
-            tx.send(worterbuch.get(&key)).ok();
-        }
-        WbFunction::CGet(key, tx) => {
-            tx.send(worterbuch.cget(&key)).ok();
-        }
-        WbFunction::Set(_, _, _, tx, _) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::CSet(_, _, _, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::SPubInit(_, _, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::SPub(_, _, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::Publish(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::Ls(parent, tx) => {
-            tx.send(worterbuch.ls(&parent)).ok();
-        }
-        WbFunction::PLs(parent, tx) => {
-            tx.send(worterbuch.pls(&parent)).ok();
-        }
-        WbFunction::PGet(pattern, tx) => {
-            tx.send(worterbuch.pget(&pattern)).ok();
-        }
-        WbFunction::Subscribe(client_id, transaction_id, key, unique, live_only, tx) => {
-            tx.send(
-                worterbuch
-                    .subscribe(client_id, transaction_id, key, unique, live_only)
-                    .await,
-            )
-            .ok();
-        }
-        WbFunction::PSubscribe(client_id, transaction_id, pattern, unique, live_only, tx) => {
-            tx.send(
-                worterbuch
-                    .psubscribe(client_id, transaction_id, pattern, unique, live_only)
-                    .await,
-            )
-            .ok();
-        }
-        WbFunction::SubscribeLs(client_id, transaction_id, parent, tx) => {
-            tx.send(
-                worterbuch
-                    .subscribe_ls(client_id, transaction_id, parent)
-                    .await,
-            )
-            .ok();
-        }
-        WbFunction::Unsubscribe(client_id, transaction_id, tx) => {
-            tx.send(worterbuch.unsubscribe(client_id, transaction_id).await)
-                .ok();
-        }
-        WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
-            tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id))
-                .ok();
-        }
-        WbFunction::Lock(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::AcquireLock(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::ReleaseLock(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::Delete(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::PDelete(_, _, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::Connected(client_id, remote_addr, protocol, tx) => {
-            let res = worterbuch
-                .connected(client_id, remote_addr, &protocol)
-                .await;
-            tx.send(res).ok();
-        }
-        WbFunction::ProtocolSwitched(client_id, protocol) => {
-            worterbuch.protocol_switched(client_id, protocol).await;
-        }
-        WbFunction::Disconnected(client_id, remote_addr) => {
-            worterbuch.disconnected(client_id, remote_addr).await.ok();
-        }
-        WbFunction::Config(tx) => {
-            tx.send(worterbuch.config().clone()).ok();
-        }
-        WbFunction::Export(tx, span) => {
-            _ = span.enter();
-            worterbuch.export_for_persistence(tx);
-        }
-        WbFunction::Import(_, tx) => {
-            tx.send(Err(WorterbuchError::NotLeader)).ok();
-        }
-        WbFunction::Len(tx) => {
-            tx.send(worterbuch.len()).ok();
-        }
-    }
 }

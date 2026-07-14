@@ -19,7 +19,7 @@
 
 use crate::protocol::{
     AggregationDuration, AuthToken, Key, LiveOnlyFlag, ProtocolVersionSegment, QuietFlag,
-    RequestPattern, TransactionId, UniqueFlag, Value,
+    RequestPattern, SendTracesFlag, TransactionId, UniqueFlag, Value,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -186,6 +186,9 @@ pub struct Subscribe {
     /// Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub live_only: Option<LiveOnlyFlag>,
+    /// Indicate whether the server should include trace data in the subscription events
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub send_traces: Option<SendTracesFlag>,
 }
 
 /// A message sent by a client to subscribe to values of all keys matching the provided pattern
@@ -202,6 +205,9 @@ pub struct PSubscribe {
     /// Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub live_only: Option<LiveOnlyFlag>,
+    /// Indicate whether the server should include trace data in the subscription events
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub send_traces: Option<SendTracesFlag>,
     /// Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub aggregate_events: Option<AggregationDuration>,
@@ -269,6 +275,9 @@ pub struct SubscribeLs {
     /// The parent partial key for which to list sub-key segments
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parent: Option<Key>,
+    /// Indicate whether the server should include trace data in the subscription events
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub send_traces: Option<SendTracesFlag>,
 }
 
 /// A message sent by a client to request the cancellation of an ls subscription
@@ -354,6 +363,7 @@ mod test {
             unique: Some(true),
             aggregate_events: None,
             live_only: None,
+            send_traces: None,
         });
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -371,6 +381,7 @@ mod test {
             unique: Some(true),
             aggregate_events: Some(10),
             live_only: Some(true),
+            send_traces: Some(true),
         });
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -394,6 +405,7 @@ mod test {
                 unique: Some(true),
                 aggregate_events: None,
                 live_only: None,
+                send_traces: None,
             })
         );
     }
@@ -411,6 +423,7 @@ mod test {
                 unique: Some(true),
                 aggregate_events: Some(10),
                 live_only: Some(false),
+                send_traces: Some(false),
             })
         );
     }

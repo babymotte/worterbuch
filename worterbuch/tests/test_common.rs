@@ -195,6 +195,7 @@ fn assert_equals(client: &mut Client, key_value_pairs: &[KeyValuePair]) {
         let ServerMessage::State(State {
             transaction_id,
             event,
+            trace: None,
         }) = response
         else {
             panic!("expected State message, but got {:?}", response);

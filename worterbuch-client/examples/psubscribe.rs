@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let (wb2, _, _) = connect_with_default_config().await?;
 
     let (mut sub, _) = wb1
-        .psubscribe::<Value>(topic!("some", "thing", "?"), true, false, None)
+        .psubscribe::<Value>(topic!("some", "thing", "?"), true, false, false, None)
         .await?;
 
     spawn(async move {

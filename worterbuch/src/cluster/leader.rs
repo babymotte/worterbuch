@@ -44,10 +44,10 @@ use tosub::SubsystemHandle;
 use tracing::{Level, debug, error, info, span};
 use worterbuch_common::{
     KeySegment, ValueEntry,
-    protocol::PStateEvent,
     protocol::{
-        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
-        SYSTEM_TOPIC_ROOT,
+        ClientId, Interface, InternalAction, Method, PStateEvent, SYSTEM_TOPIC_CLIENTS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+        Trace,
     },
     topic, while_select, write_line_and_flush,
 };
@@ -70,17 +70,22 @@ pub(crate) async fn run(
     info!("Running in LEADER mode.");
 
     worterbuch
-        .set(
+        .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
             json!(Mode::Leader),
             INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::Startup),
             true,
         )
         .await?;
 
-    let mut client_write_txs: Vec<(usize, mpsc::Sender<ClientWriteCommand>)> = vec![];
+    let mut client_write_txs: Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)> =
+        vec![];
     let (follower_connected_tx, mut follower_connected_rx) = mpsc::channel::<
-        oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
+        oneshot::Sender<(
+            StateSync,
+            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+        )>,
     >(config.channel_buffer_size);
 
     let mut tx_id = 0;
@@ -92,9 +97,10 @@ pub(crate) async fn run(
     });
 
     let (mut grave_goods_rx, _) = worterbuch
-        .psubscribe(
+        .internal_psubscribe(
             INTERNAL_CLIENT_ID,
             0,
+            Trace::InternalAction(InternalAction::Startup),
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -103,12 +109,14 @@ pub(crate) async fn run(
             ),
             true,
             false,
+            false,
         )
         .await?;
     let (mut last_will_rx, _) = worterbuch
-        .psubscribe(
+        .internal_psubscribe(
             INTERNAL_CLIENT_ID,
             0,
+            Trace::InternalAction(InternalAction::Startup),
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -116,6 +124,7 @@ pub(crate) async fn run(
                 SYSTEM_TOPIC_LAST_WILL
             ),
             true,
+            false,
             false,
         )
         .await?;
@@ -133,11 +142,11 @@ pub(crate) async fn run(
 }
 
 async fn try_forward_grave_goods_change(
-    recv: Option<PStateEvent>,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    recv: Option<(PStateEvent, Option<Trace>)>,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
-    if let Some(e) = recv {
+    if let Some((e, _)) = recv {
         debug!("Forwarding grave goods change: {e:?}");
         match e {
             PStateEvent::KeyValuePairs(kvps) => {
@@ -147,6 +156,8 @@ async fn try_forward_grave_goods_change(
                         client_write_txs,
                         dead,
                         &WbFunction::Set(
+                            0,
+                            Interface::Local,
                             kvp.key,
                             kvp.value,
                             INTERNAL_CLIENT_ID,
@@ -163,7 +174,13 @@ async fn try_forward_grave_goods_change(
                     forward_api_call(
                         client_write_txs,
                         dead,
-                        &WbFunction::Delete(kvp.key, INTERNAL_CLIENT_ID, oneshot::channel().0),
+                        &WbFunction::Delete(
+                            0,
+                            Interface::Local,
+                            kvp.key,
+                            INTERNAL_CLIENT_ID,
+                            oneshot::channel().0,
+                        ),
                         false,
                     )
                     .await;
@@ -177,11 +194,11 @@ async fn try_forward_grave_goods_change(
 }
 
 async fn try_forward_last_will_change(
-    recv: Option<PStateEvent>,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    recv: Option<(PStateEvent, Option<Trace>)>,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
-    if let Some(e) = recv {
+    if let Some((e, _)) = recv {
         debug!("Forwarding last will change: {e:?}");
         match e {
             PStateEvent::KeyValuePairs(kvps) => {
@@ -191,6 +208,8 @@ async fn try_forward_last_will_change(
                         client_write_txs,
                         dead,
                         &WbFunction::Set(
+                            0,
+                            Interface::Local,
                             kvp.key,
                             kvp.value,
                             INTERNAL_CLIENT_ID,
@@ -207,7 +226,13 @@ async fn try_forward_last_will_change(
                     forward_api_call(
                         client_write_txs,
                         dead,
-                        &WbFunction::Delete(kvp.key, INTERNAL_CLIENT_ID, oneshot::channel().0),
+                        &WbFunction::Delete(
+                            0,
+                            Interface::Local,
+                            kvp.key,
+                            INTERNAL_CLIENT_ID,
+                            oneshot::channel().0,
+                        ),
                         false,
                     )
                     .await;
@@ -224,13 +249,17 @@ async fn try_forward_last_will_change(
 async fn try_forward_api_call(
     recv: Option<WbFunction>,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
-        Some(WbFunction::Import(json, tx)) => {
+        Some(WbFunction::Import(transaction_id, client_id, interface, json, tx)) => {
             let (tx_int, rx_int) = oneshot::channel();
-            process_api_call(worterbuch, WbFunction::Import(json, tx_int)).await;
+            process_api_call(
+                worterbuch,
+                WbFunction::Import(transaction_id, client_id, interface.clone(), json, tx_int),
+            )
+            .await;
             let imported_values = rx_int.await??;
 
             for (key, (value, changed)) in &imported_values {
@@ -243,7 +272,13 @@ async fn try_forward_api_call(
                             ClientWriteCommand::Set(key.to_owned(), value, true)
                         }
                     };
-                    forward_to_followers(cmd, client_write_txs, dead).await;
+                    let trace = Trace::ClientRequest {
+                        client_id,
+                        transaction_id,
+                        method: Method::Import,
+                        interface: interface.clone(),
+                    };
+                    forward_to_followers(cmd, client_id, trace, client_write_txs, dead).await;
                 }
             }
             tx.send(Ok(imported_values)).ok();
@@ -259,23 +294,28 @@ async fn try_forward_api_call(
 }
 
 async fn try_forward_follower_connected(
-    recv: Option<oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>>,
+    recv: Option<
+        oneshot::Sender<(
+            StateSync,
+            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+        )>,
+    >,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, mpsc::Sender<ClientWriteCommand>)>,
+    client_write_txs: &mut Vec<(usize, mpsc::Sender<(ClientWriteCommand, ClientId, Trace)>)>,
     config: &Config,
     tx_id: &mut usize,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
         Some(state_tx) => {
             let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
-            let (current_state, grave_goods, last_will) = worterbuch.export();
-            if state_tx
-                .send((
-                    StateSync(current_state, grave_goods, last_will),
-                    client_write_rx,
-                ))
-                .is_ok()
-            {
+            let (current_state, locks, grave_goods, last_will) = worterbuch.export_with_locks();
+            let state_sync = StateSync {
+                store: current_state,
+                locks,
+                grave_goods,
+                last_will,
+            };
+            if state_tx.send((state_sync, client_write_rx)).is_ok() {
                 client_write_txs.push((*tx_id, client_write_tx));
                 *tx_id += 1;
             }
@@ -289,7 +329,10 @@ async fn run_cluster_sync_port(
     subsys: SubsystemHandle,
     config: Config,
     on_follower_connected: mpsc::Sender<
-        oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
+        oneshot::Sender<(
+            StateSync,
+            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+        )>,
     >,
     port: u16,
 ) -> Result<()> {
@@ -331,7 +374,10 @@ async fn accecpt_client(
     subsys: &SubsystemHandle,
     config: &Config,
     on_follower_connected: &mpsc::Sender<
-        oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
+        oneshot::Sender<(
+            StateSync,
+            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+        )>,
     >,
 ) -> ControlFlow<()> {
     match client {
@@ -351,7 +397,10 @@ async fn serve(
     subsys: &SubsystemHandle,
     client: (TcpStream, SocketAddr),
     on_follower_connected: &mpsc::Sender<
-        oneshot::Sender<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
+        oneshot::Sender<(
+            StateSync,
+            mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+        )>,
     >,
     config: Config,
 ) {
@@ -371,7 +420,10 @@ async fn forward_events_to_follower(
     subsys: SubsystemHandle,
     mut tcp_stream: TcpStream,
     follower: SocketAddr,
-    sync_rx: oneshot::Receiver<(StateSync, mpsc::Receiver<ClientWriteCommand>)>,
+    sync_rx: oneshot::Receiver<(
+        StateSync,
+        mpsc::Receiver<(ClientWriteCommand, ClientId, Trace)>,
+    )>,
     config: Config,
 ) {
     let (state, mut commands) = match sync_rx.await {
@@ -396,7 +448,7 @@ async fn forward_events_to_follower(
     loop {
         select! {
             recv = commands.recv() => match recv {
-                Some(cmd) => if let Err(e) = write_line_and_flush(LeaderSyncMessage::Mut(cmd), &mut tcp_stream, config.send_timeout, follower).await {
+                Some((cmd, client_id, trace)) => if let Err(e) = write_line_and_flush(LeaderSyncMessage::Mut(cmd, client_id, trace), &mut tcp_stream, config.send_timeout, follower).await {
                     error!("Could not write command to follower: {e}");
                     break;
                 },

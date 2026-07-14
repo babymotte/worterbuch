@@ -21,7 +21,10 @@ use super::*;
 use crate::persistence::{TIMESTAMP_FILE_NAME, is_persistence_locked};
 use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
-use worterbuch_common::WbApi;
+use worterbuch_common::{
+    WbApi,
+    protocol::{InternalAction, Trace},
+};
 
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
@@ -233,9 +236,16 @@ pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
             .await
         }
     } {
-        wb.apply_grave_goods(grave_goods_last_will.grave_goods)
-            .await;
-        wb.apply_last_wills(grave_goods_last_will.last_will).await;
+        wb.apply_grave_goods(
+            grave_goods_last_will.grave_goods,
+            Trace::InternalAction(InternalAction::Startup),
+        )
+        .await;
+        wb.apply_last_wills(
+            grave_goods_last_will.last_will,
+            Trace::InternalAction(InternalAction::Startup),
+        )
+        .await;
     }
 
     Ok(wb)

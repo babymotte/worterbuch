@@ -395,7 +395,7 @@ async fn client(
     let key = topic!("speedtest/throughput/client", id, "offset");
 
     let (mut rx, _) = wb
-        .subscribe::<u64>(key.clone(), false, true)
+        .subscribe::<u64>(key.clone(), false, true, false)
         .await
         .into_diagnostic()
         .context("Failed to subscribe to agent key.")?;

@@ -19,11 +19,11 @@
 
 use hashbrown::{HashMap, hash_map::Entry};
 use miette::{IntoDiagnostic, Result, miette};
-use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
 use worterbuch_common::{
-    KeySegment, RegularKeySegment, SubscriptionId,
-    protocol::{PStateEvent, StateEvent},
+    KeySegment, LsSubscriptionSender, PSubscriptionSender, RegularKeySegment, SubscriptionId,
+    SubscriptionSender,
+    protocol::{PStateEvent, StateEvent, Trace},
 };
 
 type Subs = Vec<Subscriber>;
@@ -31,8 +31,8 @@ type Tree = HashMap<KeySegment, Node>;
 
 #[derive(Clone, Debug)]
 pub enum EventSender {
-    State(Sender<StateEvent>),
-    PState(Sender<PStateEvent>),
+    State(SubscriptionSender),
+    PState(PSubscriptionSender),
 }
 
 #[derive(Clone, Debug)]
@@ -41,6 +41,7 @@ pub struct Subscriber {
     tx: EventSender,
     id: SubscriptionId,
     unique: bool,
+    send_traces: bool,
 }
 
 impl Subscriber {
@@ -49,33 +50,37 @@ impl Subscriber {
         pattern: Vec<KeySegment>,
         tx: EventSender,
         unique: bool,
+        send_traces: bool,
     ) -> Subscriber {
         Subscriber {
             pattern,
             tx,
             id,
             unique,
+            send_traces,
         }
     }
 
-    pub async fn send_pstate(&self, event: PStateEvent) -> Result<()> {
+    pub async fn send_pstate(&self, event: PStateEvent, trace: Trace) -> Result<()> {
         if let EventSender::PState(tx) = &self.tx {
-            tx.send(event).await.into_diagnostic()?;
+            let trace = if self.send_traces { Some(trace) } else { None };
+            tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
             Err(miette!(
-                "Tried to send a PSatetEvent to a StateEvent subscriber"
+                "Tried to send a PStateEvent to a StateEvent subscriber"
             ))
         }
     }
 
-    pub async fn send_state(&self, event: StateEvent) -> Result<()> {
+    pub async fn send_state(&self, event: StateEvent, trace: Trace) -> Result<()> {
         if let EventSender::State(tx) = &self.tx {
-            tx.send(event).await.into_diagnostic()?;
+            let trace = if self.send_traces { Some(trace) } else { None };
+            tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
             Err(miette!(
-                "Tried to send a SatetEvent to a PStateEvent subscriber"
+                "Tried to send a StateEvent to a PStateEvent subscriber"
             ))
         }
     }
@@ -95,21 +100,29 @@ impl Subscriber {
 #[derive(Clone, Debug)]
 pub struct LsSubscriber {
     pub parent: Vec<RegularKeySegment>,
-    tx: Sender<Vec<RegularKeySegment>>,
+    tx: LsSubscriptionSender,
     pub id: SubscriptionId,
+    send_traces: bool,
 }
 
 impl LsSubscriber {
     pub fn new(
         id: SubscriptionId,
         parent: Vec<RegularKeySegment>,
-        tx: Sender<Vec<RegularKeySegment>>,
+        tx: LsSubscriptionSender,
+        send_traces: bool,
     ) -> LsSubscriber {
-        LsSubscriber { parent, tx, id }
+        LsSubscriber {
+            parent,
+            tx,
+            id,
+            send_traces,
+        }
     }
 
-    pub async fn send(&self, children: Vec<RegularKeySegment>) -> Result<()> {
-        self.tx.send(children).await.into_diagnostic()?;
+    pub async fn send(&self, children: Vec<RegularKeySegment>, trace: Trace) -> Result<()> {
+        let trace = if self.send_traces { Some(trace) } else { None };
+        self.tx.send((children, trace)).await.into_diagnostic()?;
         Ok(())
     }
 }
@@ -257,6 +270,7 @@ mod test {
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
             EventSender::PState(tx),
             false,
+            false,
         );
 
         subscribers.add_subscriber(&pattern, subscriber);
@@ -282,6 +296,7 @@ mod test {
             id.clone(),
             pattern.clone().into_iter().map(|s| s.to_owned()).collect(),
             EventSender::PState(tx),
+            false,
             false,
         );
 

@@ -44,6 +44,7 @@ pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
 pub type StoreNode = Node<ValueEntry>;
 type LockNode = Node<Lock>;
+pub type SerializeableLockNode = Node<SerializeableLock>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistedStore {
@@ -58,6 +59,31 @@ impl From<PersistedStore> for Store {
         };
         store.count_entries();
         store
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializeableLock {
+    holder: ClientId,
+}
+
+impl From<&Lock> for SerializeableLock {
+    fn from(lock: &Lock) -> Self {
+        SerializeableLock {
+            holder: lock.holder,
+        }
+    }
+}
+
+impl From<&LockNode> for SerializeableLockNode {
+    fn from(lock_node: &LockNode) -> Self {
+        SerializeableLockNode {
+            value: lock_node.value.as_ref().map(|lock| lock.into()),
+            tree: lock_node
+                .tree
+                .as_ref()
+                .map(|tree| tree.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
+        }
     }
 }
 
@@ -286,6 +312,14 @@ impl Store {
             Store::ncount_values(&original_data)
         );
         original_data
+    }
+
+    #[instrument(level=Level::DEBUG, skip(self))]
+    pub fn export_locks(&mut self) -> SerializeableLockNode {
+        debug!("Exporting copy of locks …");
+        let locks_copy = (&self.locks).into();
+        debug!("Exported locks.");
+        locks_copy
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
@@ -1286,6 +1320,7 @@ mod test {
             SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
+            true,
         );
         store.add_ls_subscriber(&parent, subscriber);
         let (_, subscribers) = store
@@ -1309,6 +1344,7 @@ mod test {
             SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
+            false,
         );
         store.add_ls_subscriber(&parent, subscriber);
         store
@@ -1342,6 +1378,7 @@ mod test {
             SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
+            true,
         );
         store.add_ls_subscriber(&parent, subscriber);
         store
@@ -1362,6 +1399,7 @@ mod test {
             SubscriptionId::new(ClientId::new_v4(), 123),
             parent.clone().into(),
             tx,
+            false,
         );
         store.add_ls_subscriber(&parent, subscriber);
         let (_, subscribers) = store

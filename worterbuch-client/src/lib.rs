@@ -110,8 +110,9 @@ pub(crate) enum Command {
         AckCallback,
         mpsc::UnboundedSender<Option<Value>>,
         LiveOnlyFlag,
+        SendTracesFlag,
     ),
-    SubscribeAsync(Key, UniqueFlag, AsyncTicket, LiveOnlyFlag),
+    SubscribeAsync(Key, UniqueFlag, AsyncTicket, LiveOnlyFlag, SendTracesFlag),
     PSubscribe(
         Key,
         UniqueFlag,
@@ -119,16 +120,25 @@ pub(crate) enum Command {
         mpsc::UnboundedSender<PStateEvent>,
         Option<u64>,
         LiveOnlyFlag,
+        SendTracesFlag,
     ),
-    PSubscribeAsync(Key, UniqueFlag, AsyncTicket, Option<u64>, LiveOnlyFlag),
+    PSubscribeAsync(
+        Key,
+        UniqueFlag,
+        AsyncTicket,
+        Option<u64>,
+        LiveOnlyFlag,
+        SendTracesFlag,
+    ),
     Unsubscribe(TransactionId, AckCallback),
     UnsubscribeAsync(TransactionId, AsyncTicket),
     SubscribeLs(
         Option<Key>,
         AckCallback,
+        SendTracesFlag,
         mpsc::UnboundedSender<Vec<RegularKeySegment>>,
     ),
-    SubscribeLsAsync(Option<Key>, AsyncTicket),
+    SubscribeLsAsync(Option<Key>, AsyncTicket, SendTracesFlag),
     UnsubscribeLs(TransactionId, AckCallback),
     UnsubscribeLsAsync(TransactionId, AsyncTicket),
     Lock(Key, AckCallback),
@@ -723,10 +733,17 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::SubscribeAsync(key, unique, tx, live_only))
+            .send(Command::SubscribeAsync(
+                key,
+                unique,
+                tx,
+                live_only,
+                send_traces,
+            ))
             .await?;
         let tid = rx.await?;
         Ok(tid)
@@ -738,11 +755,19 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<Value>>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (val_tx, val_rx) = mpsc::unbounded_channel();
         self.commands
-            .send(Command::Subscribe(key, unique, tid_tx, val_tx, live_only))
+            .send(Command::Subscribe(
+                key,
+                unique,
+                tid_tx,
+                val_tx,
+                live_only,
+                send_traces,
+            ))
             .await?;
         let res = tid_rx.await??;
         Ok((val_rx, res.transaction_id))
@@ -754,8 +779,11 @@ impl Worterbuch {
         key: Key,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<Option<T>>, TransactionId)> {
-        let (val_rx, transaction_id) = self.subscribe_generic(key, unique, live_only).await?;
+        let (val_rx, transaction_id) = self
+            .subscribe_generic(key, unique, live_only, send_traces)
+            .await?;
         let (typed_val_tx, typed_val_rx) = mpsc::unbounded_channel();
         spawn(deserialize_values(val_rx, typed_val_tx));
         Ok((typed_val_rx, transaction_id))
@@ -767,6 +795,7 @@ impl Worterbuch {
         request_pattern: RequestPattern,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
@@ -777,6 +806,7 @@ impl Worterbuch {
                 tx,
                 aggregation_duration.map(|d| d.as_millis() as u64),
                 live_only,
+                send_traces,
             ))
             .await?;
         let tid = rx.await?;
@@ -789,6 +819,7 @@ impl Worterbuch {
         request_pattern: RequestPattern,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<PStateEvent>, TransactionId)> {
         let (tid_tx, tid_rx) = oneshot::channel();
@@ -801,6 +832,7 @@ impl Worterbuch {
                 event_tx,
                 aggregation_duration.map(|d| d.as_millis() as u64),
                 live_only,
+                send_traces,
             ))
             .await?;
         let res = tid_rx.await??;
@@ -813,10 +845,17 @@ impl Worterbuch {
         request_pattern: RequestPattern,
         unique: bool,
         live_only: bool,
+        send_traces: bool,
         aggregation_duration: Option<Duration>,
     ) -> ConnectionResult<(mpsc::UnboundedReceiver<TypedPStateEvent<T>>, TransactionId)> {
         let (event_rx, transaction_id) = self
-            .psubscribe_generic(request_pattern, unique, live_only, aggregation_duration)
+            .psubscribe_generic(
+                request_pattern,
+                unique,
+                live_only,
+                send_traces,
+                aggregation_duration,
+            )
             .await?;
         let (typed_event_tx, typed_event_rx) = mpsc::unbounded_channel();
         spawn(deserialize_events(event_rx, typed_event_tx));
@@ -847,10 +886,14 @@ impl Worterbuch {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn subscribe_ls_async(&self, parent: Option<Key>) -> ConnectionResult<TransactionId> {
+    pub async fn subscribe_ls_async(
+        &self,
+        parent: Option<Key>,
+        send_traces: bool,
+    ) -> ConnectionResult<TransactionId> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send(Command::SubscribeLsAsync(parent, tx))
+            .send(Command::SubscribeLsAsync(parent, tx, send_traces))
             .await?;
         let tid = rx.await?;
         Ok(tid)
@@ -860,6 +903,7 @@ impl Worterbuch {
     pub async fn subscribe_ls(
         &self,
         parent: Option<Key>,
+        send_traces: bool,
     ) -> ConnectionResult<(
         mpsc::UnboundedReceiver<Vec<RegularKeySegment>>,
         TransactionId,
@@ -867,7 +911,12 @@ impl Worterbuch {
         let (tid_tx, tid_rx) = oneshot::channel();
         let (children_tx, children_rx) = mpsc::unbounded_channel();
         self.commands
-            .send(Command::SubscribeLs(parent, tid_tx, children_tx))
+            .send(Command::SubscribeLs(
+                parent,
+                tid_tx,
+                send_traces,
+                children_tx,
+            ))
             .await?;
         let res = tid_rx.await??;
         Ok((children_rx, res.transaction_id))
@@ -2108,7 +2157,14 @@ async fn process_incoming_command(
                     parent_pattern,
                 }))
             }
-            Command::Subscribe(key, unique, tid_callback, value_callback, live_only) => {
+            Command::Subscribe(
+                key,
+                unique,
+                tid_callback,
+                value_callback,
+                live_only,
+                send_traces,
+            ) => {
                 callbacks.sub.insert(transaction_id, value_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
                 Some(ClientMessage::Subscribe(Subscribe {
@@ -2116,15 +2172,17 @@ async fn process_incoming_command(
                     key,
                     unique: Some(unique),
                     live_only: Some(live_only),
+                    send_traces: Some(send_traces),
                 }))
             }
-            Command::SubscribeAsync(key, unique, callback, live_only) => {
+            Command::SubscribeAsync(key, unique, callback, live_only, send_traces) => {
                 callback.send(transaction_id).ok();
                 Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
                     unique: Some(unique),
                     live_only: Some(live_only),
+                    send_traces: Some(send_traces),
                 }))
             }
             Command::PSubscribe(
@@ -2134,6 +2192,7 @@ async fn process_incoming_command(
                 event_callback,
                 aggregate_events,
                 live_only,
+                send_traces,
             ) => {
                 callbacks.psub.insert(transaction_id, event_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
@@ -2143,6 +2202,7 @@ async fn process_incoming_command(
                     unique: Some(unique),
                     aggregate_events,
                     live_only: Some(live_only),
+                    send_traces: Some(send_traces),
                 }))
             }
             Command::PSubscribeAsync(
@@ -2151,6 +2211,7 @@ async fn process_incoming_command(
                 callback,
                 aggregate_events,
                 live_only,
+                send_traces,
             ) => {
                 callback.send(transaction_id).ok();
                 Some(ClientMessage::PSubscribe(PSubscribe {
@@ -2159,6 +2220,7 @@ async fn process_incoming_command(
                     unique: Some(unique),
                     aggregate_events,
                     live_only: Some(live_only),
+                    send_traces: Some(send_traces),
                 }))
             }
             Command::Unsubscribe(transaction_id, callback) => {
@@ -2173,19 +2235,21 @@ async fn process_incoming_command(
                 callback.send(transaction_id).ok();
                 Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
-            Command::SubscribeLs(parent, tid_callback, children_callback) => {
+            Command::SubscribeLs(parent, tid_callback, send_traces, children_callback) => {
                 callbacks.subls.insert(transaction_id, children_callback);
                 callbacks.ack.insert(transaction_id, tid_callback);
                 Some(ClientMessage::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
+                    send_traces: Some(send_traces),
                 }))
             }
-            Command::SubscribeLsAsync(parent, callback) => {
+            Command::SubscribeLsAsync(parent, callback, send_traces) => {
                 callback.send(transaction_id).ok();
                 Some(ClientMessage::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
+                    send_traces: Some(send_traces),
                 }))
             }
             Command::UnsubscribeLs(transaction_id, callback) => {

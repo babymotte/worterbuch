@@ -4,7 +4,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID, RegularKeySegment, WbApi,
+    INTERNAL_CLIENT_ID, LsSubscriptionReceiver, PSubscriptionReceiver, SubscriptionReceiver, WbApi,
     error::{ConnectionResult, WorterbuchError},
     protocol::{
         Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, ErrorCode, Get, Lock, Ls,
@@ -92,6 +92,7 @@ async fn forward_loop(
                     stx.send(ServerMessage::State(State {
                         event: StateEvent::Value(val),
                         transaction_id,
+                        trace: None,
                     }))
                     .ok();
                 }
@@ -122,6 +123,7 @@ async fn forward_loop(
                         event: PStateEvent::KeyValuePairs(kvps),
                         request_pattern,
                         transaction_id,
+                        trace: None,
                     }))
                     .ok();
                 }
@@ -131,7 +133,10 @@ async fn forward_loop(
                 transaction_id,
                 key,
                 value,
-            }) => match api.set(key, value, INTERNAL_CLIENT_ID).await {
+            }) => match api
+                .set(transaction_id, key, value, INTERNAL_CLIENT_ID)
+                .await
+            {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -142,7 +147,10 @@ async fn forward_loop(
                 key,
                 value,
                 version,
-            }) => match api.cset(key, value, version, INTERNAL_CLIENT_ID).await {
+            }) => match api
+                .cset(transaction_id, key, value, version, INTERNAL_CLIENT_ID)
+                .await
+            {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -170,7 +178,10 @@ async fn forward_loop(
                 transaction_id,
                 key,
                 value,
-            }) => match api.publish(key, value).await {
+            }) => match api
+                .publish(transaction_id, key, value, INTERNAL_CLIENT_ID)
+                .await
+            {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -181,6 +192,7 @@ async fn forward_loop(
                 key,
                 unique,
                 live_only,
+                send_traces,
             }) => match api
                 .subscribe(
                     INTERNAL_CLIENT_ID,
@@ -188,6 +200,7 @@ async fn forward_loop(
                     key,
                     unique.unwrap_or(false),
                     live_only.unwrap_or(false),
+                    send_traces.unwrap_or(false),
                 )
                 .await
             {
@@ -202,6 +215,7 @@ async fn forward_loop(
                 request_pattern,
                 unique,
                 live_only,
+                send_traces,
                 aggregate_events: _,
             }) => match api
                 .psubscribe(
@@ -210,6 +224,7 @@ async fn forward_loop(
                     request_pattern.clone(),
                     unique.unwrap_or(false),
                     live_only.unwrap_or(false),
+                    send_traces.unwrap_or(false),
                 )
                 .await
             {
@@ -235,11 +250,12 @@ async fn forward_loop(
             ClientMessage::Delete(Delete {
                 transaction_id,
                 key,
-            }) => match api.delete(key, INTERNAL_CLIENT_ID).await {
+            }) => match api.delete(transaction_id, key, INTERNAL_CLIENT_ID).await {
                 Ok(val) => {
                     stx.send(ServerMessage::State(State {
                         transaction_id,
                         event: StateEvent::Deleted(val),
+                        trace: None,
                     }))
                     .ok();
                 }
@@ -250,7 +266,7 @@ async fn forward_loop(
                 request_pattern,
                 quiet,
             }) => match api
-                .pdelete(request_pattern.clone(), INTERNAL_CLIENT_ID)
+                .pdelete(transaction_id, request_pattern.clone(), INTERNAL_CLIENT_ID)
                 .await
             {
                 Ok(kvps) => {
@@ -259,6 +275,7 @@ async fn forward_loop(
                             transaction_id,
                             request_pattern,
                             event: PStateEvent::Deleted(kvps),
+                            trace: None,
                         }))
                         .ok();
                     } else {
@@ -275,6 +292,7 @@ async fn forward_loop(
                     stx.send(ServerMessage::LsState(LsState {
                         transaction_id,
                         children,
+                        trace: None,
                     }))
                     .ok();
                 }
@@ -288,6 +306,7 @@ async fn forward_loop(
                     stx.send(ServerMessage::LsState(LsState {
                         transaction_id,
                         children,
+                        trace: None,
                     }))
                     .ok();
                 }
@@ -296,8 +315,14 @@ async fn forward_loop(
             ClientMessage::SubscribeLs(SubscribeLs {
                 transaction_id,
                 parent,
+                send_traces,
             }) => match api
-                .subscribe_ls(INTERNAL_CLIENT_ID, transaction_id, parent)
+                .subscribe_ls(
+                    INTERNAL_CLIENT_ID,
+                    transaction_id,
+                    parent,
+                    send_traces.unwrap_or(false),
+                )
                 .await
             {
                 Ok((lssub_rx, _)) => {
@@ -317,7 +342,7 @@ async fn forward_loop(
             ClientMessage::Lock(Lock {
                 transaction_id,
                 key,
-            }) => match api.lock(key, INTERNAL_CLIENT_ID).await {
+            }) => match api.lock(transaction_id, key, INTERNAL_CLIENT_ID).await {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -326,7 +351,10 @@ async fn forward_loop(
             ClientMessage::AcquireLock(Lock {
                 transaction_id,
                 key,
-            }) => match api.acquire_lock(key, INTERNAL_CLIENT_ID).await {
+            }) => match api
+                .acquire_lock(transaction_id, key, INTERNAL_CLIENT_ID)
+                .await
+            {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -335,7 +363,10 @@ async fn forward_loop(
             ClientMessage::ReleaseLock(Lock {
                 transaction_id,
                 key,
-            }) => match api.release_lock(key, INTERNAL_CLIENT_ID).await {
+            }) => match api
+                .release_lock(transaction_id, key, INTERNAL_CLIENT_ID)
+                .await
+            {
                 Ok(_) => {
                     stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
                 }
@@ -362,7 +393,7 @@ async fn handle_error(
 }
 
 fn spawn_forward_sub_events_loop(
-    sub_rx: mpsc::Receiver<StateEvent>,
+    sub_rx: SubscriptionReceiver,
     transaction_id: TransactionId,
     stx: mpsc::UnboundedSender<ServerMessage>,
 ) {
@@ -370,15 +401,16 @@ fn spawn_forward_sub_events_loop(
 }
 
 async fn forward_sub_events(
-    mut sub_rx: mpsc::Receiver<StateEvent>,
+    mut sub_rx: SubscriptionReceiver,
     transaction_id: TransactionId,
     stx: mpsc::UnboundedSender<ServerMessage>,
 ) {
-    while let Some(event) = sub_rx.recv().await {
+    while let Some((event, trace)) = sub_rx.recv().await {
         if stx
             .send(ServerMessage::State(State {
                 transaction_id,
                 event,
+                trace,
             }))
             .is_err()
         {
@@ -388,7 +420,7 @@ async fn forward_sub_events(
 }
 
 fn spawn_forward_psub_events_loop(
-    psub_rx: mpsc::Receiver<PStateEvent>,
+    psub_rx: PSubscriptionReceiver,
     transaction_id: TransactionId,
     request_pattern: RequestPattern,
     stx: mpsc::UnboundedSender<ServerMessage>,
@@ -402,18 +434,19 @@ fn spawn_forward_psub_events_loop(
 }
 
 async fn forward_psub_events(
-    mut psub_rx: mpsc::Receiver<PStateEvent>,
+    mut psub_rx: PSubscriptionReceiver,
     transaction_id: TransactionId,
     request_pattern: RequestPattern,
     stx: mpsc::UnboundedSender<ServerMessage>,
 ) {
-    while let Some(event) = psub_rx.recv().await {
+    while let Some((event, trace)) = psub_rx.recv().await {
         let request_pattern = request_pattern.clone();
         if stx
             .send(ServerMessage::PState(PState {
                 transaction_id,
                 request_pattern,
                 event,
+                trace,
             }))
             .is_err()
         {
@@ -423,7 +456,7 @@ async fn forward_psub_events(
 }
 
 fn spawn_forward_lssub_events_loop(
-    lssub_rx: mpsc::Receiver<Vec<RegularKeySegment>>,
+    lssub_rx: LsSubscriptionReceiver,
     transaction_id: TransactionId,
     stx: mpsc::UnboundedSender<ServerMessage>,
 ) {
@@ -431,15 +464,16 @@ fn spawn_forward_lssub_events_loop(
 }
 
 async fn forward_lssub_events(
-    mut lssub_rx: mpsc::Receiver<Vec<RegularKeySegment>>,
+    mut lssub_rx: LsSubscriptionReceiver,
     transaction_id: TransactionId,
     stx: mpsc::UnboundedSender<ServerMessage>,
 ) {
-    while let Some(children) = lssub_rx.recv().await {
+    while let Some((children, trace)) = lssub_rx.recv().await {
         if stx
             .send(ServerMessage::LsState(LsState {
                 transaction_id,
                 children,
+                trace,
             }))
             .is_err()
         {

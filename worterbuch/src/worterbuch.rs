@@ -23,7 +23,7 @@ use crate::{
     INTERNAL_CLIENT_ID,
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
-    store::{PersistedStore, Store, StoreNode},
+    store::{PersistedStore, SerializeableLockNode, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
 use chrono::prelude::{DateTime, Utc};
@@ -46,17 +46,18 @@ use tokio::{
 };
 use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
 use worterbuch_common::{
-    KeySegment, Protocol, RegularKeySegment, SubscriptionId, ValueEntry,
+    KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
+    SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments,
     protocol::{
-        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, PState,
-        PStateEvent, ProtocolMajorVersion, RequestPattern, SYSTEM_TOPIC_CLIENT_NAME,
-        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS, SYSTEM_TOPIC_CLIENTS_PROTOCOL,
-        SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION, SYSTEM_TOPIC_CLIENTS_TIMESTAMP,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT,
-        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent,
-        TransactionId,
+        CasVersion, ClientId, GraveGoods, Interface, InternalAction, Key, KeyValuePair,
+        KeyValuePairs, LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
+        SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
+        SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
+        SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
+        SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+        SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, Trace, TransactionId,
     },
     topic,
 };
@@ -184,6 +185,7 @@ impl PStateAggregatorState {
             transaction_id: self.transaction_id,
             request_pattern: self.request_pattern.clone(),
             event,
+            trace: None,
         };
         self.client_sub.send(ServerMessage::PState(pstate)).await?;
         Ok(())
@@ -258,7 +260,7 @@ pub struct Worterbuch {
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     clients: HashMap<ClientId, ClientInfo>,
-    spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
+    spub_keys: HashMap<ClientId, HashMap<TransactionId, (Key, Interface)>>,
     persistent_storage: PersistentStorageImpl,
 }
 
@@ -340,6 +342,26 @@ impl Worterbuch {
         key: Key,
         value: Value,
         client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+        force: bool,
+    ) -> WorterbuchResult<()> {
+        let cause = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Set,
+            interface,
+        };
+        self.internal_set(key, value, client_id, cause, force).await
+    }
+
+    #[instrument(level = Level::TRACE, skip(self))]
+    pub(crate) async fn internal_set(
+        &mut self,
+        key: Key,
+        value: Value,
+        client_id: ClientId,
+        cause: Trace,
         force: bool,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
@@ -360,11 +382,12 @@ impl Worterbuch {
 
         if let Some(ls_subscribers) = ls_subscribers {
             trace!("Notifying ls subscribers …");
-            self.notify_ls_subscribers(ls_subscribers).await;
+            self.notify_ls_subscribers(ls_subscribers, cause.clone())
+                .await;
             trace!("Notifying ls subscribers done.");
         }
         trace!("Notifying subscribers …");
-        self.notify_subscribers(&path, &key, &value, changed, false)
+        self.notify_subscribers(&path, &key, &value, changed, false, cause)
             .await;
         trace!("Notifying subscribers done.");
 
@@ -377,6 +400,28 @@ impl Worterbuch {
         value: Value,
         version: CasVersion,
         client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+        force: bool,
+    ) -> WorterbuchResult<()> {
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::CSet,
+            interface,
+        };
+
+        self.internal_cset(key, value, version, client_id, trace, force)
+            .await
+    }
+
+    pub(crate) async fn internal_cset(
+        &mut self,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+        client_id: ClientId,
+        cause: Trace,
         force: bool,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
@@ -403,11 +448,12 @@ impl Worterbuch {
 
         if let Some(ls_subscribers) = ls_subscribers {
             trace!("Notifying ls subscribers …");
-            self.notify_ls_subscribers(ls_subscribers).await;
+            self.notify_ls_subscribers(ls_subscribers, cause.clone())
+                .await;
             trace!("Notifying ls subscribers done.");
         }
         trace!("Notifying subscribers …");
-        self.notify_subscribers(&path, &key, &value, changed, false)
+        self.notify_subscribers(&path, &key, &value, changed, false, cause)
             .await;
         trace!("Notifying subscribers done.");
 
@@ -419,9 +465,10 @@ impl Worterbuch {
         transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
+        interface: Interface,
     ) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, client_id)?;
-        self.store_key(client_id, transaction_id, key);
+        self.store_key(client_id, transaction_id, key, interface);
 
         Ok(())
     }
@@ -432,17 +479,31 @@ impl Worterbuch {
         value: Value,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        if let Some(key) = self.lookup_key(client_id, transaction_id) {
-            self.publish(key, value).await
+        if let Some((key, interface)) = self.lookup_key(client_id, transaction_id) {
+            self.publish(key, value, client_id, transaction_id, interface)
+                .await
         } else {
             Err(WorterbuchError::NoPubStream(transaction_id))
         }
     }
 
-    pub async fn publish(&mut self, key: Key, value: Value) -> WorterbuchResult<()> {
+    pub async fn publish(
+        &mut self,
+        key: Key,
+        value: Value,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+    ) -> WorterbuchResult<()> {
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Publish,
+            interface,
+        };
 
-        self.notify_subscribers(&path, &key, &value, true, false)
+        self.notify_subscribers(&path, &key, &value, true, false, trace)
             .await;
 
         Ok(())
@@ -457,20 +518,52 @@ impl Worterbuch {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        interface: Interface,
         key: Key,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<StateEvent>, SubscriptionId)> {
+        send_traces: bool,
+    ) -> WorterbuchResult<Subscription> {
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Subscribe,
+            interface,
+        };
+        self.internal_subscribe(
+            client_id,
+            transaction_id,
+            trace,
+            key,
+            unique,
+            live_only,
+            send_traces,
+        )
+        .await
+    }
+
+    pub(crate) async fn internal_subscribe(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        cause: Trace,
+        key: Key,
+        unique: bool,
+        live_only: bool,
+        send_traces: bool,
+    ) -> WorterbuchResult<Subscription> {
         let path: Vec<KeySegment> = KeySegment::parse(&key);
-        let (tx, rx) = channel::<StateEvent>(self.config.channel_buffer_size);
+        let (tx, rx) = channel(self.config.channel_buffer_size);
         let subscription = SubscriptionId::new(client_id, transaction_id);
         let subscriber = Subscriber::new(
             subscription.clone(),
             path.clone(),
             EventSender::State(tx.clone()),
             unique,
+            send_traces,
         );
         self.subscribers.add_subscriber(&path, subscriber);
+
         if !live_only {
             let matches = match self.get(&key) {
                 Ok(value) => Some(value),
@@ -478,7 +571,7 @@ impl Worterbuch {
                 Err(e) => return Err(e),
             };
             if let Some(value) = matches {
-                tx.send(StateEvent::Value(value))
+                tx.send((StateEvent::Value(value), Some(cause.clone())))
                     .await
                     .expect("rx is neither closed nor dropped");
             }
@@ -500,10 +593,13 @@ impl Worterbuch {
             && client_id != INTERNAL_CLIENT_ID
         {
             if let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                     true,
                 )
                 .await
@@ -518,17 +614,21 @@ impl Worterbuch {
                 SYSTEM_TOPIC_SUBSCRIPTIONS
             );
             if let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(subs_key, key),
                     json!(transaction_id),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                     true,
                 )
                 .await
             {
                 debug!("Error in subscription monitoring: {e}");
             }
-            self.update_subscription_count(subs_key, client_subs).await;
+            self.update_subscription_count(subs_key, client_subs, cause)
+                .await;
         }
 
         Ok((rx, subscription))
@@ -538,10 +638,40 @@ impl Worterbuch {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        interface: Interface,
         pattern: RequestPattern,
         unique: bool,
         live_only: bool,
-    ) -> WorterbuchResult<(Receiver<PStateEvent>, SubscriptionId)> {
+        send_traces: bool,
+    ) -> WorterbuchResult<PSubscription> {
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::PSubscribe,
+            interface,
+        };
+        self.internal_psubscribe(
+            client_id,
+            transaction_id,
+            trace,
+            pattern,
+            unique,
+            live_only,
+            send_traces,
+        )
+        .await
+    }
+
+    pub(crate) async fn internal_psubscribe(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        cause: Trace,
+        pattern: RequestPattern,
+        unique: bool,
+        live_only: bool,
+        send_traces: bool,
+    ) -> WorterbuchResult<PSubscription> {
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
         let (tx, rx) = channel(self.config.channel_buffer_size);
         let subscription = SubscriptionId::new(client_id, transaction_id);
@@ -550,11 +680,12 @@ impl Worterbuch {
             path.clone().into_iter().map(|s| s.to_owned()).collect(),
             EventSender::PState(tx.clone()),
             unique,
+            send_traces,
         );
         self.subscribers.add_subscriber(&path, subscriber);
         if !live_only {
             let matches = self.pget(&pattern)?;
-            tx.send(PStateEvent::KeyValuePairs(matches))
+            tx.send((PStateEvent::KeyValuePairs(matches), Some(cause.clone())))
                 .await
                 .expect("rx is neither closed nor dropped");
         }
@@ -575,10 +706,13 @@ impl Worterbuch {
             && client_id != INTERNAL_CLIENT_ID
         {
             if let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                     true,
                 )
                 .await
@@ -592,36 +726,57 @@ impl Worterbuch {
                 SYSTEM_TOPIC_SUBSCRIPTIONS
             );
             if let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(subs_key, escape_wildcards(&pattern)),
                     json!(transaction_id),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                     true,
                 )
                 .await
             {
                 debug!("Error in subscription monitoring: {e}");
             }
-            self.update_subscription_count(subs_key, client_subs).await;
+            self.update_subscription_count(subs_key, client_subs, cause)
+                .await;
         }
 
         Ok((rx, subscription))
     }
 
-    async fn update_subscription_count(&mut self, subs_key: String, client_subs: usize) {
+    async fn update_subscription_count(
+        &mut self,
+        subs_key: String,
+        client_subs: usize,
+        cause: Trace,
+    ) {
         if client_subs > 0 {
             if let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(subs_key),
                     json!(client_subs),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                     true,
                 )
                 .await
             {
                 debug!("Error in subscription monitoring: {e}");
             }
-        } else if let Err(e) = self.delete(topic!(subs_key), INTERNAL_CLIENT_ID).await {
+        } else if let Err(e) = self
+            .internal_delete(
+                topic!(subs_key),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                    cause: Box::new(cause),
+                }),
+            )
+            .await
+        {
             debug!("Error in subscription monitoring: {e}");
         }
     }
@@ -630,17 +785,26 @@ impl Worterbuch {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        interface: Interface,
         parent: Option<Key>,
-    ) -> WorterbuchResult<(Receiver<Vec<RegularKeySegment>>, SubscriptionId)> {
+        send_traces: bool,
+    ) -> WorterbuchResult<LsSubscription> {
         let children = self.ls(&parent).unwrap_or_else(|_| Vec::new());
         let path: Vec<RegularKeySegment> = parent
             .map(|p| p.split('/').map(ToOwned::to_owned).collect())
             .unwrap_or_default();
         let (tx, rx) = channel(self.config.channel_buffer_size);
         let subscription = SubscriptionId::new(client_id, transaction_id);
-        let subscriber = LsSubscriber::new(subscription.clone(), path.clone(), tx.clone());
+        let subscriber =
+            LsSubscriber::new(subscription.clone(), path.clone(), tx.clone(), send_traces);
         self.store.add_ls_subscriber(&path, subscriber);
-        tx.send(children)
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::LsSubscribe,
+            interface,
+        };
+        tx.send((children, Some(trace.clone())))
             .await
             .expect("rx is neither closed nor dropped");
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
@@ -656,6 +820,18 @@ impl Worterbuch {
         let last_will = self.last_wills();
 
         (store, grave_goods, last_will)
+    }
+
+    #[instrument(level=Level::DEBUG, skip(self))]
+    pub(crate) fn export_with_locks(
+        &mut self,
+    ) -> (StoreNode, SerializeableLockNode, GraveGoods, LastWill) {
+        let store = self.store.export();
+        let locks = self.store.export_locks();
+        let grave_goods = self.grave_goods();
+        let last_will = self.last_wills();
+
+        (store, locks, grave_goods, last_will)
     }
 
     #[instrument(level=Level::DEBUG, skip(self, tx))]
@@ -682,6 +858,9 @@ impl Worterbuch {
     pub async fn import(
         &mut self,
         json: &str,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
     ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         debug!("Parsing store data …");
         let store: PersistedStore = from_str(json).map_err(|e| {
@@ -689,6 +868,13 @@ impl Worterbuch {
         })?;
         debug!("Done. Merging nodes …");
         let imported_values = self.store.merge(store.data);
+
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Import,
+            interface,
+        };
 
         for (key, (val, changed)) in &imported_values {
             if *changed {
@@ -704,7 +890,8 @@ impl Worterbuch {
             }
 
             let path: Vec<RegularKeySegment> = parse_segments(key)?;
-            self.notify_subscribers(&path, key, val.as_ref(), *changed, false)
+
+            self.notify_subscribers(&path, key, val.as_ref(), *changed, false, trace.clone())
                 .await;
         }
 
@@ -715,15 +902,23 @@ impl Worterbuch {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        interface: Interface,
     ) -> WorterbuchResult<()> {
         let subscription = SubscriptionId::new(client_id, transaction_id);
-        self.do_unsubscribe(&subscription, client_id).await
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Unsubscribe,
+            interface,
+        };
+        self.do_unsubscribe(&subscription, client_id, trace).await
     }
 
     async fn do_unsubscribe(
         &mut self,
         subscription: &SubscriptionId,
         client_id: ClientId,
+        cause: Trace,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.subscriptions.remove(subscription) {
             let mut client_subs = 0;
@@ -743,7 +938,7 @@ impl Worterbuch {
                     SYSTEM_TOPIC_SUBSCRIPTIONS
                 );
                 if let Err(e) = self
-                    .delete(
+                    .internal_delete(
                         topic!(
                             subs_key,
                             escape_wildcards(
@@ -755,6 +950,9 @@ impl Worterbuch {
                             )
                         ),
                         INTERNAL_CLIENT_ID,
+                        Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                            cause: Box::new(cause.clone()),
+                        }),
                     )
                     .await
                 {
@@ -763,17 +961,21 @@ impl Worterbuch {
                         _ => debug!("Error in subscription monitoring: {e}"),
                     }
                 }
-                self.update_subscription_count(subs_key, client_subs).await;
+                self.update_subscription_count(subs_key, client_subs, cause.clone())
+                    .await;
             }
             debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
             if self.config.extended_monitoring
                 && client_id != INTERNAL_CLIENT_ID
                 && let Err(e) = self
-                    .set(
+                    .internal_set(
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                         json!(self.subscriptions.len()),
                         INTERNAL_CLIENT_ID,
+                        Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                            cause: Box::new(cause),
+                        }),
                         true,
                     )
                     .await
@@ -822,6 +1024,7 @@ impl Worterbuch {
         value: &Value,
         value_changed: bool,
         deleted: bool,
+        trace: Trace,
     ) {
         let subscribers = self.subscribers.get_subscribers(path);
 
@@ -836,10 +1039,12 @@ impl Worterbuch {
             if subscriber.is_pstate_subscriber() {
                 let kvps = vec![KeyValuePair::of(key, value)];
                 if let Err(e) = if deleted {
-                    subscriber.send_pstate(PStateEvent::Deleted(kvps)).await
+                    subscriber
+                        .send_pstate(PStateEvent::Deleted(kvps), trace.clone())
+                        .await
                 } else {
                     subscriber
-                        .send_pstate(PStateEvent::KeyValuePairs(kvps))
+                        .send_pstate(PStateEvent::KeyValuePairs(kvps), trace.clone())
                         .await
                 } {
                     debug!("Error calling subscriber: {e}");
@@ -848,9 +1053,13 @@ impl Worterbuch {
             } else {
                 let value = value.to_owned();
                 if let Err(e) = if deleted {
-                    subscriber.send_state(StateEvent::Deleted(value)).await
+                    subscriber
+                        .send_state(StateEvent::Deleted(value), trace.clone())
+                        .await
                 } else {
-                    subscriber.send_state(StateEvent::Value(value)).await
+                    subscriber
+                        .send_state(StateEvent::Value(value), trace.clone())
+                        .await
                 } {
                     debug!("Error calling subscriber: {e}");
                     self.subscribers.remove_subscriber(subscriber);
@@ -863,12 +1072,13 @@ impl Worterbuch {
     async fn notify_ls_subscribers(
         &mut self,
         ls_subscribers: Vec<(Vec<LsSubscriber>, Vec<String>)>,
+        trace: Trace,
     ) {
         let len = ls_subscribers.len();
         trace!("Calling {} ls subscribers …", len);
         for (subscribers, new_children) in ls_subscribers {
             for subscriber in subscribers {
-                if let Err(e) = subscriber.send(new_children.clone()).await {
+                if let Err(e) = subscriber.send(new_children.clone(), trace.clone()).await {
                     debug!("Error calling subscriber: {e}");
                     self.store.remove_ls_subscriber(subscriber);
                 }
@@ -877,7 +1087,28 @@ impl Worterbuch {
         trace!("Calling {} ls subscribers done.", len);
     }
 
-    pub async fn delete(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<Value> {
+    pub async fn delete(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+    ) -> WorterbuchResult<Value> {
+        let cause = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Delete,
+            interface,
+        };
+        self.internal_delete(key, client_id, cause).await
+    }
+
+    pub(crate) async fn internal_delete(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        cause: Trace,
+    ) -> WorterbuchResult<Value> {
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -895,9 +1126,10 @@ impl Worterbuch {
                     })?;
 
                 if let Some(ls_subscribers) = ls_subscribers {
-                    self.notify_ls_subscribers(ls_subscribers).await;
+                    self.notify_ls_subscribers(ls_subscribers, cause.clone())
+                        .await;
                 }
-                self.notify_subscribers(&path, &key, &value, true, true)
+                self.notify_subscribers(&path, &key, &value, true, true, cause)
                     .await;
                 Ok(value)
             }
@@ -909,15 +1141,25 @@ impl Worterbuch {
         &mut self,
         pattern: RequestPattern,
         client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
     ) -> WorterbuchResult<KeyValuePairs> {
-        self.internal_pdelete(pattern, false, client_id).await
+        let cause = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::PDelete,
+            interface,
+        };
+        self.internal_pdelete(pattern, false, client_id, cause)
+            .await
     }
 
-    async fn internal_pdelete(
+    pub(crate) async fn internal_pdelete(
         &mut self,
         pattern: RequestPattern,
         skip_read_only_check: bool,
         client_id: ClientId,
+        cause: Trace,
     ) -> Result<Vec<KeyValuePair>, WorterbuchError> {
         if !skip_read_only_check {
             check_for_read_only_key(&pattern, client_id)?;
@@ -939,11 +1181,11 @@ impl Worterbuch {
                 })?;
 
             let path = parse_segments(&kvp.key)?;
-            self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true)
+            self.notify_subscribers(&path, &kvp.key, &kvp.value, true, true, cause.clone())
                 .await;
         }
         if let Some(ls_subscribers) = ls_subscribers {
-            self.notify_ls_subscribers(ls_subscribers).await;
+            self.notify_ls_subscribers(ls_subscribers, cause).await;
         }
 
         #[cfg(not(feature = "jemalloc"))]
@@ -952,12 +1194,25 @@ impl Worterbuch {
         Ok(deleted)
     }
 
-    pub async fn lock(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<()> {
+    pub async fn lock(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+    ) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
+
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::Lock,
+            interface,
+        };
 
         self.store.lock(client_id, path)?;
 
-        self.locked(Some(client_id), &key).await;
+        self.locked(Some(client_id), &key, trace).await;
 
         Ok(())
     }
@@ -966,24 +1221,36 @@ impl Worterbuch {
         &mut self,
         key: Key,
         client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
     ) -> WorterbuchResult<oneshot::Receiver<()>> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::AcquireLock,
+            interface,
+        };
+
         let (rx, client_id) = self.store.acquire_lock(client_id, path).await;
 
-        self.locked(client_id, &key).await;
+        self.locked(client_id, &key, trace).await;
 
         Ok(rx)
     }
 
-    async fn locked(&mut self, client_id: Option<ClientId>, key: &str) {
+    async fn locked(&mut self, client_id: Option<ClientId>, key: &str, cause: Trace) {
         if self.config.extended_monitoring {
             if let Some(client_id) = client_id {
                 if let Err(e) = self
-                    .set(
+                    .internal_set(
                         topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LOCKS, escape_wildcards(key)),
                         json!(client_id),
                         INTERNAL_CLIENT_ID,
+                        Trace::InternalAction(InternalAction::LocksChanged {
+                            cause: Box::new(cause.clone()),
+                        }),
                         true,
                     )
                     .await
@@ -991,9 +1258,12 @@ impl Worterbuch {
                     error!("Error updating client locks: {e}");
                 };
             } else if let Err(e) = self
-                .delete(
+                .internal_delete(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LOCKS, escape_wildcards(key)),
                     INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::LocksChanged {
+                        cause: Box::new(cause.clone()),
+                    }),
                 )
                 .await
             {
@@ -1002,12 +1272,25 @@ impl Worterbuch {
         }
     }
 
-    pub async fn release_lock(&mut self, key: Key, client_id: ClientId) -> WorterbuchResult<()> {
+    pub async fn release_lock(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        interface: Interface,
+    ) -> WorterbuchResult<()> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
+
+        let trace = Trace::ClientRequest {
+            client_id,
+            transaction_id,
+            method: Method::ReleaseLock,
+            interface,
+        };
 
         let client_id = self.store.unlock(client_id, &path).await?;
 
-        self.locked(client_id, &key).await;
+        self.locked(client_id, &key, trace).await;
 
         Ok(())
     }
@@ -1068,7 +1351,7 @@ impl Worterbuch {
         &mut self,
         client_id: ClientId,
         remote_addr: Option<SocketAddr>,
-        protocol: &Protocol,
+        protocol: Protocol,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
@@ -1080,28 +1363,37 @@ impl Worterbuch {
 
         self.clients.insert(client_id, ClientInfo::new());
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
+        let trace =
+            Trace::InternalAction(InternalAction::ClientConnected(client_id, protocol.clone()));
         if let Err(e) = self
-            .set(
+            .internal_set(
                 client_count_key,
                 json!(self.clients.len()),
                 INTERNAL_CLIENT_ID,
+                trace.clone(),
                 true,
             )
             .await
         {
             error!("Error updating client count: {e}");
         }
-        if let Err(e) = self.set_client_protocol(&client_id, protocol).await {
+        if let Err(e) = self
+            .set_client_protocol(&client_id, &protocol, trace.clone())
+            .await
+        {
             error!("Error updating client protocol: {e}");
         };
 
-        if let Err(e) = self.set_client_address(&client_id, remote_addr).await {
+        if let Err(e) = self
+            .set_client_address(&client_id, remote_addr, trace.clone())
+            .await
+        {
             error!("Error updating client address: {e}");
         }
 
         if self.config.extended_monitoring
             && client_id != INTERNAL_CLIENT_ID
-            && let Err(e) = self.set_client_timestamp(&client_id, now).await
+            && let Err(e) = self.set_client_timestamp(&client_id, now, trace).await
         {
             error!("Error updating client timestamp: {e}");
         }
@@ -1109,11 +1401,33 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn protocol_switched(&mut self, client_id: ClientId, protocol: ProtocolMajorVersion) {
+    pub async fn protocol_switched(
+        &mut self,
+        client_id: ClientId,
+        interface: Interface,
+        protocol: ProtocolMajorVersion,
+    ) {
+        let trace = Trace::ProtocolSwitch {
+            client_id,
+            protocol_version: protocol,
+            interface,
+        };
+        self.internal_protocol_switched(client_id, protocol, trace)
+            .await
+    }
+
+    pub(crate) async fn internal_protocol_switched(
+        &mut self,
+        client_id: ClientId,
+        protocol: ProtocolMajorVersion,
+        cause: Trace,
+    ) {
         if self.clients.contains_key(&client_id)
             && self.config.extended_monitoring
             && client_id != INTERNAL_CLIENT_ID
-            && let Err(e) = self.set_client_protocol_version(&client_id, protocol).await
+            && let Err(e) = self
+                .set_client_protocol_version(&client_id, protocol, cause)
+                .await
         {
             error!("Error updating client protocol version: {e}");
         }
@@ -1123,8 +1437,9 @@ impl Worterbuch {
         &mut self,
         client_id: &ClientId,
         protocol: &Protocol,
+        cause: Trace,
     ) -> WorterbuchResult<()> {
-        self.set(
+        self.internal_set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -1133,6 +1448,7 @@ impl Worterbuch {
             ),
             json!(protocol),
             INTERNAL_CLIENT_ID,
+            cause,
             true,
         )
         .await
@@ -1142,8 +1458,9 @@ impl Worterbuch {
         &mut self,
         client_id: &ClientId,
         protocol_version: ProtocolMajorVersion,
+        cause: Trace,
     ) -> WorterbuchResult<()> {
-        self.set(
+        self.internal_set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -1152,6 +1469,7 @@ impl Worterbuch {
             ),
             json!(protocol_version),
             INTERNAL_CLIENT_ID,
+            cause,
             true,
         )
         .await
@@ -1161,11 +1479,12 @@ impl Worterbuch {
         &mut self,
         client_id: &ClientId,
         remote_addr: Option<SocketAddr>,
+        cause: Trace,
     ) -> WorterbuchResult<()> {
         let remote_addr = serde_json::to_value(remote_addr).map_err(|e| {
             WorterbuchError::SerDeError(e, "could not convert remote address to value".to_owned())
         })?;
-        self.set(
+        self.internal_set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -1174,6 +1493,7 @@ impl Worterbuch {
             ),
             remote_addr,
             INTERNAL_CLIENT_ID,
+            cause,
             true,
         )
         .await
@@ -1183,9 +1503,10 @@ impl Worterbuch {
         &mut self,
         client_id: &ClientId,
         timestamp: DateTime<Utc>,
+        cause: Trace,
     ) -> WorterbuchResult<()> {
         let timestamp = json!(timestamp.format("%+").to_string());
-        self.set(
+        self.internal_set(
             topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -1194,6 +1515,7 @@ impl Worterbuch {
             ),
             timestamp,
             INTERNAL_CLIENT_ID,
+            cause,
             true,
         )
         .await
@@ -1224,6 +1546,7 @@ impl Worterbuch {
     pub async fn disconnected(
         &mut self,
         client_id: ClientId,
+        protocol: Protocol,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
@@ -1236,13 +1559,15 @@ impl Worterbuch {
             );
         }
 
+        let trace = Trace::InternalAction(InternalAction::ClientDisconnected(client_id, protocol));
+
         if let Some(keys) = self.store.unlock_all(client_id).await
             && self.config.extended_monitoring
             && !keys.is_empty()
         {
             info!("Dropping locks of client {}.", client_id);
             for (key, client_id) in keys {
-                self.locked(client_id, &key).await;
+                self.locked(client_id, &key, trace.clone()).await;
             }
         }
 
@@ -1252,10 +1577,11 @@ impl Worterbuch {
         self.clients.remove(&client_id);
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         if let Err(e) = self
-            .set(
+            .internal_set(
                 client_count_key,
                 json!(self.clients.len()),
                 INTERNAL_CLIENT_ID,
+                trace.clone(),
                 true,
             )
             .await
@@ -1279,14 +1605,20 @@ impl Worterbuch {
             );
         }
         for subscription in subscription_keys {
-            if let Err(e) = self.do_unsubscribe(&subscription, client_id).await {
+            if let Err(e) = self
+                .do_unsubscribe(&subscription, client_id, trace.clone())
+                .await
+            {
                 error!("Inconsistent subscription state: {e}");
             }
         }
 
         let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         debug!("Deleting {pattern}");
-        if let Err(e) = self.pdelete(pattern, INTERNAL_CLIENT_ID).await {
+        if let Err(e) = self
+            .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace.clone())
+            .await
+        {
             debug!("Error in subscription monitoring: {e}");
         }
 
@@ -1306,7 +1638,17 @@ impl Worterbuch {
                         .unwrap_or_else(|| "<unknown>".to_owned()),
                     grave_good
                 );
-                if let Err(e) = self.pdelete(grave_good, client_id).await {
+                if let Err(e) = self
+                    .internal_pdelete(
+                        grave_good,
+                        false,
+                        client_id,
+                        Trace::InternalAction(InternalAction::ApplyingGraveGoods {
+                            cause: Box::new(trace.clone()),
+                        }),
+                    )
+                    .await
+                {
                     error!("Error burying grave goods for client {client_id}: {e}");
                 }
             }
@@ -1337,7 +1679,15 @@ impl Worterbuch {
                     last_will.value
                 );
                 if let Err(e) = self
-                    .set(last_will.key, last_will.value, client_id, true)
+                    .internal_set(
+                        last_will.key,
+                        last_will.value,
+                        client_id,
+                        Trace::InternalAction(InternalAction::ApplyingLastWill {
+                            cause: Box::new(trace.clone()),
+                        }),
+                        true,
+                    )
                     .await
                 {
                     error!("Error setting last will of client {client_id}: {e}");
@@ -1364,10 +1714,11 @@ impl Worterbuch {
 
         if self.config.extended_monitoring
             && let Err(e) = self
-                .set(
+                .internal_set(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
                     json!(self.subscriptions.len()),
                     INTERNAL_CLIENT_ID,
+                    trace,
                     true,
                 )
                 .await
@@ -1381,19 +1732,29 @@ impl Worterbuch {
         Ok(())
     }
 
-    fn store_key(&mut self, client_id: ClientId, transaction_id: TransactionId, key: Key) {
+    fn store_key(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        key: Key,
+        interface: Interface,
+    ) {
         let keys = match self.spub_keys.entry(client_id) {
             Entry::Occupied(it) => it.into_mut(),
             Entry::Vacant(it) => it.insert(HashMap::new()),
         };
-        keys.insert(transaction_id, key);
+        keys.insert(transaction_id, (key, interface));
     }
 
-    fn lookup_key(&self, client_id: ClientId, transaction_id: TransactionId) -> Option<Key> {
+    fn lookup_key(
+        &self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+    ) -> Option<(Key, Interface)> {
         self.spub_keys
             .get(&client_id)
             .and_then(|keys| keys.get(&transaction_id))
-            .map(ToOwned::to_owned)
+            .map(|(key, interface)| (key.to_owned(), interface.to_owned()))
     }
 
     pub(crate) async fn reset_store(&mut self, data: StoreNode) -> WorterbuchResult<()> {
@@ -1433,9 +1794,10 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self) {
-        self.apply_grave_goods(self.grave_goods()).await;
-        self.apply_last_wills(self.last_wills()).await;
+    pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self, cause: Trace) {
+        self.apply_grave_goods(self.grave_goods(), cause.clone())
+            .await;
+        self.apply_last_wills(self.last_wills(), cause).await;
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
@@ -1487,18 +1849,35 @@ impl Worterbuch {
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn apply_grave_goods(&mut self, grave_goods: GraveGoods) {
+    pub(crate) async fn apply_grave_goods(&mut self, grave_goods: GraveGoods, cause: Trace) {
         for gg in grave_goods {
-            self.pdelete(gg, INTERNAL_CLIENT_ID).await.ok();
+            self.internal_pdelete(
+                gg,
+                false,
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::ApplyingGraveGoods {
+                    cause: Box::new(cause.clone()),
+                }),
+            )
+            .await
+            .ok();
         }
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill) {
+    pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill, cause: Trace) {
         for lw in last_wills {
-            self.set(lw.key, lw.value, INTERNAL_CLIENT_ID, true)
-                .await
-                .ok();
+            self.internal_set(
+                lw.key,
+                lw.value,
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::ApplyingLastWill {
+                    cause: Box::new(cause.clone()),
+                }),
+                true,
+            )
+            .await
+            .ok();
         }
     }
 
@@ -1569,6 +1948,8 @@ mod test {
             "hello/world".to_owned(),
             json!("test"),
             INTERNAL_CLIENT_ID,
+            123,
+            Interface::Local,
             false,
         )
         .await
@@ -1577,6 +1958,8 @@ mod test {
             "$SYS/something".to_owned(),
             json!("this should not be exported"),
             INTERNAL_CLIENT_ID,
+            321,
+            Interface::Protocol(Protocol::HTTP),
             false,
         )
         .await

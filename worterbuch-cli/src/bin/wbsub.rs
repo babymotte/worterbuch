@@ -50,6 +50,9 @@ struct Args {
     /// Only receive live values, i.e. do not receive a callback for the state currently stored on the broker.
     #[arg(short, long)]
     live_only: bool,
+    /// Request that the server send trace data for subscription events
+    #[arg(short, long)]
+    trace: bool,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
@@ -102,6 +105,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
     let keys = args.keys;
     let unique = args.unique;
     let live_only = args.live_only;
+    let send_traces = args.trace;
 
     let (wb, mut on_disconnect) = connect(config).await?;
     if let Some(name) = args.name {
@@ -128,7 +132,7 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
             },
             recv = next_item(&mut rx, done) => match recv {
                 Some(key ) => {
-                    wb.subscribe_async(key, unique, live_only).await?;
+                    wb.subscribe_async(key, unique, live_only, send_traces).await?;
                 },
                 None => done = true,
             },
