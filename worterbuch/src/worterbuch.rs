@@ -559,8 +559,14 @@ impl Worterbuch {
                 Err(WorterbuchError::NoSuchValue(_)) => None,
                 Err(e) => return Err(e),
             };
+
+            let cause = if flags.send_traces {
+                Some(cause.clone())
+            } else {
+                None
+            };
             if let Some(value) = matches {
-                tx.send((StateEvent::Value(value), Some(cause.clone())))
+                tx.send((StateEvent::Value(value), cause))
                     .await
                     .expect("rx is neither closed nor dropped");
             }
@@ -661,7 +667,12 @@ impl Worterbuch {
         self.subscribers.add_subscriber(&path, subscriber);
         if !flags.live_only {
             let matches = self.pget(&pattern)?;
-            tx.send((PStateEvent::KeyValuePairs(matches), Some(cause.clone())))
+            let cause = if flags.send_traces {
+                Some(cause.clone())
+            } else {
+                None
+            };
+            tx.send((PStateEvent::KeyValuePairs(matches), cause))
                 .await
                 .expect("rx is neither closed nor dropped");
         }
