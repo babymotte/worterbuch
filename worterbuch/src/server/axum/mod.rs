@@ -84,7 +84,7 @@ use websocket::serve;
 use worterbuch_common::{
     AuthCheck, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::{ClientId, Key, KeyValuePairs, ServerInfo, StateEvent},
+    protocol::{ClientId, Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
 };
 
 async fn ws(
@@ -873,7 +873,7 @@ pub async fn build_worterbuch_router(
 
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
-        let wb = worterbuch.clone();
+        let wb = worterbuch.for_interface(Interface::Protocol(Protocol::WS));
         subsys.spawn("wsserver", async |s| {
             run_ws_server(s, ws_stream_rx, wb).await
         });

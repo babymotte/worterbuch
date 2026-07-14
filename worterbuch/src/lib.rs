@@ -58,7 +58,7 @@ use tokio::sync::{mpsc, oneshot};
 use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID,
+    INTERNAL_CLIENT_ID, Protocol,
     protocol::{
         ClientId, Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
@@ -209,7 +209,7 @@ fn web_server(
     }) = &config.ws_endpoint
     {
         info!("Starting web server …");
-        let sapi = api.clone();
+        let sapi = api.for_interface(Interface::Protocol(Protocol::HTTP));
         let tls = tls.to_owned();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
@@ -238,7 +238,7 @@ fn tcp_server(
         }) = &config.tcp_endpoint
         && !config.tcp_disabled
     {
-        let sapi = api.clone();
+        let sapi = api.for_interface(Interface::Protocol(Protocol::TCP));
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         Some(subsys.spawn("tcpserver", async move |subsys| {
@@ -259,7 +259,7 @@ fn unix_socket(
         && let Some(UnixEndpoint { path }) = &config.unix_endpoint
         && !config.unix_disabled
     {
-        let sapi = api.clone();
+        let sapi = api.for_interface(Interface::Protocol(Protocol::UNIX));
         let path = path.clone();
         Some(subsys.spawn("unixsocket", async move |subsys| {
             server::unix::start(sapi, path, subsys).await
