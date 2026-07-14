@@ -234,6 +234,6 @@ async fn try_process_api_call(
     }
 }
 
-async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
+async fn process_api_call(_worterbuch: &mut Worterbuch, _function: WbFunction) {
     // TODO forward to leader
 }
