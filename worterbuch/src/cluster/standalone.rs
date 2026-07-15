@@ -19,13 +19,20 @@
 
 use crate::{
     Config, Servers,
-    cluster::{process_api_call, shutdown},
+    cluster::{Mode, process_api_call, shutdown},
     error::WorterbuchAppResult,
     server::common::WbFunction,
     worterbuch::Worterbuch,
 };
+use serde_json::json;
 use tokio::{select, sync::mpsc};
 use tosub::SubsystemHandle;
+use tracing::info;
+use worterbuch_common::{
+    INTERNAL_CLIENT_ID,
+    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
+    topic,
+};
 
 pub async fn run(
     subsys: &SubsystemHandle,
@@ -34,6 +41,18 @@ pub async fn run(
     config: Config,
     servers: Servers,
 ) -> WorterbuchAppResult<()> {
+    info!("Running in STANDALONE mode.");
+
+    worterbuch
+        .internal_set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+            json!(Mode::Standalone),
+            INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::Startup),
+            true,
+        )
+        .await?;
+
     loop {
         select! {
             recv = api_rx.recv() => match recv {
