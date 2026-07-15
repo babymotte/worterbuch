@@ -43,12 +43,14 @@ mod subscribers;
 pub mod telemetry;
 mod worterbuch;
 
+use core::fmt;
+
 use crate::{
     cluster::{
         ClusterStateChangeSender, follower, leader, protocol::ClientWriteCommand, proxy, standalone,
     },
     error::WorterbuchAppResult,
-    server::{CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
+    server::{common::CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
     stats::track_stats,
     worterbuch::Worterbuch,
 };
@@ -99,9 +101,10 @@ async fn do_run_worterbuch(
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
     let api = CloneableWbApi::new(api_tx, config.clone(), Interface::Local);
 
-    wb_api_created(&api, tx);
+    wb_api_created(&api, tx, "client/internal");
 
-    let mut worterbuch = persistence::restore(&subsys, config.clone(), api.clone()).await?;
+    let mut worterbuch =
+        persistence::restore(&subsys, config.clone(), api.named("worterbuch-core")).await?;
 
     set_instance_name(&mut worterbuch, &config).await?;
 
@@ -110,7 +113,7 @@ async fn do_run_worterbuch(
     let unix_socket = unix_socket(&api, &subsys, &config);
 
     if config.role.provide_server_metadata() {
-        server_metadata(api.clone(), &mut worterbuch, &subsys).await?;
+        server_metadata(api.named("server-metadata"), &mut worterbuch, &subsys).await?;
     }
 
     match config.role.clone() {
@@ -168,9 +171,13 @@ async fn do_run_worterbuch(
     Ok(())
 }
 
-fn wb_api_created(api: &CloneableWbApi, tx: Option<oneshot::Sender<CloneableWbApi>>) {
+fn wb_api_created(
+    api: &CloneableWbApi,
+    tx: Option<oneshot::Sender<CloneableWbApi>>,
+    name: impl fmt::Display,
+) {
     if let Some(tx) = tx {
-        tx.send(api.clone()).ok();
+        tx.send(api.named(name)).ok();
     }
 }
 
@@ -209,7 +216,7 @@ fn web_server(
     }) = &config.ws_endpoint
     {
         info!("Starting web server …");
-        let sapi = api.for_interface(Interface::Protocol(Protocol::HTTP));
+        let sapi = api.for_interface("server/http", Interface::Protocol(Protocol::HTTP));
         let tls = tls.to_owned();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
@@ -238,7 +245,7 @@ fn tcp_server(
         }) = &config.tcp_endpoint
         && !config.tcp_disabled
     {
-        let sapi = api.for_interface(Interface::Protocol(Protocol::TCP));
+        let sapi = api.for_interface("server/tcp", Interface::Protocol(Protocol::TCP));
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         Some(subsys.spawn("tcpserver", async move |subsys| {
@@ -259,7 +266,7 @@ fn unix_socket(
         && let Some(UnixEndpoint { path }) = &config.unix_endpoint
         && !config.unix_disabled
     {
-        let sapi = api.for_interface(Interface::Protocol(Protocol::UNIX));
+        let sapi = api.for_interface("server/unix", Interface::Protocol(Protocol::UNIX));
         let path = path.clone();
         Some(subsys.spawn("unixsocket", async move |subsys| {
             server::unix::start(sapi, path, subsys).await

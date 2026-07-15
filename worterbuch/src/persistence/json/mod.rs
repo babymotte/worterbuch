@@ -27,7 +27,7 @@ use crate::{
         PersistentStorage,
         error::{PersistenceError, PersistenceResult},
     },
-    server::CloneableWbApi,
+    server::common::CloneableWbApi,
     worterbuch::Worterbuch,
 };
 use serde::{Deserialize, Serialize};

@@ -16,7 +16,7 @@ use crate::persistence::turso::PersistentTursoStore;
 use crate::{
     Config, PersistenceMode, Worterbuch,
     persistence::{error::PersistenceResult, json::PersistentJsonStorage},
-    server::CloneableWbApi,
+    server::common::CloneableWbApi,
 };
 use lazy_static::lazy_static;
 use serde_json::json;

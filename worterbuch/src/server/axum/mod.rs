@@ -25,7 +25,7 @@ use crate::{
     auth::JwtClaims,
     error::{WorterbuchAppError, WorterbuchAppResult},
     print_endpoint,
-    server::{CloneableWbApi, common::init_server_socket},
+    server::common::{CloneableWbApi, init_server_socket},
     stats::VERSION,
 };
 use axum::{
@@ -410,7 +410,7 @@ async fn subscribe(
         .get("sendTraces")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
-    let wb_unsub = wb.clone();
+    let wb_unsub = wb.named("unsubscribe");
 
     let (mut rx, _) = wb
         .subscribe(
@@ -497,7 +497,7 @@ async fn psubscribe(
         .get("sendTraces")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
-    let wb_unsub = wb.clone();
+    let wb_unsub = wb.named("unsubscribe");
 
     let (mut rx, _) = wb
         .psubscribe(
@@ -566,7 +566,7 @@ async fn subscribels_root(
         .get("sendTraces")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
-    let wb_unsub = wb.clone();
+    let wb_unsub = wb.named("unsubscribe");
 
     let (mut rx, _) = wb
         .subscribe_ls(client_id, transaction_id, None, send_traces)
@@ -629,7 +629,7 @@ async fn subscribels(
         .get("sendTraces")
         .map(|it| it.to_lowercase() != "false")
         .unwrap_or(false);
-    let wb_unsub = wb.clone();
+    let wb_unsub = wb.named("unsubscribe");
 
     let (mut rx, _) = wb
         .subscribe_ls(client_id, transaction_id, Some(parent), send_traces)
@@ -873,7 +873,7 @@ pub async fn build_worterbuch_router(
 
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
-        let wb = worterbuch.for_interface(Interface::Protocol(Protocol::WS));
+        let wb = worterbuch.for_interface("server/ws", Interface::Protocol(Protocol::WS));
         subsys.spawn("wsserver", async |s| {
             run_ws_server(s, ws_stream_rx, wb).await
         });
@@ -943,7 +943,10 @@ pub async fn build_worterbuch_router(
 
     info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
 
-    app = app.route("/info", get(info).with_state(worterbuch.clone()));
+    app = app.route(
+        "/info",
+        get(info).with_state(worterbuch.named("/info-endpoint")),
+    );
 
     if let Some(web_root_path) = &config.web_root_path {
         let web_root_path = PathBuf::from(web_root_path);
@@ -1010,7 +1013,7 @@ async fn run_ws_server(
                 if let Some((socket, remote_addr)) = con {
                     let id = ClientId::new_v4();
                     debug!("{} WS connection(s) open.",clients.len());
-                    let worterbuch = worterbuch.clone();
+                    let worterbuch = worterbuch.named(format!("client/{id}"));
                     let conn_closed_tx = conn_closed_tx.clone();
 
                     let client = subsys.spawn(format!("client-{id}"), async move |s|  {

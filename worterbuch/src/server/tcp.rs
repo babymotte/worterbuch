@@ -22,7 +22,7 @@ use crate::{
     Config, SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
     print_endpoint,
-    server::{CloneableWbApi, common::init_server_socket},
+    server::{common::CloneableWbApi, common::init_server_socket},
     stats::VERSION,
 };
 use hashbrown::HashMap;
@@ -108,7 +108,7 @@ pub async fn start(
                         Ok((socket, remote_addr)) => {
                             let id = ClientId::new_v4();
                             debug!("{} TCP connection(s) open.", clients.len());
-                            let worterbuch = worterbuch.clone();
+                            let worterbuch = worterbuch.named(format!("client/{id}"));
                             let conn_closed_tx = conn_closed_tx.clone();
 
                             let client = subsys.spawn(format!("client-{id}"), async move |s|  {
@@ -187,7 +187,14 @@ async fn serve(
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-        if let Err(e) = serve_loop(subsys, client_id, remote_addr, worterbuch.clone(), socket).await
+        if let Err(e) = serve_loop(
+            subsys,
+            client_id,
+            remote_addr,
+            worterbuch.named("serve-loop"),
+            socket,
+        )
+        .await
         {
             error!("Error in serve loop: {e}");
         }

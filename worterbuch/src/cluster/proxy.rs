@@ -192,6 +192,11 @@ async fn run_with_leader(
         recv = api_rx.recv() => try_process_api_call(recv, worterbuch).await?,
     }
 
+    info!(
+        "Proxy loop for leader {} stopped, closing connection.",
+        leader_address
+    );
+
     Ok(true)
 }
 

@@ -499,7 +499,7 @@ impl V0 {
 
         let transaction_id = msg.transaction_id;
 
-        let wb_unsub = self.worterbuch.clone();
+        let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
         spawn(async move {
@@ -569,7 +569,7 @@ impl V0 {
         let transaction_id = msg.transaction_id;
         let request_pattern = msg.request_pattern;
 
-        let wb_unsub = self.worterbuch.clone();
+        let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
 
@@ -812,7 +812,7 @@ impl V0 {
 
         let transaction_id = msg.transaction_id;
 
-        let wb_unsub = self.worterbuch.clone();
+        let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
 

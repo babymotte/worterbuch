@@ -19,7 +19,7 @@
 
 use crate::{
     SUPPORTED_PROTOCOL_VERSIONS,
-    server::{CloneableWbApi, common::protocol::Proto},
+    server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
 use axum::extract::ws::{Message, WebSocket};
@@ -49,10 +49,18 @@ pub(crate) async fn serve(
         .await
     {
         error!("Error while adding new client: {e}");
+        eprintln!("{e:?}");
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-        if let Err(e) = serve_loop(client_id, remote_addr, worterbuch.clone(), websocket).await {
+        if let Err(e) = serve_loop(
+            client_id,
+            remote_addr,
+            worterbuch.named(format!("client/{client_id}")),
+            websocket,
+        )
+        .await
+        {
             error!("Error in serve loop: {e}");
         }
     }

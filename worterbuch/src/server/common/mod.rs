@@ -19,15 +19,16 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, server::CloneableWbApi, stats::VERSION};
+use crate::{Config, INTERNAL_CLIENT_ID, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
+    fmt,
     net::{IpAddr, SocketAddr, TcpListener},
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
-use tracing::{Level, Span, instrument, trace};
+use tracing::{Level, Span, debug, instrument, trace, warn};
 use worterbuch_common::{
     LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::WorterbuchResult,
@@ -200,9 +201,27 @@ pub enum WbFunction {
     Len(oneshot::Sender<usize>),
 }
 
+#[derive(Clone)]
+pub struct CloneableWbApi {
+    name: String,
+    config: Config,
+    tx: mpsc::Sender<WbFunction>,
+    interface: Interface,
+}
+
+impl Drop for CloneableWbApi {
+    fn drop(&mut self) {
+        debug!("Dropping CloneableWbApi '{}'", self);
+        if self.tx.is_closed() {
+            warn!("CloneableWbApi tx channel is closed");
+        }
+    }
+}
+
 impl CloneableWbApi {
     pub fn new(tx: mpsc::Sender<WbFunction>, config: Config, interface: Interface) -> Self {
         CloneableWbApi {
+            name: "".to_string(),
             tx,
             config,
             interface,
@@ -213,12 +232,33 @@ impl CloneableWbApi {
         &self.config
     }
 
-    pub fn for_interface(&self, interface: Interface) -> Self {
+    pub fn named(&self, name: impl fmt::Display) -> Self {
         CloneableWbApi {
+            name: format!("{}/{}", self.name, name),
+            config: self.config.clone(),
+            tx: self.tx.clone(),
+            interface: self.interface.clone(),
+        }
+    }
+
+    pub fn for_interface(&self, name: impl fmt::Display, interface: Interface) -> Self {
+        CloneableWbApi {
+            name: format!("{}/{}", self.name, name),
             config: self.config.clone(),
             tx: self.tx.clone(),
             interface,
         }
+    }
+}
+
+impl fmt::Display for CloneableWbApi {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = if self.name.is_empty() {
+            "<root>"
+        } else {
+            &self.name
+        };
+        name.fmt(f)
     }
 }
 

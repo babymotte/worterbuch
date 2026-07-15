@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{INTERNAL_CLIENT_ID, server::CloneableWbApi};
+use crate::{INTERNAL_CLIENT_ID, server::common::CloneableWbApi};
 use serde_json::json;
 use std::{ops::ControlFlow, time::Duration};
 use tokio::time::{Instant, interval};

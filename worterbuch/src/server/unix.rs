@@ -18,7 +18,9 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::CloneableWbApi, stats::VERSION};
+use crate::{
+    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
+};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
@@ -94,7 +96,7 @@ pub async fn start(
                         Ok((socket, remote_addr)) => {
                             let id = ClientId::new_v4();
                             debug!("{} UNIX connection(s) open.", clients.len());
-                            let worterbuch = worterbuch.clone();
+                            let worterbuch = worterbuch.named(format!("client/{id}"));
                             let conn_closed_tx = conn_closed_tx.clone();
 
                             let client = subsys.spawn(format!("client-{id}"), async move |s| {
@@ -171,7 +173,14 @@ async fn serve(
     } else {
         debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
-        if let Err(e) = serve_loop(subsys, client_id, remote_addr, worterbuch.clone(), socket).await
+        if let Err(e) = serve_loop(
+            subsys,
+            client_id,
+            remote_addr,
+            worterbuch.named("serve-loop"),
+            socket,
+        )
+        .await
         {
             error!("Error in serve loop: {e}");
         }

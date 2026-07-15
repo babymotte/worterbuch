@@ -22,14 +22,3 @@ pub(crate) mod common;
 pub(crate) mod tcp;
 #[cfg(target_family = "unix")]
 pub(crate) mod unix;
-
-use crate::{Config, server::common::WbFunction};
-use tokio::sync::mpsc;
-use worterbuch_common::protocol::Interface;
-
-#[derive(Clone)]
-pub struct CloneableWbApi {
-    config: Config,
-    tx: mpsc::Sender<WbFunction>,
-    interface: Interface,
-}
