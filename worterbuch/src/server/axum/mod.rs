@@ -873,7 +873,7 @@ pub async fn build_worterbuch_router(
 
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
-        let wb = worterbuch.for_interface("server/ws", Interface::Protocol(Protocol::WS));
+        let wb = worterbuch.for_interface("ws", Interface::Protocol(Protocol::WS));
         subsys.spawn("wsserver", async |s| {
             run_ws_server(s, ws_stream_rx, wb).await
         });
@@ -945,7 +945,7 @@ pub async fn build_worterbuch_router(
 
     app = app.route(
         "/info",
-        get(info).with_state(worterbuch.named("/info-endpoint")),
+        get(info).with_state(worterbuch.named("info-endpoint")),
     );
 
     if let Some(web_root_path) = &config.web_root_path {

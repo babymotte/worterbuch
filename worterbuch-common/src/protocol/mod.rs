@@ -153,7 +153,8 @@ pub enum Interface {
     Local,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TraceData {
     pub transaction_id: TransactionId,
     pub client_id: ClientId,

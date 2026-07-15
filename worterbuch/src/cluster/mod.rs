@@ -25,7 +25,7 @@ pub(crate) mod standalone;
 
 use crate::{
     Config, Servers,
-    cluster::protocol::ClientWriteCommand,
+    cluster::protocol::ClusterStateChange,
     error::WorterbuchAppResult,
     server::common::WbFunction,
     worterbuch::{SubscriptionFlags, Worterbuch},
@@ -34,9 +34,8 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};
-use worterbuch_common::protocol::{ClientId, InternalAction, Trace, TraceData};
+use worterbuch_common::protocol::{InternalAction, Trace, TraceData};
 
-pub type ClusterStateChange = (ClientWriteCommand, ClientId, Trace);
 pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
 pub type ClusterStateChangeSender = mpsc::Sender<ClusterStateChange>;
 

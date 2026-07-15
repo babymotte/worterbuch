@@ -1,3 +1,3 @@
 #!/bin/bash
 
-WORTERBUCH_DATA_DIR=./data/leader cargo run -- --leader --sync-port 9999
+WORTERBUCH_LOG=debug WORTERBUCH_DATA_DIR=./data/leader WORTERBUCH_TCP_SERVER_PORT=9090 WORTERBUCH_WS_SERVER_PORT=8080 cargo run -- leader --sync-port 6060

@@ -21,7 +21,7 @@ use crate::{
     Config, INTERNAL_CLIENT_ID, Servers, Worterbuch,
     cluster::{
         Mode,
-        protocol::{ClientWriteCommand, LeaderSyncMessage, StateSync},
+        protocol::{ClientWriteCommand, ClusterStateChange, LeaderMessage, StateSync},
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
@@ -87,7 +87,7 @@ pub(crate) async fn run(
             debug!("Received leader message");
             match recv {
                 Ok(Some(msg)) => {
-                    if let LeaderSyncMessage::Init(state) = msg {
+                    if let LeaderMessage::Init(state) = msg {
                         debug!("Received initial sync message from leader: {state:?}");
                         initial_sync(state, &mut worterbuch).await?;
                         persistence_interval.reset();
@@ -112,6 +112,8 @@ pub(crate) async fn run(
         recv = receive_msg(&mut lines, None) => try_process_leader_message(recv, &mut worterbuch).await?,
     }
 
+    info!("Main loop stopped, shutting down.");
+
     shutdown(
         subsys,
         worterbuch,
@@ -125,7 +127,7 @@ pub(crate) async fn run(
 }
 
 pub(crate) async fn try_process_leader_message(
-    recv: ConnectionResult<Option<LeaderSyncMessage>>,
+    recv: ConnectionResult<Option<LeaderMessage>>,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
@@ -171,18 +173,18 @@ async fn initial_sync(
 }
 
 async fn process_leader_message(
-    msg: LeaderSyncMessage,
+    msg: LeaderMessage,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<()> {
     trace!("Received leader sync message: {msg:?}");
 
     let res = match msg {
-        LeaderSyncMessage::Init(_) => {
+        LeaderMessage::Init(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "already synced".to_owned(),
             ));
         }
-        LeaderSyncMessage::Mut((client_write_command, _, trace)) => match client_write_command {
+        LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
             ClientWriteCommand::Set(key, value, force) => {
                 worterbuch
                     .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
@@ -202,12 +204,12 @@ async fn process_leader_message(
                 .await
                 .map(|_| ()),
         },
-        LeaderSyncMessage::ClientResponse(_) => {
+        LeaderMessage::ClientResponse(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "leader should never send a ClientResponse to a follower".to_owned(),
             ));
         }
-        LeaderSyncMessage::ClientAccepted(_) => {
+        LeaderMessage::ClientAccepted(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "leader should never send a ClientAccepted to a follower".to_owned(),
             ));

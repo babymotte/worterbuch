@@ -19,10 +19,11 @@
 
 use crate::{
     Config, Servers,
+    cluster::{self, protocol::ProxyMessage},
     cluster::{
         Mode,
         follower::try_process_leader_message,
-        protocol::{LeaderSyncMessage, StateSync},
+        protocol::{LeaderMessage, StateSync},
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
@@ -39,16 +40,18 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
+    net::tcp::OwnedWriteHalf,
     select,
     sync::mpsc,
 };
 use tosub::SubsystemHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
     error::ConfigError,
+    protocol::{ClientMessage, Set},
     protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
-    receive_msg, topic, while_select,
+    receive_msg, topic, while_select, write_line_and_flush,
 };
 
 pub(crate) async fn run(
@@ -128,6 +131,8 @@ pub(crate) async fn run(
         }
     }
 
+    info!("Main loop stopped, shutting down.");
+
     shutdown(subsys, worterbuch, config, servers).await
 }
 
@@ -147,7 +152,10 @@ async fn run_with_leader(
             return Ok(false);
         }
     };
-    let mut lines = BufReader::new(stream).lines();
+    let (leader_rx, leader_tx) = stream.into_split();
+    let mut lines = BufReader::new(leader_rx).lines();
+
+    let proxy_request_sender = init_request_sender(subsys, leader_tx, &config, leader_address);
 
     let timeout = config.initial_sync_timeout;
 
@@ -162,7 +170,7 @@ async fn run_with_leader(
             debug!("Received leader message");
             match recv {
                 Ok(Some(msg)) => {
-                    if let LeaderSyncMessage::Init(state) = msg {
+                    if let LeaderMessage::Init(state) = msg {
                         debug!("Received initial sync message from leader: {state:?}");
                         initial_sync(state, worterbuch).await?;
                         persistence_interval.reset();
@@ -185,11 +193,13 @@ async fn run_with_leader(
     }
     info!("Successfully synced with leader.");
 
+    // TODO delay opening of client sockets until after initial sync
+
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = receive_msg(&mut lines, None) => try_process_leader_message(recv, worterbuch).await?,
-        recv = api_rx.recv() => try_process_api_call(recv, worterbuch).await?,
+        recv = api_rx.recv() => try_process_api_call(recv, worterbuch, &proxy_request_sender).await?,
     }
 
     info!(
@@ -198,6 +208,58 @@ async fn run_with_leader(
     );
 
     Ok(true)
+}
+
+fn init_request_sender(
+    subsys: &SubsystemHandle,
+    leader_tx: OwnedWriteHalf,
+    config: &Config,
+    leader_addr: SocketAddr,
+) -> mpsc::Sender<ProxyMessage> {
+    let (tx, rx) = mpsc::channel(config.channel_buffer_size);
+    let send_timeout = config.send_timeout;
+    subsys.spawn("proxy_request_sender", move |s| {
+        request_sneder_loop(s, leader_tx, rx, send_timeout, leader_addr)
+    });
+    tx
+}
+
+async fn request_sneder_loop(
+    subsys: SubsystemHandle,
+    mut leader_tx: OwnedWriteHalf,
+    mut rx: mpsc::Receiver<ProxyMessage>,
+    timeout: Option<Duration>,
+    leader_addr: SocketAddr,
+) -> miette::Result<()> {
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        recv = rx.recv() => forward_client_request(recv, &mut leader_tx, timeout, leader_addr).await,
+    }
+    Ok(())
+}
+
+async fn forward_client_request(
+    recv: Option<ProxyMessage>,
+    leader_tx: &mut OwnedWriteHalf,
+    timeout: Option<Duration>,
+    leader_addr: SocketAddr,
+) -> ControlFlow<()> {
+    let Some(request) = recv else {
+        return ControlFlow::Break(());
+    };
+
+    debug!("Forwarding client request to leader");
+
+    if let Err(e) = write_line_and_flush(request, leader_tx, timeout, leader_addr).await {
+        error!(
+            "Failed to forward client request to leader {}: {e}",
+            leader_addr
+        );
+        return ControlFlow::Break(());
+    }
+
+    ControlFlow::Continue(())
 }
 
 async fn initial_sync(
@@ -229,16 +291,128 @@ async fn initial_sync(
 async fn try_process_api_call(
     recv: Option<WbFunction>,
     worterbuch: &mut Worterbuch,
+    leader_tx: &mpsc::Sender<ProxyMessage>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
         Some(function) => {
-            process_api_call(worterbuch, function).await;
+            process_api_call(worterbuch, function, leader_tx).await?;
             Ok(ControlFlow::Continue(()))
         }
         None => Ok(ControlFlow::Break(())),
     }
 }
 
-async fn process_api_call(_worterbuch: &mut Worterbuch, _function: WbFunction) {
-    // TODO forward to leader
+async fn process_api_call(
+    worterbuch: &mut Worterbuch,
+    function: WbFunction,
+    leader_tx: &mpsc::Sender<ProxyMessage>,
+) -> WorterbuchAppResult<()> {
+    match function {
+        WbFunction::Connected(client_id, addr, protocol, tx) => {
+            let request = ProxyMessage::Connected {
+                client_id,
+                protocol: protocol.clone(),
+            };
+            // TODO register response interest?
+            leader_tx.send(request).await?;
+            cluster::process_api_call(
+                worterbuch,
+                WbFunction::Connected(client_id, addr, protocol, tx),
+            )
+            .await;
+        }
+        WbFunction::Disconnected(client_id, protocol, tx) => {
+            let request = ProxyMessage::Disconnected {
+                client_id,
+                protocol: protocol.clone(),
+            };
+            // TODO register response interest?
+            leader_tx.send(request).await?;
+            cluster::process_api_call(
+                worterbuch,
+                WbFunction::Disconnected(client_id, protocol, tx),
+            )
+            .await;
+        }
+        WbFunction::ProtocolSwitched(client_id, interface, version) => {
+            let request = ProxyMessage::ProtocolSwitched {
+                client_id,
+                interface: interface.clone(),
+                version,
+            };
+            // TODO register response interest?
+            leader_tx.send(request).await?;
+            cluster::process_api_call(
+                worterbuch,
+                WbFunction::ProtocolSwitched(client_id, interface, version),
+            )
+            .await;
+        }
+        WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::Set(Set {
+                    transaction_id,
+                    key,
+                    value,
+                }),
+                interface,
+            };
+            // TODO register response interest
+            leader_tx.send(request).await?;
+        }
+        WbFunction::CSet(_, _, _, _, _, _, _) => {
+            warn!("CSet not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::SPubInit(_, _, _, _, _) => {
+            warn!("SPubInit not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::SPub(_, _, _, _) => {
+            warn!("SPub not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::Publish(_, _, _, _, _, _) => {
+            warn!("Publish not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::Delete(_, _, _, _, _) => {
+            warn!("Delete not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::PDelete(_, _, _, _, _) => {
+            warn!("PDelete not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::Lock(_, _, _, _, _) => {
+            warn!("Lock not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::AcquireLock(_, _, _, _, _) => {
+            warn!("AcquireLock not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::ReleaseLock(_, _, _, _, _) => {
+            warn!("ReleaseLock not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        WbFunction::Import(_, _, _, _, _) => {
+            warn!("Import not yet implemented");
+            // TODO forward to leader
+            // TODO register response interest
+        }
+        function => cluster::process_api_call(worterbuch, function).await,
+    };
+
+    Ok(())
 }

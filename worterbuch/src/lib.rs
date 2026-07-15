@@ -47,10 +47,12 @@ use core::fmt;
 
 use crate::{
     cluster::{
-        ClusterStateChangeSender, follower, leader, protocol::ClientWriteCommand, proxy, standalone,
+        ClusterStateChangeSender, follower, leader,
+        protocol::{ClientWriteCommand, ClusterStateChange},
+        proxy, standalone,
     },
     error::WorterbuchAppResult,
-    server::{common::CloneableWbApi, common::SUPPORTED_PROTOCOL_VERSIONS},
+    server::common::{CloneableWbApi, SUPPORTED_PROTOCOL_VERSIONS},
     stats::track_stats,
     worterbuch::Worterbuch,
 };
@@ -135,6 +137,7 @@ async fn do_run_worterbuch(
             leader::run(
                 &subsys,
                 worterbuch,
+                &api,
                 api_rx,
                 config,
                 Servers {
@@ -409,7 +412,11 @@ async fn forward_to_followers(
 ) {
     for (id, tx) in client_write_txs.iter() {
         if tx
-            .send((cmd.clone(), client_id, trace.clone()))
+            .send(ClusterStateChange {
+                client_id,
+                command: cmd.clone(),
+                trace: trace.clone(),
+            })
             .await
             .is_err()
         {

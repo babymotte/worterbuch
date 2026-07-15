@@ -63,5 +63,7 @@ pub async fn run(
         }
     }
 
+    info!("Main loop stopped, shutting down.");
+
     shutdown(subsys, worterbuch, config, servers).await
 }
