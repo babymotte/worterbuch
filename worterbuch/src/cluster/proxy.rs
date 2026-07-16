@@ -19,11 +19,11 @@
 
 use crate::{
     Config, Servers,
-    cluster::{self, protocol::ProxyMessage},
     cluster::{
-        Mode,
-        follower::try_process_leader_message,
-        protocol::{LeaderMessage, StateSync},
+        self, Mode,
+        protocol::{
+            ClientWriteCommand, ClusterStateChange, LeaderMessage, ProxyMessage, StateSync,
+        },
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
@@ -31,6 +31,7 @@ use crate::{
     server::common::WbFunction,
     worterbuch::Worterbuch,
 };
+use hashbrown::HashMap;
 use serde_json::json;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
@@ -38,20 +39,23 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::TcpStream,
-    net::tcp::OwnedWriteHalf,
+    io::{AsyncBufReadExt, BufReader, Lines},
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
     select,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, warn};
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID,
-    error::ConfigError,
+    ClientId, INTERNAL_CLIENT_ID,
+    error::{ConfigError, ConnectionResult, WorterbuchResult},
     protocol::v1::{
-        CSet, ClientMessage, Delete, InternalAction, Lock, PDelete, Publish, SPub, SPubInit,
-        SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set, Trace,
+        CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete,
+        ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set,
+        Trace, TransactionId, Value,
     },
     receive_msg, topic, while_select, write_line_and_flush,
 };
@@ -157,7 +161,7 @@ async fn run_with_leader(
     let (leader_rx, leader_tx) = stream.into_split();
     let mut lines = BufReader::new(leader_rx).lines();
 
-    let proxy_request_sender = init_request_sender(subsys, leader_tx, &config, leader_address);
+    let proxy_request_tx = init_request_sender(subsys, leader_tx, &config, leader_address);
 
     let timeout = config.initial_sync_timeout;
 
@@ -195,14 +199,11 @@ async fn run_with_leader(
     }
     info!("Successfully synced with leader.");
 
-    announce_connected_clients(worterbuch, &proxy_request_sender).await?;
+    announce_connected_clients(worterbuch, &proxy_request_tx).await?;
 
-    while_select! {
-        biased;
-        _ = subsys.shutdown_requested() => break,
-        recv = receive_msg(&mut lines, None) => try_process_leader_message(recv, worterbuch).await?,
-        recv = api_rx.recv() => try_process_api_call(recv, worterbuch, &proxy_request_sender).await?,
-    }
+    LeaderConnection::new(subsys, proxy_request_tx, worterbuch, api_rx, lines)
+        .run()
+        .await?;
 
     info!(
         "Proxy loop for leader {} stopped, closing connection.",
@@ -210,6 +211,448 @@ async fn run_with_leader(
     );
 
     Ok(true)
+}
+
+#[derive(Debug, Default)]
+struct ClientResponseInterests {
+    set: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    cset: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    spubinit: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    spub: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    publish: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    delete: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
+    pdelete: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
+    lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    acquire_lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>>,
+    release_lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+}
+
+struct LeaderConnection<'a> {
+    subsys: &'a SubsystemHandle,
+    response_interests: HashMap<ClientId, ClientResponseInterests>,
+    proxy_request_tx: mpsc::Sender<ProxyMessage>,
+    worterbuch: &'a mut Worterbuch,
+    api_rx: &'a mut mpsc::Receiver<WbFunction>,
+    lines: Lines<BufReader<OwnedReadHalf>>,
+}
+
+impl<'a> LeaderConnection<'a> {
+    fn new(
+        subsys: &'a SubsystemHandle,
+        proxy_request_tx: mpsc::Sender<ProxyMessage>,
+        worterbuch: &'a mut Worterbuch,
+        api_rx: &'a mut mpsc::Receiver<WbFunction>,
+        lines: Lines<BufReader<OwnedReadHalf>>,
+    ) -> Self {
+        Self {
+            subsys,
+            response_interests: HashMap::new(),
+            proxy_request_tx,
+            worterbuch,
+            api_rx,
+            lines,
+        }
+    }
+
+    async fn run(mut self) -> WorterbuchAppResult<()> {
+        while_select! {
+            biased;
+            _ = self.subsys.shutdown_requested() => break,
+            recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
+            recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
+        }
+        Ok(())
+    }
+
+    async fn try_process_leader_message(
+        &mut self,
+        recv: ConnectionResult<Option<LeaderMessage>>,
+    ) -> WorterbuchAppResult<ControlFlow<()>> {
+        match recv {
+            Ok(Some(msg)) => {
+                self.process_leader_message(msg).await?;
+                Ok(ControlFlow::Continue(()))
+            }
+            Ok(None) => Ok(ControlFlow::Break(())),
+            Err(e) => {
+                error!("Error receiving update from leader: {e}");
+                Ok(ControlFlow::Break(()))
+            }
+        }
+    }
+
+    async fn process_leader_message(&mut self, msg: LeaderMessage) -> WorterbuchAppResult<()> {
+        debug!("Processing leader sync message: {msg:?}");
+
+        let res = match msg {
+            LeaderMessage::Init(_) => {
+                return Err(crate::error::WorterbuchAppError::ClusterError(
+                    "already synced".to_owned(),
+                ));
+            }
+            LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
+                ClientWriteCommand::Set(key, value, force) => {
+                    self.worterbuch
+                        .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
+                        .await
+                }
+                ClientWriteCommand::CSet(key, value, versions, force) => {
+                    self.worterbuch
+                        .internal_cset(key, value, versions, INTERNAL_CLIENT_ID, trace, force)
+                        .await
+                }
+                ClientWriteCommand::Delete(key) => self
+                    .worterbuch
+                    .internal_delete(key, INTERNAL_CLIENT_ID, trace)
+                    .await
+                    .map(|_| ()),
+                ClientWriteCommand::PDelete(pattern) => self
+                    .worterbuch
+                    .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace)
+                    .await
+                    .map(|_| ()),
+            },
+            LeaderMessage::ClientResponse(server_message) => {
+                // TODO resolve client response interests
+                Ok(())
+            }
+        };
+
+        if let Err(e) = res {
+            error!("Error applying leader sync message: {e}");
+        }
+
+        Ok(())
+    }
+
+    async fn try_process_api_call(
+        &mut self,
+        recv: Option<WbFunction>,
+    ) -> WorterbuchAppResult<ControlFlow<()>> {
+        match recv {
+            Some(function) => {
+                self.process_api_call(function).await?;
+                Ok(ControlFlow::Continue(()))
+            }
+            None => Ok(ControlFlow::Break(())),
+        }
+    }
+
+    async fn process_api_call(&mut self, function: WbFunction) -> WorterbuchAppResult<()> {
+        debug!("Processing API call: {function:?}");
+        match function {
+            WbFunction::Connected(client_id, addr, protocol, tx) => {
+                let request = ProxyMessage::Connected {
+                    client_id,
+                    protocol: protocol.clone(),
+                };
+                self.proxy_request_tx.send(request).await?;
+                cluster::process_api_call(
+                    self.worterbuch,
+                    WbFunction::Connected(client_id, addr, protocol, tx),
+                )
+                .await;
+            }
+            WbFunction::Disconnected(client_id, protocol, tx) => {
+                let request = ProxyMessage::Disconnected {
+                    client_id,
+                    protocol: protocol.clone(),
+                };
+                self.proxy_request_tx.send(request).await?;
+                cluster::process_api_call(
+                    self.worterbuch,
+                    WbFunction::Disconnected(client_id, protocol, tx),
+                )
+                .await;
+            }
+            WbFunction::ProtocolSwitched(client_id, interface, version) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest {
+                        version: version,
+                    }),
+                    interface: interface.clone(),
+                };
+                // TODO register response interest
+                self.proxy_request_tx.send(request).await?;
+                cluster::process_api_call(
+                    self.worterbuch,
+                    WbFunction::ProtocolSwitched(client_id, interface, version),
+                )
+                .await;
+            }
+            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::Set(Set {
+                        transaction_id,
+                        key,
+                        value,
+                    }),
+                    interface,
+                };
+                self.register_set_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::CSet(CSet {
+                        transaction_id,
+                        key,
+                        value,
+                        version,
+                    }),
+                    interface,
+                };
+                self.register_cset_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::SPubInit(SPubInit {
+                        transaction_id,
+                        key,
+                    }),
+                    interface,
+                };
+                self.register_spubinit_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::SPub(SPub {
+                        transaction_id,
+                        value,
+                    }),
+                    interface,
+                };
+                self.register_spub_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::Publish(Publish {
+                        transaction_id,
+                        key,
+                        value,
+                    }),
+                    interface,
+                };
+                self.register_publish_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::Delete(Delete {
+                        transaction_id,
+                        key,
+                    }),
+                    interface,
+                };
+                self.register_delete_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::PDelete(
+                transaction_id,
+                interface,
+                request_pattern,
+                quiet,
+                client_id,
+                tx,
+            ) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::PDelete(PDelete {
+                        transaction_id,
+                        request_pattern,
+                        quiet,
+                    }),
+                    interface,
+                };
+                self.register_pdelete_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::Lock(Lock {
+                        transaction_id,
+                        key,
+                    }),
+                    interface,
+                };
+                self.register_lock_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::AcquireLock(Lock {
+                        transaction_id,
+                        key,
+                    }),
+                    interface,
+                };
+                self.register_acquire_lock_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
+                let request = ProxyMessage::Request {
+                    client_id,
+                    msg: ClientMessage::ReleaseLock(Lock {
+                        transaction_id,
+                        key,
+                    }),
+                    interface,
+                };
+                self.register_release_lock_response_interest(client_id, transaction_id, tx);
+                self.proxy_request_tx.send(request).await?;
+            }
+            WbFunction::Import(_, _, _, _, _) => {
+                warn!("Import not yet implemented");
+                // TODO forward to leader
+                // TODO register response interest
+            }
+            function => cluster::process_api_call(self.worterbuch, function).await,
+        };
+
+        Ok(())
+    }
+
+    fn register_set_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .set
+            .insert(transaction_id, tx);
+    }
+
+    fn register_cset_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .cset
+            .insert(transaction_id, tx);
+    }
+
+    fn register_spubinit_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .spubinit
+            .insert(transaction_id, tx);
+    }
+
+    fn register_spub_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .spub
+            .insert(transaction_id, tx);
+    }
+
+    fn register_publish_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .publish
+            .insert(transaction_id, tx);
+    }
+
+    fn register_delete_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<Value>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .delete
+            .insert(transaction_id, tx);
+    }
+
+    fn register_pdelete_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .pdelete
+            .insert(transaction_id, tx);
+    }
+
+    fn register_lock_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .lock
+            .insert(transaction_id, tx);
+    }
+
+    fn register_acquire_lock_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .acquire_lock
+            .insert(transaction_id, tx);
+    }
+
+    fn register_release_lock_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        tx: oneshot::Sender<WorterbuchResult<()>>,
+    ) {
+        self.response_interests
+            .entry(client_id)
+            .or_insert_with(ClientResponseInterests::default)
+            .release_lock
+            .insert(transaction_id, tx);
+    }
 }
 
 async fn announce_connected_clients(
@@ -234,12 +677,12 @@ fn init_request_sender(
     let (tx, rx) = mpsc::channel(config.channel_buffer_size);
     let send_timeout = config.send_timeout;
     subsys.spawn("proxy_request_sender", move |s| {
-        request_sneder_loop(s, leader_tx, rx, send_timeout, leader_addr)
+        request_sender_loop(s, leader_tx, rx, send_timeout, leader_addr)
     });
     tx
 }
 
-async fn request_sneder_loop(
+async fn request_sender_loop(
     subsys: SubsystemHandle,
     mut leader_tx: OwnedWriteHalf,
     mut rx: mpsc::Receiver<ProxyMessage>,
@@ -264,7 +707,7 @@ async fn forward_client_request(
         return ControlFlow::Break(());
     };
 
-    debug!("Forwarding client request to leader");
+    debug!("Forwarding client request to leader: {request:?}");
 
     if let Err(e) = write_line_and_flush(request, leader_tx, timeout, leader_addr).await {
         error!(
@@ -273,6 +716,8 @@ async fn forward_client_request(
         );
         return ControlFlow::Break(());
     }
+
+    debug!("Client request forwarded to leader.");
 
     ControlFlow::Continue(())
 }
@@ -300,201 +745,5 @@ async fn initial_sync(
     worterbuch.flush().await.map_err(|e| {
         WorterbuchAppError::ClusterError(format!("Failed to flush storage after initial sync: {e}"))
     })?;
-    Ok(())
-}
-
-async fn try_process_api_call(
-    recv: Option<WbFunction>,
-    worterbuch: &mut Worterbuch,
-    leader_tx: &mpsc::Sender<ProxyMessage>,
-) -> WorterbuchAppResult<ControlFlow<()>> {
-    match recv {
-        Some(function) => {
-            process_api_call(worterbuch, function, leader_tx).await?;
-            Ok(ControlFlow::Continue(()))
-        }
-        None => Ok(ControlFlow::Break(())),
-    }
-}
-
-async fn process_api_call(
-    worterbuch: &mut Worterbuch,
-    function: WbFunction,
-    leader_tx: &mpsc::Sender<ProxyMessage>,
-) -> WorterbuchAppResult<()> {
-    match function {
-        WbFunction::Connected(client_id, addr, protocol, tx) => {
-            let request = ProxyMessage::Connected {
-                client_id,
-                protocol: protocol.clone(),
-            };
-            // TODO register response interest?
-            leader_tx.send(request).await?;
-            cluster::process_api_call(
-                worterbuch,
-                WbFunction::Connected(client_id, addr, protocol, tx),
-            )
-            .await;
-        }
-        WbFunction::Disconnected(client_id, protocol, tx) => {
-            let request = ProxyMessage::Disconnected {
-                client_id,
-                protocol: protocol.clone(),
-            };
-            // TODO register response interest?
-            leader_tx.send(request).await?;
-            cluster::process_api_call(
-                worterbuch,
-                WbFunction::Disconnected(client_id, protocol, tx),
-            )
-            .await;
-        }
-        WbFunction::ProtocolSwitched(client_id, interface, version) => {
-            let request = ProxyMessage::ProtocolSwitched {
-                client_id,
-                interface: interface.clone(),
-                version,
-            };
-            // TODO register response interest?
-            leader_tx.send(request).await?;
-            cluster::process_api_call(
-                worterbuch,
-                WbFunction::ProtocolSwitched(client_id, interface, version),
-            )
-            .await;
-        }
-        WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::Set(Set {
-                    transaction_id,
-                    key,
-                    value,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::CSet(CSet {
-                    transaction_id,
-                    key,
-                    value,
-                    version,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::SPubInit(SPubInit {
-                    transaction_id,
-                    key,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::SPub(SPub {
-                    transaction_id,
-                    value,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::Publish(Publish {
-                    transaction_id,
-                    key,
-                    value,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::Delete(Delete {
-                    transaction_id,
-                    key,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::PDelete(transaction_id, interface, request_pattern, quiet, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::PDelete(PDelete {
-                    transaction_id,
-                    request_pattern,
-                    quiet,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::Lock(Lock {
-                    transaction_id,
-                    key,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::AcquireLock(Lock {
-                    transaction_id,
-                    key,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
-            let request = ProxyMessage::Request {
-                client_id,
-                msg: ClientMessage::ReleaseLock(Lock {
-                    transaction_id,
-                    key,
-                }),
-                interface,
-            };
-            // TODO register response interest
-            leader_tx.send(request).await?;
-        }
-        WbFunction::Import(_, _, _, _, _) => {
-            warn!("Import not yet implemented");
-            // TODO forward to leader
-            // TODO register response interest
-        }
-        function => cluster::process_api_call(worterbuch, function).await,
-    };
-
     Ok(())
 }

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId,
     protocol::v1::{
-        CasVersion, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value, Welcome,
+        CasVersion, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value,
     },
 };
 
@@ -30,7 +30,6 @@ use worterbuch_common::{
 #[serde(rename_all = "camelCase")]
 pub enum LeaderMessage {
     Init(StateSync),
-    ClientAccepted(Welcome),
     Mut(ClusterStateChange),
     ClientResponse(ServerMessage),
 }

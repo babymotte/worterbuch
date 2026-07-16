@@ -204,6 +204,185 @@ pub enum WbFunction {
     Len(oneshot::Sender<usize>),
 }
 
+impl fmt::Debug for WbFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WbFunction::Get(key, _) => f.debug_tuple("Get").field(key).finish(),
+            WbFunction::CGet(key, _) => f.debug_tuple("CGet").field(key).finish(),
+            WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => f
+                .debug_tuple("Set")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(value)
+                .field(client_id)
+                .finish(),
+            WbFunction::CSet(transaction_id, interface, key, value, version, client_id, _) => f
+                .debug_tuple("CSet")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(value)
+                .field(version)
+                .field(client_id)
+                .finish(),
+            WbFunction::SPubInit(transaction_id, interface, key, client_id, _) => f
+                .debug_tuple("SPubInit")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(client_id)
+                .finish(),
+            WbFunction::SPub(transaction_id, interface, value, client_id, _) => f
+                .debug_tuple("SPub")
+                .field(transaction_id)
+                .field(interface)
+                .field(value)
+                .field(client_id)
+                .finish(),
+            WbFunction::Publish(transaction_id, interface, key, value, client_id, _) => f
+                .debug_tuple("Publish")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(value)
+                .field(client_id)
+                .finish(),
+            WbFunction::Ls(parent, _) => f.debug_tuple("Ls").field(parent).finish(),
+            WbFunction::PLs(parent, _) => f.debug_tuple("PLs").field(parent).finish(),
+            WbFunction::PGet(pattern, _) => f.debug_tuple("PGet").field(pattern).finish(),
+            WbFunction::Subscribe(
+                client_id,
+                transaction_id,
+                interface,
+                key,
+                unique,
+                live_only,
+                send_traces,
+                _,
+            ) => f
+                .debug_tuple("Subscribe")
+                .field(client_id)
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(unique)
+                .field(live_only)
+                .field(send_traces)
+                .finish(),
+            WbFunction::PSubscribe(
+                client_id,
+                transaction_id,
+                interface,
+                pattern,
+                unique,
+                live_only,
+                send_traces,
+                _,
+            ) => f
+                .debug_tuple("PSubscribe")
+                .field(client_id)
+                .field(transaction_id)
+                .field(interface)
+                .field(pattern)
+                .field(unique)
+                .field(live_only)
+                .field(send_traces)
+                .finish(),
+            WbFunction::SubscribeLs(
+                client_id,
+                transaction_id,
+                interface,
+                parent,
+                send_traces,
+                _,
+            ) => f
+                .debug_tuple("SubscribeLs")
+                .field(client_id)
+                .field(transaction_id)
+                .field(interface)
+                .field(parent)
+                .field(send_traces)
+                .finish(),
+            WbFunction::Unsubscribe(client_id, transaction_id, interface, _) => f
+                .debug_tuple("Unsubscribe")
+                .field(client_id)
+                .field(transaction_id)
+                .field(interface)
+                .finish(),
+            WbFunction::UnsubscribeLs(client_id, transaction_id, _) => f
+                .debug_tuple("UnsubscribeLs")
+                .field(client_id)
+                .field(transaction_id)
+                .finish(),
+            WbFunction::Delete(transaction_id, interface, key, client_id, _) => f
+                .debug_tuple("Delete")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(client_id)
+                .finish(),
+            WbFunction::PDelete(transaction_id, interface, pattern, quiet, client_id, _) => f
+                .debug_tuple("PDelete")
+                .field(transaction_id)
+                .field(interface)
+                .field(pattern)
+                .field(quiet)
+                .field(client_id)
+                .finish(),
+            WbFunction::Lock(transaction_id, interface, key, client_id, _) => f
+                .debug_tuple("Lock")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(client_id)
+                .finish(),
+            WbFunction::AcquireLock(transaction_id, interface, key, client_id, _) => f
+                .debug_tuple("AcquireLock")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(client_id)
+                .finish(),
+            WbFunction::ReleaseLock(transaction_id, interface, key, client_id, _) => f
+                .debug_tuple("ReleaseLock")
+                .field(transaction_id)
+                .field(interface)
+                .field(key)
+                .field(client_id)
+                .finish(),
+            WbFunction::Connected(client_id, remote_addr, protocol, _) => f
+                .debug_tuple("Connected")
+                .field(client_id)
+                .field(remote_addr)
+                .field(protocol)
+                .finish(),
+            WbFunction::ProtocolSwitched(client_id, interface, version) => f
+                .debug_tuple("ProtocolSwitched")
+                .field(client_id)
+                .field(interface)
+                .field(version)
+                .finish(),
+            WbFunction::Disconnected(client_id, protocol, remote_addr) => f
+                .debug_tuple("Disconnected")
+                .field(client_id)
+                .field(protocol)
+                .field(remote_addr)
+                .finish(),
+            WbFunction::Config(_) => f.debug_tuple("Config").finish(),
+            WbFunction::Export(_, _) => f.debug_tuple("Export").finish(),
+            WbFunction::Import(transaction_id, client_id, interface, path, _) => f
+                .debug_tuple("Import")
+                .field(transaction_id)
+                .field(client_id)
+                .field(interface)
+                .field(path)
+                .finish(),
+            WbFunction::Len(_) => f.debug_tuple("Len").finish(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CloneableWbApi {
     name: String,

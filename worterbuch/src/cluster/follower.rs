@@ -126,7 +126,7 @@ pub(crate) async fn run(
     .await
 }
 
-pub(crate) async fn try_process_leader_message(
+async fn try_process_leader_message(
     recv: ConnectionResult<Option<LeaderMessage>>,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
@@ -207,11 +207,6 @@ async fn process_leader_message(
         LeaderMessage::ClientResponse(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "leader should never send a ClientResponse to a follower".to_owned(),
-            ));
-        }
-        LeaderMessage::ClientAccepted(_) => {
-            return Err(crate::error::WorterbuchAppError::ClusterError(
-                "leader should never send a ClientAccepted to a follower".to_owned(),
             ));
         }
     };

@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, Protocol,
-    protocol::v1::{ClientMessage, Interface, ProtocolMajorVersion},
+    protocol::v1::{ClientMessage, Interface},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,12 +35,6 @@ pub enum ProxyMessage {
     Disconnected {
         client_id: ClientId,
         protocol: Protocol,
-    },
-    #[serde(rename_all = "camelCase")]
-    ProtocolSwitched {
-        client_id: ClientId,
-        interface: Interface,
-        version: ProtocolMajorVersion,
     },
     #[serde(rename_all = "camelCase")]
     Request {

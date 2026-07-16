@@ -543,11 +543,6 @@ impl VirtualProxyServer {
                 client_id,
                 protocol,
             } => self.stop_virtual_client(client_id, protocol),
-            ProxyMessage::ProtocolSwitched {
-                client_id,
-                interface,
-                version,
-            } => self.switch_client_protocol(client_id, interface, version),
             ProxyMessage::Request {
                 client_id,
                 msg,
@@ -612,10 +607,6 @@ impl VirtualProxyServer {
             "Proxied client disconnected: {} ({}/{:?})",
             client_id, self.proxy_address, protocol
         );
-    }
-
-    fn switch_client_protocol(&self, client_id: ClientId, interface: Interface, version: u32) {
-        // TODO
     }
 
     async fn process_client_request(
