@@ -28,11 +28,11 @@ use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
 use tracing::{Level, debug, error, instrument, trace, warn};
 use worterbuch_common::{
-    AuthCheck, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
+    AuthCheck, ClientId, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
     protocol::v1::{
-        Ack, AuthorizationRequest, ClientId, ClientMessage, Delete, Err, ErrorCode, Get, Ls,
-        LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
+        Ack, AuthorizationRequest, ClientMessage, Delete, Err, ErrorCode, Get, Ls, LsState,
+        PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
         ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
         UnsubscribeLs,
     },
@@ -706,6 +706,7 @@ impl V0 {
             .pdelete(
                 msg.transaction_id,
                 msg.request_pattern.clone(),
+                msg.quiet,
                 self.client_id,
             )
             .await

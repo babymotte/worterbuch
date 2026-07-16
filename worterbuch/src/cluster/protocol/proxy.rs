@@ -19,8 +19,8 @@
 
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    Protocol,
-    protocol::v1::{ClientId, ClientMessage, Interface, ProtocolMajorVersion},
+    ClientId, Protocol,
+    protocol::v1::{ClientMessage, Interface, ProtocolMajorVersion},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

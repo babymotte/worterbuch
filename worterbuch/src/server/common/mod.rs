@@ -30,10 +30,11 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, debug, instrument, trace, warn};
 use worterbuch_common::{
-    LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
+    ClientId, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription, ValueEntry,
+    WbApi,
     error::WorterbuchResult,
     protocol::v1::{
-        CasVersion, ClientId, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
+        CasVersion, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
         ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag, TransactionId,
         UniqueFlag, Value,
     },
@@ -83,6 +84,7 @@ pub enum WbFunction {
     ),
     SPub(
         TransactionId,
+        Interface,
         Value,
         ClientId,
         oneshot::Sender<WorterbuchResult<()>>,
@@ -157,6 +159,7 @@ pub enum WbFunction {
         TransactionId,
         Interface,
         RequestPattern,
+        Option<bool>,
         ClientId,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ),
@@ -512,7 +515,13 @@ impl WbApi for CloneableWbApi {
         }
         let res = self
             .tx
-            .send(WbFunction::SPub(transaction_id, value, client_id, tx))
+            .send(WbFunction::SPub(
+                transaction_id,
+                self.interface.clone(),
+                value,
+                client_id,
+                tx,
+            ))
             .await;
         if trace {
             trace!("Sending spub request to core system done.");
@@ -687,6 +696,7 @@ impl WbApi for CloneableWbApi {
         &self,
         transaction_id: TransactionId,
         pattern: RequestPattern,
+        quiet: Option<bool>,
         client_id: ClientId,
     ) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
@@ -695,6 +705,7 @@ impl WbApi for CloneableWbApi {
                 transaction_id,
                 self.interface.clone(),
                 pattern,
+                quiet,
                 client_id,
                 tx,
             ))

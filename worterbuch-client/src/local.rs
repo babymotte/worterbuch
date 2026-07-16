@@ -266,7 +266,12 @@ async fn forward_loop(
                 request_pattern,
                 quiet,
             }) => match api
-                .pdelete(transaction_id, request_pattern.clone(), INTERNAL_CLIENT_ID)
+                .pdelete(
+                    transaction_id,
+                    request_pattern.clone(),
+                    quiet,
+                    INTERNAL_CLIENT_ID,
+                )
                 .await
             {
                 Ok(kvps) => {

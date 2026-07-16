@@ -62,9 +62,9 @@ use tokio::sync::{mpsc, oneshot};
 use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID, Protocol,
+    ClientId, INTERNAL_CLIENT_ID, Protocol,
     protocol::v1::{
-        ClientId, Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
+        Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
     },
     topic,
@@ -313,7 +313,7 @@ async fn forward_api_call(
         WbFunction::Get(_, _)
         | WbFunction::CGet(_, _)
         | WbFunction::SPubInit(_, _, _, _, _)
-        | WbFunction::SPub(_, _, _, _)
+        | WbFunction::SPub(_, _, _, _, _)
         | WbFunction::Publish(_, _, _, _, _, _)
         | WbFunction::Ls(_, _)
         | WbFunction::PLs(_, _)
@@ -383,7 +383,7 @@ async fn forward_api_call(
                 None
             }
         }
-        WbFunction::PDelete(transaction_id, interface, pattern, client_id, _) => {
+        WbFunction::PDelete(transaction_id, interface, pattern, _, client_id, _) => {
             if !filter_sys || !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 let cmd = ClientWriteCommand::PDelete(pattern.to_owned());
                 let client_id = *client_id;

@@ -19,9 +19,11 @@
 
 use crate::store::{SerializeableLockNode, StoreNode};
 use serde::{Deserialize, Serialize};
-use worterbuch_common::protocol::v1::{
-    CasVersion, ClientId, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value,
-    Welcome,
+use worterbuch_common::{
+    ClientId,
+    protocol::v1::{
+        CasVersion, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value, Welcome,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

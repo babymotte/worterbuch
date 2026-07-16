@@ -50,7 +50,8 @@ use worterbuch_common::{
     INTERNAL_CLIENT_ID,
     error::ConfigError,
     protocol::v1::{
-        ClientMessage, InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set, Trace,
+        CSet, ClientMessage, Delete, InternalAction, Lock, PDelete, Publish, SPub, SPubInit,
+        SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set, Trace,
     },
     receive_msg, topic, while_select, write_line_and_flush,
 };
@@ -362,50 +363,117 @@ async fn process_api_call(
             // TODO register response interest
             leader_tx.send(request).await?;
         }
-        WbFunction::CSet(_, _, _, _, _, _, _) => {
-            warn!("CSet not yet implemented");
-            // TODO forward to leader
+        WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::CSet(CSet {
+                    transaction_id,
+                    key,
+                    value,
+                    version,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::SPubInit(_, _, _, _, _) => {
-            warn!("SPubInit not yet implemented");
-            // TODO forward to leader
+        WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::SPubInit(SPubInit {
+                    transaction_id,
+                    key,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::SPub(_, _, _, _) => {
-            warn!("SPub not yet implemented");
-            // TODO forward to leader
+        WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::SPub(SPub {
+                    transaction_id,
+                    value,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::Publish(_, _, _, _, _, _) => {
-            warn!("Publish not yet implemented");
-            // TODO forward to leader
+        WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::Publish(Publish {
+                    transaction_id,
+                    key,
+                    value,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::Delete(_, _, _, _, _) => {
-            warn!("Delete not yet implemented");
-            // TODO forward to leader
+        WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::Delete(Delete {
+                    transaction_id,
+                    key,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::PDelete(_, _, _, _, _) => {
-            warn!("PDelete not yet implemented");
-            // TODO forward to leader
+        WbFunction::PDelete(transaction_id, interface, request_pattern, quiet, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::PDelete(PDelete {
+                    transaction_id,
+                    request_pattern,
+                    quiet,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::Lock(_, _, _, _, _) => {
-            warn!("Lock not yet implemented");
-            // TODO forward to leader
+        WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::Lock(Lock {
+                    transaction_id,
+                    key,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::AcquireLock(_, _, _, _, _) => {
-            warn!("AcquireLock not yet implemented");
-            // TODO forward to leader
+        WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::AcquireLock(Lock {
+                    transaction_id,
+                    key,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
-        WbFunction::ReleaseLock(_, _, _, _, _) => {
-            warn!("ReleaseLock not yet implemented");
-            // TODO forward to leader
+        WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
+            let request = ProxyMessage::Request {
+                client_id,
+                msg: ClientMessage::ReleaseLock(Lock {
+                    transaction_id,
+                    key,
+                }),
+                interface,
+            };
             // TODO register response interest
+            leader_tx.send(request).await?;
         }
         WbFunction::Import(_, _, _, _, _) => {
             warn!("Import not yet implemented");

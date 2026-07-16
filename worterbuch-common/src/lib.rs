@@ -26,7 +26,7 @@ pub mod protocol;
 use crate::{
     error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
     protocol::v1::{
-        CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
+        CasVersion, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
         PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag,
         StateEvent, Trace, TransactionId, UniqueFlag, Value,
     },
@@ -47,6 +47,7 @@ use tokio::{
     time::timeout,
 };
 use tracing::{Span, debug, error, trace, warn};
+use uuid::Uuid;
 
 #[cfg(feature = "jemalloc")]
 mod jemalloc;
@@ -56,6 +57,8 @@ pub mod profiling;
 pub mod redb;
 
 pub const INTERNAL_CLIENT_ID: ClientId = ClientId::nil();
+
+pub type ClientId = Uuid;
 
 pub type TypedKeyValuePairs<T> = Vec<TypedKeyValuePair<T>>;
 pub type Path = String;
@@ -571,6 +574,7 @@ pub trait WbApi {
         &self,
         transaction_id: TransactionId,
         pattern: RequestPattern,
+        quiet: Option<bool>,
         client_id: ClientId,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
 

@@ -82,9 +82,9 @@ use tracing::{debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
-    AuthCheck, Privilege, Protocol, RegularKeySegment, WbApi,
+    AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::v1::{ClientId, Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
+    protocol::v1::{Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
 };
 
 async fn ws(
@@ -354,14 +354,16 @@ async fn delete_value(
 
 async fn pdelete(
     Path(pattern): Path<Key>,
+    Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
+    let quiet = params.get("quiet").map(|it| it.to_lowercase() != "false");
     let client_id = ClientId::new_v4();
-    Ok(Json(wb.pdelete(1, pattern, client_id).await?))
+    Ok(Json(wb.pdelete(1, pattern, quiet, client_id).await?))
 }
 
 async fn ls(

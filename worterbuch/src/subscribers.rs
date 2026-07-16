@@ -245,7 +245,7 @@ mod test {
 
     use super::*;
     use tokio::sync::mpsc::channel;
-    use worterbuch_common::{parse_segments, protocol::v1::ClientId};
+    use worterbuch_common::{ClientId, parse_segments};
 
     fn reg_key_segs(key: &str) -> Vec<RegularKeySegment> {
         parse_segments(key).unwrap()

@@ -92,9 +92,13 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             )
             .ok();
         }
-        WbFunction::SPub(transaction_id, value, client_id, tx) => {
-            tx.send(worterbuch.spub(transaction_id, value, client_id).await)
-                .ok();
+        WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
+            tx.send(
+                worterbuch
+                    .spub(value, TraceData::new(client_id, interface, transaction_id))
+                    .await,
+            )
+            .ok();
         }
         WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
             tx.send(
@@ -191,7 +195,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             )
             .ok();
         }
-        WbFunction::PDelete(transaction_id, interface, pattern, client_id, tx) => {
+        WbFunction::PDelete(transaction_id, interface, pattern, _, client_id, tx) => {
             tx.send(
                 worterbuch
                     .pdelete(pattern, client_id, transaction_id, interface)

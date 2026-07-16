@@ -27,9 +27,9 @@ use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    WbApi,
+    ClientId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
-    protocol::v1::{Ack, ClientId, ClientMessage, ProtocolVersionSegment, ServerMessage},
+    protocol::v1::{Ack, ClientMessage, ProtocolVersionSegment, ServerMessage},
 };
 
 enum ProtocolHandler {

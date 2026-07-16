@@ -31,10 +31,10 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
-    KeySegment, RegularKeySegment, SubscriptionId, ValueEntry,
+    ClientId, KeySegment, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
-    protocol::v1::{CasVersion, ClientId, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
+    protocol::v1::{CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
 };
 
 type Tree<V> = HashMap<RegularKeySegment, Node<V>>;

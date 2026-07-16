@@ -5,12 +5,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt;
-use uuid::Uuid;
 
 pub use client::*;
 pub use server::*;
 
-use crate::Protocol;
+use crate::{ClientId, Protocol};
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
@@ -55,7 +54,6 @@ pub type AggregationDuration = u64;
 pub type AuthToken = String;
 pub type AuthTokenKey = String;
 pub type CasVersion = u64;
-pub type ClientId = Uuid;
 pub type MetaData = String;
 pub type Version = String;
 pub type LastWill = KeyValuePairs;

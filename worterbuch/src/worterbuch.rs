@@ -46,13 +46,13 @@ use tokio::{
 };
 use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
 use worterbuch_common::{
-    KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
+    ClientId, KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
     SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments,
     protocol::v1::{
-        CasVersion, ClientId, GraveGoods, Interface, InternalAction, Key, KeyValuePair,
-        KeyValuePairs, LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
+        CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
+        LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
         SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
         SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
         SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
@@ -276,7 +276,7 @@ pub struct Worterbuch {
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     clients: HashMap<ClientId, ClientInfo>,
-    spub_keys: HashMap<ClientId, HashMap<TransactionId, (Key, Interface)>>,
+    spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
     persistent_storage: PersistentStorageImpl,
 }
 
@@ -464,35 +464,16 @@ impl Worterbuch {
 
     pub async fn spub_init(&mut self, key: Key, trace_data: TraceData) -> WorterbuchResult<()> {
         check_for_read_only_key(&key, trace_data.client_id)?;
-        self.store_key(
-            trace_data.client_id,
-            trace_data.transaction_id,
-            key,
-            trace_data.interface.clone(),
-        );
+        self.store_key(trace_data.client_id, trace_data.transaction_id, key);
 
         Ok(())
     }
 
-    pub async fn spub(
-        &mut self,
-        transaction_id: TransactionId,
-        value: Value,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
-        if let Some((key, interface)) = self.lookup_key(client_id, transaction_id) {
-            self.publish(
-                key,
-                value,
-                TraceData {
-                    client_id,
-                    transaction_id,
-                    interface,
-                },
-            )
-            .await
+    pub async fn spub(&mut self, value: Value, trace_data: TraceData) -> WorterbuchResult<()> {
+        if let Some(key) = self.lookup_key(trace_data.client_id, trace_data.transaction_id) {
+            self.publish(key, value, trace_data).await
         } else {
-            Err(WorterbuchError::NoPubStream(transaction_id))
+            Err(WorterbuchError::NoPubStream(trace_data.transaction_id))
         }
     }
 
@@ -1708,29 +1689,19 @@ impl Worterbuch {
         Ok(())
     }
 
-    fn store_key(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        key: Key,
-        interface: Interface,
-    ) {
+    fn store_key(&mut self, client_id: ClientId, transaction_id: TransactionId, key: Key) {
         let keys = match self.spub_keys.entry(client_id) {
             Entry::Occupied(it) => it.into_mut(),
             Entry::Vacant(it) => it.insert(HashMap::new()),
         };
-        keys.insert(transaction_id, (key, interface));
+        keys.insert(transaction_id, key);
     }
 
-    fn lookup_key(
-        &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-    ) -> Option<(Key, Interface)> {
+    fn lookup_key(&self, client_id: ClientId, transaction_id: TransactionId) -> Option<Key> {
         self.spub_keys
             .get(&client_id)
             .and_then(|keys| keys.get(&transaction_id))
-            .map(|(key, interface)| (key.to_owned(), interface.to_owned()))
+            .map(ToOwned::to_owned)
     }
 
     pub(crate) async fn reset_store(&mut self, data: StoreNode) -> WorterbuchResult<()> {

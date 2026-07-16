@@ -42,8 +42,8 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
 use worterbuch_common::{
-    ValueEntry,
-    protocol::v1::{ClientId, GraveGoods, Key, LastWill},
+    ClientId, ValueEntry,
+    protocol::v1::{GraveGoods, Key, LastWill},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
