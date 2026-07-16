@@ -195,7 +195,7 @@ async fn run_with_leader(
     }
     info!("Successfully synced with leader.");
 
-    // TODO delay opening of client sockets until after initial sync
+    announce_connected_clients(worterbuch, &proxy_request_sender).await?;
 
     while_select! {
         biased;
@@ -210,6 +210,19 @@ async fn run_with_leader(
     );
 
     Ok(true)
+}
+
+async fn announce_connected_clients(
+    worterbuch: &mut Worterbuch,
+    proxy_request_sender: &mpsc::Sender<ProxyMessage>,
+) -> Result<(), WorterbuchAppError> {
+    Ok(for (client_id, client_info) in worterbuch.clients() {
+        let request = ProxyMessage::Connected {
+            client_id: *client_id,
+            protocol: client_info.protocol.clone(),
+        };
+        proxy_request_sender.send(request).await?;
+    })
 }
 
 fn init_request_sender(

@@ -84,13 +84,17 @@ impl SubscriptionFlags {
 }
 
 #[derive(Debug)]
-struct ClientInfo {
-    subscriptions: usize,
+pub struct ClientInfo {
+    pub subscriptions: usize,
+    pub protocol: Protocol,
 }
 
 impl ClientInfo {
-    fn new() -> Self {
-        Self { subscriptions: 0 }
+    fn new(protocol: Protocol) -> Self {
+        Self {
+            subscriptions: 0,
+            protocol,
+        }
     }
 }
 
@@ -296,6 +300,10 @@ impl Worterbuch {
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
         }
+    }
+
+    pub fn clients(&self) -> &HashMap<ClientId, ClientInfo> {
+        &self.clients
     }
 
     #[instrument(skip(store, config))]
@@ -1313,7 +1321,8 @@ impl Worterbuch {
 
         let now = SystemTime::now().into();
 
-        self.clients.insert(client_id, ClientInfo::new());
+        self.clients
+            .insert(client_id, ClientInfo::new(protocol.clone()));
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         let trace = Trace::InternalAction(InternalAction::ClientConnected {
             client_id,
