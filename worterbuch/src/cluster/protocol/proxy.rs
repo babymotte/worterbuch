@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     Protocol,
-    protocol::{ClientId, ClientMessage, Interface, ProtocolMajorVersion},
+    protocol::v1::{ClientId, ClientMessage, Interface, ProtocolMajorVersion},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

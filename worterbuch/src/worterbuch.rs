@@ -50,7 +50,7 @@ use worterbuch_common::{
     SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     parse_segments,
-    protocol::{
+    protocol::v1::{
         CasVersion, ClientId, GraveGoods, Interface, InternalAction, Key, KeyValuePair,
         KeyValuePairs, LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
         SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,

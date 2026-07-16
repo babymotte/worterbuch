@@ -8,7 +8,7 @@ use std::{
     process::{Child, Command, Stdio},
     time::Duration,
 };
-use worterbuch_common::protocol::{
+use worterbuch_common::protocol::v1::{
     ClientMessage, ErrorCode, Get, Key, KeyValuePair, ServerMessage, State, StateEvent,
     TransactionId,
 };

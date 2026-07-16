@@ -73,7 +73,7 @@ use worterbuch_common::error::{ConnectionError, ConnectionResult, WorterbuchErro
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
-pub use worterbuch_common::protocol::*;
+pub use worterbuch_common::protocol::v1::*;
 pub use worterbuch_common::*;
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);

@@ -32,7 +32,7 @@ use tracing::{Level, Span, debug, instrument, trace, warn};
 use worterbuch_common::{
     LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::WorterbuchResult,
-    protocol::{
+    protocol::v1::{
         CasVersion, ClientId, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
         ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag, TransactionId,
         UniqueFlag, Value,

@@ -19,7 +19,7 @@
 
 use crate::store::{SerializeableLockNode, StoreNode};
 use serde::{Deserialize, Serialize};
-use worterbuch_common::protocol::{
+use worterbuch_common::protocol::v1::{
     CasVersion, ClientId, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value,
     Welcome,
 };

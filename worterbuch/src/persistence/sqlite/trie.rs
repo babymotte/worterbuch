@@ -2,7 +2,7 @@ use crate::persistence::error::PersistenceResult;
 use rusqlite::{Connection, params};
 use std::{collections::HashMap, io, path::Path};
 use tracing::trace;
-use worterbuch_common::{ValueEntry, protocol::KeyValuePair};
+use worterbuch_common::{ValueEntry, protocol::v1::KeyValuePair};
 
 const ROOT_ID: i64 = 0;
 

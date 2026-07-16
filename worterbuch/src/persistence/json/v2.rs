@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use worterbuch_common::protocol::{InternalAction, Trace};
+use worterbuch_common::protocol::v1::{InternalAction, Trace};
 
 use super::*;
 

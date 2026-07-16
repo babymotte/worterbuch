@@ -16,7 +16,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     KeySegment, ValueEntry, parse_segments,
-    protocol::{ClientId, GraveGoods, Key, KeyValuePair, LastWill},
+    protocol::v1::{ClientId, GraveGoods, Key, KeyValuePair, LastWill},
 };
 
 enum StoreAction {

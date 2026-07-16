@@ -51,7 +51,7 @@ use tosub::SubsystemHandle;
 use tracing::{Level, debug, error, info, span, trace, warn};
 use worterbuch_common::{
     KeySegment, Protocol, ValueEntry,
-    protocol::{
+    protocol::v1::{
         ClientId, ClientMessage, Interface, InternalAction, Method, PStateEvent,
         SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
         SYSTEM_TOPIC_ROOT, ServerMessage, Trace,
@@ -619,12 +619,32 @@ impl VirtualProxyServer {
     }
 
     async fn process_client_request(
-        &self,
+        &mut self,
         client_id: ClientId,
         msg: ClientMessage,
         interface: Interface,
     ) -> miette::Result<()> {
-        // TODO
+        trace!("Processing incoming message …");
+        let Some(client_handler) = self.clients.get_mut(&client_id) else {
+            return Err(miette!(
+                "Received request for unknown client {client_id} ({}/{:?})",
+                self.proxy_address,
+                interface
+            ));
+        };
+
+        let msg_processed = client_handler
+            .proto
+            .process_client_message(msg, &mut client_handler.authorized)
+            .await?;
+        if !msg_processed {
+            return Err(miette!(
+                "Message processing failed for client {client_id} ({}/{:?})",
+                self.proxy_address,
+                interface
+            ));
+        }
+        trace!("Processing incoming message done.");
 
         Ok(())
     }

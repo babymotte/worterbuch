@@ -23,7 +23,7 @@ use std::fmt::Debug;
 use tracing::{Instrument, Level, debug_span, instrument};
 use worterbuch_common::{
     WbApi,
-    protocol::{InternalAction, Trace},
+    protocol::v1::{InternalAction, Trace},
 };
 
 pub(crate) async fn periodic(

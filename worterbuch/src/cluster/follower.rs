@@ -38,7 +38,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     error::ConnectionResult,
-    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
+    protocol::v1::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
     receive_msg, topic, while_select,
 };
 

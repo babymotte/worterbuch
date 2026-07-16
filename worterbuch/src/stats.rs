@@ -27,7 +27,7 @@ use tracing::debug;
 use worterbuch_common::{
     WbApi,
     error::WorterbuchResult,
-    protocol::{
+    protocol::v1::{
         SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES,
         SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
     },
@@ -140,7 +140,7 @@ async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
 async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
     use miette::IntoDiagnostic;
     use tikv_jemalloc_ctl::{epoch, stats};
-    use worterbuch_common::protocol::{
+    use worterbuch_common::protocol::v1::{
         SYSTEM_TOPIC_FORMATTED, SYSTEM_TOPIC_JEMALLOC, SYSTEM_TOPIC_RAW,
     };
 

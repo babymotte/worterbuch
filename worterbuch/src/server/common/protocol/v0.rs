@@ -1,3 +1,22 @@
+/*
+ *  Worterbuch client protocol v0 implementation
+ *
+ *  Copyright (C) 2024 Michael Bachmann
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU Affero General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Affero General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Affero General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 use crate::{
     Config,
     auth::{JwtClaims, get_claims},
@@ -11,7 +30,7 @@ use tracing::{Level, debug, error, instrument, trace, warn};
 use worterbuch_common::{
     AuthCheck, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
-    protocol::{
+    protocol::v1::{
         Ack, AuthorizationRequest, ClientId, ClientMessage, Delete, Err, ErrorCode, Get, Ls,
         LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
         ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,

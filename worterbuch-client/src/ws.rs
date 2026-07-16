@@ -34,7 +34,7 @@ use tokio_tungstenite_wasm::{Message, WebSocketStream};
 use tracing::debug;
 use worterbuch_common::{
     error::ConnectionResult,
-    protocol::{ClientMessage, ServerMessage},
+    protocol::v1::{ClientMessage, ServerMessage},
 };
 
 pub struct WsClientSocket {

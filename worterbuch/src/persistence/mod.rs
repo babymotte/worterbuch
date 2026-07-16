@@ -25,7 +25,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, ValueEntry,
-    protocol::{
+    protocol::v1::{
         ClientId, GraveGoods, InternalAction, Key, LastWill, SYSTEM_TOPIC_CLIENTS,
         SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, Trace,

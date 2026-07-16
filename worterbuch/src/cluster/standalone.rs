@@ -30,7 +30,7 @@ use tosub::SubsystemHandle;
 use tracing::info;
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
-    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
+    protocol::v1::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
     topic,
 };
 

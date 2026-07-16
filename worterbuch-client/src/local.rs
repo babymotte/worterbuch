@@ -6,7 +6,7 @@ use tokio::{
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, LsSubscriptionReceiver, PSubscriptionReceiver, SubscriptionReceiver, WbApi,
     error::{ConnectionResult, WorterbuchError},
-    protocol::{
+    protocol::v1::{
         Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, ErrorCode, Get, Lock, Ls,
         LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, RequestPattern,
         SPub, SPubInit, ServerInfo, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,

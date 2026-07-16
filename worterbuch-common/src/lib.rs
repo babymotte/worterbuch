@@ -25,7 +25,7 @@ pub mod protocol;
 
 use crate::{
     error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
-    protocol::{
+    protocol::v1::{
         CasVersion, ClientId, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
         PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag,
         StateEvent, Trace, TransactionId, UniqueFlag, Value,

@@ -31,7 +31,7 @@ use tokio::{
 use tracing::error;
 use worterbuch_common::{
     error::ConnectionResult,
-    protocol::{Key, KeyValuePair, Value},
+    protocol::v1::{Key, KeyValuePair, Value},
 };
 
 type Buffer = Arc<Mutex<HashMap<Key, Value>>>;

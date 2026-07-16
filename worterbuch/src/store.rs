@@ -34,7 +34,7 @@ use worterbuch_common::{
     KeySegment, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
-    protocol::{CasVersion, ClientId, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
+    protocol::v1::{CasVersion, ClientId, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
 };
 
 type Tree<V> = HashMap<RegularKeySegment, Node<V>>;

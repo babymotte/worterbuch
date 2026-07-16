@@ -35,7 +35,7 @@ use tracing::debug;
 use worterbuch_common::{
     Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
-    protocol::AuthTokenKey,
+    protocol::v1::AuthTokenKey,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]

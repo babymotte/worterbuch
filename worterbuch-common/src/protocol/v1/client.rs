@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::{
+use crate::protocol::v1::{
     AggregationDuration, AuthToken, Key, LiveOnlyFlag, ProtocolVersionSegment, QuietFlag,
     RequestPattern, SendTracesFlag, TransactionId, UniqueFlag, Value,
 };

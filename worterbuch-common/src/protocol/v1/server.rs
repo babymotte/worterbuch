@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::{
+use crate::protocol::v1::{
     CasVersion, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern, Trace,
     TransactionId, Value, Version,
 };
@@ -328,7 +328,7 @@ mod test {
     use super::*;
     use crate::{
         Protocol,
-        protocol::{Interface, InternalAction, Method},
+        protocol::v1::{Interface, InternalAction, Method},
     };
     use serde_json::json;
     use uuid::Uuid;

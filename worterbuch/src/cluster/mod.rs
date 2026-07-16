@@ -34,7 +34,7 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};
-use worterbuch_common::protocol::{InternalAction, Trace, TraceData};
+use worterbuch_common::protocol::v1::{InternalAction, Trace, TraceData};
 
 pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
 pub type ClusterStateChangeSender = mpsc::Sender<ClusterStateChange>;

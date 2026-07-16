@@ -20,7 +20,7 @@
 use std::fmt;
 #[cfg(feature = "tokio")]
 use tokio::sync::broadcast;
-use worterbuch_common::protocol::Err;
+use worterbuch_common::protocol::v1::Err;
 
 #[derive(Debug)]
 pub enum SubscriptionError {

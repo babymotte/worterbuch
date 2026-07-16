@@ -31,7 +31,7 @@ use tosub::SubsystemHandle;
 use tracing::error;
 use worterbuch_client::{
     Key, KeyValuePair, KeyValuePairs,
-    protocol::{Err, LsState, PState, PStateEvent, ServerMessage, State, StateEvent},
+    protocol::v1::{Err, LsState, PState, PStateEvent, ServerMessage, State, StateEvent},
 };
 
 pub async fn next_item<T>(rx: &mut mpsc::Receiver<T>, done: bool) -> Option<T> {

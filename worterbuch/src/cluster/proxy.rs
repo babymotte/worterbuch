@@ -49,8 +49,9 @@ use tracing::{debug, error, info, warn};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
     error::ConfigError,
-    protocol::{ClientMessage, Set},
-    protocol::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
+    protocol::v1::{
+        ClientMessage, InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set, Trace,
+    },
     receive_msg, topic, while_select, write_line_and_flush,
 };
 

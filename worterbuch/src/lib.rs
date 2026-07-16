@@ -63,7 +63,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, Protocol,
-    protocol::{
+    protocol::v1::{
         ClientId, Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
     },

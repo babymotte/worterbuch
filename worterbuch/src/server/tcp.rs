@@ -46,7 +46,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     Protocol, WbApi,
-    protocol::{ClientId, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientId, ServerInfo, ServerMessage, Welcome},
     write_line_and_flush,
 };
 

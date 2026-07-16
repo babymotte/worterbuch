@@ -27,7 +27,7 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{error, info};
 use worterbuch_client::{benchmark::generate_dummy_data, connect_with_default_config};
-use worterbuch_common::protocol::ServerMessage;
+use worterbuch_common::protocol::v1::ServerMessage;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
