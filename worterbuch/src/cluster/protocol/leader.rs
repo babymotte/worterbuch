@@ -31,7 +31,7 @@ use worterbuch_common::{
 pub enum LeaderMessage {
     Init(StateSync),
     Mut(ClusterStateChange),
-    ClientResponse(ServerMessage),
+    ClientResponse(ClientId, ServerMessage),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

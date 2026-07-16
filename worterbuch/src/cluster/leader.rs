@@ -39,12 +39,10 @@ use std::{
     io::{self},
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
-    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{TcpSocket, TcpStream, tcp::OwnedWriteHalf},
-    select,
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
@@ -438,6 +436,7 @@ async fn follower_serve_loop(
     }
 
     let (socket_rx, mut socket_tx) = tcp_stream.into_split();
+    let (send_tx, mut send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
     let mut proxy_server = VirtualProxyServer {
         subsys,
@@ -445,13 +444,15 @@ async fn follower_serve_loop(
         worterbuch: worterbuch.named("server/virtual-proxy"),
         config: config.clone(),
         proxy_address: follower,
+        send_tx,
     };
 
     while_select! {
         biased;
         _ = proxy_server.subsys.shutdown_requested() => break,
-        recv = commands.recv() => forward_to_follower(recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding message to follower/proxy")?,
+        recv = commands.recv() => forward_change_to_follower(recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
         recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,
+        recv = send_rx.recv() => forward_response_to_proxy(recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
@@ -459,7 +460,7 @@ async fn follower_serve_loop(
     Ok(())
 }
 
-async fn forward_to_follower(
+async fn forward_change_to_follower(
     recv: Option<ClusterStateChange>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
@@ -469,6 +470,29 @@ async fn forward_to_follower(
         Some(change) => {
             write_line_and_flush(
                 LeaderMessage::Mut(change),
+                socket_tx,
+                config.send_timeout,
+                follower,
+            )
+            .await
+            .wrap_err("could not write command to follower/proxy")?;
+        }
+        None => return Ok(ControlFlow::Break(())),
+    }
+
+    Ok(ControlFlow::Continue(()))
+}
+
+async fn forward_response_to_proxy(
+    recv: Option<(ClientId, ServerMessage)>,
+    socket_tx: &mut OwnedWriteHalf,
+    config: &Config,
+    follower: SocketAddr,
+) -> miette::Result<ControlFlow<()>> {
+    match recv {
+        Some((client_id, server_message)) => {
+            write_line_and_flush(
+                LeaderMessage::ClientResponse(client_id, server_message),
                 socket_tx,
                 config.send_timeout,
                 follower,
@@ -495,6 +519,7 @@ struct VirtualProxyServer {
     worterbuch: CloneableWbApi,
     config: Config,
     proxy_address: SocketAddr,
+    send_tx: mpsc::Sender<(ClientId, ServerMessage)>,
 }
 
 impl VirtualProxyServer {
@@ -563,21 +588,15 @@ impl VirtualProxyServer {
         config: Config,
         worterbuch: CloneableWbApi,
     ) {
-        let (send_tx, send_rx) = mpsc::channel(config.channel_buffer_size);
-        let send_timeout = config.send_timeout;
-        self.subsys
-            .spawn(format!("message-forwarder/{client_id}"), async move |s| {
-                forward_messages_to_socket(
-                    s,
-                    send_rx,
-                    // tcp_tx,
-                    client_id,
-                    send_timeout,
-                )
-                .await
-            });
         let auth_required = config.auth_token_key.is_some();
-        let proto = Proto::new(client_id, send_tx, auth_required, config, worterbuch);
+        let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
+
+        let send_tx = self.send_tx.clone();
+        self.subsys.spawn("leader-response-forwarder", move |s| {
+            response_forwarder_loop(s, send_client_rx, send_tx, client_id)
+        });
+
+        let proto = Proto::new(client_id, send_client_tx, auth_required, config, worterbuch);
 
         let client = VirtualProxyClientHandler {
             client_id,
@@ -641,31 +660,36 @@ impl VirtualProxyServer {
     }
 }
 
-async fn forward_messages_to_socket(
+async fn response_forwarder_loop(
     subsys: SubsystemHandle,
-    mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
-    // mut tcp_tx: OwnedWriteHalf,
-    client_id: ClientId,
-    send_timeout: Option<Duration>,
-) -> Result<()> {
-    loop {
-        select! {
-            recv = tcp_send_rx.recv() => if let Some(msg) = recv {
-                // if let Err(e) = write_line_and_flush(&msg, &mut tcp_tx, send_timeout, client_id).await {
-                //     error!("Error sending TCP message '{msg:?}': {e}");
-                //     break;
-                // }
-                eprint!("//TODO: forward {:?}", msg);
-            } else {
-                debug!("Message forwarding to client {client_id} stopped: channel closed.");
-                break;
-            },
-            _ = subsys.shutdown_requested() => {
-                debug!("Message forwarding to client {client_id} stopped: subsystem stopped.");
-                break;
-            },
-        }
+    mut send_client_rx: mpsc::Receiver<ServerMessage>,
+    send_tx: mpsc::Sender<(ClientId, ServerMessage)>,
+    client_id: uuid::Uuid,
+) -> miette::Result<()> {
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        recv = send_client_rx.recv() => forward_leader_response(recv, &send_tx, client_id).await?,
     }
 
     Ok(())
+}
+
+async fn forward_leader_response(
+    recv: Option<ServerMessage>,
+    send_tx: &mpsc::Sender<(ClientId, ServerMessage)>,
+    client_id: ClientId,
+) -> miette::Result<ControlFlow<()>> {
+    match recv {
+        Some(msg) => {
+            send_tx
+                .send((client_id, msg))
+                .await
+                .into_diagnostic()
+                .wrap_err("could not forward response to proxy")?;
+        }
+        None => return Ok(ControlFlow::Break(())),
+    }
+
+    Ok(ControlFlow::Continue(()))
 }

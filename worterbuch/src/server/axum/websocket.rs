@@ -119,7 +119,7 @@ async fn serve_loop(
         if let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(incoming_msg) => {
-                    trace!("Processing incoming message …");
+                    debug!("Processing incoming message …");
                     if let Message::Text(text) = incoming_msg {
                         let msg_processed = proto
                             .process_incoming_message(&text, &mut authorized)

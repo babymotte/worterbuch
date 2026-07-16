@@ -53,9 +53,9 @@ use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID,
     error::{ConfigError, ConnectionResult, WorterbuchResult},
     protocol::v1::{
-        CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete,
-        ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Set,
-        Trace, TransactionId, Value,
+        Ack, CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete,
+        ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+        ServerMessage, Set, Trace, TransactionId, Value,
     },
     receive_msg, topic, while_select, write_line_and_flush,
 };
@@ -215,16 +215,18 @@ async fn run_with_leader(
 
 #[derive(Debug, Default)]
 struct ClientResponseInterests {
-    set: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    cset: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    spubinit: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    spub: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    publish: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    delete: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
-    pdelete: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
-    lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    acquire_lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>>,
-    release_lock: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    state: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
+    pstate: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
+    lock_acquired: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>>,
+    ack: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+}
+impl ClientResponseInterests {
+    fn is_empty(&self) -> bool {
+        self.state.is_empty()
+            && self.pstate.is_empty()
+            && self.lock_acquired.is_empty()
+            && self.ack.is_empty()
+    }
 }
 
 struct LeaderConnection<'a> {
@@ -312,9 +314,9 @@ impl<'a> LeaderConnection<'a> {
                     .await
                     .map(|_| ()),
             },
-            LeaderMessage::ClientResponse(server_message) => {
-                // TODO resolve client response interests
-                Ok(())
+            LeaderMessage::ClientResponse(client_id, server_message) => {
+                self.forward_leader_response(client_id, server_message)
+                    .await
             }
         };
 
@@ -368,9 +370,7 @@ impl<'a> LeaderConnection<'a> {
             WbFunction::ProtocolSwitched(client_id, interface, version) => {
                 let request = ProxyMessage::Request {
                     client_id,
-                    msg: ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest {
-                        version: version,
-                    }),
+                    msg: ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest { version }),
                     interface: interface.clone(),
                 };
                 // TODO register response interest
@@ -381,7 +381,7 @@ impl<'a> LeaderConnection<'a> {
                 )
                 .await;
             }
-            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
+            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, _span) => {
                 let request = ProxyMessage::Request {
                     client_id,
                     msg: ClientMessage::Set(Set {
@@ -391,7 +391,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_set_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
@@ -405,7 +405,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_cset_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
@@ -417,7 +417,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_spubinit_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
@@ -429,7 +429,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_spub_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
@@ -442,7 +442,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_publish_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
@@ -454,7 +454,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_delete_response_interest(client_id, transaction_id, tx);
+                self.register_state_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::PDelete(
@@ -474,7 +474,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_pdelete_response_interest(client_id, transaction_id, tx);
+                self.register_pstate_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
@@ -486,7 +486,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_lock_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
@@ -498,7 +498,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_acquire_lock_response_interest(client_id, transaction_id, tx);
+                self.register_lock_acquired_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
@@ -510,7 +510,7 @@ impl<'a> LeaderConnection<'a> {
                     }),
                     interface,
                 };
-                self.register_release_lock_response_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Import(_, _, _, _, _) => {
@@ -524,7 +524,7 @@ impl<'a> LeaderConnection<'a> {
         Ok(())
     }
 
-    fn register_set_response_interest(
+    fn register_ack_interest(
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
@@ -532,64 +532,12 @@ impl<'a> LeaderConnection<'a> {
     ) {
         self.response_interests
             .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .set
+            .or_default()
+            .ack
             .insert(transaction_id, tx);
     }
 
-    fn register_cset_response_interest(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .cset
-            .insert(transaction_id, tx);
-    }
-
-    fn register_spubinit_response_interest(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .spubinit
-            .insert(transaction_id, tx);
-    }
-
-    fn register_spub_response_interest(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .spub
-            .insert(transaction_id, tx);
-    }
-
-    fn register_publish_response_interest(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .publish
-            .insert(transaction_id, tx);
-    }
-
-    fn register_delete_response_interest(
+    fn register_state_interest(
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
@@ -597,12 +545,12 @@ impl<'a> LeaderConnection<'a> {
     ) {
         self.response_interests
             .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .delete
+            .or_default()
+            .state
             .insert(transaction_id, tx);
     }
 
-    fn register_pdelete_response_interest(
+    fn register_pstate_interest(
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
@@ -610,25 +558,12 @@ impl<'a> LeaderConnection<'a> {
     ) {
         self.response_interests
             .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .pdelete
+            .or_default()
+            .pstate
             .insert(transaction_id, tx);
     }
 
-    fn register_lock_response_interest(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .lock
-            .insert(transaction_id, tx);
-    }
-
-    fn register_acquire_lock_response_interest(
+    fn register_lock_acquired_interest(
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
@@ -636,22 +571,58 @@ impl<'a> LeaderConnection<'a> {
     ) {
         self.response_interests
             .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .acquire_lock
+            .or_default()
+            .lock_acquired
             .insert(transaction_id, tx);
     }
 
-    fn register_release_lock_response_interest(
+    async fn forward_leader_response(
         &mut self,
         client_id: ClientId,
-        transaction_id: TransactionId,
-        tx: oneshot::Sender<WorterbuchResult<()>>,
-    ) {
-        self.response_interests
-            .entry(client_id)
-            .or_insert_with(ClientResponseInterests::default)
-            .release_lock
-            .insert(transaction_id, tx);
+        server_message: ServerMessage,
+    ) -> WorterbuchResult<()> {
+        match server_message {
+            ServerMessage::Welcome(welcome) => {
+                warn!("Received unexpected welcome message from leader: {welcome:?}");
+            }
+            ServerMessage::CState(cstate) => {
+                warn!("Received unexpected CState message from leader: {cstate:?}");
+            }
+
+            ServerMessage::LsState(ls_state) => {
+                warn!("Received unexpected LsState message from leader: {ls_state:?}");
+            }
+            ServerMessage::Authorized(ack) => {
+                // TODO handle this correctly
+                warn!(
+                    "Received Authorized message from leader; handler not yet implemented: {ack:?}"
+                );
+            }
+            ServerMessage::Ack(ack) => {
+                if let Some(tx) = self.get_ack_response_interest(client_id, &ack) {
+                    tx.send(Ok(())).ok();
+                }
+            }
+            ServerMessage::State(_state) => todo!(),
+            ServerMessage::PState(_pstate) => todo!(),
+            ServerMessage::Err(_e) => todo!(),
+        }
+
+        Ok(())
+    }
+
+    fn get_ack_response_interest(
+        &mut self,
+        client_id: ClientId,
+        ack: &Ack,
+    ) -> Option<oneshot::Sender<WorterbuchResult<()>>> {
+        let interests = self.response_interests.get_mut(&client_id)?;
+        let tx = interests.ack.remove(&ack.transaction_id);
+        if interests.is_empty() {
+            self.response_interests.remove(&client_id);
+        }
+
+        tx
     }
 }
 
@@ -659,13 +630,14 @@ async fn announce_connected_clients(
     worterbuch: &mut Worterbuch,
     proxy_request_sender: &mpsc::Sender<ProxyMessage>,
 ) -> Result<(), WorterbuchAppError> {
-    Ok(for (client_id, client_info) in worterbuch.clients() {
+    for (client_id, client_info) in worterbuch.clients() {
         let request = ProxyMessage::Connected {
             client_id: *client_id,
             protocol: client_info.protocol.clone(),
         };
         proxy_request_sender.send(request).await?;
-    })
+    }
+    Ok(())
 }
 
 fn init_request_sender(
