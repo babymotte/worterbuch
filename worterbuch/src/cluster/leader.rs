@@ -507,10 +507,8 @@ async fn forward_response_to_proxy(
 }
 
 struct VirtualProxyClientHandler {
-    client_id: ClientId,
     authorized: Option<JwtClaims>,
     proto: Proto,
-    interface: Interface,
 }
 
 struct VirtualProxyServer {
@@ -599,10 +597,8 @@ impl VirtualProxyServer {
         let proto = Proto::new(client_id, send_client_tx, auth_required, config, worterbuch);
 
         let client = VirtualProxyClientHandler {
-            client_id,
             authorized: None,
             proto,
-            interface: Interface::Protocol(Protocol::Proxied(Box::new(protocol.clone()))),
         };
 
         self.clients.insert(client_id, client);

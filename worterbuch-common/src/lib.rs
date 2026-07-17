@@ -225,7 +225,6 @@ pub enum Protocol {
     WS,
     HTTP,
     UNIX,
-    Proxied(Box<Protocol>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

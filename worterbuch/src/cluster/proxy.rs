@@ -701,11 +701,14 @@ async fn initial_sync(
     // TODO create diff with current state store
     // TODO send out diff to all clients
 
-    worterbuch.reset_store(state_sync.store).await?;
+    worterbuch
+        .reset_store_and_notify_subscribers(state_sync.store)
+        .await?;
+
     worterbuch
         .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
-            json!(Mode::Follower),
+            json!(Mode::Proxy),
             INTERNAL_CLIENT_ID,
             Trace::InternalAction(InternalAction::LeaderSync),
             true,

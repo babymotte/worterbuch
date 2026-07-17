@@ -275,6 +275,55 @@ impl<V> Node<V> {
     }
 }
 
+impl<V: Clone + PartialEq> Node<V> {
+    fn diff(&self, data: &Node<V>) -> StoreDiff<V> {
+        let mut diff = StoreDiff::<V>::default();
+        let mut path = Vec::new();
+        compute_node_diff(self, data, &mut path, &mut diff);
+        diff
+    }
+}
+
+fn compute_node_diff<V: Clone + PartialEq>(
+    old: &Node<V>,
+    new: &Node<V>,
+    path: &mut Vec<RegularKeySegment>,
+    diff: &mut StoreDiff<V>,
+) {
+    match (old.value(), new.value()) {
+        (Some(old_value), None) => diff.removed.push(DiffEntry {
+            path: path.clone(),
+            value: old_value.clone(),
+            ls_subscribers: None,
+        }),
+        (old_value, Some(new_value)) if old_value != Some(new_value) => {
+            diff.added.push(DiffEntry {
+                path: path.clone(),
+                value: new_value.clone(),
+                ls_subscribers: None,
+            });
+        }
+        _ => {}
+    }
+
+    let default = Node::default();
+    let mut keys: HashSet<&RegularKeySegment> = HashSet::new();
+    if let Some(tree) = old.sub_tree() {
+        keys.extend(tree.keys());
+    }
+    if let Some(tree) = new.sub_tree() {
+        keys.extend(tree.keys());
+    }
+
+    for key in keys {
+        let old_child = old.get_child(key).unwrap_or(&default);
+        let new_child = new.get_child(key).unwrap_or(&default);
+        path.push(key.clone());
+        compute_node_diff(old_child, new_child, path, diff);
+        path.pop();
+    }
+}
+
 impl<V> Default for Node<V> {
     fn default() -> Self {
         Self {
@@ -289,6 +338,28 @@ pub struct SubscribersNode {
     _subscribers: Vec<Subscriber>,
     ls_subscribers: Vec<LsSubscriber>,
     pub tree: SubscribersTree,
+}
+
+#[derive(Debug)]
+pub struct StoreDiff<V> {
+    pub removed: Vec<DiffEntry<V>>,
+    pub added: Vec<DiffEntry<V>>,
+}
+
+impl<V> Default for StoreDiff<V> {
+    fn default() -> Self {
+        Self {
+            removed: Default::default(),
+            added: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct DiffEntry<V> {
+    pub path: Vec<RegularKeySegment>,
+    pub value: V,
+    pub ls_subscribers: Option<Vec<AffectedLsSubscribers>>,
 }
 
 #[derive(Debug, Default)]
@@ -1099,6 +1170,12 @@ impl Store {
         self.data = data;
         self.count_entries();
     }
+
+    pub(crate) fn reset_with_diff(&mut self, data: StoreNode) -> StoreDiff<ValueEntry> {
+        let diff = self.data.diff(&data);
+        self.reset(data);
+        diff
+    }
 }
 
 fn concat_key(path: &[&str], key: Option<&str>) -> String {
@@ -1612,6 +1689,121 @@ mod test {
         assert_eq!(store.get(&path), None);
         assert_eq!(store.get(&path2), None);
         assert_eq!(store.get(&path3), None);
+    }
+
+    #[test]
+    fn diff_detects_added_value() {
+        let old = Node::<i32>::default();
+        let mut new = Node::<i32>::default();
+        new.set_value(42);
+
+        let diff = old.diff(&new);
+
+        assert!(diff.removed.is_empty());
+        assert_eq!(diff.added.len(), 1);
+        assert_eq!(diff.added[0].path, Vec::<RegularKeySegment>::new());
+        assert_eq!(diff.added[0].value, 42);
+    }
+
+    #[test]
+    fn diff_detects_removed_value() {
+        let mut old = Node::<i32>::default();
+        old.set_value(42);
+        let new = Node::<i32>::default();
+
+        let diff = old.diff(&new);
+
+        assert!(diff.added.is_empty());
+        assert_eq!(diff.removed.len(), 1);
+        assert_eq!(diff.removed[0].path, Vec::<RegularKeySegment>::new());
+        assert_eq!(diff.removed[0].value, 42);
+    }
+
+    #[test]
+    fn diff_detects_changed_value() {
+        let mut old = Node::<i32>::default();
+        old.set_value(1);
+        let mut new = Node::<i32>::default();
+        new.set_value(2);
+
+        let diff = old.diff(&new);
+
+        assert!(diff.removed.is_empty());
+        assert_eq!(diff.added.len(), 1);
+        assert_eq!(diff.added[0].value, 2);
+    }
+
+    #[test]
+    fn diff_ignores_unchanged_value() {
+        let mut old = Node::<i32>::default();
+        old.set_value(1);
+        let mut new = Node::<i32>::default();
+        new.set_value(1);
+
+        let diff = old.diff(&new);
+
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn diff_ignores_identical_empty_trees() {
+        let old = Node::<i32>::default();
+        let new = Node::<i32>::default();
+
+        let diff = old.diff(&new);
+
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn diff_detects_nested_changes() {
+        let mut old_store = Store::default();
+        old_store
+            .insert_plain(&reg_key_segs("a/b"), json!(1), false)
+            .unwrap();
+        old_store
+            .insert_plain(&reg_key_segs("a/c"), json!(2), false)
+            .unwrap();
+        old_store
+            .insert_plain(&reg_key_segs("x/y"), json!(3), false)
+            .unwrap();
+
+        let mut new_store = Store::default();
+        // a/b is unchanged
+        new_store
+            .insert_plain(&reg_key_segs("a/b"), json!(1), false)
+            .unwrap();
+        // a/c is changed
+        new_store
+            .insert_plain(&reg_key_segs("a/c"), json!(99), false)
+            .unwrap();
+        // a/d is added
+        new_store
+            .insert_plain(&reg_key_segs("a/d"), json!(4), false)
+            .unwrap();
+        // x/y is removed (not present in new_store)
+
+        let diff = old_store.data.diff(&new_store.data);
+
+        assert_eq!(diff.removed.len(), 1);
+        assert_eq!(diff.removed[0].path, reg_key_segs("x/y").to_vec());
+        assert_eq!(diff.removed[0].value, ValueEntry::Plain(json!(3)));
+
+        assert_eq!(diff.added.len(), 2);
+        assert!(
+            diff.added
+                .iter()
+                .any(|e| e.path == reg_key_segs("a/c").to_vec()
+                    && e.value == ValueEntry::Plain(json!(99)))
+        );
+        assert!(
+            diff.added
+                .iter()
+                .any(|e| e.path == reg_key_segs("a/d").to_vec()
+                    && e.value == ValueEntry::Plain(json!(4)))
+        );
     }
 
     #[test]
