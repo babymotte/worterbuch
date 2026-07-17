@@ -273,6 +273,19 @@ impl<V> Node<V> {
         self.tree = None;
         self.value = None;
     }
+
+    pub(crate) fn add_or_replace_child(&mut self, key: String, sys_data: Node<V>) {
+        match &mut self.tree {
+            Some(tree) => {
+                tree.insert(key, sys_data);
+            }
+            None => {
+                let mut tree = Tree::new();
+                tree.insert(key, sys_data);
+                self.tree = Some(tree);
+            }
+        }
+    }
 }
 
 impl<V: Clone + PartialEq> Node<V> {
@@ -1175,6 +1188,12 @@ impl Store {
         let diff = self.data.diff(&data);
         self.reset(data);
         diff
+    }
+
+    pub(crate) fn export_sys(&self) -> Option<StoreNode> {
+        self.data
+            .get_child(SYSTEM_TOPIC_ROOT)
+            .map(ToOwned::to_owned)
     }
 }
 

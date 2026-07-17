@@ -53,9 +53,9 @@ use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID,
     error::{ConfigError, ConnectionResult, WorterbuchResult},
     protocol::v1::{
-        Ack, CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete,
+        CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete, PStateEvent,
         ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-        ServerMessage, Set, Trace, TransactionId, Value,
+        ServerMessage, Set, StateEvent, Trace, TransactionId, Value,
     },
     receive_msg, topic, while_select, write_line_and_flush,
 };
@@ -215,10 +215,10 @@ async fn run_with_leader(
 
 #[derive(Debug, Default)]
 struct ClientResponseInterests {
+    ack: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
     state: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
     pstate: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
     lock_acquired: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>>,
-    ack: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
 }
 impl ClientResponseInterests {
     fn is_empty(&self) -> bool {
@@ -599,13 +599,50 @@ impl<'a> LeaderConnection<'a> {
                 );
             }
             ServerMessage::Ack(ack) => {
-                if let Some(tx) = self.get_ack_response_interest(client_id, &ack) {
+                if let Some(tx) = self.get_ack_response_interest(client_id, ack.transaction_id) {
                     tx.send(Ok(())).ok();
                 }
             }
-            ServerMessage::State(_state) => todo!(),
-            ServerMessage::PState(_pstate) => todo!(),
-            ServerMessage::Err(_e) => todo!(),
+            ServerMessage::State(state) => match state.event {
+                StateEvent::Value(value) => {
+                    warn!("Received unexpected StateEvent::Value message from leader: {value:?}");
+                }
+                StateEvent::Deleted(value) => {
+                    if let Some(tx) =
+                        self.get_state_response_interest(client_id, state.transaction_id)
+                    {
+                        tx.send(Ok(value)).ok();
+                    }
+                }
+            },
+            ServerMessage::PState(pstate) => match pstate.event {
+                PStateEvent::KeyValuePairs(kvps) => {
+                    warn!(
+                        "Received unexpected PState::KeyValuePairs message from leader: {kvps:?}"
+                    );
+                }
+                PStateEvent::Deleted(kvps) => {
+                    if let Some(tx) =
+                        self.get_pstate_response_interest(client_id, pstate.transaction_id)
+                    {
+                        tx.send(Ok(kvps)).ok();
+                    }
+                }
+            },
+            ServerMessage::Err(e) => {
+                warn!("Received error message from leader for client {client_id}: {e:?}");
+                if let Some(tx) = self.get_ack_response_interest(client_id, e.transaction_id) {
+                    tx.send(Err(e.into())).ok();
+                } else if let Some(tx) =
+                    self.get_state_response_interest(client_id, e.transaction_id)
+                {
+                    tx.send(Err(e.into())).ok();
+                } else if let Some(tx) =
+                    self.get_pstate_response_interest(client_id, e.transaction_id)
+                {
+                    tx.send(Err(e.into())).ok();
+                }
+            }
         }
 
         Ok(())
@@ -614,10 +651,38 @@ impl<'a> LeaderConnection<'a> {
     fn get_ack_response_interest(
         &mut self,
         client_id: ClientId,
-        ack: &Ack,
+        transaction_id: TransactionId,
     ) -> Option<oneshot::Sender<WorterbuchResult<()>>> {
         let interests = self.response_interests.get_mut(&client_id)?;
-        let tx = interests.ack.remove(&ack.transaction_id);
+        let tx = interests.ack.remove(&transaction_id);
+        if interests.is_empty() {
+            self.response_interests.remove(&client_id);
+        }
+
+        tx
+    }
+
+    fn get_state_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+    ) -> Option<oneshot::Sender<WorterbuchResult<Value>>> {
+        let interests = self.response_interests.get_mut(&client_id)?;
+        let tx = interests.state.remove(&transaction_id);
+        if interests.is_empty() {
+            self.response_interests.remove(&client_id);
+        }
+
+        tx
+    }
+
+    fn get_pstate_response_interest(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+    ) -> Option<oneshot::Sender<WorterbuchResult<KeyValuePairs>>> {
+        let interests = self.response_interests.get_mut(&client_id)?;
+        let tx = interests.pstate.remove(&transaction_id);
         if interests.is_empty() {
             self.response_interests.remove(&client_id);
         }
@@ -698,11 +763,8 @@ async fn initial_sync(
     state_sync: StateSync,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<()> {
-    // TODO create diff with current state store
-    // TODO send out diff to all clients
-
     worterbuch
-        .reset_store_and_notify_subscribers(state_sync.store)
+        .reset_store_and_notify_subscribers(state_sync.store, true)
         .await?;
 
     worterbuch

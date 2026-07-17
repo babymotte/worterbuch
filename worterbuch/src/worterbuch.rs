@@ -1723,8 +1723,13 @@ impl Worterbuch {
 
     pub(crate) async fn reset_store_and_notify_subscribers(
         &mut self,
-        data: StoreNode,
+        mut data: StoreNode,
+        retain_sys: bool,
     ) -> WorterbuchResult<()> {
+        if retain_sys && let Some(sys_data) = self.store.export_sys() {
+            data.add_or_replace_child(SYSTEM_TOPIC_ROOT.to_owned(), sys_data);
+        }
+
         self.reset_persistent_storage(&data).await?;
 
         let diff = self.store.reset_with_diff(data);
@@ -1779,7 +1784,7 @@ impl Worterbuch {
             WorterbuchError::IoError(io::Error::other(e), "Failed to clear storage".to_owned())
         })?;
         let mut stack: Vec<(&StoreNode, Vec<&RegularKeySegment>)> = vec![(data, vec![])];
-        Ok(while let Some((node, path)) = stack.pop() {
+        while let Some((node, path)) = stack.pop() {
             if let Some(value) = node.value() {
                 let key = path
                     .iter()
@@ -1803,7 +1808,8 @@ impl Worterbuch {
                     stack.push((child, child_path));
                 }
             }
-        })
+        }
+        Ok(())
     }
 
     pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self, cause: Trace) {

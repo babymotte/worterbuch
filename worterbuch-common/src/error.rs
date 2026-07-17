@@ -140,6 +140,12 @@ pub enum WorterbuchError {
     EmptyKey,
 }
 
+impl From<Err> for WorterbuchError {
+    fn from(value: Err) -> Self {
+        WorterbuchError::ServerResponse(value)
+    }
+}
+
 impl fmt::Display for WorterbuchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
