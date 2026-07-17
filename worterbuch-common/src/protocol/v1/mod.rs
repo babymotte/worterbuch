@@ -36,6 +36,8 @@ pub const SYSTEM_TOPIC_COUNT: &str = "count";
 pub const SYSTEM_TOPIC_JEMALLOC: &str = "jemalloc";
 pub const SYSTEM_TOPIC_RAW: &str = "raw";
 pub const SYSTEM_TOPIC_FORMATTED: &str = "formatted";
+pub const SYSTEM_TOPIC_CLUSTER: &str = "cluster";
+pub const SYSTEM_TOPIC_LEADER: &str = "leader";
 
 pub type TransactionId = u64;
 pub type RequestPattern = String;

@@ -20,7 +20,7 @@
 use crate::{
     Config, Servers,
     cluster::{
-        self, Mode,
+        self, LeaderState, Mode,
         protocol::{
             ClientWriteCommand, ClusterStateChange, LeaderMessage, ProxyMessage, StateSync,
         },
@@ -54,8 +54,9 @@ use worterbuch_common::{
     error::{ConfigError, ConnectionResult, WorterbuchResult},
     protocol::v1::{
         CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete, PStateEvent,
-        ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-        ServerMessage, Set, StateEvent, Trace, TransactionId, Value,
+        ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER,
+        SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, ServerMessage, Set, StateEvent, Trace, TransactionId,
+        Value,
     },
     receive_msg, topic, while_select, write_line_and_flush,
 };
@@ -105,6 +106,16 @@ pub(crate) async fn run(
 
     'outer: loop {
         for leader_address in &leader_addresses {
+            worterbuch
+                .internal_set(
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                    json!(&LeaderState::Disconnected),
+                    INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::LeaderSync),
+                    true,
+                )
+                .await?;
+
             if counter >= leader_addresses.len() {
                 warn!("Could not connect to any leader. Retrying in {retry_seconds} second(s) …");
                 select! {
@@ -149,6 +160,16 @@ async fn run_with_leader(
     config: Config,
     leader_address: SocketAddr,
 ) -> WorterbuchAppResult<bool> {
+    worterbuch
+        .internal_set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+            json!(LeaderState::Connecting(leader_address)),
+            INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::LeaderSync),
+            true,
+        )
+        .await?;
+
     let mut persistence_interval = config.persistence_interval();
 
     let stream = match TcpStream::connect(leader_address).await {
@@ -166,6 +187,17 @@ async fn run_with_leader(
     let timeout = config.initial_sync_timeout;
 
     info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
+
+    worterbuch
+        .internal_set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+            json!(LeaderState::Syncing(leader_address)),
+            INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::LeaderSync),
+            true,
+        )
+        .await?;
+
     select! {
         biased;
         _ = subsys.shutdown_requested() => {
@@ -198,6 +230,16 @@ async fn run_with_leader(
         },
     }
     info!("Successfully synced with leader.");
+
+    worterbuch
+        .internal_set(
+            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+            json!(LeaderState::Synced(leader_address)),
+            INTERNAL_CLIENT_ID,
+            Trace::InternalAction(InternalAction::LeaderSync),
+            true,
+        )
+        .await?;
 
     announce_connected_clients(worterbuch, &proxy_request_tx).await?;
 

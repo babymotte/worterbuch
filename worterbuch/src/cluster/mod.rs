@@ -23,6 +23,8 @@ pub(crate) mod protocol;
 pub(crate) mod proxy;
 pub(crate) mod standalone;
 
+use std::net::SocketAddr;
+
 use crate::{
     Config, Servers,
     cluster::protocol::ClusterStateChange,
@@ -30,7 +32,7 @@ use crate::{
     server::common::WbFunction,
     worterbuch::{SubscriptionFlags, Worterbuch},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};
@@ -46,6 +48,15 @@ pub enum Mode {
     Leader,
     Follower,
     Proxy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LeaderState {
+    Disconnected,
+    Connecting(SocketAddr),
+    Syncing(SocketAddr),
+    Synced(SocketAddr),
 }
 
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
