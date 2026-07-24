@@ -685,6 +685,9 @@ impl<'a> LeaderConnection<'a> {
                     tx.send(Err(e.into())).ok();
                 }
             }
+            ServerMessage::LockLost(_) => {
+                warn!("Received unexpected LockLost message from leader");
+            }
         }
 
         Ok(())

@@ -33,7 +33,7 @@ use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ProtocolVersionSegment, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ServerInfo, ServerMessage, Welcome},
 };
 
 pub(crate) async fn serve(

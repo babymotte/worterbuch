@@ -84,7 +84,7 @@ use websocket::serve;
 use worterbuch_common::{
     AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::v1::{Interface, Key, KeyValuePairs, ProtocolVersionSegment, ServerInfo, StateEvent},
+    protocol::v1::{Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
 };
 
 async fn ws(

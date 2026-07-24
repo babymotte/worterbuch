@@ -18,7 +18,7 @@
  */
 
 use crate::protocol::v1::{
-    CasVersion, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern, Trace,
+    CasVersion, Key, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern, Trace,
     TransactionId, Value, Version,
 };
 use schemars::JsonSchema;
@@ -37,6 +37,7 @@ pub enum ServerMessage {
     Err(Err),
     Authorized(Ack),
     LsState(LsState),
+    LockLost(LockLost),
 }
 
 impl ServerMessage {
@@ -49,6 +50,7 @@ impl ServerMessage {
             ServerMessage::CState(msg) => Some(msg.transaction_id),
             ServerMessage::Err(msg) => Some(msg.transaction_id),
             ServerMessage::LsState(msg) => Some(msg.transaction_id),
+            ServerMessage::LockLost(msg) => Some(msg.transaction_id),
             ServerMessage::Authorized(_) => Some(0),
         }
     }
@@ -237,6 +239,19 @@ impl fmt::Display for LsState {
                 .fold(String::new(), |a, b| a + &b + "\t")
                 .trim_end()
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LockLost {
+    pub transaction_id: TransactionId,
+    pub key: Key,
+}
+
+impl fmt::Display for LockLost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "lock lost: {} {}", self.transaction_id, self.key)
     }
 }
 

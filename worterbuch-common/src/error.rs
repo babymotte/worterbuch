@@ -19,7 +19,7 @@
 
 use crate::{
     AuthCheckOwned, ClientId, Key, Privilege, RequestPattern, TransactionId,
-    protocol::v1::{ClientMessage, Err, ErrorCode, MetaData, ProtocolVersionSegment},
+    protocol::v1::{ClientMessage, Err, ErrorCode, LockLost, MetaData, ProtocolVersionSegment},
 };
 use http::StatusCode;
 #[cfg(feature = "ws")]
@@ -287,6 +287,7 @@ pub enum ConnectionError {
     ServerResponse(Box<Err>),
     #[cfg(feature = "ws")]
     InvalidHeaderValue(Box<InvalidHeaderValue>),
+    LockLost(LockLost),
 }
 
 impl std::error::Error for ConnectionError {}
@@ -317,6 +318,11 @@ impl fmt::Display for ConnectionError {
             Self::ServerResponse(e) => e.fmt(f),
             #[cfg(feature = "ws")]
             Self::InvalidHeaderValue(e) => e.fmt(f),
+            Self::LockLost(lock) => write!(
+                f,
+                "lost lock on key '{}' (transaction id: {})",
+                lock.key, lock.transaction_id
+            ),
         }
     }
 }

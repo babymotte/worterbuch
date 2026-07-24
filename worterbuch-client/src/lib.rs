@@ -141,9 +141,9 @@ pub(crate) enum Command {
     SubscribeLsAsync(Option<Key>, AsyncTicket, SendTracesFlag),
     UnsubscribeLs(TransactionId, AckCallback),
     UnsubscribeLsAsync(TransactionId, AsyncTicket),
-    Lock(Key, AckCallback),
-    LockAsync(Key, AsyncTicket),
-    AcquireLock(Key, AckCallback),
+    Lock(Key, AckCallback, LockLostCallback),
+    LockAsync(Key, AsyncTicket, LockLostCallback),
+    AcquireLock(Key, AckCallback, LockLostCallback),
     ReleaseLock(Key, AckCallback),
     ReleaseLockAsync(Key, AsyncTicket),
     AllMessages(GenericCallback),
@@ -946,27 +946,37 @@ impl Worterbuch {
     }
 
     #[instrument(skip(self), err)]
-    pub async fn lock(&self, key: Key) -> ConnectionResult<()> {
+    pub async fn lock(&self, key: Key) -> ConnectionResult<oneshot::Receiver<LockLost>> {
         let (tx, rx) = oneshot::channel();
-        self.commands.send(Command::Lock(key, tx)).await?;
+        let (lost_tx, lost_rx) = oneshot::channel();
+        self.commands.send(Command::Lock(key, tx, lost_tx)).await?;
         rx.await??;
-        Ok(())
+        Ok(lost_rx)
     }
 
     #[instrument(skip(self), err)]
-    pub async fn lock_async(&self, key: Key) -> ConnectionResult<TransactionId> {
+    pub async fn lock_async(
+        &self,
+        key: Key,
+    ) -> ConnectionResult<(TransactionId, oneshot::Receiver<LockLost>)> {
         let (tx, rx) = oneshot::channel();
-        self.commands.send(Command::LockAsync(key, tx)).await?;
+        let (lost_tx, lost_rx) = oneshot::channel();
+        self.commands
+            .send(Command::LockAsync(key, tx, lost_tx))
+            .await?;
         let res = rx.await?;
-        Ok(res)
+        Ok((res, lost_rx))
     }
 
     #[instrument(skip(self), err)]
-    pub async fn acquire_lock(&self, key: Key) -> ConnectionResult<()> {
+    pub async fn acquire_lock(&self, key: Key) -> ConnectionResult<oneshot::Receiver<LockLost>> {
         let (tx, rx) = oneshot::channel();
-        self.commands.send(Command::AcquireLock(key, tx)).await?;
+        let (lost_tx, lost_rx) = oneshot::channel();
+        self.commands
+            .send(Command::AcquireLock(key, tx, lost_tx))
+            .await?;
         match rx.await? {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(lost_rx),
             Result::Err(e) => Err(ConnectionError::ServerResponse(Box::new(e))),
         }
     }
@@ -976,8 +986,16 @@ impl Worterbuch {
         key: Key,
         task: impl AsyncFnOnce() -> T + Send,
     ) -> ConnectionResult<T> {
-        self.acquire_lock(key.clone()).await?;
-        let result = task().await;
+        let lost_rx = self.acquire_lock(key.clone()).await?;
+        let result = select! {
+            res = task() => res,
+            lost = lost_rx => {
+                match lost {
+                    Ok(lost) => return Err(ConnectionError::LockLost(lost)),
+                    Err(_) => panic!("lock has been released before the task has finished, this should never happen"),
+                }
+            }
+        };
         self.release_lock(key).await?;
         Ok(result)
     }
@@ -987,8 +1005,16 @@ impl Worterbuch {
         key: Key,
         task: impl AsyncFnOnce() -> std::result::Result<T, E> + Send,
     ) -> ConnectionResult<std::result::Result<T, E>> {
-        self.lock(key.clone()).await?;
-        let result = task().await;
+        let lost_rx = self.lock(key.clone()).await?;
+        let result = select! {
+            res = task() => res,
+            lost = lost_rx => {
+                match lost {
+                    Ok(lost) => return Err(ConnectionError::LockLost(lost)),
+                    Err(_) => panic!("lock has been released before the task has finished, this should never happen"),
+                }
+            }
+        };
         self.release_lock(key).await?;
         Ok(result)
     }
@@ -1154,6 +1180,10 @@ type StateCallback = oneshot::Sender<Result<State, Err>>;
 type CStateCallback = oneshot::Sender<Result<CState, Err>>;
 type PStateCallback = oneshot::Sender<Result<PState, Err>>;
 type LsStateCallback = oneshot::Sender<Result<LsState, Err>>;
+type LockLostCallback = oneshot::Sender<LockLost>;
+type SubscriptionCallbackk = mpsc::UnboundedSender<Option<Value>>;
+type PSubscriptionCallbackk = mpsc::UnboundedSender<PStateEvent>;
+type LsSubscriptionCallbackk = mpsc::UnboundedSender<Vec<RegularKeySegment>>;
 
 type GenericCallbacks = Vec<GenericCallback>;
 type AckCallbacks = HashMap<TransactionId, AckCallback>;
@@ -1161,9 +1191,10 @@ type StateCallbacks = HashMap<TransactionId, StateCallback>;
 type CStateCallbacks = HashMap<TransactionId, CStateCallback>;
 type PStateCallbacks = HashMap<TransactionId, PStateCallback>;
 type LsStateCallbacks = HashMap<TransactionId, LsStateCallback>;
-type SubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Option<Value>>>;
-type PSubCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<PStateEvent>>;
-type SubLsCallbacks = HashMap<TransactionId, mpsc::UnboundedSender<Vec<RegularKeySegment>>>;
+type SubCallbacks = HashMap<TransactionId, SubscriptionCallbackk>;
+type PSubCallbacks = HashMap<TransactionId, PSubscriptionCallbackk>;
+type SubLsCallbacks = HashMap<TransactionId, LsSubscriptionCallbackk>;
+type LockLostCallbacks = HashMap<TransactionId, LockLostCallback>;
 
 #[derive(Default)]
 struct Callbacks {
@@ -1176,6 +1207,7 @@ struct Callbacks {
     sub: SubCallbacks,
     psub: PSubCallbacks,
     subls: SubLsCallbacks,
+    lock_lost: LockLostCallbacks,
 }
 
 struct TransactionIds {
@@ -2264,22 +2296,25 @@ async fn process_incoming_command(
                 callback.send(transaction_id).ok();
                 Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
-            Command::Lock(key, callback) => {
+            Command::Lock(key, callback, lost_callback) => {
                 callbacks.ack.insert(transaction_id, callback);
+                callbacks.lock_lost.insert(transaction_id, lost_callback);
                 Some(ClientMessage::Lock(Lock {
                     transaction_id,
                     key,
                 }))
             }
-            Command::LockAsync(key, callback) => {
+            Command::LockAsync(key, callback, lost_callback) => {
                 callback.send(transaction_id).ok();
+                callbacks.lock_lost.insert(transaction_id, lost_callback);
                 Some(ClientMessage::Lock(Lock {
                     transaction_id,
                     key,
                 }))
             }
-            Command::AcquireLock(key, callback) => {
+            Command::AcquireLock(key, callback, lost_callback) => {
                 callbacks.ack.insert(transaction_id, callback);
+                callbacks.lock_lost.insert(transaction_id, lost_callback);
                 Some(ClientMessage::AcquireLock(Lock {
                     transaction_id,
                     key,
@@ -2287,6 +2322,7 @@ async fn process_incoming_command(
             }
             Command::ReleaseLock(key, callback) => {
                 callbacks.ack.insert(transaction_id, callback);
+                callbacks.lock_lost.remove(&transaction_id);
                 Some(ClientMessage::ReleaseLock(Lock {
                     transaction_id,
                     key,
@@ -2294,6 +2330,7 @@ async fn process_incoming_command(
             }
             Command::ReleaseLockAsync(key, callback) => {
                 callback.send(transaction_id).ok();
+                callbacks.lock_lost.remove(&transaction_id);
                 Some(ClientMessage::ReleaseLock(Lock {
                     transaction_id,
                     key,
@@ -2326,6 +2363,7 @@ async fn process_incoming_server_message(
                 ServerMessage::LsState(ls) => deliver_ls(ls, callbacks).await?,
                 ServerMessage::Err(err) => deliver_err(err, callbacks).await,
                 ServerMessage::Ack(ack) => deliver_ack(ack, callbacks).await,
+                ServerMessage::LockLost(lock_lost) => deliver_lock_lost(lock_lost, callbacks).await,
                 ServerMessage::Welcome(_) | ServerMessage::Authorized(_) => (),
             }
             Ok(ControlFlow::Continue(()))
@@ -2409,6 +2447,13 @@ async fn deliver_ack(ack: Ack, callbacks: &mut Callbacks) {
 }
 
 #[instrument(skip(callbacks), level = "trace", ret)]
+async fn deliver_lock_lost(lock_lost: LockLost, callbacks: &mut Callbacks) {
+    if let Some(cb) = callbacks.lock_lost.remove(&lock_lost.transaction_id) {
+        cb.send(lock_lost).ok();
+    }
+}
+
+#[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.ack.remove(&err.transaction_id) {
         cb.send(Err(err.clone())).ok();
@@ -2425,6 +2470,7 @@ async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.lsstate.remove(&err.transaction_id) {
         cb.send(Err(err.clone())).ok();
     }
+    callbacks.lock_lost.remove(&err.transaction_id);
 }
 
 #[instrument(level = "trace", err)]
