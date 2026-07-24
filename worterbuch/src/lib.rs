@@ -101,7 +101,13 @@ async fn do_run_worterbuch(
 ) -> WorterbuchAppResult<()> {
     let channel_buffer_size = config.channel_buffer_size;
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
-    let api = CloneableWbApi::new(api_tx, config.clone(), Interface::Local);
+    let supported_client_protocol_versions = config.supported_client_protocol_versions();
+    let api = CloneableWbApi::new(
+        api_tx,
+        config.clone(),
+        Interface::Local,
+        supported_client_protocol_versions,
+    );
 
     wb_api_created(&api, tx, "client/internal");
 

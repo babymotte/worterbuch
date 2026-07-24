@@ -442,6 +442,15 @@ impl Config {
         // a follower's sole purpose is to write the leader's state to persistence, so it should always start the persistence backend
         self.use_persistence || matches!(self.role, ClusterRole::Follower { .. })
     }
+
+    pub(crate) fn supported_client_protocol_versions(&self) -> Box<[u32]> {
+        match self.role {
+            ClusterRole::Standalone | ClusterRole::Leader { .. } | ClusterRole::Follower { .. } => {
+                Box::new([0, 1, 2])
+            }
+            ClusterRole::Proxy { .. } => Box::new([2]),
+        }
+    }
 }
 
 #[derive(Serialize)]

@@ -19,9 +19,10 @@
 
 mod v0;
 mod v1;
+mod v2;
 
 use super::CloneableWbApi;
-use crate::{Config, auth::JwtClaims};
+use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
 use tokio::sync::mpsc;
 use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
 use v0::V0;
@@ -35,10 +36,11 @@ use worterbuch_common::{
 enum ProtocolHandler {
     V0(V0),
     V1(V1),
+    V2(V2),
 }
 
 pub struct Proto {
-    latest: V1,
+    latest: V2,
     handler: ProtocolHandler,
 }
 
@@ -50,28 +52,45 @@ impl Proto {
         config: Config,
         worterbuch: CloneableWbApi,
     ) -> Self {
-        let latest = V1::new(V0 {
+        let latest = V2::new(V1::new(V0 {
             auth_required,
             client_id,
             config,
             tx,
             worterbuch,
-        });
+        }));
         Self {
-            handler: ProtocolHandler::V1(latest.clone()),
+            handler: ProtocolHandler::V2(latest.clone()),
             latest,
         }
     }
 
+    fn is_supported(&self, protocol_version: &ProtocolVersionSegment) -> bool {
+        self.latest
+            .v1
+            .v0
+            .worterbuch
+            .supported_client_protocol_versions
+            .contains(protocol_version)
+    }
+
     #[instrument(level=Level::TRACE, skip(self))]
     pub fn switch_protocol(&mut self, version: ProtocolVersionSegment) -> bool {
+        if !self.is_supported(&version) {
+            debug!("Protocol version {version} is not supported by the server.");
+            return false;
+        }
         match version {
             0 => {
-                self.handler = ProtocolHandler::V0(self.latest.v0.clone());
+                self.handler = ProtocolHandler::V0(self.latest.v1.v0.clone());
                 true
             }
             1 => {
-                self.handler = ProtocolHandler::V1(self.latest.clone());
+                self.handler = ProtocolHandler::V1(self.latest.v1.clone());
+                true
+            }
+            2 => {
+                self.handler = ProtocolHandler::V2(self.latest.clone());
                 true
             }
             _ => false,
@@ -111,6 +130,7 @@ impl Proto {
             debug!("Switching protocol to v{}", protocol_switch_request.version);
             if self.switch_protocol(protocol_switch_request.version) {
                 self.latest
+                    .v1
                     .v0
                     .worterbuch
                     .protocol_switched(self.client_id(), protocol_switch_request.version)
@@ -134,6 +154,9 @@ impl Proto {
                 ProtocolHandler::V1(v1) => {
                     v1.process_incoming_message(msg, authorized).await?;
                 }
+                ProtocolHandler::V2(v2) => {
+                    v2.process_incoming_message(msg, authorized).await?;
+                }
             }
         }
 
@@ -141,10 +164,10 @@ impl Proto {
     }
 
     fn client_id(&self) -> ClientId {
-        self.latest.v0.client_id
+        self.latest.v1.v0.client_id
     }
 
     fn tx(&self) -> &mpsc::Sender<ServerMessage> {
-        &self.latest.v0.tx
+        &self.latest.v1.v0.tx
     }
 }

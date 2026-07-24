@@ -35,8 +35,8 @@ use worterbuch_common::{
     error::WorterbuchResult,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
-        ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag, TransactionId,
-        UniqueFlag, Value,
+        ProtocolMajorVersion, ProtocolVersion, ProtocolVersionSegment, RequestPattern,
+        SendTracesFlag, TransactionId, UniqueFlag, Value,
     },
 };
 
@@ -389,6 +389,7 @@ pub struct CloneableWbApi {
     config: Config,
     tx: mpsc::Sender<WbFunction>,
     interface: Interface,
+    supported_client_protocol_versions: Box<[ProtocolVersionSegment]>,
 }
 
 impl Drop for CloneableWbApi {
@@ -401,12 +402,18 @@ impl Drop for CloneableWbApi {
 }
 
 impl CloneableWbApi {
-    pub fn new(tx: mpsc::Sender<WbFunction>, config: Config, interface: Interface) -> Self {
+    pub fn new(
+        tx: mpsc::Sender<WbFunction>,
+        config: Config,
+        interface: Interface,
+        supported_client_protocol_versions: Box<[ProtocolVersionSegment]>,
+    ) -> Self {
         CloneableWbApi {
             name: "".to_string(),
             tx,
             config,
             interface,
+            supported_client_protocol_versions,
         }
     }
 
@@ -420,6 +427,7 @@ impl CloneableWbApi {
             config: self.config.clone(),
             tx: self.tx.clone(),
             interface: self.interface.clone(),
+            supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
     }
 
@@ -429,6 +437,7 @@ impl CloneableWbApi {
             config: self.config.clone(),
             tx: self.tx.clone(),
             interface,
+            supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
     }
 }
