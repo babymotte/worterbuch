@@ -18,7 +18,6 @@
  */
 
 use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS,
     server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
@@ -33,7 +32,7 @@ use tokio::{spawn, sync::mpsc, time::timeout};
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
 };
 
 pub(crate) async fn serve(
@@ -41,6 +40,7 @@ pub(crate) async fn serve(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
+    supported_protocol_versions: Box<[ProtocolVersion]>,
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
@@ -58,6 +58,7 @@ pub(crate) async fn serve(
             remote_addr,
             worterbuch.named(format!("client/{client_id}")),
             websocket,
+            supported_protocol_versions,
         )
         .await
         {
@@ -81,6 +82,7 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
+    supported_protocol_versions: Box<[ProtocolVersion]>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
@@ -92,8 +94,6 @@ async fn serve_loop(
 
     // websocket send loop
     spawn(send_loop(client_id, send_timeout, ws_tx, ws_send_rx));
-
-    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
     ws_send_tx
         .send(ServerMessage::Welcome(Welcome {

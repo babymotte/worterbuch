@@ -19,7 +19,7 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    Config, SUPPORTED_PROTOCOL_VERSIONS,
+    Config,
     auth::JwtClaims,
     print_endpoint,
     server::{common::CloneableWbApi, common::init_server_socket},
@@ -46,7 +46,7 @@ use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     write_line_and_flush,
 };
 
@@ -111,9 +111,12 @@ pub async fn start(
                             let worterbuch = worterbuch.named(format!("client/{id}"));
                             let conn_closed_tx = conn_closed_tx.clone();
 
+                            let supported_client_protocol_versions =
+                                config.supported_client_protocol_versions();
+
                             let client = subsys.spawn(format!("client-{id}"), async move |s|  {
                             select! {
-                                s = serve(&s, id, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                s = serve(&s, id, remote_addr, worterbuch, socket, supported_client_protocol_versions) => if let Err(e) = s {
                                     error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                                 },
                                 _ = s.shutdown_requested() => (),
@@ -176,6 +179,7 @@ async fn serve(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
+    supported_protocol_versions: Box<[ProtocolVersion]>,
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
@@ -193,6 +197,7 @@ async fn serve(
             remote_addr,
             worterbuch.named("serve-loop"),
             socket,
+            supported_protocol_versions,
         )
         .await
         {
@@ -223,6 +228,7 @@ async fn serve_loop(
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
     socket: TcpStream,
+    supported_protocol_versions: Box<[ProtocolVersion]>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
@@ -238,8 +244,6 @@ async fn serve_loop(
 
     let tcp_rx = BufReader::new(tcp_rx);
     let tcp_rx = tcp_rx.lines();
-
-    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
 
     tcp_send_tx
         .send(ServerMessage::Welcome(Welcome {

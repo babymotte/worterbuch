@@ -18,9 +18,7 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS, auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION,
-};
+use crate::{auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
@@ -224,9 +222,7 @@ async fn serve_loop(
 
     let unix_rx = BufReader::new(unix_rx);
     let unix_rx = unix_rx.lines();
-
-    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
-
+    let supported_protocol_versions = worterbuch.supported_protocol_versions();
     unix_send_tx
         .send(ServerMessage::Welcome(Welcome {
             client_id: client_id.to_string(),

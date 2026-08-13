@@ -35,7 +35,7 @@ use tracing::debug;
 use worterbuch_common::{
     Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
-    protocol::v1::AuthTokenKey,
+    protocol::v1::{AuthTokenKey, ProtocolVersion},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]
@@ -443,12 +443,16 @@ impl Config {
         self.use_persistence || matches!(self.role, ClusterRole::Follower { .. })
     }
 
-    pub(crate) fn supported_client_protocol_versions(&self) -> Box<[u32]> {
+    pub(crate) fn supported_client_protocol_versions(&self) -> Box<[ProtocolVersion]> {
         match self.role {
             ClusterRole::Standalone | ClusterRole::Leader { .. } | ClusterRole::Follower { .. } => {
-                Box::new([0, 1, 2])
+                Box::new([
+                    ProtocolVersion::new(0, 11),
+                    ProtocolVersion::new(1, 1),
+                    ProtocolVersion::new(2, 0),
+                ])
             }
-            ClusterRole::Proxy { .. } => Box::new([2]),
+            ClusterRole::Proxy { .. } => Box::new([ProtocolVersion::new(2, 0)]),
         }
     }
 }

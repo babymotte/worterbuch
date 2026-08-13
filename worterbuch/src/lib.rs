@@ -52,7 +52,7 @@ use crate::{
         proxy, standalone,
     },
     error::WorterbuchAppResult,
-    server::common::{CloneableWbApi, SUPPORTED_PROTOCOL_VERSIONS},
+    server::common::CloneableWbApi,
     stats::track_stats,
     worterbuch::Worterbuch,
 };
@@ -129,7 +129,7 @@ async fn do_run_worterbuch(
         api_tx,
         config.clone(),
         Interface::Local,
-        supported_client_protocol_versions,
+        &supported_client_protocol_versions,
     );
 
     wb_api_created(&api, tx, "client/internal");
@@ -319,7 +319,7 @@ async fn server_metadata(
     worterbuch
         .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION),
-            serde_json::to_value(SUPPORTED_PROTOCOL_VERSIONS)
+            serde_json::to_value(worterbuch.config().supported_client_protocol_versions())
                 .unwrap_or_else(|e| Value::String(format!("Error serializing version: {e}"))),
             INTERNAL_CLIENT_ID,
             Trace::InternalAction(InternalAction::Startup),

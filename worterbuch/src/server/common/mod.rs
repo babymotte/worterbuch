@@ -40,9 +40,6 @@ use worterbuch_common::{
     },
 };
 
-pub const SUPPORTED_PROTOCOL_VERSIONS: [ProtocolVersion; 2] =
-    [ProtocolVersion::new(0, 11), ProtocolVersion::new(1, 1)];
-
 #[derive(Debug, Clone, PartialEq)]
 struct SubscriptionInfo {
     transaction_id: TransactionId,
@@ -406,14 +403,17 @@ impl CloneableWbApi {
         tx: mpsc::Sender<WbFunction>,
         config: Config,
         interface: Interface,
-        supported_client_protocol_versions: Box<[ProtocolVersionSegment]>,
+        supported_client_protocol_versions: &[ProtocolVersion],
     ) -> Self {
         CloneableWbApi {
             name: "".to_string(),
             tx,
             config,
             interface,
-            supported_client_protocol_versions,
+            supported_client_protocol_versions: supported_client_protocol_versions
+                .iter()
+                .map(ProtocolVersion::major)
+                .collect(),
         }
     }
 
@@ -454,8 +454,8 @@ impl fmt::Display for CloneableWbApi {
 }
 
 impl WbApi for CloneableWbApi {
-    fn supported_protocol_versions(&self) -> Vec<ProtocolVersion> {
-        SUPPORTED_PROTOCOL_VERSIONS.into()
+    fn supported_protocol_versions(&self) -> Box<[ProtocolVersion]> {
+        self.config.supported_client_protocol_versions()
     }
 
     fn version(&self) -> &str {

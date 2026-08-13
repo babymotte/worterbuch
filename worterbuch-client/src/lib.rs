@@ -79,7 +79,7 @@ use ws::WsClientSocket;
 pub use worterbuch_common::protocol::v1::*;
 pub use worterbuch_common::*;
 
-const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(2, 0);
 
 #[derive(Clone)]
 pub(crate) struct CancellationToken {

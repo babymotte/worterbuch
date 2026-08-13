@@ -441,7 +441,7 @@ impl SubscriptionId {
 }
 
 pub trait WbApi {
-    fn supported_protocol_versions(&self) -> Vec<ProtocolVersion>;
+    fn supported_protocol_versions(&self) -> Box<[ProtocolVersion]>;
 
     fn version(&self) -> &str;
 

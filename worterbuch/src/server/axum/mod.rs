@@ -21,7 +21,6 @@ mod auth;
 mod websocket;
 
 use crate::{
-    SUPPORTED_PROTOCOL_VERSIONS,
     auth::JwtClaims,
     error::{WorterbuchAppError, WorterbuchAppResult},
     print_endpoint,
@@ -104,7 +103,7 @@ async fn ws(
 }
 
 async fn info(State(wb): State<CloneableWbApi>) -> WorterbuchResult<Json<ServerInfo>> {
-    let supported_protocol_versions = SUPPORTED_PROTOCOL_VERSIONS.into();
+    let supported_protocol_versions = wb.supported_protocol_versions();
     let config = wb.config();
     let info = ServerInfo::new(
         VERSION.to_owned(),
@@ -1017,10 +1016,11 @@ async fn run_ws_server(
                     debug!("{} WS connection(s) open.",clients.len());
                     let worterbuch = worterbuch.named(format!("client/{id}"));
                     let conn_closed_tx = conn_closed_tx.clone();
+                    let supported_protocol_versions = worterbuch.supported_protocol_versions();
 
                     let client = subsys.spawn(format!("client-{id}"), async move |s|  {
                         select! {
-                            s = serve(id, remote_addr, worterbuch, socket) => if let Err(e) = s {
+                            s = serve(id, remote_addr, worterbuch, socket, supported_protocol_versions) => if let Err(e) = s {
                                 error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                             },
                             _ = s.shutdown_requested() => (),
