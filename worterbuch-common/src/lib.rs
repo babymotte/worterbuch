@@ -24,7 +24,7 @@ pub mod error;
 pub mod protocol;
 
 use crate::{
-    error::{ConfigError, ConfigResult, ConnectionError, ConnectionResult},
+    error::{ConnectionError, ConnectionResult},
     protocol::v1::{
         CasVersion, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
         PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag,
@@ -43,6 +43,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
+    select,
     sync::{mpsc, oneshot},
     time::timeout,
 };
@@ -86,6 +87,7 @@ pub struct WorterbuchVersion(
 );
 
 impl WorterbuchVersion {
+    #[cfg(feature = "commercial")]
     pub fn check_covered_by_license(
         &self,
         license_min: (WorterbuchVersionSegment, WorterbuchVersionSegment),
@@ -641,12 +643,17 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn write_line_and_flush(
+pub async fn write_line_and_flush<F, Fut>(
+    mut shutdown_request: F,
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
     send_timeout: Option<Duration>,
     remote: impl Display,
-) -> ConnectionResult<()> {
+) -> ConnectionResult<()>
+where
+    F: FnMut() -> Fut,
+    Fut: IntoFuture<Output = ()>,
+{
     let mut json = serde_json::to_string(&msg)?;
     if json.contains('\n') {
         return Err(ConnectionError::IoError(Box::new(io::Error::new(
@@ -669,33 +676,70 @@ pub async fn write_line_and_flush(
     for chunk in bytes.chunks(1024) {
         let mut written = 0;
         while written < chunk.len() {
-            if let Some(send_timeout) = send_timeout {
-                written += timeout(send_timeout, tx.write(&chunk[written..]))
-                    .await
-                    .map_err(|_| {
-                        ConnectionError::Timeout(Box::new(format!(
-                            "timeout while sending tcp message to {remote}"
-                        )))
-                    })??;
+            let do_write = tx.write(&chunk[written..]);
+            let additionally_written = if let Some(send_timeout) = send_timeout {
+                do_with_timeout(&mut shutdown_request, &remote, do_write, send_timeout).await??
             } else {
-                written += tx.write(&chunk[written..]).await?;
-            }
+                do_without_timeout(&mut shutdown_request, do_write).await??
+            };
+            written += additionally_written;
         }
     }
     trace!("Writing line done.");
     trace!("Flushing channel …");
+
+    let do_flush = tx.flush();
+
     if let Some(send_timeout) = send_timeout {
-        timeout(send_timeout, tx.flush()).await.map_err(|_| {
-            ConnectionError::Timeout(Box::new(format!(
-                "timeout while sending tcp message to {remote}"
-            )))
-        })??;
+        do_with_timeout(&mut shutdown_request, &remote, do_flush, send_timeout).await??;
     } else {
-        tx.flush().await?;
+        do_without_timeout(&mut shutdown_request, do_flush).await??;
     }
     trace!("Flushing channel done.");
 
     Ok(())
+}
+
+async fn do_without_timeout<F, Fut, T>(
+    shutdown_request: &mut F,
+    task: impl Future<Output = io::Result<T>>,
+) -> ConnectionResult<io::Result<T>>
+where
+    F: FnMut() -> Fut,
+    Fut: IntoFuture<Output = ()>,
+{
+    select! {
+        biased;
+        _ = shutdown_request() => {
+            return Err(ConnectionError::ShutdownRequested);
+        },
+        res = task => Ok(res),
+    }
+}
+
+async fn do_with_timeout<F, Fut, T>(
+    shutdown_request: &mut F,
+    remote: &impl Display,
+    task: impl Future<Output = io::Result<T>>,
+    send_timeout: Duration,
+) -> ConnectionResult<io::Result<T>>
+where
+    F: FnMut() -> Fut,
+    Fut: IntoFuture<Output = ()>,
+{
+    let res = select! {
+        biased;
+        _ = shutdown_request() => {
+            return Err(ConnectionError::ShutdownRequested);
+        },
+        res = timeout(send_timeout, task) => res,
+    };
+
+    res.map_err(|_| {
+        ConnectionError::Timeout(Box::new(format!(
+            "timeout while sending tcp message to {remote}"
+        )))
+    })
 }
 
 mod macros {
@@ -792,8 +836,6 @@ mod test {
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
-    use super::*;
-
     #[test]
     fn topic_macro_generates_topic_correctly() {
         assert_eq!(
@@ -802,137 +844,143 @@ mod test {
         );
     }
 
-    #[test]
-    fn major_version_too_old_for_license_is_rejected() {
-        let license_min = (2, 0);
-        let license_max = (3, 0);
-        assert!(
-            WorterbuchVersion(0, 0, 1)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
+    #[cfg(feature = "commercial")]
+    mod commercial {
 
-        assert!(
-            WorterbuchVersion(1, 5, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-    }
+        use crate::WorterbuchVersion;
 
-    #[test]
-    fn minor_version_too_old_for_license_is_rejected() {
-        let license_min = (2, 6);
-        let license_max = (3, 0);
-        assert!(
-            WorterbuchVersion(2, 0, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-        assert!(
-            WorterbuchVersion(2, 5, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-        assert!(
-            WorterbuchVersion(2, 5, 9999)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-    }
+        #[test]
+        fn major_version_too_old_for_license_is_rejected() {
+            let license_min = (2, 0);
+            let license_max = (3, 0);
+            assert!(
+                WorterbuchVersion(0, 0, 1)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
 
-    #[test]
-    fn major_version_too_new_for_license_is_rejected() {
-        let license_min = (2, 0);
-        let license_max = (3, 0);
-        assert!(
-            WorterbuchVersion(4, 5, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-        assert!(
-            WorterbuchVersion(9999, 9999, 9999)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-    }
+            assert!(
+                WorterbuchVersion(1, 5, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+        }
 
-    #[test]
-    fn minor_version_too_new_for_license_is_rejected() {
-        let license_min = (2, 0);
-        let license_max = (2, 6);
-        assert!(
-            WorterbuchVersion(2, 7, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-    }
+        #[test]
+        fn minor_version_too_old_for_license_is_rejected() {
+            let license_min = (2, 6);
+            let license_max = (3, 0);
+            assert!(
+                WorterbuchVersion(2, 0, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+            assert!(
+                WorterbuchVersion(2, 5, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+            assert!(
+                WorterbuchVersion(2, 5, 9999)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+        }
 
-    #[test]
-    fn major_version_in_range_is_accepted() {
-        let license_min = (1, 0);
-        let license_max = (3, 0);
-        assert!(
-            WorterbuchVersion(1, 1, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-        assert!(
-            WorterbuchVersion(2, 0, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-        assert!(
-            WorterbuchVersion(2, 5, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-        assert!(
-            WorterbuchVersion(2, 99999, 99999)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-    }
+        #[test]
+        fn major_version_too_new_for_license_is_rejected() {
+            let license_min = (2, 0);
+            let license_max = (3, 0);
+            assert!(
+                WorterbuchVersion(4, 5, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+            assert!(
+                WorterbuchVersion(9999, 9999, 9999)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+        }
 
-    #[test]
-    fn minor_version_in_range_is_accepted() {
-        let license_min = (2, 1);
-        let license_max = (2, 6);
-        assert!(
-            WorterbuchVersion(2, 5, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-    }
+        #[test]
+        fn minor_version_too_new_for_license_is_rejected() {
+            let license_min = (2, 0);
+            let license_max = (2, 6);
+            assert!(
+                WorterbuchVersion(2, 7, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+        }
 
-    #[test]
-    fn version_equal_to_min_version_is_accepted() {
-        let license_min = (2, 1);
-        let license_max = (2, 6);
-        assert!(
-            WorterbuchVersion(2, 1, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-        assert!(
-            WorterbuchVersion(2, 1, 5)
-                .check_covered_by_license(license_min, license_max)
-                .is_ok()
-        );
-    }
+        #[test]
+        fn major_version_in_range_is_accepted() {
+            let license_min = (1, 0);
+            let license_max = (3, 0);
+            assert!(
+                WorterbuchVersion(1, 1, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+            assert!(
+                WorterbuchVersion(2, 0, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+            assert!(
+                WorterbuchVersion(2, 5, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+            assert!(
+                WorterbuchVersion(2, 99999, 99999)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+        }
 
-    #[test]
-    fn version_equal_to_max_version_is_rejected() {
-        let license_min = (1, 0);
-        let license_max = (2, 6);
-        assert!(
-            WorterbuchVersion(2, 6, 0)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
-        assert!(
-            WorterbuchVersion(2, 6, 1)
-                .check_covered_by_license(license_min, license_max)
-                .is_err()
-        );
+        #[test]
+        fn minor_version_in_range_is_accepted() {
+            let license_min = (2, 1);
+            let license_max = (2, 6);
+            assert!(
+                WorterbuchVersion(2, 5, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+        }
+
+        #[test]
+        fn version_equal_to_min_version_is_accepted() {
+            let license_min = (2, 1);
+            let license_max = (2, 6);
+            assert!(
+                WorterbuchVersion(2, 1, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+            assert!(
+                WorterbuchVersion(2, 1, 5)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_ok()
+            );
+        }
+
+        #[test]
+        fn version_equal_to_max_version_is_rejected() {
+            let license_min = (1, 0);
+            let license_max = (2, 6);
+            assert!(
+                WorterbuchVersion(2, 6, 0)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+            assert!(
+                WorterbuchVersion(2, 6, 1)
+                    .check_covered_by_license(license_min, license_max)
+                    .is_err()
+            );
+        }
     }
 }

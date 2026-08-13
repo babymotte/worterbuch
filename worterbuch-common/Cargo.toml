@@ -26,6 +26,7 @@ jemalloc = [
 axum-errors = ["axum"]
 redb = ["dep:redb"]
 telemetry = ["opentelemetry", "opentelemetry-otlp"]
+commercial = []
 
 [dependencies]
 axum = { workspace = true, optional = true }

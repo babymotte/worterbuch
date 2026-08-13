@@ -119,7 +119,5 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
         }
     }
 
-    wb.close().await?;
-
     Ok(())
 }

@@ -42,7 +42,8 @@ use std::{
     future::Future,
     io,
     net::SocketAddr,
-    ops::ControlFlow,
+    ops::{ControlFlow, Deref},
+    sync::Arc,
     time::Duration,
 };
 #[cfg(feature = "tcp")]
@@ -51,6 +52,7 @@ use tcp::TcpClientSocket;
 use tokio::net::TcpStream;
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use tokio::net::UnixStream;
+use tokio::sync::watch;
 #[cfg(any(feature = "tcp", feature = "unix"))]
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -65,6 +67,7 @@ use tokio::{
 use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 #[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
+#[cfg(feature = "tcp")]
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
@@ -77,6 +80,34 @@ pub use worterbuch_common::protocol::v1::*;
 pub use worterbuch_common::*;
 
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
+
+#[derive(Clone)]
+pub(crate) struct CancellationToken {
+    cancel_tx: watch::Sender<bool>,
+    cancel_rx: watch::Receiver<bool>,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        Self {
+            cancel_tx,
+            cancel_rx,
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_tx.send_modify(|it| *it = true);
+    }
+
+    pub async fn cancelled(&mut self) -> () {
+        let _ = self.cancel_rx.wait_for(|it| *it).await;
+    }
+
+    pub async fn cancelled_owned(mut self) -> () {
+        let _ = self.cancel_rx.wait_for(|it| *it).await;
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -201,22 +232,21 @@ impl ClientSocket {
     }
 }
 
-#[derive(Clone)]
-pub struct Worterbuch {
+pub struct WorterbuchConnection {
     commands: mpsc::Sender<Command>,
-    stop: mpsc::Sender<oneshot::Sender<()>>,
     client_id: String,
+    cancellation_token: CancellationToken,
 }
 
-impl Worterbuch {
+impl WorterbuchConnection {
     fn new(
         commands: mpsc::Sender<Command>,
-        stop: mpsc::Sender<oneshot::Sender<()>>,
+        cancellation_token: CancellationToken,
         client_id: String,
     ) -> Self {
         Self {
             commands,
-            stop,
+            cancellation_token,
             client_id,
         }
     }
@@ -1107,11 +1137,15 @@ impl Worterbuch {
     }
 
     #[instrument(skip(self), err)]
+    #[deprecated]
     pub async fn close(&self) -> ConnectionResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.stop.send(tx).await?;
-        rx.await.ok();
+        self.cancellation_token.cancel();
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub fn disconnect(&self) {
+        self.cancellation_token.cancel();
     }
 
     #[instrument(skip(self))]
@@ -1123,6 +1157,23 @@ impl Worterbuch {
 
     pub fn client_id(&self) -> &str {
         &self.client_id
+    }
+}
+
+#[derive(Clone)]
+pub struct Worterbuch(Arc<WorterbuchConnection>);
+
+impl Deref for Worterbuch {
+    type Target = WorterbuchConnection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for WorterbuchConnection {
+    fn drop(&mut self) {
+        self.disconnect();
     }
 }
 
@@ -1254,10 +1305,11 @@ pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDi
 
 #[instrument(, err)]
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
+    let cancellation_token = CancellationToken::new();
     let mut err = None;
     for addr in &config.servers {
         info!("Trying to connect to server {addr} …");
-        match try_connect(config.clone(), *addr).await {
+        match try_connect(cancellation_token.clone(), config.clone(), *addr).await {
             Ok(con) => {
                 info!("Successfully connected to server {addr}");
                 return Ok(con);
@@ -1276,8 +1328,8 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
 }
 
 pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbuch {
+    let cancellation_token = CancellationToken::new();
     let (commands_tx, cmd_rx) = mpsc::channel(1);
-    let (stop_tx, stop_rx) = mpsc::channel(1);
     let (disco_tx, disco_rx) = oneshot::channel();
 
     let (ctx, crx) = mpsc::unbounded_channel();
@@ -1289,8 +1341,9 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
     let client_socket = ClientSocket::Local(local_socket);
     let config = Config::new();
 
+    let ct = cancellation_token.clone();
     spawn(async move {
-        if let Err(e) = run(cmd_rx, client_socket, stop_rx, config).await {
+        if let Err(e) = run(cmd_rx, client_socket, ct, config).await {
             error!("Connection closed with error: {e}");
         } else {
             debug!("Connection closed.");
@@ -1298,15 +1351,16 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
         disco_tx.send(()).ok();
     });
 
-    Worterbuch {
+    Worterbuch(Arc::new(WorterbuchConnection {
         client_id: "internal".to_owned(),
         commands: commands_tx,
-        stop: stop_tx,
-    }
+        cancellation_token,
+    }))
 }
 
-#[instrument(skip(config), err(level = Level::WARN))]
-pub async fn try_connect(
+#[instrument(skip(cancellation_token, config), err(level = Level::WARN))]
+async fn try_connect(
+    cancellation_token: CancellationToken,
     config: Config,
     host_addr: SocketAddr,
 ) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
@@ -1336,14 +1390,14 @@ pub async fn try_connect(
         #[cfg(not(feature = "tcp"))]
         panic!("tcp not supported, binary was compiled without the tcp feature flag");
         #[cfg(feature = "tcp")]
-        connect_tcp(host_addr, disco_tx, config).await?
+        connect_tcp(cancellation_token, host_addr, disco_tx, config).await?
     } else if unix {
         #[cfg(not(all(target_family = "unix", feature = "unix")))]
         panic!(
             "not supported, binary was compile without the unix feature flag or for non-unix operating systems"
         );
         #[cfg(all(target_family = "unix", feature = "unix"))]
-        connect_unix(url, disco_tx, config).await?
+        connect_unix(cancellation_token, url, disco_tx, config).await?
     } else {
         #[cfg(not(any(feature = "ws", feature = "wasm")))]
         panic!("websocket not supported, binary was compiled without the ws feature flag");
@@ -1546,8 +1600,9 @@ async fn connect_ws(
 }
 
 #[cfg(feature = "tcp")]
-#[instrument(skip(config, on_disconnect))]
+#[instrument(skip(cancellation_token, config, on_disconnect))]
 async fn connect_tcp(
+    cancellation_token: CancellationToken,
     host_addr: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
@@ -1685,6 +1740,7 @@ async fn connect_tcp(
                             connected(
                                 ClientSocket::Tcp(
                                     TcpClientSocket::new(
+                                        cancellation_token,
                                         tcp_tx,
                                         tcp_rx,
                                         config.send_timeout,
@@ -1724,6 +1780,7 @@ async fn connect_tcp(
         connected(
             ClientSocket::Tcp(
                 TcpClientSocket::new(
+                    cancellation_token,
                     tcp_tx,
                     tcp_rx,
                     config.send_timeout,
@@ -1739,8 +1796,9 @@ async fn connect_tcp(
 }
 
 #[cfg(all(target_family = "unix", feature = "unix"))]
-#[instrument(skip(config, on_disconnect), err(level = Level::WARN))]
+#[instrument(skip(cancellation_token, config, on_disconnect), err(level = Level::WARN))]
 async fn connect_unix(
+    cancellation_token: CancellationToken,
     path: String,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
@@ -1754,7 +1812,7 @@ async fn connect_unix(
     let stream = select! {
         conn = UnixStream::connect(&path) => conn,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for TCP connection.".to_owned())));
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for UNIX connection.".to_owned())));
         },
     }?;
     debug!("Connected to {path}.");
@@ -1878,6 +1936,7 @@ async fn connect_unix(
                             connected(
                                 ClientSocket::Unix(
                                     UnixClientSocket::new(
+                                        cancellation_token,
                                         tcp_tx,
                                         tcp_rx,
                                         config.channel_buffer_size,
@@ -1913,14 +1972,16 @@ async fn connect_unix(
             )))
         }
     } else {
-        connected(
-            ClientSocket::Unix(
-                UnixClientSocket::new(tcp_tx, tcp_rx, config.channel_buffer_size).await,
-            ),
-            on_disconnect,
-            config,
-            client_id,
-        )
+        let client_socket = ClientSocket::Unix(
+            UnixClientSocket::new(
+                cancellation_token,
+                tcp_tx,
+                tcp_rx,
+                config.channel_buffer_size,
+            )
+            .await,
+        );
+        connected(client_socket, on_disconnect, config, client_id)
     }
 }
 
@@ -1931,11 +1992,12 @@ fn connected(
     config: Config,
     client_id: String,
 ) -> Result<Worterbuch, ConnectionError> {
-    let (stop_tx, stop_rx) = mpsc::channel(1);
+    let cancellation_token = CancellationToken::new();
     let (cmd_tx, cmd_rx) = mpsc::channel(1);
 
+    let ct = cancellation_token.clone();
     spawn(async move {
-        if let Err(e) = run(cmd_rx, client_socket, stop_rx, config).await {
+        if let Err(e) = run(cmd_rx, client_socket, ct, config).await {
             error!("Connection closed with error: {e}");
         } else {
             debug!("Connection closed.");
@@ -1943,27 +2005,28 @@ fn connected(
         on_disconnect.send(()).ok();
     });
 
-    Ok(Worterbuch::new(cmd_tx, stop_tx, client_id))
+    Ok(Worterbuch(Arc::new(WorterbuchConnection::new(
+        cmd_tx,
+        cancellation_token,
+        client_id,
+    ))))
 }
 
-#[instrument(skip(cmd_rx, client_socket, stop_rx, config), err)]
+#[instrument(skip(cmd_rx, client_socket, cancellation_token, config), err)]
 async fn run(
     mut cmd_rx: mpsc::Receiver<Command>,
     mut client_socket: ClientSocket,
-    mut stop_rx: mpsc::Receiver<oneshot::Sender<()>>,
+    mut cancellation_token: CancellationToken,
     config: Config,
 ) -> ConnectionResult<()> {
     let mut callbacks = Callbacks::default();
     let mut transaction_ids = TransactionIds::default();
 
-    let mut stop_tx = None;
-
     loop {
         trace!("loop: wait for command / ws message / shutdown request");
         select! {
-            recv = stop_rx.recv() => {
+            _ = cancellation_token.cancelled() => {
                 debug!("Shutdown request received.");
-                stop_tx = recv;
                 break;
             },
             ws_msg = client_socket.receive_msg() => {
@@ -1994,9 +2057,6 @@ async fn run(
     }
 
     client_socket.close().await?;
-    if let Some(tx) = stop_tx {
-        tx.send(()).ok();
-    }
 
     Ok(())
 }

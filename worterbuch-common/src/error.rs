@@ -288,6 +288,7 @@ pub enum ConnectionError {
     #[cfg(feature = "ws")]
     InvalidHeaderValue(Box<InvalidHeaderValue>),
     LockLost(LockLost),
+    ShutdownRequested,
 }
 
 impl std::error::Error for ConnectionError {}
@@ -323,6 +324,7 @@ impl fmt::Display for ConnectionError {
                 "lost lock on key '{}' (transaction id: {})",
                 lock.key, lock.transaction_id
             ),
+            Self::ShutdownRequested => "shutdown requested".fmt(f),
         }
     }
 }

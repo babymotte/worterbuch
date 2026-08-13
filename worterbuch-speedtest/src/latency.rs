@@ -227,7 +227,5 @@ async fn start_sender(settings: LatencySettings, mut stop_rx: oneshot::Receiver<
         }
     }
 
-    wb.close().await.ok();
-
     counter
 }

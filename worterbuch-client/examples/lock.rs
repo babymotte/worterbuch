@@ -59,8 +59,7 @@ async fn add_number(i: usize) -> Result<()> {
 
         tracing::info!("{i} done.");
 
-        wb.close().await?;
-        drop(wb);
+        wb.disconnect();
 
         break;
     }

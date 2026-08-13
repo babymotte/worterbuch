@@ -31,6 +31,8 @@ use worterbuch_common::{
     write_line_and_flush,
 };
 
+use crate::CancellationToken;
+
 const SERVER_ID: &str = "worterbuch server";
 
 pub struct TcpClientSocket {
@@ -40,7 +42,8 @@ pub struct TcpClientSocket {
 }
 
 impl TcpClientSocket {
-    pub async fn new(
+    pub(crate) async fn new(
+        cancellation_token: CancellationToken,
         tx: OwnedWriteHalf,
         rx: Lines<BufReader<OwnedReadHalf>>,
         send_timeout: Option<Duration>,
@@ -48,7 +51,13 @@ impl TcpClientSocket {
     ) -> Self {
         let (send_tx, send_rx) = mpsc::channel(buffer_size);
         let (closed_tx, closed_rx) = oneshot::channel();
-        spawn(forward_tcp_messages(tx, send_rx, send_timeout, closed_tx));
+        spawn(forward_tcp_messages(
+            cancellation_token,
+            tx,
+            send_rx,
+            send_timeout,
+            closed_tx,
+        ));
         Self {
             tx: send_tx,
             rx,
@@ -79,13 +88,22 @@ impl TcpClientSocket {
 }
 
 async fn forward_tcp_messages(
+    cancellation_token: CancellationToken,
     mut tx: OwnedWriteHalf,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     timeout: Option<Duration>,
     closed_tx: oneshot::Sender<()>,
 ) {
     while let Some(msg) = send_rx.recv().await {
-        if let Err(e) = write_line_and_flush(msg, &mut tx, timeout, SERVER_ID).await {
+        if let Err(e) = write_line_and_flush(
+            || cancellation_token.clone().cancelled_owned(),
+            msg,
+            &mut tx,
+            timeout,
+            SERVER_ID,
+        )
+        .await
+        {
             error!("Error sending TCP message: {e}");
             break;
         }

@@ -30,6 +30,8 @@ use worterbuch_common::{
     write_line_and_flush,
 };
 
+use crate::CancellationToken;
+
 const SERVER_ID: &str = "worterbuch server";
 
 pub struct UnixClientSocket {
@@ -39,14 +41,20 @@ pub struct UnixClientSocket {
 }
 
 impl UnixClientSocket {
-    pub async fn new(
+    pub(crate) async fn new(
+        cancellation_token: CancellationToken,
         tx: OwnedWriteHalf,
         rx: Lines<BufReader<OwnedReadHalf>>,
         buffer_size: usize,
     ) -> Self {
         let (send_tx, send_rx) = mpsc::channel(buffer_size);
         let (closed_tx, closed_rx) = oneshot::channel();
-        spawn(forward_unix_messages(tx, send_rx, closed_tx));
+        spawn(forward_unix_messages(
+            cancellation_token,
+            tx,
+            send_rx,
+            closed_tx,
+        ));
         Self {
             tx: send_tx,
             rx,
@@ -84,12 +92,23 @@ impl UnixClientSocket {
 }
 
 async fn forward_unix_messages(
+    cancellation_token: CancellationToken,
     mut tx: OwnedWriteHalf,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     closed_tx: oneshot::Sender<()>,
-) {
+) -> ()
+where
+{
     while let Some(msg) = send_rx.recv().await {
-        if let Err(e) = write_line_and_flush(msg, &mut tx, None, SERVER_ID).await {
+        if let Err(e) = write_line_and_flush(
+            || cancellation_token.clone().cancelled_owned(),
+            msg,
+            &mut tx,
+            None,
+            SERVER_ID,
+        )
+        .await
+        {
             error!("Error sending TCP message: {e}");
             break;
         }
