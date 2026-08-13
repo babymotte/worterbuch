@@ -1137,7 +1137,10 @@ impl WorterbuchConnection {
     }
 
     #[instrument(skip(self), err)]
-    #[deprecated]
+    #[deprecated(
+        since = "1.7.0",
+        note = "the connection will now be closed automatically once all copies of the `Worterbuch` object are dropped; to close the connection explicitly, use `disconnect`"
+    )]
     pub async fn close(&self) -> ConnectionResult<()> {
         self.cancellation_token.cancel();
         Ok(())

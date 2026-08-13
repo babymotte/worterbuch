@@ -62,7 +62,7 @@ use tokio::sync::{mpsc, oneshot};
 use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_common::{
-    ClientId, INTERNAL_CLIENT_ID, Protocol,
+    ClientId, INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
     protocol::v1::{
         Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
@@ -72,6 +72,29 @@ use worterbuch_common::{
 
 pub use config::*;
 pub use worterbuch_common as common;
+
+const WORTERBUCH_VERSION: (&str, &str, &str) = (
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    env!("CARGO_PKG_VERSION_MINOR"),
+    env!("CARGO_PKG_VERSION_PATCH"),
+);
+
+pub fn worterbuch_version() -> WorterbuchVersion {
+    WorterbuchVersion(
+        WORTERBUCH_VERSION
+            .0
+            .parse::<u32>()
+            .expect("invalid cargo version"),
+        WORTERBUCH_VERSION
+            .1
+            .parse::<u32>()
+            .expect("invalid cargo version"),
+        WORTERBUCH_VERSION
+            .2
+            .parse::<u32>()
+            .expect("invalid cargo version"),
+    )
+}
 
 #[derive(Default)]
 struct Servers {

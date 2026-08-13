@@ -55,6 +55,7 @@ pub enum Mode {
 pub enum LeaderState {
     Disconnected,
     Connecting(SocketAddr),
+    Handshake(SocketAddr),
     Syncing(SocketAddr),
     Synced(SocketAddr),
 }

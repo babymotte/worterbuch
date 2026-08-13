@@ -23,7 +23,8 @@ use crate::{
     cluster::{
         ClusterStateChangeReceiver, ClusterStateChangeSender, Mode, Servers, process_api_call,
         protocol::{
-            ClientWriteCommand, ClusterStateChange, LeaderMessage, ProxyMessage, StateSync,
+            ClientWriteCommand, ClusterStateChange, Connected, Disconnected, Handshake,
+            LeaderMessage, LeaderWelcome, ProxyMessage, Request, StateSync,
         },
         shutdown,
     },
@@ -31,6 +32,7 @@ use crate::{
     forward_api_call, forward_to_followers,
     server::common::{CloneableWbApi, WbFunction, protocol::Proto},
     worterbuch::SubscriptionFlags,
+    worterbuch_version,
 };
 use hashbrown::HashMap;
 use miette::{Context, Error, IntoDiagnostic, Result, miette};
@@ -41,8 +43,12 @@ use std::{
     ops::ControlFlow,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{TcpSocket, TcpStream, tcp::OwnedWriteHalf},
+    io::{AsyncBufReadExt, BufReader, Lines},
+    net::{
+        TcpSocket, TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    select,
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
@@ -414,30 +420,25 @@ async fn serve(
 
 async fn follower_serve_loop(
     subsys: SubsystemHandle,
-    mut tcp_stream: TcpStream,
+    tcp_stream: TcpStream,
     follower: SocketAddr,
     sync_rx: oneshot::Receiver<(StateSync, ClusterStateChangeReceiver)>,
     config: Config,
     worterbuch: CloneableWbApi,
 ) -> miette::Result<()> {
-    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
-
-    if let Err(e) = write_line_and_flush(
-        LeaderMessage::Init(state),
-        &mut tcp_stream,
-        config.send_timeout,
-        follower,
-    )
-    .await
-    {
-        return Err(miette!(
-            "Could not send current state to follower/proxy: {e}"
-        ));
-    }
-
     let (socket_rx, mut socket_tx) = tcp_stream.into_split();
-    let (send_tx, mut send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
+
+    send_welcome(&subsys, &mut socket_tx, follower, &config).await?;
+    let handshake = receive_handshake(&mut proxy_messages, follower).await?;
+
+    // TODO check version
+    authenticate(handshake, &config)?;
+
+    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
+    send_initial_state(&subsys, &mut socket_tx, follower, &config, state).await?;
+
+    let (send_tx, mut send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_server = VirtualProxyServer {
         subsys,
         clients: HashMap::new(),
@@ -450,9 +451,9 @@ async fn follower_serve_loop(
     while_select! {
         biased;
         _ = proxy_server.subsys.shutdown_requested() => break,
-        recv = commands.recv() => forward_change_to_follower(recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
+        recv = commands.recv() => forward_change_to_follower(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
         recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,
-        recv = send_rx.recv() => forward_response_to_proxy(recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
+        recv = send_rx.recv() => forward_response_to_proxy(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
@@ -460,7 +461,95 @@ async fn follower_serve_loop(
     Ok(())
 }
 
+async fn send_welcome(
+    subsys: &SubsystemHandle,
+    tcp_stream: &mut OwnedWriteHalf,
+    follower: SocketAddr,
+    config: &Config,
+) -> miette::Result<()> {
+    let authentication_required = config.auth_token_key.is_some();
+    let version = worterbuch_version();
+
+    write_line_and_flush(
+        || subsys.shutdown_requested(),
+        LeaderMessage::Welcome(LeaderWelcome {
+            version,
+            authentication_required,
+        }),
+        tcp_stream,
+        config.send_timeout,
+        follower,
+    )
+    .await
+    .into_diagnostic()
+    .wrap_err("could not send current state to follower/proxy")
+}
+
+async fn receive_handshake(
+    tcp_stream: &mut Lines<BufReader<OwnedReadHalf>>,
+    follower: SocketAddr,
+) -> miette::Result<Handshake> {
+    match tcp_stream.next_line().await {
+        Ok(Some(line)) => {
+            debug!("Received handshake message from follower/proxy: {line}");
+
+            let msg: ProxyMessage = serde_json::from_str(&line)
+                .into_diagnostic()
+                .wrap_err("could not parse follower/proxy message")?;
+
+            match msg {
+                ProxyMessage::Handshake(handshake) => Ok(handshake),
+                msg => Err(miette!(
+                    "expected handshake message from follower/proxy {}, but got:\n{:?}",
+                    follower,
+                    msg
+                )),
+            }
+        }
+        Ok(None) => Err(miette!(
+            "connection to follower/proxy {} closed before handshake",
+            follower
+        )),
+        Err(e) => Err(miette!(
+            "error receiving handshake message from follower/proxy {}: {}",
+            follower,
+            e
+        )),
+    }
+}
+
+fn authenticate(handshake: Handshake, config: &Config) -> miette::Result<()> {
+    match &config.auth_token_key {
+        Some(key) => authenticate_against_key(handshake, key),
+        None => Ok(()),
+    }
+}
+
+fn authenticate_against_key(handshake: Handshake, key: &str) -> miette::Result<()> {
+    todo!()
+}
+
+async fn send_initial_state(
+    subsys: &SubsystemHandle,
+    tcp_stream: &mut OwnedWriteHalf,
+    follower: SocketAddr,
+    config: &Config,
+    state: StateSync,
+) -> miette::Result<()> {
+    select! {
+        biased;
+        _ = subsys.shutdown_requested() => {
+            warn!("Shutdown requested before initial sync completed.");
+            Err(miette!("shut down before initial sync"))
+        },
+        res = write_line_and_flush(|| subsys.shutdown_requested(), LeaderMessage::Init(state), tcp_stream, config.send_timeout, follower) => {
+            res.into_diagnostic().wrap_err("could not send current state to follower/proxy")
+        }
+    }
+}
+
 async fn forward_change_to_follower(
+    subsys: &SubsystemHandle,
     recv: Option<ClusterStateChange>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
@@ -469,6 +558,7 @@ async fn forward_change_to_follower(
     match recv {
         Some(change) => {
             write_line_and_flush(
+                || subsys.shutdown_requested(),
                 LeaderMessage::Mut(change),
                 socket_tx,
                 config.send_timeout,
@@ -484,6 +574,7 @@ async fn forward_change_to_follower(
 }
 
 async fn forward_response_to_proxy(
+    subsys: &SubsystemHandle,
     recv: Option<(ClientId, ServerMessage)>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
@@ -492,6 +583,7 @@ async fn forward_response_to_proxy(
     match recv {
         Some((client_id, server_message)) => {
             write_line_and_flush(
+                || subsys.shutdown_requested(),
                 LeaderMessage::ClientResponse(client_id, server_message),
                 socket_tx,
                 config.send_timeout,
@@ -553,24 +645,29 @@ impl VirtualProxyServer {
             .wrap_err("could not parse proxy message")?;
 
         match msg {
-            ProxyMessage::Connected {
+            ProxyMessage::Handshake(_) => {
+                return Err(miette!(
+                    "received handshake message from proxy after initial handshake"
+                ));
+            }
+            ProxyMessage::Connected(Connected {
                 client_id,
                 protocol,
-            } => self.spawn_virtual_client(
+            }) => self.spawn_virtual_client(
                 client_id,
                 protocol,
                 self.config.clone(),
                 self.worterbuch.named(format!("client/{client_id}")),
             ),
-            ProxyMessage::Disconnected {
+            ProxyMessage::Disconnected(Disconnected {
                 client_id,
                 protocol,
-            } => self.stop_virtual_client(client_id, protocol),
-            ProxyMessage::Request {
+            }) => self.stop_virtual_client(client_id, protocol),
+            ProxyMessage::Request(Request {
                 client_id,
                 msg,
                 interface,
-            } => {
+            }) => {
                 self.process_client_request(client_id, msg, interface)
                     .await?
             }

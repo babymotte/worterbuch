@@ -118,6 +118,8 @@ pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<Lice
 #[cfg(feature = "commercial")]
 pub mod commercial {
 
+    use crate::{WORTERBUCH_VERSION, worterbuch_version};
+
     use super::License;
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use std::{env, path::Path, str};
@@ -128,11 +130,6 @@ pub mod commercial {
     };
 
     pub const LICENSE_PUBLIC_KEY: &str = env!("WORTERBUCH_LICENSE_PUBLIC_KEY");
-    pub const WORTERBUCH_VERSION: (&str, &str, &str) = (
-        env!("CARGO_PKG_VERSION_MAJOR"),
-        env!("CARGO_PKG_VERSION_MINOR"),
-        env!("CARGO_PKG_VERSION_PATCH"),
-    );
 
     pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<License> {
         let license_file = license_file_path.unwrap_or_else(|| Path::new("./license"));
@@ -152,20 +149,7 @@ pub mod commercial {
             ))
         })?;
 
-        let wb_version = WorterbuchVersion(
-            WORTERBUCH_VERSION
-                .0
-                .parse::<u32>()
-                .expect("invalid cargo version"),
-            WORTERBUCH_VERSION
-                .1
-                .parse::<u32>()
-                .expect("invalid cargo version"),
-            WORTERBUCH_VERSION
-                .2
-                .parse::<u32>()
-                .expect("invalid cargo version"),
-        );
+        let wb_version = worterbuch_version();
 
         wb_version.check_covered_by_license(token.claims.versions.0, token.claims.versions.1)?;
 

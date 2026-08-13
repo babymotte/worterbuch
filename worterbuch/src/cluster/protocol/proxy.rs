@@ -19,27 +19,53 @@
 
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    ClientId, Protocol,
-    protocol::v1::{ClientMessage, Interface},
+    ClientId, Protocol, WorterbuchVersion,
+    protocol::v1::{ClientMessage, Interface, Key},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProxyMessage {
-    #[serde(rename_all = "camelCase")]
-    Connected {
-        client_id: ClientId,
-        protocol: Protocol,
-    },
-    #[serde(rename_all = "camelCase")]
-    Disconnected {
-        client_id: ClientId,
-        protocol: Protocol,
-    },
-    #[serde(rename_all = "camelCase")]
-    Request {
-        client_id: ClientId,
-        msg: ClientMessage,
-        interface: Interface,
-    },
+    Handshake(Handshake),
+    Connected(Connected),
+    Disconnected(Disconnected),
+    Request(Request),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Handshake {
+    pub version: WorterbuchVersion,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+    pub locks: Option<Locks>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Locks {
+    pub held: Vec<Key>,
+    pub waiting: Vec<Key>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Connected {
+    pub client_id: ClientId,
+    pub protocol: Protocol,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Disconnected {
+    pub client_id: ClientId,
+    pub protocol: Protocol,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Request {
+    pub client_id: ClientId,
+    pub msg: ClientMessage,
+    pub interface: Interface,
 }

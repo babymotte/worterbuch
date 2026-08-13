@@ -20,7 +20,7 @@
 use crate::store::{SerializeableLockNode, StoreNode};
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    ClientId,
+    ClientId, WorterbuchVersion,
     protocol::v1::{
         CasVersion, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value,
     },
@@ -29,9 +29,17 @@ use worterbuch_common::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LeaderMessage {
+    Welcome(LeaderWelcome),
     Init(StateSync),
     Mut(ClusterStateChange),
     ClientResponse(ClientId, ServerMessage),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaderWelcome {
+    pub version: WorterbuchVersion,
+    pub authentication_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

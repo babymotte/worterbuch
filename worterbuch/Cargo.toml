@@ -23,7 +23,7 @@ telemetry = [
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
 ]
-commercial = []
+commercial = ["worterbuch-common/commercial"]
 redb = ["worterbuch-common/redb", "dep:redb"]
 sqlite = ["dep:rusqlite"]
 turso = ["dep:turso"]

@@ -21,7 +21,9 @@ use crate::{
     Config, INTERNAL_CLIENT_ID, Servers, Worterbuch,
     cluster::{
         Mode,
-        protocol::{ClientWriteCommand, ClusterStateChange, LeaderMessage, StateSync},
+        protocol::{
+            ClientWriteCommand, ClusterStateChange, LeaderMessage, LeaderWelcome, StateSync,
+        },
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
@@ -179,6 +181,13 @@ async fn process_leader_message(
     trace!("Received leader sync message: {msg:?}");
 
     let res = match msg {
+        LeaderMessage::Welcome(LeaderWelcome {
+            version,
+            authentication_required,
+        }) => {
+            // TODO send handshake
+            Ok(())
+        }
         LeaderMessage::Init(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "already synced".to_owned(),

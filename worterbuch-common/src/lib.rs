@@ -711,7 +711,7 @@ where
     select! {
         biased;
         _ = shutdown_request() => {
-            return Err(ConnectionError::ShutdownRequested);
+            Err(ConnectionError::ShutdownRequested)
         },
         res = task => Ok(res),
     }
