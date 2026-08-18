@@ -15,7 +15,7 @@
 
 ARG WORTERBUCH_VERSION
 
-FROM rust:1-bookworm AS wbco-chef
+FROM rust:1-trixie AS wbco-chef
 RUN cargo install cargo-chef
 RUN rustup component add rustfmt
 RUN rustup component add clippy
