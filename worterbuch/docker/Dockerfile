@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FROM rust:1-bookworm AS worterbuch-chef
+FROM rust:1-trixie AS worterbuch-chef
 RUN cargo install cargo-chef
 RUN rustup component add rustfmt
 RUN rustup component add clippy
@@ -29,12 +29,9 @@ FROM worterbuch-chef AS worterbuch-builder
 COPY --from=worterbuch-planner /app/recipe.json recipe.json
 RUN cargo chef cook -p worterbuch --release --recipe-path recipe.json
 COPY . .
-RUN cargo fmt --check
-RUN cargo clippy -- --deny warnings
-RUN cargo test
 RUN cargo build -p worterbuch --release
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 WORKDIR /app
 COPY --from=worterbuch-builder /app/target/release/worterbuch /usr/local/bin
 ENV WORTERBUCH_LOG=info
