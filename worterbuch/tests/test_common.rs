@@ -330,7 +330,7 @@ fn start_wb(setup: &IntegrationTestEnvironment, clean_persistence_data: bool) ->
 
 fn connect(addr: SocketAddr) -> TcpStream {
     let mut err = None;
-    for i in 0..5 {
+    for i in 0..10 {
         match TcpStream::connect(addr) {
             Ok(stream) => return stream,
             Err(e) => {
