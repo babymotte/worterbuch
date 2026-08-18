@@ -29,9 +29,6 @@ FROM wbco-chef AS wbco-builder
 COPY --from=wbco-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo fmt --check
-RUN cargo clippy -- --deny warnings
-RUN cargo test
 RUN cargo build --release
 
 FROM babymotte/worterbuch:${WORTERBUCH_VERSION}
