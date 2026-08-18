@@ -576,9 +576,9 @@ impl Store {
                 if !tail.is_empty() {
                     return Err(StoreError::IllegalMultiWildcard(format!(
                         "{}/{}/{}",
-                        &format_path(&traversed_path),
+                        format_path(&traversed_path),
                         head.as_ref(),
-                        &format_path(tail),
+                        format_path(tail),
                     )));
                 }
                 Store::ncollect_matches(
@@ -683,9 +683,9 @@ impl Store {
                 if !tail.is_empty() {
                     return Err(StoreError::IllegalMultiWildcard(format!(
                         "{}/{}/{}",
-                        &format_path(&traversed_path),
+                        format_path(&traversed_path),
                         next.as_ref(),
-                        &format_path(tail),
+                        format_path(tail),
                     )));
                 }
 
@@ -781,9 +781,9 @@ impl Store {
             KeySegment::MultiWildcard => {
                 return Err(StoreError::IllegalMultiWildcard(format!(
                     "{}/{}/{}",
-                    &format_path(&traversed_path),
+                    format_path(&traversed_path),
                     next.as_ref(),
-                    &format_path(tail),
+                    format_path(tail),
                 )));
             }
             KeySegment::Wildcard => {
