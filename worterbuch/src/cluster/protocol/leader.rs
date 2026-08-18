@@ -17,12 +17,13 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::store::{SerializeableLockNode, StoreNode};
+use crate::store::{PersistedStore, SerializeableLockNode, StoreNode};
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    ClientId, WorterbuchVersion,
+    ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CasVersion, GraveGoods, Key, LastWill, RequestPattern, ServerMessage, Trace, Value,
+        CasVersion, ForceSet, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_ROOT_PREFIX,
+        ServerMessage, Trace, Value,
     },
 };
 
@@ -62,8 +63,39 @@ pub struct ClusterStateChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientWriteCommand {
-    Set(Key, Value, bool),
-    CSet(Key, Value, CasVersion, bool),
+    Set(Key, Value, ForceSet),
+    CSet(Key, Value, CasVersion, ForceSet),
+    Publish(Key, Value),
     Delete(Key),
     PDelete(RequestPattern),
+    Import(PersistedStore),
+}
+
+impl ClientWriteCommand {
+    pub fn is_grave_goods_or_last_will(&self) -> bool {
+        match self {
+            ClientWriteCommand::Set(key, _, _) | ClientWriteCommand::CSet(key, _, _, _) => {
+                is_grave_goods_topic(key) || is_last_will_topic(key)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_system_key(&self) -> bool {
+        match self.key() {
+            Some(key) => key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX),
+            None => false,
+        }
+    }
+
+    fn key(&self) -> Option<&Key> {
+        match self {
+            ClientWriteCommand::Set(key, _, _) => Some(key),
+            ClientWriteCommand::CSet(key, _, _, _) => Some(key),
+            ClientWriteCommand::Publish(key, _) => Some(key),
+            ClientWriteCommand::Delete(key) => Some(key),
+            ClientWriteCommand::PDelete(pattern) => Some(pattern),
+            ClientWriteCommand::Import(_) => None,
+        }
+    }
 }

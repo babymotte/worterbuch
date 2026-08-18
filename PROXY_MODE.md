@@ -24,10 +24,22 @@ Proxy instances that just re-connected to a new leader must try to re-acquire an
 
 ### Grave Goods/Last Wills
 
-Normally grave goods and last wills are stored in the persistence file so that in case of a server restart (which implies that all client connections break) they can all be triggered before the server accepts any new connections. In a scenario where there are proxy instances a server restart does not necessarily mean that any client connections break, so triggering grave goods and las wills on the new leader is probably not desired. It would probably make sense to add a config entry that allows skipping the trigger of grave goods and last wills on server start iff the server is starting in leader mode.
+Normally grave goods and last wills are stored in the persistence file so that in case of a server restart (which implies that all client connections break) they can all be triggered before the server accepts any new connections. In a scenario where there are proxy instances a server restart does not necessarily mean that any client connections break, so triggering grave goods and last wills on the new leader is probably not desired. It would probably make sense to add a config entry that allows skipping the trigger of grave goods and last wills on server start iff the server is starting in leader mode.
 
-I'm also considering making grave goods and last wills a first class citizen in the client protocol since a breaking change in the client protocol will be introduced by the locking API anyway
+=> this needs to be differentiated between direct clients (clients connected directly to the leader) and proxied clients (clients connected to a proxy):
+
+- the leader must not write grave goods and last wills of proxied clients into its persistent storage
+- the leader must write grave goods and last wills of direct clients into its persistent storage and apply them on (re-)start
+- proxies must write grave goods and last wills of their own clients into their persistent storage and include them in the first handshake after (re-)start so that the leader can apply them
+- leader must treats direct client disconnects normally by directly applying its grave goods and last will
+- proxies must treat client disconnects by forwarding grave goods and last wills to the leader for application
+
+I'm also considering making grave goods and last wills a first class citizen in the client protocol since a breaking change in the client protocol will be introduced by the locking API anyway <- !!!!
 
 ### Authentication
 
 Currently leader sync ports do not require authentication since it is assumed they will not be exposed to the public. However with proxy mode it may become necessary to expose the sync port on a public network which means the sync port would provide unauthorized access to protected data.
+
+### Cleanup
+
+Double check for any left-over TODOs!

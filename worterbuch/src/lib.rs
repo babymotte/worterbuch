@@ -333,10 +333,11 @@ async fn server_metadata(
 }
 
 async fn forward_api_call(
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     dead: &mut Vec<usize>,
     function: &WbFunction,
     filter_sys: bool,
+    followers_only: bool,
 ) {
     if let Some((cmd, client_id, trace)) = match function {
         WbFunction::Get(_, _)
@@ -428,7 +429,15 @@ async fn forward_api_call(
             }
         }
     } {
-        forward_to_followers(cmd, client_id, trace, client_write_txs, dead).await;
+        forward_to_followers(
+            cmd,
+            client_id,
+            trace,
+            client_write_txs,
+            dead,
+            followers_only,
+        )
+        .await;
     }
 }
 
@@ -436,10 +445,15 @@ async fn forward_to_followers(
     cmd: ClientWriteCommand,
     client_id: ClientId,
     trace: Trace,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     dead: &mut Vec<usize>,
+    followers_only: bool,
 ) {
-    for (id, tx) in client_write_txs.iter() {
+    for (id, tx, is_proxy) in client_write_txs.iter() {
+        if followers_only && *is_proxy {
+            continue;
+        }
+
         if tx
             .send(ClusterStateChange {
                 client_id,
@@ -453,7 +467,7 @@ async fn forward_to_followers(
         }
     }
     if !dead.is_empty() {
-        client_write_txs.retain(|(i, _)| !dead.contains(i));
+        client_write_txs.retain(|(i, _, _)| !dead.contains(i));
         dead.clear();
     }
 }

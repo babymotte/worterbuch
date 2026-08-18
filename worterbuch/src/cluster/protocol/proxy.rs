@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, Protocol, WorterbuchVersion,
-    protocol::v1::{ClientMessage, Interface, Key},
+    protocol::v1::{ClientMessage, GraveGoods, Interface, Key, LastWill},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,14 +34,45 @@ pub enum ProxyMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Handshake {
-    pub version: WorterbuchVersion,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_token: Option<String>,
-    pub locks: Option<Locks>,
+pub enum Handshake {
+    Proxy(ProxyHandshake),
+    Follower(FollowerHandshake),
+}
+impl Handshake {
+    pub(crate) fn version(&self) -> &WorterbuchVersion {
+        match self {
+            Handshake::Proxy(proxy_handshake) => &proxy_handshake.version,
+            Handshake::Follower(follower_handshake) => &follower_handshake.version,
+        }
+    }
+
+    pub(crate) fn auth_token(&self) -> Option<&str> {
+        match self {
+            Handshake::Proxy(proxy_handshake) => proxy_handshake.auth_token.as_deref(),
+            Handshake::Follower(follower_handshake) => follower_handshake.auth_token.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowerHandshake {
+    pub version: WorterbuchVersion,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyHandshake {
+    pub version: WorterbuchVersion,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
+    pub connected_clients: Vec<Connected>,
+    pub locks: Locks,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Locks {
     pub held: Vec<Key>,
@@ -60,6 +91,8 @@ pub struct Connected {
 pub struct Disconnected {
     pub client_id: ClientId,
     pub protocol: Protocol,
+    pub grave_goods: GraveGoods,
+    pub last_will: LastWill,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

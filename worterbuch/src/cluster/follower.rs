@@ -22,26 +22,29 @@ use crate::{
     cluster::{
         Mode,
         protocol::{
-            ClientWriteCommand, ClusterStateChange, LeaderMessage, LeaderWelcome, StateSync,
+            ClientWriteCommand, ClusterStateChange, FollowerHandshake, Handshake, LeaderMessage,
+            LeaderWelcome, ProxyMessage, StateSync,
         },
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
     persistence::unlock_persistence,
+    worterbuch_version,
 };
 use serde_json::json;
-use std::ops::ControlFlow;
+use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    net::TcpStream,
+    net::{TcpStream, tcp::OwnedWriteHalf},
     select,
+    sync::mpsc,
 };
 use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     error::ConnectionResult,
     protocol::v1::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
-    receive_msg, topic, while_select,
+    receive_msg, topic, while_select, write_line_and_flush,
 };
 
 pub(crate) async fn run(
@@ -73,12 +76,52 @@ pub(crate) async fn run(
     let mut persistence_interval = config.persistence_interval();
 
     let stream = TcpStream::connect(&leader_address).await?;
+    let leader_address = stream.peer_addr()?;
 
-    let mut lines = BufReader::new(stream).lines();
+    let (leader_rx, leader_tx) = stream.into_split();
+    let mut lines = BufReader::new(leader_rx).lines();
+
+    let follower_request_tx = init_request_sender(subsys, leader_tx, &config, leader_address);
 
     let timeout = config.initial_sync_timeout;
 
     info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
+
+    let welcome = select! {
+        biased;
+        _ = subsys.shutdown_requested() => {
+            warn!("Shutdown requested before receiving leader welcome message.");
+            return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
+        },
+        recv = receive_msg(&mut lines, timeout) => {
+            debug!("Received leader message");
+            match recv {
+                Ok(Some(msg)) => {
+                    if let LeaderMessage::Welcome(welcome) = msg {
+                        debug!("Received welcome message from leader: {welcome:?}");
+                        welcome
+                    } else {
+                        warn!("Expected welcome message from leader, but got: {msg:?}");
+                        return Err(WorterbuchAppError::ClusterError(format!("Expected welcome message from leader, but got: {msg:?}")));
+                    }
+                },
+                Ok(None) => {
+                    warn!("Leader closed connection before sending welcome message.");
+                    return Err(WorterbuchAppError::ClusterError("Leader closed connection before sending welcome message.".to_owned()));
+                },
+                Err(e) => {
+                    warn!("Error receiving welcome message from leader: {e}");
+                    return Err(WorterbuchAppError::ClusterError(format!("Error receiving welcome message from leader: {e}")));
+                }
+            }
+        },
+    };
+
+    // TODO check version
+    send_handshake(welcome, &worterbuch, &config, &follower_request_tx).await?;
+
+    info!("Handshake complete. Waiting for initial sync message …");
+
     select! {
         biased;
         _ = subsys.shutdown_requested() => {
@@ -95,7 +138,7 @@ pub(crate) async fn run(
                         persistence_interval.reset();
                         worterbuch.flush().await?;
                     } else {
-                        return Err(WorterbuchAppError::ClusterError("first message from leader is supposed to be the initial sync, but it wasn't".to_owned()));
+                        return Err(WorterbuchAppError::ClusterError(format!("Expected initial sync, but it got: {msg:?}")));
                     }
                 },
                 Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
@@ -128,6 +171,29 @@ pub(crate) async fn run(
     .await
 }
 
+async fn send_handshake(
+    welcome: LeaderWelcome,
+    worterbuch: &Worterbuch,
+    config: &Config,
+    follower_request_tx: &mpsc::Sender<ProxyMessage>,
+) -> WorterbuchAppResult<()> {
+    let version = worterbuch_version();
+    let auth_token = if welcome.authentication_required {
+        todo!()
+    } else {
+        None
+    };
+
+    let handshake = ProxyMessage::Handshake(Handshake::Follower(FollowerHandshake {
+        version,
+        auth_token,
+    }));
+
+    follower_request_tx.send(handshake).await?;
+
+    Ok(())
+}
+
 async fn try_process_leader_message(
     recv: ConnectionResult<Option<LeaderMessage>>,
     worterbuch: &mut Worterbuch,
@@ -149,6 +215,69 @@ async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFl
     debug!("Follower persistence interval triggered");
     worterbuch.flush().await?;
     Ok(ControlFlow::Continue(()))
+}
+
+fn init_request_sender(
+    subsys: &SubsystemHandle,
+    leader_tx: OwnedWriteHalf,
+    config: &Config,
+    leader_addr: SocketAddr,
+) -> mpsc::Sender<ProxyMessage> {
+    let (tx, rx) = mpsc::channel(config.channel_buffer_size);
+    let send_timeout = config.send_timeout;
+    subsys.spawn("proxy_request_sender", move |s| {
+        request_sender_loop(s, leader_tx, rx, send_timeout, leader_addr)
+    });
+    tx
+}
+
+async fn request_sender_loop(
+    subsys: SubsystemHandle,
+    mut leader_tx: OwnedWriteHalf,
+    mut rx: mpsc::Receiver<ProxyMessage>,
+    timeout: Option<Duration>,
+    leader_addr: SocketAddr,
+) -> miette::Result<()> {
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        recv = rx.recv() => forward_client_request(&subsys, recv, &mut leader_tx, timeout, leader_addr).await,
+    }
+    Ok(())
+}
+
+async fn forward_client_request(
+    subsys: &SubsystemHandle,
+    recv: Option<ProxyMessage>,
+    leader_tx: &mut OwnedWriteHalf,
+    timeout: Option<Duration>,
+    leader_addr: SocketAddr,
+) -> ControlFlow<()> {
+    let Some(request) = recv else {
+        return ControlFlow::Break(());
+    };
+
+    debug!("Forwarding client request to leader: {request:?}");
+
+    if let Err(e) = write_line_and_flush(
+        || subsys.shutdown_requested(),
+        request,
+        leader_tx,
+        timeout,
+        leader_addr,
+    )
+    .await
+    {
+        error!(
+            "Failed to forward client request to leader {}: {e}",
+            leader_addr
+        );
+        return ControlFlow::Break(());
+    }
+
+    trace!("Client request forwarded to leader.");
+
+    ControlFlow::Continue(())
 }
 
 async fn initial_sync(
@@ -181,12 +310,10 @@ async fn process_leader_message(
     trace!("Received leader sync message: {msg:?}");
 
     let res = match msg {
-        LeaderMessage::Welcome(LeaderWelcome {
-            version,
-            authentication_required,
-        }) => {
-            // TODO send handshake
-            Ok(())
+        LeaderMessage::Welcome(_) => {
+            return Err(crate::error::WorterbuchAppError::ClusterError(
+                "already received welcome message".to_owned(),
+            ));
         }
         LeaderMessage::Init(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
@@ -196,20 +323,49 @@ async fn process_leader_message(
         LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
             ClientWriteCommand::Set(key, value, force) => {
                 worterbuch
-                    .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
+                    .internal_set(
+                        key,
+                        value,
+                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                        trace,
+                        force,
+                    )
                     .await
             }
             ClientWriteCommand::CSet(key, value, versions, force) => {
                 worterbuch
-                    .internal_cset(key, value, versions, INTERNAL_CLIENT_ID, trace, force)
+                    .internal_cset(
+                        key,
+                        value,
+                        versions,
+                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                        trace,
+                        force,
+                    )
                     .await
             }
             ClientWriteCommand::Delete(key) => worterbuch
-                .internal_delete(key, INTERNAL_CLIENT_ID, trace)
+                .internal_delete(key, trace.client_id().unwrap_or(INTERNAL_CLIENT_ID), trace)
                 .await
                 .map(|_| ()),
             ClientWriteCommand::PDelete(pattern) => worterbuch
-                .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace)
+                .internal_pdelete(
+                    pattern,
+                    false,
+                    trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    trace,
+                )
+                .await
+                .map(|_| ()),
+            ClientWriteCommand::Publish(_, _) => {
+                panic!("leader should never forward a Publish command to a follower")
+            }
+            ClientWriteCommand::Import(persisted_store) => worterbuch
+                .internal_import(
+                    persisted_store,
+                    trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    trace,
+                )
                 .await
                 .map(|_| ()),
         },

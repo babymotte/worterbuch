@@ -23,13 +23,13 @@ use crate::{
     cluster::{
         ClusterStateChangeReceiver, ClusterStateChangeSender, Mode, Servers, process_api_call,
         protocol::{
-            ClientWriteCommand, ClusterStateChange, Connected, Disconnected, Handshake,
-            LeaderMessage, LeaderWelcome, ProxyMessage, Request, StateSync,
+            ClusterStateChange, Connected, Disconnected, Handshake, LeaderMessage, LeaderWelcome,
+            Locks, ProxyMessage, Request, StateSync,
         },
         shutdown,
     },
     error::WorterbuchAppResult,
-    forward_api_call, forward_to_followers,
+    forward_api_call,
     server::common::{CloneableWbApi, WbFunction, protocol::Proto},
     worterbuch::SubscriptionFlags,
     worterbuch_version,
@@ -54,11 +54,11 @@ use tokio::{
 use tosub::SubsystemHandle;
 use tracing::{Level, debug, error, info, span, trace, warn};
 use worterbuch_common::{
-    ClientId, KeySegment, Protocol, ValueEntry,
+    ClientId, KeySegment, Protocol, WbApi, WorterbuchVersion,
     protocol::v1::{
-        ClientMessage, Interface, InternalAction, Method, PStateEvent, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-        ServerMessage, Trace,
+        ClientMessage, GraveGoods, Interface, InternalAction, LastWill, PStateEvent,
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
+        SYSTEM_TOPIC_ROOT, ServerMessage, Trace,
     },
     topic, while_select, write_line_and_flush,
 };
@@ -91,18 +91,30 @@ pub(crate) async fn run(
         )
         .await?;
 
-    let mut client_write_txs: Vec<(usize, ClusterStateChangeSender)> = vec![];
-    let (follower_connected_tx, mut follower_connected_rx) = mpsc::channel::<
+    let mut client_write_txs: Vec<(usize, ClusterStateChangeSender, bool)> = vec![];
+    let (follower_connected_tx, mut follower_connected_rx) = mpsc::channel::<(
         oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-    >(config.channel_buffer_size);
+        SocketAddr,
+        bool,
+    )>(config.channel_buffer_size);
+    let (follower_disconnected_tx, mut follower_disconnected_rx) =
+        mpsc::channel::<SocketAddr>(config.channel_buffer_size);
 
     let mut tx_id = 0;
-    let mut dead = vec![];
+    // let mut dead = vec![];
 
     let cfg = config.clone();
     let wb = api.named("cluster-sync-port");
     subsys.spawn("cluster_sync_port", async move |s| {
-        run_cluster_sync_port(s, cfg, wb, follower_connected_tx, sync_port).await
+        run_cluster_sync_port(
+            s,
+            cfg,
+            wb,
+            follower_connected_tx,
+            follower_disconnected_tx,
+            sync_port,
+        )
+        .await
     });
 
     let (mut grave_goods_rx, _) = worterbuch
@@ -137,10 +149,12 @@ pub(crate) async fn run(
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        recv = grave_goods_rx.recv() => try_forward_grave_goods_change(recv, &mut client_write_txs, &mut dead).await?,
-        recv = last_will_rx.recv() => try_forward_last_will_change(recv, &mut client_write_txs, &mut dead).await?,
-        recv = follower_connected_rx.recv() => try_forward_follower_connected(recv, &mut worterbuch,&mut client_write_txs, &config, &mut tx_id).await?,
-        recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch, &mut client_write_txs, &mut dead).await?,
+        // recv = grave_goods_rx.recv() => try_forward_grave_goods_change(recv, &mut client_write_txs, &mut dead).await?,
+        // recv = last_will_rx.recv() => try_forward_last_will_change(recv, &mut client_write_txs, &mut dead).await?,
+        recv = follower_connected_rx.recv() => try_forward_follower_connected(recv, &mut worterbuch, &mut client_write_txs, &config, &mut tx_id).await?,
+        recv = follower_disconnected_rx.recv() => try_forward_follower_disconnected(recv, &mut worterbuch).await?,
+        recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch).await?,
+        // TODO forward follower notifications
     }
 
     info!("Main loop stopped, shutting down.");
@@ -150,7 +164,7 @@ pub(crate) async fn run(
 
 async fn try_forward_grave_goods_change(
     recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     if let Some((e, _)) = recv {
@@ -159,6 +173,13 @@ async fn try_forward_grave_goods_change(
             PStateEvent::KeyValuePairs(kvps) => {
                 for kvp in kvps {
                     let span = span!(Level::DEBUG, "forward_grave_goods");
+                    let client_id = kvp
+                        .key
+                        .split("/")
+                        .nth(2)
+                        .expect("invalid grave goods key format")
+                        .parse()
+                        .expect("invalid client id");
                     forward_api_call(
                         client_write_txs,
                         dead,
@@ -167,17 +188,25 @@ async fn try_forward_grave_goods_change(
                             Interface::Local,
                             kvp.key,
                             kvp.value,
-                            INTERNAL_CLIENT_ID,
+                            client_id,
                             oneshot::channel().0,
                             span,
                         ),
                         false,
+                        true,
                     )
                     .await;
                 }
             }
             PStateEvent::Deleted(kvps) => {
                 for kvp in kvps {
+                    let client_id = kvp
+                        .key
+                        .split("/")
+                        .nth(2)
+                        .expect("invalid grave goods key format")
+                        .parse()
+                        .expect("invalid client id");
                     forward_api_call(
                         client_write_txs,
                         dead,
@@ -185,10 +214,11 @@ async fn try_forward_grave_goods_change(
                             0,
                             Interface::Local,
                             kvp.key,
-                            INTERNAL_CLIENT_ID,
+                            client_id,
                             oneshot::channel().0,
                         ),
                         false,
+                        true,
                     )
                     .await;
                 }
@@ -202,7 +232,7 @@ async fn try_forward_grave_goods_change(
 
 async fn try_forward_last_will_change(
     recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     if let Some((e, _)) = recv {
@@ -211,6 +241,13 @@ async fn try_forward_last_will_change(
             PStateEvent::KeyValuePairs(kvps) => {
                 for kvp in kvps {
                     let span = span!(Level::DEBUG, "forward_last_will");
+                    let client_id = kvp
+                        .key
+                        .split("/")
+                        .nth(2)
+                        .expect("invalid grave goods key format")
+                        .parse()
+                        .expect("invalid client id");
                     forward_api_call(
                         client_write_txs,
                         dead,
@@ -219,17 +256,25 @@ async fn try_forward_last_will_change(
                             Interface::Local,
                             kvp.key,
                             kvp.value,
-                            INTERNAL_CLIENT_ID,
+                            client_id,
                             oneshot::channel().0,
                             span,
                         ),
                         false,
+                        true,
                     )
                     .await;
                 }
             }
             PStateEvent::Deleted(kvps) => {
                 for kvp in kvps {
+                    let client_id = kvp
+                        .key
+                        .split("/")
+                        .nth(2)
+                        .expect("invalid grave goods key format")
+                        .parse()
+                        .expect("invalid client id");
                     forward_api_call(
                         client_write_txs,
                         dead,
@@ -237,10 +282,11 @@ async fn try_forward_last_will_change(
                             0,
                             Interface::Local,
                             kvp.key,
-                            INTERNAL_CLIENT_ID,
+                            client_id,
                             oneshot::channel().0,
                         ),
                         false,
+                        true,
                     )
                     .await;
                 }
@@ -256,43 +302,9 @@ async fn try_forward_last_will_change(
 async fn try_forward_api_call(
     recv: Option<WbFunction>,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
-    dead: &mut Vec<usize>,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
-        Some(WbFunction::Import(transaction_id, client_id, interface, json, tx)) => {
-            let (tx_int, rx_int) = oneshot::channel();
-            process_api_call(
-                worterbuch,
-                WbFunction::Import(transaction_id, client_id, interface.clone(), json, tx_int),
-            )
-            .await;
-            let imported_values = rx_int.await??;
-
-            for (key, (value, changed)) in &imported_values {
-                if *changed {
-                    let cmd = match value.to_owned() {
-                        ValueEntry::Cas(value, version) => {
-                            ClientWriteCommand::CSet(key.to_owned(), value, version, true)
-                        }
-                        ValueEntry::Plain(value) => {
-                            ClientWriteCommand::Set(key.to_owned(), value, true)
-                        }
-                    };
-                    let trace = Trace::ClientRequest {
-                        client_id,
-                        transaction_id,
-                        method: Method::Import,
-                        interface: interface.clone(),
-                    };
-                    forward_to_followers(cmd, client_id, trace, client_write_txs, dead).await;
-                }
-            }
-            tx.send(Ok(imported_values)).ok();
-        }
         Some(function) => {
-            // TODO check if processing was successful and only then forward api call
-            forward_api_call(client_write_txs, dead, &function, true).await;
             process_api_call(worterbuch, function).await;
         }
         None => return Ok(ControlFlow::Break(())),
@@ -301,14 +313,18 @@ async fn try_forward_api_call(
 }
 
 async fn try_forward_follower_connected(
-    recv: Option<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
+    recv: Option<(
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+        SocketAddr,
+        bool,
+    )>,
     worterbuch: &mut Worterbuch,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender)>,
+    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     config: &Config,
     tx_id: &mut usize,
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
-        Some(state_tx) => {
+        Some((state_tx, remote_addr, is_proxy)) => {
             let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
             let (current_state, locks, grave_goods, last_will) = worterbuch.export_with_locks();
             let state_sync = StateSync {
@@ -318,9 +334,23 @@ async fn try_forward_follower_connected(
                 last_will,
             };
             if state_tx.send((state_sync, client_write_rx)).is_ok() {
-                client_write_txs.push((*tx_id, client_write_tx));
+                client_write_txs.push((*tx_id, client_write_tx.clone(), is_proxy));
                 *tx_id += 1;
             }
+            worterbuch.follower_connected(remote_addr, client_write_tx, is_proxy);
+            Ok(ControlFlow::Continue(()))
+        }
+        None => Ok(ControlFlow::Break(())),
+    }
+}
+
+async fn try_forward_follower_disconnected(
+    recv: Option<SocketAddr>,
+    worterbuch: &mut Worterbuch,
+) -> WorterbuchAppResult<ControlFlow<()>> {
+    match recv {
+        Some(remote_addr) => {
+            worterbuch.follower_disconnected(remote_addr);
             Ok(ControlFlow::Continue(()))
         }
         None => Ok(ControlFlow::Break(())),
@@ -331,7 +361,12 @@ async fn run_cluster_sync_port(
     subsys: SubsystemHandle,
     config: Config,
     wb: CloneableWbApi,
-    on_follower_connected: mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
+    on_follower_connected: mpsc::Sender<(
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+        SocketAddr,
+        bool,
+    )>,
+    on_follower_disconnected: mpsc::Sender<SocketAddr>,
     port: u16,
 ) -> Result<()> {
     let ip = config
@@ -358,7 +393,7 @@ async fn run_cluster_sync_port(
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        client = listener.accept() => accecpt_client(client, &subsys, &config, &wb ,&on_follower_connected).await,
+        client = listener.accept() => accecpt_client(client, &subsys, &config, &wb, on_follower_connected.clone(), on_follower_disconnected.clone()).await,
     }
 
     drop(listener);
@@ -373,7 +408,12 @@ async fn accecpt_client(
     subsys: &SubsystemHandle,
     config: &Config,
     wb: &CloneableWbApi,
-    on_follower_connected: &mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
+    on_follower_connected: mpsc::Sender<(
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+        SocketAddr,
+        bool,
+    )>,
+    on_follower_disconnected: mpsc::Sender<SocketAddr>,
 ) -> ControlFlow<()> {
     match client {
         Ok(client) => {
@@ -383,6 +423,7 @@ async fn accecpt_client(
                 subsys,
                 client,
                 on_follower_connected,
+                on_follower_disconnected,
                 config.clone(),
                 wb.named(name),
             )
@@ -399,18 +440,29 @@ async fn accecpt_client(
 async fn serve(
     subsys: &SubsystemHandle,
     client: (TcpStream, SocketAddr),
-    on_follower_connected: &mpsc::Sender<oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>>,
+    on_follower_connected: mpsc::Sender<(
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+        SocketAddr,
+        bool,
+    )>,
+    on_follower_disconnected: mpsc::Sender<SocketAddr>,
     config: Config,
     wb: CloneableWbApi,
 ) {
     info!("Follower {} connected.", client.1);
-    let (sync_tx, sync_rx) = oneshot::channel();
-    if on_follower_connected.send(sync_tx).await.is_err() {
-        return;
-    }
 
     subsys.spawn(client.1.to_string(), async move |s| {
-        if let Err(e) = follower_serve_loop(s, client.0, client.1, sync_rx, config, wb).await {
+        if let Err(e) = follower_serve_loop(
+            s,
+            client.0,
+            client.1,
+            on_follower_connected,
+            on_follower_disconnected,
+            config,
+            wb,
+        )
+        .await
+        {
             error!("Error in follower serve loop: {e}");
             eprintln!("{e:?}");
         }
@@ -422,31 +474,42 @@ async fn follower_serve_loop(
     subsys: SubsystemHandle,
     tcp_stream: TcpStream,
     follower: SocketAddr,
-    sync_rx: oneshot::Receiver<(StateSync, ClusterStateChangeReceiver)>,
+    on_follower_connected: mpsc::Sender<(
+        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+        SocketAddr,
+        bool,
+    )>,
+    on_follower_disconnected: mpsc::Sender<SocketAddr>,
     config: Config,
     worterbuch: CloneableWbApi,
 ) -> miette::Result<()> {
     let (socket_rx, mut socket_tx) = tcp_stream.into_split();
     let mut proxy_messages = BufReader::new(socket_rx).lines();
 
-    send_welcome(&subsys, &mut socket_tx, follower, &config).await?;
-    let handshake = receive_handshake(&mut proxy_messages, follower).await?;
-
-    // TODO check version
-    authenticate(handshake, &config)?;
-
-    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
-    send_initial_state(&subsys, &mut socket_tx, follower, &config, state).await?;
-
     let (send_tx, mut send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_server = VirtualProxyServer {
-        subsys,
+        subsys: subsys.clone(),
         clients: HashMap::new(),
         worterbuch: worterbuch.named("server/virtual-proxy"),
         config: config.clone(),
         proxy_address: follower,
         send_tx,
     };
+
+    send_welcome(&subsys, &mut socket_tx, follower, &config).await?;
+    let handshake = receive_handshake(&mut proxy_messages, follower).await?;
+
+    let is_proxy = process_handshake(handshake, &config, &mut proxy_server).await?;
+
+    let (sync_tx, sync_rx) = oneshot::channel();
+    on_follower_connected
+        .send((sync_tx, follower, is_proxy))
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to forward follower connected event")?;
+
+    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
+    send_initial_state(&subsys, &mut socket_tx, follower, &config, state).await?;
 
     while_select! {
         biased;
@@ -457,6 +520,12 @@ async fn follower_serve_loop(
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
+
+    on_follower_disconnected
+        .send(follower)
+        .await
+        .into_diagnostic()
+        .wrap_err("failed to forward follower disconnected event")?;
 
     Ok(())
 }
@@ -518,14 +587,49 @@ async fn receive_handshake(
     }
 }
 
-fn authenticate(handshake: Handshake, config: &Config) -> miette::Result<()> {
+async fn process_handshake(
+    handshake: Handshake,
+    config: &Config,
+    proxy_server: &mut VirtualProxyServer,
+) -> miette::Result<bool> {
+    check_version(handshake.version(), config)
+        .wrap_err("could not check version of follower/proxy")?;
+
+    authenticate(handshake.auth_token(), config)
+        .wrap_err("could not authenticate follower/proxy")?;
+
+    if let Handshake::Proxy(proxy_handshake) = &handshake {
+        proxy_server
+            .register_clients(&proxy_handshake.connected_clients)
+            .await?;
+        proxy_server.restore_locks(&proxy_handshake.locks);
+
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+fn check_version(version: &WorterbuchVersion, config: &Config) -> miette::Result<()> {
+    if version != &worterbuch_version() {
+        return Err(miette!(
+            "follower/proxy version mismatch: expected {}, got {}",
+            worterbuch_version(),
+            version
+        ));
+    }
+
+    Ok(())
+}
+
+fn authenticate(auth_token: Option<&str>, config: &Config) -> miette::Result<()> {
     match &config.auth_token_key {
-        Some(key) => authenticate_against_key(handshake, key),
+        Some(key) => authenticate_against_key(auth_token, key),
         None => Ok(()),
     }
 }
 
-fn authenticate_against_key(handshake: Handshake, key: &str) -> miette::Result<()> {
+fn authenticate_against_key(auth_token: Option<&str>, key: &str) -> miette::Result<()> {
     todo!()
 }
 
@@ -653,36 +757,45 @@ impl VirtualProxyServer {
             ProxyMessage::Connected(Connected {
                 client_id,
                 protocol,
-            }) => self.spawn_virtual_client(
-                client_id,
-                protocol,
-                self.config.clone(),
-                self.worterbuch.named(format!("client/{client_id}")),
-            ),
+            }) => {
+                self.spawn_virtual_client(
+                    client_id,
+                    protocol,
+                    self.config.clone(),
+                    self.worterbuch.named(format!("client/{client_id}")),
+                )
+                .await?;
+            }
             ProxyMessage::Disconnected(Disconnected {
                 client_id,
                 protocol,
-            }) => self.stop_virtual_client(client_id, protocol),
+                grave_goods,
+                last_will,
+            }) => {
+                self.apply_grave_goods_and_last_will(client_id, grave_goods, last_will)
+                    .await?;
+                self.stop_virtual_client(client_id, protocol).await?;
+            }
             ProxyMessage::Request(Request {
                 client_id,
                 msg,
                 interface,
             }) => {
                 self.process_client_request(client_id, msg, interface)
-                    .await?
+                    .await?;
             }
         }
 
         Ok(())
     }
 
-    fn spawn_virtual_client(
+    async fn spawn_virtual_client(
         &mut self,
         client_id: ClientId,
         protocol: Protocol,
         config: Config,
         worterbuch: CloneableWbApi,
-    ) {
+    ) -> miette::Result<()> {
         let auth_required = config.auth_token_key.is_some();
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
 
@@ -690,6 +803,15 @@ impl VirtualProxyServer {
         self.subsys.spawn("leader-response-forwarder", move |s| {
             response_forwarder_loop(s, send_client_rx, send_tx, client_id)
         });
+
+        worterbuch
+            .connected(
+                client_id,
+                None,
+                Protocol::Proxied(Box::new(protocol.clone())),
+            )
+            .await
+            .into_diagnostic()?;
 
         let proto = Proto::new(client_id, send_client_tx, auth_required, config, worterbuch);
 
@@ -704,21 +826,38 @@ impl VirtualProxyServer {
             "New proxied client connected: {} ({}/{:?})",
             client_id, self.proxy_address, protocol
         );
+
+        Ok(())
     }
 
-    fn stop_virtual_client(&mut self, client_id: ClientId, protocol: Protocol) {
+    async fn stop_virtual_client(
+        &mut self,
+        client_id: ClientId,
+        protocol: Protocol,
+    ) -> miette::Result<()> {
+        debug!("Stopping virtual client {client_id} …");
         if self.clients.remove(&client_id).is_none() {
             warn!(
                 "Received disconnect for unknown client {client_id} ({}/{:?})",
                 self.proxy_address, protocol
             );
-            return;
+            return Ok(());
         }
+
+        debug!(
+            "Virtual client {client_id} removed from local register, triggering client disconnect callback …"
+        );
+
+        self.worterbuch
+            .disconnected(client_id, protocol.clone(), None)
+            .await?;
 
         info!(
             "Proxied client disconnected: {} ({}/{:?})",
             client_id, self.proxy_address, protocol
         );
+
+        Ok(())
     }
 
     async fn process_client_request(
@@ -748,6 +887,65 @@ impl VirtualProxyServer {
             ));
         }
         trace!("Processing incoming message done.");
+
+        Ok(())
+    }
+
+    async fn register_clients(&mut self, connected_clients: &[Connected]) -> miette::Result<()> {
+        for Connected {
+            client_id,
+            protocol,
+        } in connected_clients
+        {
+            self.spawn_virtual_client(
+                *client_id,
+                protocol.clone(),
+                self.config.clone(),
+                self.worterbuch.named(format!("client/{client_id}")),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    fn restore_locks(&self, locks: &Locks) {
+        // TODO
+    }
+
+    async fn apply_grave_goods_and_last_will(
+        &self,
+        client_id: ClientId,
+        grave_goods: GraveGoods,
+        last_will: LastWill,
+    ) -> miette::Result<()> {
+        self.worterbuch
+            .set(
+                0,
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_GRAVE_GOODS
+                ),
+                json!(grave_goods),
+                client_id,
+            )
+            .await?;
+
+        self.worterbuch
+            .set(
+                0,
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client_id,
+                    SYSTEM_TOPIC_LAST_WILL
+                ),
+                json!(last_will),
+                client_id,
+            )
+            .await?;
 
         Ok(())
     }

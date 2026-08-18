@@ -27,8 +27,9 @@ use crate::{
     error::{ConnectionError, ConnectionResult},
     protocol::v1::{
         CasVersion, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
-        PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SendTracesFlag,
-        StateEvent, Trace, TransactionId, UniqueFlag, Value,
+        PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SYSTEM_TOPIC_CLIENTS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SendTracesFlag, StateEvent, Trace,
+        TransactionId, UniqueFlag, Value,
     },
 };
 use error::WorterbuchResult;
@@ -119,6 +120,12 @@ impl WorterbuchVersion {
         }
 
         Ok(())
+    }
+}
+
+impl fmt::Display for WorterbuchVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
     }
 }
 
@@ -222,11 +229,13 @@ macro_rules! topic {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Protocol {
     TCP,
     WS,
     HTTP,
     UNIX,
+    Proxied(Box<Protocol>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -740,6 +749,24 @@ where
             "timeout while sending tcp message to {remote}"
         )))
     })
+}
+
+pub fn is_grave_goods_topic(key: &str) -> bool {
+    let mut split = key.split('/');
+    (
+        Some(SYSTEM_TOPIC_CLIENTS),
+        Some(SYSTEM_TOPIC_GRAVE_GOODS),
+        None,
+    ) == (split.nth(1), split.nth(1), split.next())
+}
+
+pub fn is_last_will_topic(key: &str) -> bool {
+    let mut split = key.split('/');
+    (
+        Some(SYSTEM_TOPIC_CLIENTS),
+        Some(SYSTEM_TOPIC_LAST_WILL),
+        None,
+    ) == (split.nth(1), split.nth(1), split.next())
 }
 
 mod macros {

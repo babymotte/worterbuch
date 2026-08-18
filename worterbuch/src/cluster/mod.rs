@@ -107,7 +107,11 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
             tx.send(
                 worterbuch
-                    .spub(value, TraceData::new(client_id, interface, transaction_id))
+                    .spub(
+                        value,
+                        client_id,
+                        TraceData::new(client_id, interface, transaction_id),
+                    )
                     .await,
             )
             .ok();
@@ -118,6 +122,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                     .publish(
                         key,
                         value,
+                        client_id,
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,

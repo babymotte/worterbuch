@@ -24,11 +24,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tosub::SubsystemHandle;
 use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
-    ClientId, INTERNAL_CLIENT_ID, ValueEntry,
+    ClientId, INTERNAL_CLIENT_ID, ValueEntry, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        GraveGoods, InternalAction, Key, LastWill, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
-        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-        SYSTEM_TOPIC_STORE, Trace,
+        GraveGoods, InternalAction, Key, LastWill, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_STORE, Trace,
     },
     topic,
 };
@@ -162,20 +161,72 @@ impl PersistentStorageImpl {
         }
     }
 
-    pub async fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
+    pub async fn delete_value(
+        &self,
+        key: &Key,
+        client_id: Option<ClientId>,
+    ) -> PersistenceResult<()> {
         if key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-            return Ok(());
-        }
-
-        match self {
-            PersistentStorageImpl::Json(s) => s.delete_value(key).await,
-            #[cfg(feature = "redb")]
-            PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
-            #[cfg(feature = "sqlite")]
-            PersistentStorageImpl::SQLite(s) => s.delete_value(key).await,
-            #[cfg(feature = "turso")]
-            PersistentStorageImpl::Turso(s) => s.delete_value(key).await,
-            PersistentStorageImpl::Noop => Ok(()),
+            if let Some(client_id) = client_id {
+                if is_grave_goods_topic(key) {
+                    let grave_goods = None;
+                    trace!("Updating grave goods for client {client_id} to {grave_goods:?}");
+                    match self {
+                        PersistentStorageImpl::Json(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        #[cfg(feature = "redb")]
+                        PersistentStorageImpl::ReDB(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        #[cfg(feature = "sqlite")]
+                        PersistentStorageImpl::SQLite(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        #[cfg(feature = "turso")]
+                        PersistentStorageImpl::Turso(s) => {
+                            s.update_grave_goods(client_id, grave_goods).await
+                        }
+                        PersistentStorageImpl::Noop => Ok(()),
+                    }
+                } else if is_last_will_topic(key) {
+                    let last_will = None;
+                    trace!("Updating last will for client {client_id} to {last_will:?}");
+                    match self {
+                        PersistentStorageImpl::Json(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        #[cfg(feature = "redb")]
+                        PersistentStorageImpl::ReDB(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        #[cfg(feature = "sqlite")]
+                        PersistentStorageImpl::SQLite(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        #[cfg(feature = "turso")]
+                        PersistentStorageImpl::Turso(s) => {
+                            s.update_last_will(client_id, last_will).await
+                        }
+                        PersistentStorageImpl::Noop => Ok(()),
+                    }
+                } else {
+                    Ok(())
+                }
+            } else {
+                Ok(())
+            }
+        } else {
+            match self {
+                PersistentStorageImpl::Json(s) => s.delete_value(key).await,
+                #[cfg(feature = "redb")]
+                PersistentStorageImpl::ReDB(s) => s.delete_value(key).await,
+                #[cfg(feature = "sqlite")]
+                PersistentStorageImpl::SQLite(s) => s.delete_value(key).await,
+                #[cfg(feature = "turso")]
+                PersistentStorageImpl::Turso(s) => s.delete_value(key).await,
+                PersistentStorageImpl::Noop => Ok(()),
+            }
         }
     }
 
@@ -258,24 +309,6 @@ impl PersistentStorageImpl {
             PersistentStorageImpl::Noop => Ok(()),
         }
     }
-}
-
-fn is_grave_goods_topic(key: &str) -> bool {
-    let mut split = key.split('/');
-    (
-        Some(SYSTEM_TOPIC_CLIENTS),
-        Some(SYSTEM_TOPIC_GRAVE_GOODS),
-        None,
-    ) == (split.nth(1), split.nth(1), split.next())
-}
-
-fn is_last_will_topic(key: &str) -> bool {
-    let mut split = key.split('/');
-    (
-        Some(SYSTEM_TOPIC_CLIENTS),
-        Some(SYSTEM_TOPIC_LAST_WILL),
-        None,
-    ) == (split.nth(1), split.nth(1), split.next())
 }
 
 pub(crate) async fn restore(

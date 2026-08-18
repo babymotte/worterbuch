@@ -46,7 +46,7 @@ pub type StoreNode = Node<ValueEntry>;
 type LockNode = Node<Lock>;
 pub type SerializeableLockNode = Node<SerializeableLock>;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedStore {
     pub data: StoreNode,
 }

@@ -23,7 +23,7 @@ use crate::{
         self, LeaderState, Mode,
         protocol::{
             ClientWriteCommand, ClusterStateChange, Connected, Disconnected, Handshake,
-            LeaderMessage, LeaderWelcome, ProxyMessage, Request, StateSync,
+            LeaderMessage, LeaderWelcome, Locks, ProxyHandshake, ProxyMessage, Request, StateSync,
         },
         shutdown,
     },
@@ -54,6 +54,7 @@ use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID,
     error::{ConfigError, ConnectionResult, WorterbuchResult},
+    is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
         CSet, ClientMessage, Delete, InternalAction, KeyValuePairs, Lock, PDelete, PStateEvent,
         ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER,
@@ -106,6 +107,8 @@ pub(crate) async fn run(
 
     let mut counter = 0;
 
+    let mut locks = Locks::default();
+
     'outer: loop {
         for leader_address in &leader_addresses {
             worterbuch
@@ -130,12 +133,13 @@ pub(crate) async fn run(
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break 'outer,
-                    res = run_with_leader(
+                res = run_with_leader(
                     subsys,
                     &mut worterbuch,
                     &mut api_rx,
                     config.clone(),
                     *leader_address,
+                    &mut locks,
                 ) => {
                     let initial_connection_successful =  res?;
                     if initial_connection_successful {
@@ -161,6 +165,7 @@ async fn run_with_leader(
     api_rx: &mut mpsc::Receiver<WbFunction>,
     config: Config,
     leader_address: SocketAddr,
+    locks: &mut Locks,
 ) -> WorterbuchAppResult<bool> {
     worterbuch
         .internal_set(
@@ -186,7 +191,7 @@ async fn run_with_leader(
 
     let timeout = config.initial_sync_timeout;
 
-    info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
+    info!("Successfully connected to leader {leader_address}. Performing handshake …");
 
     worterbuch
         .internal_set(
@@ -201,8 +206,8 @@ async fn run_with_leader(
     let welcome = select! {
         biased;
         _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before initial sync completed.");
-            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
+            warn!("Shutdown requested before receiving leader welcome message.");
+            return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
         },
         recv = receive_msg(&mut lines, timeout) => {
             debug!("Received leader message");
@@ -212,16 +217,16 @@ async fn run_with_leader(
                         debug!("Received welcome message from leader: {welcome:?}");
                         welcome
                     } else {
-                        warn!("Expected initial sync message from leader, but got: {msg:?}");
+                        warn!("Expected welcome message from leader, but got: {msg:?}");
                         return Ok(false);
                     }
                 },
                 Ok(None) => {
-                    warn!("Leader closed connection before sending initial sync message.");
+                    warn!("Leader closed connection before sending welcome message.");
                     return Ok(false);
                 },
                 Err(e) => {
-                    warn!("Error receiving initial sync message from leader: {e}");
+                    warn!("Error receiving welcome message from leader: {e}");
                     return Ok(false);
                 }
             }
@@ -229,7 +234,9 @@ async fn run_with_leader(
     };
 
     // TODO check version
-    send_handshake(welcome, &config, &proxy_request_tx).await?;
+    send_handshake(welcome, worterbuch, &config, &proxy_request_tx, locks).await?;
+
+    info!("Handshake complete. Waiting for initial sync message …");
 
     worterbuch
         .internal_set(
@@ -286,8 +293,6 @@ async fn run_with_leader(
         )
         .await?;
 
-    announce_connected_clients(worterbuch, &proxy_request_tx).await?;
-
     LeaderConnection::new(subsys, proxy_request_tx, worterbuch, api_rx, lines)
         .run()
         .await?;
@@ -302,8 +307,10 @@ async fn run_with_leader(
 
 async fn send_handshake(
     welcome: LeaderWelcome,
+    worterbuch: &Worterbuch,
     config: &Config,
     proxy_request_tx: &mpsc::Sender<ProxyMessage>,
+    locks: &Locks,
 ) -> WorterbuchAppResult<()> {
     let version = worterbuch_version();
     let auth_token = if welcome.authentication_required {
@@ -311,13 +318,15 @@ async fn send_handshake(
     } else {
         None
     };
-    let locks = None; // TODO: populate locks if necessary
 
-    let handshake = ProxyMessage::Handshake(Handshake {
+    let connected_clients = connected_clients(worterbuch);
+
+    let handshake = ProxyMessage::Handshake(Handshake::Proxy(ProxyHandshake {
         version,
         auth_token,
-        locks,
-    });
+        locks: locks.clone(),
+        connected_clients,
+    }));
 
     proxy_request_tx.send(handshake).await?;
 
@@ -429,6 +438,25 @@ impl<'a> LeaderConnection<'a> {
                     .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace)
                     .await
                     .map(|_| ()),
+                ClientWriteCommand::Publish(key, value) => {
+                    self.worterbuch
+                        .internal_publish(
+                            key,
+                            value,
+                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                            trace,
+                        )
+                        .await
+                }
+                ClientWriteCommand::Import(persisted_store) => self
+                    .worterbuch
+                    .internal_import(
+                        persisted_store,
+                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                        trace,
+                    )
+                    .await
+                    .map(|_| ()),
             },
             LeaderMessage::ClientResponse(client_id, server_message) => {
                 self.forward_leader_response(client_id, server_message)
@@ -471,15 +499,26 @@ impl<'a> LeaderConnection<'a> {
                 )
                 .await;
             }
-            WbFunction::Disconnected(client_id, protocol, tx) => {
+            WbFunction::Disconnected(client_id, protocol, socket_addr) => {
+                let grave_goods = self
+                    .worterbuch
+                    .grave_goods_for_client(&client_id)
+                    .unwrap_or_default();
+                let last_will = self
+                    .worterbuch
+                    .last_will_for_client(&client_id)
+                    .unwrap_or_default();
+
                 let request = ProxyMessage::Disconnected(Disconnected {
                     client_id,
                     protocol: protocol.clone(),
+                    grave_goods,
+                    last_will,
                 });
                 self.proxy_request_tx.send(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
-                    WbFunction::Disconnected(client_id, protocol, tx),
+                    WbFunction::Disconnected(client_id, protocol, socket_addr),
                 )
                 .await;
             }
@@ -497,18 +536,28 @@ impl<'a> LeaderConnection<'a> {
                 )
                 .await;
             }
-            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, _span) => {
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: ClientMessage::Set(Set {
-                        transaction_id,
-                        key,
-                        value,
-                    }),
-                    interface,
-                });
-                self.register_ack_interest(client_id, transaction_id, tx);
-                self.proxy_request_tx.send(request).await?;
+            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
+                let is_grave_goods_or_last_will =
+                    is_grave_goods_topic(&key) || is_last_will_topic(&key);
+                if is_grave_goods_or_last_will {
+                    cluster::process_api_call(
+                        self.worterbuch,
+                        WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span),
+                    )
+                    .await;
+                } else {
+                    let request = ProxyMessage::Request(Request {
+                        client_id,
+                        msg: ClientMessage::Set(Set {
+                            transaction_id,
+                            key,
+                            value,
+                        }),
+                        interface,
+                    });
+                    self.register_ack_interest(client_id, transaction_id, tx);
+                    self.proxy_request_tx.send(request).await?;
+                }
             }
             WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
                 let request = ProxyMessage::Request(Request {
@@ -810,18 +859,15 @@ impl<'a> LeaderConnection<'a> {
     }
 }
 
-async fn announce_connected_clients(
-    worterbuch: &mut Worterbuch,
-    proxy_request_sender: &mpsc::Sender<ProxyMessage>,
-) -> Result<(), WorterbuchAppError> {
-    for (client_id, client_info) in worterbuch.clients() {
-        let request = ProxyMessage::Connected(Connected {
+fn connected_clients(worterbuch: &Worterbuch) -> Vec<Connected> {
+    worterbuch
+        .clients()
+        .iter()
+        .map(|(client_id, client_info)| Connected {
             client_id: *client_id,
             protocol: client_info.protocol.clone(),
-        });
-        proxy_request_sender.send(request).await?;
-    }
-    Ok(())
+        })
+        .collect()
 }
 
 fn init_request_sender(

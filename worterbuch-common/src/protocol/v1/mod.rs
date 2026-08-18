@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt;
+use uuid::Uuid;
 
 pub use client::*;
 pub use server::*;
@@ -60,6 +61,7 @@ pub type MetaData = String;
 pub type Version = String;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
+pub type ForceSet = bool;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +200,14 @@ impl Trace {
             transaction_id: trace_data.transaction_id,
             method,
             interface: trace_data.interface.clone(),
+        }
+    }
+
+    pub fn client_id(&self) -> Option<Uuid> {
+        match self {
+            Trace::ClientRequest { client_id, .. } => Some(*client_id),
+            Trace::ProtocolSwitch { client_id, .. } => Some(*client_id),
+            Trace::InternalAction(_) => None,
         }
     }
 }

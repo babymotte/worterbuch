@@ -21,6 +21,7 @@
 use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
+    cluster::protocol::{ClientWriteCommand, ClusterStateChange},
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
     store::{PersistedStore, SerializeableLockNode, Store, StoreNode},
@@ -49,7 +50,7 @@ use worterbuch_common::{
     ClientId, KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
     SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
-    parse_segments,
+    is_grave_goods_topic, is_last_will_topic, parse_segments,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
         LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
@@ -273,6 +274,12 @@ impl PStateAggregator {
     }
 }
 
+struct Follower {
+    pub addr: SocketAddr,
+    pub tx: mpsc::Sender<ClusterStateChange>,
+    pub is_proxy: bool,
+}
+
 pub struct Worterbuch {
     config: Config,
     store: Store,
@@ -282,6 +289,7 @@ pub struct Worterbuch {
     clients: HashMap<ClientId, ClientInfo>,
     spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
     persistent_storage: PersistentStorageImpl,
+    followers: Vec<Follower>,
 }
 
 impl Worterbuch {
@@ -299,6 +307,7 @@ impl Worterbuch {
             subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
+            followers: Default::default(),
         }
     }
 
@@ -319,6 +328,7 @@ impl Worterbuch {
             subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
+            followers: Default::default(),
         }
     }
 
@@ -335,6 +345,7 @@ impl Worterbuch {
             subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
+            followers: Default::default(),
         }
     }
 
@@ -398,6 +409,13 @@ impl Worterbuch {
                 )
             })?;
 
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::Set(key.clone(), value.clone(), force),
+            cause.clone(),
+            false,
+        )
+        .await;
         if let Some(ls_subscribers) = ls_subscribers {
             trace!("Notifying ls subscribers …");
             self.notify_ls_subscribers(ls_subscribers, cause.clone())
@@ -456,6 +474,13 @@ impl Worterbuch {
                 )
             })?;
 
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::CSet(key.clone(), value.clone(), version, force),
+            cause.clone(),
+            false,
+        )
+        .await;
         if let Some(ls_subscribers) = ls_subscribers {
             trace!("Notifying ls subscribers …");
             self.notify_ls_subscribers(ls_subscribers, cause.clone())
@@ -477,9 +502,14 @@ impl Worterbuch {
         Ok(())
     }
 
-    pub async fn spub(&mut self, value: Value, trace_data: TraceData) -> WorterbuchResult<()> {
+    pub async fn spub(
+        &mut self,
+        value: Value,
+        client_id: ClientId,
+        trace_data: TraceData,
+    ) -> WorterbuchResult<()> {
         if let Some(key) = self.lookup_key(trace_data.client_id, trace_data.transaction_id) {
-            self.publish(key, value, trace_data).await
+            self.publish(key, value, client_id, trace_data).await
         } else {
             Err(WorterbuchError::NoPubStream(trace_data.transaction_id))
         }
@@ -489,12 +519,29 @@ impl Worterbuch {
         &mut self,
         key: Key,
         value: Value,
+        client_id: ClientId,
         trace_data: TraceData,
     ) -> WorterbuchResult<()> {
-        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
-        let trace = Trace::client_request(Method::Publish, &trace_data);
+        let cause = Trace::client_request(Method::Publish, &trace_data);
+        self.internal_publish(key, value, client_id, cause).await
+    }
 
-        self.notify_subscribers(&path, &key, &value, true, false, trace)
+    pub(crate) async fn internal_publish(
+        &mut self,
+        key: String,
+        value: Value,
+        client_id: ClientId,
+        cause: Trace,
+    ) -> Result<(), WorterbuchError> {
+        let path: Vec<RegularKeySegment> = parse_segments(&key)?;
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::Publish(key.clone(), value.clone()),
+            cause.clone(),
+            false,
+        )
+        .await;
+        self.notify_subscribers(&path, &key, &value, true, false, cause)
             .await;
 
         Ok(())
@@ -836,14 +883,32 @@ impl Worterbuch {
             WorterbuchError::SerDeError(e, "Error parsing JSON during import".to_owned())
         })?;
         debug!("Done. Merging nodes …");
-        let imported_values = self.store.merge(store.data);
 
-        let trace = Trace::ClientRequest {
+        let trace_data = TraceData {
             client_id,
             transaction_id,
-            method: Method::Import,
             interface,
         };
+        let cause = Trace::client_request(Method::Import, &trace_data);
+
+        self.internal_import(store, client_id, cause).await
+    }
+
+    pub(crate) async fn internal_import(
+        &mut self,
+        store: PersistedStore,
+        client_id: ClientId,
+        cause: Trace,
+    ) -> Result<Vec<(String, (ValueEntry, bool))>, WorterbuchError> {
+        let imported_values = self.store.merge(store.data.clone());
+
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::Import(store),
+            cause.clone(),
+            false,
+        )
+        .await;
 
         for (key, (val, changed)) in &imported_values {
             if *changed {
@@ -860,7 +925,7 @@ impl Worterbuch {
 
             let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
-            self.notify_subscribers(&path, key, val.as_ref(), *changed, false, trace.clone())
+            self.notify_subscribers(&path, key, val.as_ref(), *changed, false, cause.clone())
                 .await;
         }
 
@@ -1047,6 +1112,65 @@ impl Worterbuch {
         trace!("Calling {} ls subscribers done.", len);
     }
 
+    async fn notify_followers(
+        &mut self,
+        client_id: ClientId,
+        command: ClientWriteCommand,
+        trace: Trace,
+        ignore_sys_checks: bool,
+    ) {
+        let len = self.followers.len();
+        if len == 0 {
+            return;
+        }
+
+        let system_key = command.is_system_key() && !ignore_sys_checks;
+        let grave_goods_or_last_will = command.is_grave_goods_or_last_will();
+
+        let msg = ClusterStateChange {
+            client_id,
+            trace,
+            command,
+        };
+        trace!(
+            "Forwarding state change to {} followers/proxies: {:?} …",
+            len, msg
+        );
+        let mut dead: Option<Vec<SocketAddr>> = None;
+        for follower in &self.followers {
+            let read_only = system_key && !grave_goods_or_last_will;
+
+            if read_only || (grave_goods_or_last_will && follower.is_proxy) {
+                continue;
+            }
+
+            if let Err(e) = follower.tx.send(msg.clone()).await {
+                error!("Error forwarding state change to follower/proxy: {e}");
+                match dead.take() {
+                    Some(mut the_dead) => {
+                        the_dead.push(follower.addr);
+                        dead = Some(the_dead);
+                    }
+                    None => {
+                        let mut new_dead = Vec::new();
+                        new_dead.push(follower.addr);
+                        dead = Some(new_dead);
+                    }
+                }
+            }
+        }
+        if let Some(dead) = dead {
+            self.followers.retain(|f| {
+                let remove = dead.contains(&f.addr);
+                if remove {
+                    warn!("Removing dead follower/proxy {}", f.addr);
+                }
+                !remove
+            });
+        }
+        trace!("Forwarding state change to {} followers/proxies done.", len);
+    }
+
     pub async fn delete(
         &mut self,
         key: Key,
@@ -1076,7 +1200,7 @@ impl Worterbuch {
         match self.store.delete(&path)? {
             Some((value, ls_subscribers)) => {
                 self.persistent_storage
-                    .delete_value(&key)
+                    .delete_value(&key, Some(client_id))
                     .await
                     .map_err(|e| {
                         WorterbuchError::IoError(
@@ -1085,6 +1209,13 @@ impl Worterbuch {
                         )
                     })?;
 
+                self.notify_followers(
+                    client_id,
+                    ClientWriteCommand::Delete(key.clone()),
+                    cause.clone(),
+                    false,
+                )
+                .await;
                 if let Some(ls_subscribers) = ls_subscribers {
                     self.notify_ls_subscribers(ls_subscribers, cause.clone())
                         .await;
@@ -1129,9 +1260,16 @@ impl Worterbuch {
 
         let (deleted, ls_subscribers) = self.store.delete_matches(&path)?;
 
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::PDelete(pattern.clone()),
+            cause.clone(),
+            false,
+        )
+        .await;
         for kvp in &deleted {
             self.persistent_storage
-                .delete_value(&kvp.key)
+                .delete_value(&kvp.key, Some(client_id))
                 .await
                 .map_err(|e| {
                     WorterbuchError::IoError(
@@ -1484,7 +1622,7 @@ impl Worterbuch {
         .await
     }
 
-    fn grave_goods_for_client(&self, client_id: &ClientId) -> Option<GraveGoods> {
+    pub(crate) fn grave_goods_for_client(&self, client_id: &ClientId) -> Option<GraveGoods> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1495,7 +1633,7 @@ impl Worterbuch {
         value.and_then(|it| serde_json::from_value(it).ok())
     }
 
-    fn last_will_for_client(&self, client_id: &ClientId) -> Option<LastWill> {
+    pub(crate) fn last_will_for_client(&self, client_id: &ClientId) -> Option<LastWill> {
         let key = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1579,14 +1717,27 @@ impl Worterbuch {
             }
         }
 
-        let pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
-        debug!("Deleting {pattern}");
+        let client_pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
+        debug!("Deleting {client_pattern}");
         if let Err(e) = self
-            .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace.clone())
+            .internal_pdelete(
+                client_pattern.clone(),
+                false,
+                INTERNAL_CLIENT_ID,
+                trace.clone(),
+            )
             .await
         {
             debug!("Error in subscription monitoring: {e}");
         }
+
+        self.notify_followers(
+            client_id,
+            ClientWriteCommand::PDelete(client_pattern),
+            trace.clone(),
+            true,
+        )
+        .await;
 
         if let Some(grave_goods) = grave_goods {
             info!(
@@ -1721,6 +1872,7 @@ impl Worterbuch {
         Ok(())
     }
 
+    // reset function used by followers and proxies after receiving the inital sync message form the leader
     pub(crate) async fn reset_store_and_notify_subscribers(
         &mut self,
         mut data: StoreNode,
@@ -1908,6 +2060,32 @@ impl Worterbuch {
         let res = storage.flush(self).await;
         _ = mem::replace(&mut self.persistent_storage, storage);
         res
+    }
+
+    pub(crate) fn follower_connected(
+        &mut self,
+        remote_addr: SocketAddr,
+        client_write_tx: mpsc::Sender<ClusterStateChange>,
+        is_proxy: bool,
+    ) {
+        let follower = Follower {
+            addr: remote_addr,
+            tx: client_write_tx,
+            is_proxy,
+        };
+        self.followers.push(follower);
+        info!("Follower/proxy {remote_addr} added.");
+    }
+
+    pub(crate) fn follower_disconnected(&mut self, remote_addr: SocketAddr) {
+        self.followers.retain(|f| {
+            if f.addr == remote_addr {
+                info!("Follower/proxy {remote_addr} removed.");
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
