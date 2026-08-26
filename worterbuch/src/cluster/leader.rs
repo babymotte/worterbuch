@@ -29,9 +29,7 @@ use crate::{
         shutdown,
     },
     error::WorterbuchAppResult,
-    forward_api_call,
     server::common::{CloneableWbApi, WbFunction, protocol::Proto},
-    worterbuch::SubscriptionFlags,
     worterbuch_version,
 };
 use hashbrown::HashMap;
@@ -52,13 +50,13 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
-use tracing::{Level, debug, error, info, span, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    ClientId, KeySegment, Protocol, WbApi, WorterbuchVersion,
+    ClientId, Protocol, WbApi, WorterbuchVersion,
     protocol::v1::{
-        ClientMessage, GraveGoods, Interface, InternalAction, LastWill, PStateEvent,
-        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
-        SYSTEM_TOPIC_ROOT, ServerMessage, Trace,
+        ClientMessage, GraveGoods, Interface, InternalAction, LastWill, SYSTEM_TOPIC_CLIENTS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
+        ServerMessage, Trace,
     },
     topic, while_select, write_line_and_flush,
 };
@@ -117,35 +115,6 @@ pub(crate) async fn run(
         .await
     });
 
-    let (mut grave_goods_rx, _) = worterbuch
-        .internal_psubscribe(
-            INTERNAL_CLIENT_ID,
-            0,
-            Trace::InternalAction(InternalAction::Startup),
-            topic!(
-                SYSTEM_TOPIC_ROOT,
-                SYSTEM_TOPIC_CLIENTS,
-                KeySegment::Wildcard,
-                SYSTEM_TOPIC_GRAVE_GOODS
-            ),
-            SubscriptionFlags::new(true, false, false),
-        )
-        .await?;
-    let (mut last_will_rx, _) = worterbuch
-        .internal_psubscribe(
-            INTERNAL_CLIENT_ID,
-            0,
-            Trace::InternalAction(InternalAction::Startup),
-            topic!(
-                SYSTEM_TOPIC_ROOT,
-                SYSTEM_TOPIC_CLIENTS,
-                KeySegment::Wildcard,
-                SYSTEM_TOPIC_LAST_WILL
-            ),
-            SubscriptionFlags::new(true, false, false),
-        )
-        .await?;
-
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
@@ -154,149 +123,11 @@ pub(crate) async fn run(
         recv = follower_connected_rx.recv() => try_forward_follower_connected(recv, &mut worterbuch, &mut client_write_txs, &config, &mut tx_id).await?,
         recv = follower_disconnected_rx.recv() => try_forward_follower_disconnected(recv, &mut worterbuch).await?,
         recv = api_rx.recv() => try_forward_api_call(recv, &mut worterbuch).await?,
-        // TODO forward follower notifications
     }
 
     info!("Main loop stopped, shutting down.");
 
     shutdown(subsys, worterbuch, config, servers).await
-}
-
-async fn try_forward_grave_goods_change(
-    recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
-    dead: &mut Vec<usize>,
-) -> WorterbuchAppResult<ControlFlow<()>> {
-    if let Some((e, _)) = recv {
-        debug!("Forwarding grave goods change: {e:?}");
-        match e {
-            PStateEvent::KeyValuePairs(kvps) => {
-                for kvp in kvps {
-                    let span = span!(Level::DEBUG, "forward_grave_goods");
-                    let client_id = kvp
-                        .key
-                        .split("/")
-                        .nth(2)
-                        .expect("invalid grave goods key format")
-                        .parse()
-                        .expect("invalid client id");
-                    forward_api_call(
-                        client_write_txs,
-                        dead,
-                        &WbFunction::Set(
-                            0,
-                            Interface::Local,
-                            kvp.key,
-                            kvp.value,
-                            client_id,
-                            oneshot::channel().0,
-                            span,
-                        ),
-                        false,
-                        true,
-                    )
-                    .await;
-                }
-            }
-            PStateEvent::Deleted(kvps) => {
-                for kvp in kvps {
-                    let client_id = kvp
-                        .key
-                        .split("/")
-                        .nth(2)
-                        .expect("invalid grave goods key format")
-                        .parse()
-                        .expect("invalid client id");
-                    forward_api_call(
-                        client_write_txs,
-                        dead,
-                        &WbFunction::Delete(
-                            0,
-                            Interface::Local,
-                            kvp.key,
-                            client_id,
-                            oneshot::channel().0,
-                        ),
-                        false,
-                        true,
-                    )
-                    .await;
-                }
-            }
-        }
-        Ok(ControlFlow::Continue(()))
-    } else {
-        Ok(ControlFlow::Break(()))
-    }
-}
-
-async fn try_forward_last_will_change(
-    recv: Option<(PStateEvent, Option<Trace>)>,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
-    dead: &mut Vec<usize>,
-) -> WorterbuchAppResult<ControlFlow<()>> {
-    if let Some((e, _)) = recv {
-        debug!("Forwarding last will change: {e:?}");
-        match e {
-            PStateEvent::KeyValuePairs(kvps) => {
-                for kvp in kvps {
-                    let span = span!(Level::DEBUG, "forward_last_will");
-                    let client_id = kvp
-                        .key
-                        .split("/")
-                        .nth(2)
-                        .expect("invalid grave goods key format")
-                        .parse()
-                        .expect("invalid client id");
-                    forward_api_call(
-                        client_write_txs,
-                        dead,
-                        &WbFunction::Set(
-                            0,
-                            Interface::Local,
-                            kvp.key,
-                            kvp.value,
-                            client_id,
-                            oneshot::channel().0,
-                            span,
-                        ),
-                        false,
-                        true,
-                    )
-                    .await;
-                }
-            }
-            PStateEvent::Deleted(kvps) => {
-                for kvp in kvps {
-                    let client_id = kvp
-                        .key
-                        .split("/")
-                        .nth(2)
-                        .expect("invalid grave goods key format")
-                        .parse()
-                        .expect("invalid client id");
-                    forward_api_call(
-                        client_write_txs,
-                        dead,
-                        &WbFunction::Delete(
-                            0,
-                            Interface::Local,
-                            kvp.key,
-                            client_id,
-                            oneshot::channel().0,
-                        ),
-                        false,
-                        true,
-                    )
-                    .await;
-                }
-            }
-        }
-
-        Ok(ControlFlow::Continue(()))
-    } else {
-        Ok(ControlFlow::Break(()))
-    }
 }
 
 async fn try_forward_api_call(

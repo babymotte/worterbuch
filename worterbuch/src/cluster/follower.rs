@@ -351,7 +351,6 @@ async fn process_leader_message(
             ClientWriteCommand::PDelete(pattern) => worterbuch
                 .internal_pdelete(
                     pattern,
-                    false,
                     trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
                     trace,
                 )

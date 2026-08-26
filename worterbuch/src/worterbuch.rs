@@ -50,7 +50,7 @@ use worterbuch_common::{
     ClientId, KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
     SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
-    is_grave_goods_topic, is_last_will_topic, parse_segments,
+    is_client_sys_wildcard_topic, parse_segments,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
         LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
@@ -1241,24 +1241,35 @@ impl Worterbuch {
             method: Method::PDelete,
             interface,
         };
-        self.internal_pdelete(pattern, false, client_id, cause)
-            .await
+        self.internal_pdelete(pattern, client_id, cause).await
     }
 
     pub(crate) async fn internal_pdelete(
         &mut self,
         pattern: RequestPattern,
-        skip_read_only_check: bool,
         client_id: ClientId,
         cause: Trace,
     ) -> Result<Vec<KeyValuePair>, WorterbuchError> {
-        if !skip_read_only_check {
-            check_for_read_only_key(&pattern, client_id)?;
-        }
+        check_for_read_only_key(&pattern, client_id)?;
 
         let path: Vec<KeySegment> = KeySegment::parse(&pattern);
 
         let (deleted, ls_subscribers) = self.store.delete_matches(&path)?;
+
+        if let Some(client_id) = is_client_sys_wildcard_topic(&pattern) {
+            debug!(
+                "Removing grave goods and last will for client {client_id} from persistent storage …"
+            );
+            self.persistent_storage
+                .remove_grave_goods_and_last_will(client_id)
+                .await
+                .map_err(|e| {
+                    WorterbuchError::IoError(
+                        io::Error::other(e),
+                        "Failed to remove grave goods and last will".to_owned(),
+                    )
+                })?;
+        }
 
         self.notify_followers(
             client_id,
@@ -1720,12 +1731,7 @@ impl Worterbuch {
         let client_pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
         debug!("Deleting {client_pattern}");
         if let Err(e) = self
-            .internal_pdelete(
-                client_pattern.clone(),
-                false,
-                INTERNAL_CLIENT_ID,
-                trace.clone(),
-            )
+            .internal_pdelete(client_pattern.clone(), INTERNAL_CLIENT_ID, trace.clone())
             .await
         {
             debug!("Error in subscription monitoring: {e}");
@@ -1740,35 +1746,14 @@ impl Worterbuch {
         .await;
 
         if let Some(grave_goods) = grave_goods {
-            info!(
-                "Burying grave goods of client {client_id} ({}).",
-                remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
-            );
-
-            for grave_good in grave_goods {
-                debug!(
-                    "Deleting grave good key of client {client_id} ({}): {} ",
-                    remote_addr
-                        .map(|it| it.to_string())
-                        .unwrap_or_else(|| "<unknown>".to_owned()),
-                    grave_good
-                );
-                if let Err(e) = self
-                    .internal_pdelete(
-                        grave_good,
-                        false,
-                        client_id,
-                        Trace::InternalAction(InternalAction::ApplyingGraveGoods {
-                            cause: Box::new(trace.clone()),
-                        }),
-                    )
-                    .await
-                {
-                    error!("Error burying grave goods for client {client_id}: {e}");
-                }
-            }
+            self.apply_grave_goods(
+                grave_goods,
+                Trace::InternalAction(InternalAction::ApplyingGraveGoods {
+                    cause: Box::new(trace.clone()),
+                }),
+                remote_addr,
+            )
+            .await;
         } else {
             debug!(
                 "Client {client_id} ({}) has no grave goods.",
@@ -1779,37 +1764,14 @@ impl Worterbuch {
         }
 
         if let Some(last_wills) = last_wills {
-            info!(
-                "Publishing last will of client {client_id} ({}).",
-                remote_addr
-                    .map(|it| it.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_owned())
-            );
-
-            for last_will in last_wills {
-                debug!(
-                    "Setting last will of client {client_id} ({}): {} = {}",
-                    remote_addr
-                        .map(|it| it.to_string())
-                        .unwrap_or_else(|| "<unknown>".to_owned()),
-                    last_will.key,
-                    last_will.value
-                );
-                if let Err(e) = self
-                    .internal_set(
-                        last_will.key,
-                        last_will.value,
-                        client_id,
-                        Trace::InternalAction(InternalAction::ApplyingLastWill {
-                            cause: Box::new(trace.clone()),
-                        }),
-                        true,
-                    )
-                    .await
-                {
-                    error!("Error setting last will of client {client_id}: {e}");
-                }
-            }
+            self.apply_last_wills(
+                last_wills,
+                Trace::InternalAction(InternalAction::ApplyingLastWill {
+                    cause: Box::new(trace.clone()),
+                }),
+                remote_addr,
+            )
+            .await;
         } else {
             debug!(
                 "Client {client_id} ({}) has no last will.",
@@ -1818,16 +1780,6 @@ impl Worterbuch {
                     .unwrap_or_else(|| "<unknown>".to_owned())
             );
         }
-
-        self.persistent_storage
-            .remove_grave_goods_and_last_will(client_id)
-            .await
-            .map_err(|e| {
-                WorterbuchError::IoError(
-                    io::Error::other(e),
-                    "Failed to remove grave goods and last will".to_owned(),
-                )
-            })?;
 
         if self.config.extended_monitoring
             && let Err(e) = self
@@ -1965,9 +1917,9 @@ impl Worterbuch {
     }
 
     pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self, cause: Trace) {
-        self.apply_grave_goods(self.grave_goods(), cause.clone())
+        self.apply_grave_goods(self.grave_goods(), cause.clone(), None)
             .await;
-        self.apply_last_wills(self.last_wills(), cause).await;
+        self.apply_last_wills(self.last_wills(), cause, None).await;
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
@@ -2019,35 +1971,91 @@ impl Worterbuch {
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn apply_grave_goods(&mut self, grave_goods: GraveGoods, cause: Trace) {
-        for gg in grave_goods {
-            self.internal_pdelete(
-                gg,
-                false,
-                INTERNAL_CLIENT_ID,
-                Trace::InternalAction(InternalAction::ApplyingGraveGoods {
-                    cause: Box::new(cause.clone()),
-                }),
-            )
-            .await
-            .ok();
+    pub(crate) async fn apply_grave_goods(
+        &mut self,
+        grave_goods: GraveGoods,
+        cause: Trace,
+        remote_addr: Option<SocketAddr>,
+    ) {
+        debug!(
+            "Burying grave goods of client {} ({}).",
+            cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+            remote_addr
+                .map(|it| it.to_string())
+                .unwrap_or_else(|| "<unknown>".to_owned())
+        );
+
+        for grave_good in grave_goods {
+            debug!(
+                "Deleting grave good key of client {} ({}): {} ",
+                cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned()),
+                grave_good
+            );
+            if let Err(e) = self
+                .internal_pdelete(
+                    grave_good,
+                    cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    Trace::InternalAction(InternalAction::ApplyingGraveGoods {
+                        cause: Box::new(cause.clone()),
+                    }),
+                )
+                .await
+            {
+                error!(
+                    "Error burying grave goods for client {}: {}",
+                    cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    e
+                );
+            }
         }
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn apply_last_wills(&mut self, last_wills: LastWill, cause: Trace) {
-        for lw in last_wills {
-            self.internal_set(
-                lw.key,
-                lw.value,
-                INTERNAL_CLIENT_ID,
-                Trace::InternalAction(InternalAction::ApplyingLastWill {
-                    cause: Box::new(cause.clone()),
-                }),
-                true,
-            )
-            .await
-            .ok();
+    pub(crate) async fn apply_last_wills(
+        &mut self,
+        last_wills: LastWill,
+        cause: Trace,
+        remote_addr: Option<SocketAddr>,
+    ) {
+        info!(
+            "Publishing last will of client {} ({}).",
+            cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+            remote_addr
+                .map(|it| it.to_string())
+                .unwrap_or_else(|| "<unknown>".to_owned())
+        );
+
+        for last_will in last_wills {
+            debug!(
+                "Setting last will of client {} ({}): {} = {}",
+                cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                remote_addr
+                    .map(|it| it.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_owned()),
+                last_will.key,
+                last_will.value
+            );
+            if let Err(e) = self
+                .internal_set(
+                    last_will.key,
+                    last_will.value,
+                    cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    Trace::InternalAction(InternalAction::ApplyingLastWill {
+                        cause: Box::new(cause.clone()),
+                    }),
+                    true,
+                )
+                .await
+            {
+                error!(
+                    "Error setting last will of client {}: {}",
+                    cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                    e
+                );
+            }
         }
     }
 
@@ -2090,24 +2098,27 @@ impl Worterbuch {
 }
 
 fn check_for_read_only_key(key: &str, client_id: ClientId) -> WorterbuchResult<()> {
+    trace!("Checking if key is read-only: {key} for client {client_id}");
+
     if key.is_empty() {
+        trace!("Empty keys are always considered read-only.");
         return Err(WorterbuchError::EmptyKey);
     }
 
     if client_id == INTERNAL_CLIENT_ID {
-        // modification is made internally by the server, so everything is allowed
+        trace!("Modification is made internally by the server, so everything is allowed.");
         return Ok(());
     }
 
     let path: Vec<&str> = key.split('/').collect();
 
     if path.is_empty() || path[0] != SYSTEM_TOPIC_ROOT {
-        // path is outside the protected $SYS prefix
+        trace!("Path is outside the protected $SYS prefix.");
         return Ok(());
     }
 
     if path.len() <= 3 || path[1] != SYSTEM_TOPIC_CLIENTS || path[2] != client_id.to_string() {
-        // the only writable values are under $SYS/clients/[client_id]]/#
+        trace!("The only writable values are under '$SYS/clients/[client_id]/#'.");
         return Err(WorterbuchError::ReadOnlyKey(key.to_owned()));
     }
 
@@ -2115,11 +2126,13 @@ fn check_for_read_only_key(key: &str, client_id: ClientId) -> WorterbuchResult<(
         || path[3] == SYSTEM_TOPIC_LAST_WILL
         || path[3] == SYSTEM_TOPIC_CLIENT_NAME
     {
-        // clients may modify their last will or grave goods at any time
+        trace!("Clients may modify their last will, grave goods or client name at any time.");
         return Ok(());
     }
 
     // TODO potentially whitelist more fields clients may change
+
+    trace!("Unexpected key pattern.");
 
     Err(WorterbuchError::ReadOnlyKey(key.to_owned()))
 }

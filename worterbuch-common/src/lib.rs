@@ -28,8 +28,8 @@ use crate::{
     protocol::v1::{
         CasVersion, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
         PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SendTracesFlag, StateEvent, Trace,
-        TransactionId, UniqueFlag, Value,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SendTracesFlag,
+        StateEvent, Trace, TransactionId, UniqueFlag, Value,
     },
 };
 use error::WorterbuchResult;
@@ -754,19 +754,44 @@ where
 pub fn is_grave_goods_topic(key: &str) -> bool {
     let mut split = key.split('/');
     (
+        Some(SYSTEM_TOPIC_ROOT),
         Some(SYSTEM_TOPIC_CLIENTS),
         Some(SYSTEM_TOPIC_GRAVE_GOODS),
         None,
-    ) == (split.nth(1), split.nth(1), split.next())
+    ) == (split.next(), split.next(), split.nth(1), split.next())
 }
 
 pub fn is_last_will_topic(key: &str) -> bool {
     let mut split = key.split('/');
     (
+        Some(SYSTEM_TOPIC_ROOT),
         Some(SYSTEM_TOPIC_CLIENTS),
         Some(SYSTEM_TOPIC_LAST_WILL),
         None,
-    ) == (split.nth(1), split.nth(1), split.next())
+    ) == (split.next(), split.next(), split.nth(1), split.next())
+}
+
+pub fn is_client_sys_wildcard_topic(pattern: &str) -> Option<Uuid> {
+    let mut split = pattern.split('/');
+
+    let root = split.next();
+    let clients = split.next();
+    let client_id = split.next();
+    let wildcard = split.next();
+    let end = split.next();
+
+    if (
+        Some(SYSTEM_TOPIC_ROOT),
+        Some(SYSTEM_TOPIC_CLIENTS),
+        Some(KeySegment::MultiWildcard.as_ref()),
+        None,
+    ) == (root, clients, wildcard, end)
+    {
+        // Extract the UUID from the client_id segment if possible
+        client_id.and_then(|id| Uuid::parse_str(id).ok())
+    } else {
+        None
+    }
 }
 
 mod macros {

@@ -420,22 +420,39 @@ impl<'a> LeaderConnection<'a> {
             LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
                 ClientWriteCommand::Set(key, value, force) => {
                     self.worterbuch
-                        .internal_set(key, value, INTERNAL_CLIENT_ID, trace, force)
+                        .internal_set(
+                            key,
+                            value,
+                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                            trace,
+                            force,
+                        )
                         .await
                 }
                 ClientWriteCommand::CSet(key, value, versions, force) => {
                     self.worterbuch
-                        .internal_cset(key, value, versions, INTERNAL_CLIENT_ID, trace, force)
+                        .internal_cset(
+                            key,
+                            value,
+                            versions,
+                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                            trace,
+                            force,
+                        )
                         .await
                 }
                 ClientWriteCommand::Delete(key) => self
                     .worterbuch
-                    .internal_delete(key, INTERNAL_CLIENT_ID, trace)
+                    .internal_delete(key, trace.client_id().unwrap_or(INTERNAL_CLIENT_ID), trace)
                     .await
                     .map(|_| ()),
                 ClientWriteCommand::PDelete(pattern) => self
                     .worterbuch
-                    .internal_pdelete(pattern, false, INTERNAL_CLIENT_ID, trace)
+                    .internal_pdelete(
+                        pattern,
+                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
+                        trace,
+                    )
                     .await
                     .map(|_| ()),
                 ClientWriteCommand::Publish(key, value) => {
