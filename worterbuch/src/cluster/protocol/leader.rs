@@ -18,6 +18,7 @@
  */
 
 use crate::store::{PersistedStore, SerializeableLockNode, StoreNode};
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
@@ -48,8 +49,8 @@ pub struct LeaderWelcome {
 pub struct StateSync {
     pub store: StoreNode,
     pub locks: SerializeableLockNode,
-    pub grave_goods: GraveGoods,
-    pub last_will: LastWill,
+    pub grave_goods: HashMap<ClientId, GraveGoods>,
+    pub last_wills: HashMap<ClientId, LastWill>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

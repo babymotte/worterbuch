@@ -59,13 +59,23 @@ pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
         }
     {
         wb.apply_grave_goods(
-            grave_goods_last_will.grave_goods,
+            grave_goods_last_will
+                .grave_goods
+                .values()
+                .flatten()
+                .cloned()
+                .collect(),
             Trace::InternalAction(InternalAction::Startup),
             None,
         )
         .await;
         wb.apply_last_wills(
-            grave_goods_last_will.last_will,
+            grave_goods_last_will
+                .last_will
+                .values()
+                .flatten()
+                .cloned()
+                .collect(),
             Trace::InternalAction(InternalAction::Startup),
             None,
         )

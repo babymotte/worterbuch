@@ -157,12 +157,12 @@ async fn try_forward_follower_connected(
     match recv {
         Some((state_tx, remote_addr, is_proxy)) => {
             let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
-            let (current_state, locks, grave_goods, last_will) = worterbuch.export_with_locks();
+            let (current_state, locks, grave_goods, last_wills) = worterbuch.export_with_locks();
             let state_sync = StateSync {
                 store: current_state,
                 locks,
                 grave_goods,
-                last_will,
+                last_wills,
             };
             if state_tx.send((state_sync, client_write_rx)).is_ok() {
                 client_write_txs.push((*tx_id, client_write_tx.clone(), is_proxy));

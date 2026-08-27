@@ -43,7 +43,10 @@ use tosub::SubsystemHandle;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     error::ConnectionResult,
-    protocol::v1::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
+    protocol::v1::{
+        InternalAction, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
+        SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace,
+    },
     receive_msg, topic, while_select, write_line_and_flush,
 };
 
@@ -285,6 +288,40 @@ async fn initial_sync(
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<()> {
     worterbuch.reset_store(state_sync.store).await?;
+
+    for (client, grave_goods) in state_sync.grave_goods {
+        worterbuch
+            .internal_set(
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client,
+                    SYSTEM_TOPIC_GRAVE_GOODS
+                ),
+                json!(grave_goods),
+                client,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+    }
+    for (client, last_will) in state_sync.last_wills {
+        worterbuch
+            .internal_set(
+                topic!(
+                    SYSTEM_TOPIC_ROOT,
+                    SYSTEM_TOPIC_CLIENTS,
+                    client,
+                    SYSTEM_TOPIC_LAST_WILL
+                ),
+                json!(last_will),
+                client,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+    }
+
     worterbuch
         .internal_set(
             topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),

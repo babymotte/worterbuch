@@ -36,11 +36,6 @@ Normally grave goods and last wills are stored in the persistence file so that i
 
 I'm also considering making grave goods and last wills a first class citizen in the client protocol since a breaking change in the client protocol will be introduced by the locking API anyway <- !!!!
 
-TODO
-
-- send existing grave goods and last will to newly connected followers (not proxies!)
-- make sure followers clean up grave goods and last will after clients disconnects
-
 ### Authentication
 
 Currently leader sync ports do not require authentication since it is assumed they will not be exposed to the public. However with proxy mode it may become necessary to expose the sync port on a public network which means the sync port would provide unauthorized access to protected data.

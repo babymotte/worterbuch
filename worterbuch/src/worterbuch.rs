@@ -45,7 +45,7 @@ use tokio::{
     },
     time::sleep,
 };
-use tracing::{Instrument, Level, debug, debug_span, error, info, instrument, trace, warn};
+use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
     SubscriptionId, ValueEntry,
@@ -830,7 +830,13 @@ impl Worterbuch {
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
-    pub fn export(&mut self) -> (StoreNode, GraveGoods, LastWill) {
+    pub fn export(
+        &mut self,
+    ) -> (
+        StoreNode,
+        HashMap<ClientId, GraveGoods>,
+        HashMap<ClientId, LastWill>,
+    ) {
         let store = self.store.export();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
@@ -841,34 +847,35 @@ impl Worterbuch {
     #[instrument(level=Level::DEBUG, skip(self))]
     pub(crate) fn export_with_locks(
         &mut self,
-    ) -> (StoreNode, SerializeableLockNode, GraveGoods, LastWill) {
+    ) -> (
+        StoreNode,
+        SerializeableLockNode,
+        HashMap<ClientId, GraveGoods>,
+        HashMap<ClientId, LastWill>,
+    ) {
         let store = self.store.export();
         let locks = self.store.export_locks();
         let grave_goods = self.grave_goods();
-        let last_will = self.last_wills();
+        let last_wills = self.last_wills();
 
-        (store, locks, grave_goods, last_will)
+        (store, locks, grave_goods, last_wills)
     }
 
     #[instrument(level=Level::DEBUG, skip(self, tx))]
-    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<(Value, GraveGoods, LastWill)>) {
+    pub fn export_for_persistence(
+        &mut self,
+        tx: oneshot::Sender<(
+            Value,
+            HashMap<ClientId, GraveGoods>,
+            HashMap<ClientId, LastWill>,
+        )>,
+    ) {
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
-        let span = debug_span!("serialize_and_send");
-        spawn(
-            async { Self::serialize_and_send(store, grave_goods, last_will, tx) }.instrument(span),
-        );
-    }
-
-    fn serialize_and_send(
-        store: PersistedStore,
-        grave_goods: GraveGoods,
-        last_will: LastWill,
-        tx: oneshot::Sender<(Value, GraveGoods, LastWill)>,
-    ) {
-        let value = json!(store);
-        tx.send((value, grave_goods, last_will)).ok();
+        spawn(async move {
+            tx.send((json!(store), grave_goods, last_will)).ok();
+        });
     }
 
     pub async fn import(
@@ -1917,13 +1924,22 @@ impl Worterbuch {
     }
 
     pub(crate) async fn apply_all_grave_goods_and_last_wills(&mut self, cause: Trace) {
-        self.apply_grave_goods(self.grave_goods(), cause.clone(), None)
-            .await;
-        self.apply_last_wills(self.last_wills(), cause, None).await;
+        self.apply_grave_goods(
+            self.grave_goods().values().flatten().cloned().collect(),
+            cause.clone(),
+            None,
+        )
+        .await;
+        self.apply_last_wills(
+            self.last_wills().values().flatten().cloned().collect(),
+            cause,
+            None,
+        )
+        .await;
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
-    fn grave_goods(&self) -> GraveGoods {
+    fn grave_goods(&self) -> HashMap<ClientId, GraveGoods> {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1931,14 +1947,21 @@ impl Worterbuch {
             SYSTEM_TOPIC_GRAVE_GOODS
         );
 
-        let mut ggs = vec![];
+        let mut ggs = HashMap::new();
 
         if let Ok(grave_goods) = self.pget(&pattern) {
-            for KeyValuePair { key: _, value } in grave_goods {
+            for KeyValuePair { key, value } in grave_goods {
+                let client_id = key
+                    .split('/')
+                    .nth(2)
+                    .expect(
+                        "we know the key is valid because it has to match the requested pattern",
+                    )
+                    .parse::<ClientId>()
+                    .ok()
+                    .expect("invalid client ID");
                 if let Ok(keys) = serde_json::from_value::<Vec<String>>(value) {
-                    for key in keys {
-                        ggs.push(key);
-                    }
+                    ggs.insert(client_id, keys);
                 }
             }
         }
@@ -1947,7 +1970,7 @@ impl Worterbuch {
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
-    fn last_wills(&self) -> LastWill {
+    fn last_wills(&self) -> HashMap<ClientId, LastWill> {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_CLIENTS,
@@ -1955,14 +1978,21 @@ impl Worterbuch {
             SYSTEM_TOPIC_LAST_WILL
         );
 
-        let mut lws = vec![];
+        let mut lws = HashMap::new();
 
         if let Ok(last_will) = self.pget(&pattern) {
-            for KeyValuePair { key: _, value } in last_will {
+            for KeyValuePair { key, value } in last_will {
+                let client_id = key
+                    .split('/')
+                    .nth(2)
+                    .expect(
+                        "we know the key is valid because it has to match the requested pattern",
+                    )
+                    .parse::<ClientId>()
+                    .ok()
+                    .expect("invalid client ID");
                 if let Ok(kvps) = serde_json::from_value::<Vec<KeyValuePair>>(value) {
-                    for kvp in kvps {
-                        lws.push(kvp);
-                    }
+                    lws.insert(client_id, kvps);
                 }
             }
         }

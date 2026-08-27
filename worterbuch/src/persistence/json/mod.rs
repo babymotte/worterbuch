@@ -30,6 +30,7 @@ use crate::{
     server::common::CloneableWbApi,
     worterbuch::Worterbuch,
 };
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -48,8 +49,8 @@ use worterbuch_common::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct GraveGoodsLastWill {
-    grave_goods: GraveGoods,
-    last_will: LastWill,
+    grave_goods: HashMap<ClientId, GraveGoods>,
+    last_will: HashMap<ClientId, LastWill>,
 }
 
 pub(crate) async fn periodic(

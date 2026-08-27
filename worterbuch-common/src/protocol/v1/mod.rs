@@ -61,6 +61,8 @@ pub type MetaData = String;
 pub type Version = String;
 pub type LastWill = KeyValuePairs;
 pub type GraveGoods = RequestPatterns;
+pub type BorrowedLastWill = dyn AsRef<[KeyValuePair]>;
+pub type BorrowedGraveGoods = dyn AsRef<[RequestPattern]>;
 pub type ForceSet = bool;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

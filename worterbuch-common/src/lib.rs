@@ -33,6 +33,7 @@ use crate::{
     },
 };
 use error::WorterbuchResult;
+use hashbrown::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -611,7 +612,13 @@ pub trait WbApi {
     fn export(
         &self,
         span: Span,
-    ) -> impl Future<Output = WorterbuchResult<(Value, GraveGoods, LastWill)>> + Send;
+    ) -> impl Future<
+        Output = WorterbuchResult<(
+            Value,
+            HashMap<ClientId, GraveGoods>,
+            HashMap<ClientId, LastWill>,
+        )>,
+    > + Send;
 
     fn import(
         &self,

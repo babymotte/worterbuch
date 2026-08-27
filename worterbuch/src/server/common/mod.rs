@@ -20,6 +20,7 @@
 pub mod protocol;
 
 use crate::{Config, INTERNAL_CLIENT_ID, stats::VERSION};
+use hashbrown::HashMap;
 use miette::{IntoDiagnostic, Result};
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
@@ -190,7 +191,14 @@ pub enum WbFunction {
     ProtocolSwitched(ClientId, Interface, ProtocolMajorVersion),
     Disconnected(ClientId, Protocol, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
-    Export(oneshot::Sender<(Value, GraveGoods, LastWill)>, Span),
+    Export(
+        oneshot::Sender<(
+            Value,
+            HashMap<ClientId, GraveGoods>,
+            HashMap<ClientId, LastWill>,
+        )>,
+        Span,
+    ),
     Import(
         TransactionId,
         ClientId,
@@ -941,7 +949,14 @@ impl WbApi for CloneableWbApi {
         Ok(())
     }
 
-    async fn export(&self, span: Span) -> WorterbuchResult<(Value, GraveGoods, LastWill)> {
+    async fn export(
+        &self,
+        span: Span,
+    ) -> WorterbuchResult<(
+        Value,
+        HashMap<ClientId, GraveGoods>,
+        HashMap<ClientId, LastWill>,
+    )> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(WbFunction::Export(tx, span)).await?;
         Ok(rx.await?)
