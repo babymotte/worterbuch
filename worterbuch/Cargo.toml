@@ -76,6 +76,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "fs"] }
 tokio-metrics = { workspace = true }
 tokio-stream = { workspace = true }
 tosub = { workspace = true }
+totils = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, optional = true }

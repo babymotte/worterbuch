@@ -50,6 +50,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
+use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi, WorterbuchVersion,
@@ -58,7 +59,7 @@ use worterbuch_common::{
         SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
         ServerMessage, Trace,
     },
-    topic, while_select, write_line_and_flush,
+    topic, write_line_and_flush,
 };
 
 pub(crate) async fn run(

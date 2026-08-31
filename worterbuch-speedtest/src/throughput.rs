@@ -27,9 +27,9 @@ use std::{
 };
 use tokio::{select, sync::mpsc};
 use tosub::SubsystemHandle;
+use totils::while_select;
 use tracing::{debug, warn};
 use worterbuch_client::topic;
-use worterbuch_common::while_select;
 
 #[derive(Debug)]
 struct Status {

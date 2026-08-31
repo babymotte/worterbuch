@@ -22,6 +22,7 @@ use serde_json::json;
 use std::{ops::ControlFlow, time::Duration};
 use tokio::time::{Instant, interval};
 use tosub::SubsystemHandle;
+use totils::while_select;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::{
@@ -31,7 +32,7 @@ use worterbuch_common::{
         SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES,
         SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
     },
-    topic, while_select,
+    topic,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
