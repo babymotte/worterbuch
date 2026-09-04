@@ -21,9 +21,10 @@
 use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
-    cluster::protocol::{ClientWriteCommand, ClusterStateChange},
+    cluster::protocol::{ClientWriteCommand, ClusterStateChange, Locks},
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
+    server::common::UpdatedLocks,
     store::{PersistedStore, SerializeableLockNode, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
@@ -1317,14 +1318,23 @@ impl Worterbuch {
         transaction_id: TransactionId,
         interface: Interface,
     ) -> WorterbuchResult<()> {
-        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
-
         let trace = Trace::ClientRequest {
             client_id,
             transaction_id,
             method: Method::Lock,
             interface,
         };
+
+        self.internal_lock(key, client_id, trace).await
+    }
+
+    async fn internal_lock(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        trace: Trace,
+    ) -> WorterbuchResult<()> {
+        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         self.store.lock(client_id, path)?;
 
@@ -1340,14 +1350,23 @@ impl Worterbuch {
         transaction_id: TransactionId,
         interface: Interface,
     ) -> WorterbuchResult<oneshot::Receiver<()>> {
-        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
-
         let trace = Trace::ClientRequest {
             client_id,
             transaction_id,
             method: Method::AcquireLock,
             interface,
         };
+
+        self.internal_acquire_lock(key, client_id, trace).await
+    }
+
+    async fn internal_acquire_lock(
+        &mut self,
+        key: Key,
+        client_id: ClientId,
+        trace: Trace,
+    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+        let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         let (rx, client_id) = self.store.acquire_lock(client_id, path).await;
 
@@ -2124,6 +2143,48 @@ impl Worterbuch {
                 true
             }
         });
+    }
+
+    pub(crate) async fn re_grant_locks(&mut self, locks: Locks) -> WorterbuchResult<UpdatedLocks> {
+        let mut lost: HashMap<ClientId, Vec<Key>> = HashMap::new();
+        let mut acquire: HashMap<ClientId, Vec<oneshot::Receiver<()>>> = HashMap::new();
+
+        for (client_id, held_locks) in locks.held {
+            for key in held_locks {
+                match self
+                    .internal_lock(
+                        key,
+                        client_id,
+                        Trace::InternalAction(InternalAction::LeaderSync),
+                    )
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(WorterbuchError::KeyIsLocked(key)) => {
+                        lost.entry(client_id).or_default().push(key);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        for (client_id, requested_locks) in locks.requested {
+            for key in requested_locks {
+                match self
+                    .internal_acquire_lock(
+                        key,
+                        client_id,
+                        Trace::InternalAction(InternalAction::LeaderSync),
+                    )
+                    .await
+                {
+                    Ok(rx) => acquire.entry(client_id).or_default().push(rx),
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        Ok((lost, acquire))
     }
 }
 

@@ -36,6 +36,8 @@ Normally grave goods and last wills are stored in the persistence file so that i
 
 I'm also considering making grave goods and last wills a first class citizen in the client protocol since a breaking change in the client protocol will be introduced by the locking API anyway <- !!!!
 
+What is the correct behavior if a client connected to a proxy sets a last will and then the connection between leader and proxy breaks with both processes still running (e.g. because the proxy has not yet detected the disconnect but the leader has)? Should the leader assume that the proxy takes care of setting the last will or should it trigger it itself? How would the proxy even trigger the last will without a connection to the leader?
+
 ### Authentication
 
 Currently leader sync ports do not require authentication since it is assumed they will not be exposed to the public. However with proxy mode it may become necessary to expose the sync port on a public network which means the sync port would provide unauthorized access to protected data.
@@ -43,3 +45,8 @@ Currently leader sync ports do not require authentication since it is assumed th
 ### Cleanup
 
 Double check for any left-over TODOs!
+Write automated integration tests for:
+
+- grave goods/last wills (both proxy and follower)
+- handle broken proxy -> leader ocnnections correctly. If the connection breaks while writing something, it needs to be queed and re-sent to the new leader was connection is re-established!
+- ???

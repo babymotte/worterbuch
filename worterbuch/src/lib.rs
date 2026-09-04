@@ -362,7 +362,8 @@ async fn forward_api_call(
         | WbFunction::Len(_)
         | WbFunction::Lock(_, _, _, _, _)
         | WbFunction::AcquireLock(_, _, _, _, _)
-        | WbFunction::ReleaseLock(_, _, _, _, _) => None,
+        | WbFunction::ReleaseLock(_, _, _, _, _)
+        | WbFunction::ReGrantLocks(_, _) => None,
         WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => {
             if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
                 let cmd = ClientWriteCommand::Set(key.to_owned(), value.to_owned(), false);

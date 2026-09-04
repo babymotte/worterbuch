@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, Protocol, WorterbuchVersion,
@@ -75,8 +76,8 @@ pub struct ProxyHandshake {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Locks {
-    pub held: Vec<Key>,
-    pub waiting: Vec<Key>,
+    pub held: HashMap<ClientId, HashSet<Key>>,
+    pub requested: HashMap<ClientId, HashSet<Key>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

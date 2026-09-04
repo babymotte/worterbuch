@@ -19,7 +19,7 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, stats::VERSION};
+use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::Locks, stats::VERSION};
 use hashbrown::HashMap;
 use miette::{IntoDiagnostic, Result};
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
@@ -51,6 +51,10 @@ struct SubscriptionInfo {
 }
 
 pub type InsertedValues = Vec<(String, (ValueEntry, bool))>;
+pub type UpdatedLocks = (
+    HashMap<ClientId, Vec<Key>>,
+    HashMap<ClientId, Vec<oneshot::Receiver<()>>>,
+);
 
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
@@ -207,6 +211,7 @@ pub enum WbFunction {
         oneshot::Sender<WorterbuchResult<InsertedValues>>,
     ),
     Len(oneshot::Sender<usize>),
+    ReGrantLocks(Locks, oneshot::Sender<WorterbuchResult<UpdatedLocks>>),
 }
 
 impl fmt::Debug for WbFunction {
@@ -383,6 +388,9 @@ impl fmt::Debug for WbFunction {
                 .field(interface)
                 .field(path)
                 .finish(),
+            WbFunction::ReGrantLocks(locks, _) => {
+                f.debug_tuple("ReGrantLocks").field(locks).finish()
+            }
             WbFunction::Len(_) => f.debug_tuple("Len").finish(),
         }
     }
@@ -447,6 +455,12 @@ impl CloneableWbApi {
             interface,
             supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
+    }
+
+    pub(crate) async fn re_grant_locks(&self, locks: Locks) -> WorterbuchResult<UpdatedLocks> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(WbFunction::ReGrantLocks(locks, tx)).await?;
+        rx.await?
     }
 }
 

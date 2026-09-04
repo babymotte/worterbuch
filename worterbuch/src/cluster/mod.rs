@@ -279,6 +279,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
         WbFunction::Len(tx) => {
             tx.send(worterbuch.len()).ok();
         }
+        WbFunction::ReGrantLocks(locks, tx) => {
+            tx.send(worterbuch.re_grant_locks(locks).await).ok();
+        }
     }
 }
 

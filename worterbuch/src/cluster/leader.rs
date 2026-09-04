@@ -430,11 +430,11 @@ async fn process_handshake(
     authenticate(handshake.auth_token(), config)
         .wrap_err("could not authenticate follower/proxy")?;
 
-    if let Handshake::Proxy(proxy_handshake) = &handshake {
+    if let Handshake::Proxy(proxy_handshake) = handshake {
         proxy_server
             .register_clients(&proxy_handshake.connected_clients)
             .await?;
-        proxy_server.restore_locks(&proxy_handshake.locks);
+        proxy_server.restore_locks(proxy_handshake.locks).await?;
 
         Ok(true)
     } else {
@@ -741,8 +741,15 @@ impl VirtualProxyServer {
         Ok(())
     }
 
-    fn restore_locks(&self, locks: &Locks) {
-        // TODO
+    async fn restore_locks(&self, locks: Locks) -> miette::Result<()> {
+        let (loat, now_held) = self
+            .worterbuch
+            .re_grant_locks(locks)
+            .await
+            .wrap_err("error while trying to re-grant previously held locks")?;
+
+        // TODO report lost and newly acquired locks to clients
+        Ok(())
     }
 
     async fn apply_grave_goods_and_last_will(
