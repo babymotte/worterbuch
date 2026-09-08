@@ -23,8 +23,6 @@ pub(crate) mod protocol;
 pub(crate) mod proxy;
 pub(crate) mod standalone;
 
-use std::net::SocketAddr;
-
 use crate::{
     Config, Servers,
     cluster::protocol::ClusterStateChange,
@@ -33,6 +31,7 @@ use crate::{
     worterbuch::{SubscriptionFlags, Worterbuch},
 };
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{Instrument, info};

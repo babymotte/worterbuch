@@ -362,6 +362,8 @@ async fn follower_serve_loop(
         .into_diagnostic()
         .wrap_err("failed to forward follower disconnected event")?;
 
+    subsys.request_local_shutdown();
+
     Ok(())
 }
 
@@ -670,18 +672,18 @@ impl VirtualProxyServer {
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
 
         let send_tx = self.send_tx.clone();
+        let p = protocol.clone();
+        let wb = worterbuch.named(client_id);
         self.subsys.spawn("leader-response-forwarder", move |s| {
-            response_forwarder_loop(s, send_client_rx, send_tx, client_id)
-        });
-
-        worterbuch
-            .connected(
+            response_forwarder_loop(
+                s,
+                send_client_rx,
+                send_tx,
                 client_id,
-                None,
-                Protocol::Proxied(Box::new(protocol.clone())),
+                wb,
+                Protocol::Proxied(Box::new(p)),
             )
-            .await
-            .into_diagnostic()?;
+        });
 
         let proto = Proto::new(
             client_id,
@@ -875,12 +877,25 @@ async fn response_forwarder_loop(
     mut send_client_rx: mpsc::Receiver<ServerMessage>,
     send_tx: mpsc::Sender<(ClientId, ServerMessage)>,
     client_id: uuid::Uuid,
+    worterbuch: CloneableWbApi,
+    protocol: Protocol,
 ) -> miette::Result<()> {
+    worterbuch
+        .connected(client_id, None, protocol.clone())
+        .await
+        .into_diagnostic()?;
+
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = send_client_rx.recv() => forward_leader_response(recv, &send_tx, client_id).await?,
     }
+
+    info!("Client {client_id} disconnected.");
+    worterbuch
+        .disconnected(client_id, protocol, None)
+        .await
+        .wrap_err("could not notify core system about client disconnect")?;
 
     Ok(())
 }
