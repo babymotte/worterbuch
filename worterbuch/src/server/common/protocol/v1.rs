@@ -20,18 +20,14 @@
 use super::v0::V0;
 use crate::{
     auth::JwtClaims,
-    server::common::protocol::{ServerMessageBroadcaster, forward_lock_events},
+    server::common::protocol::{forward_lock_acquired, forward_lock_lost},
 };
-use serde_json::json;
 use tokio::spawn;
-use tracing::{Level, debug, instrument, trace};
+use tracing::{Level, instrument, trace};
 use worterbuch_common::{
-    LockAcquiredReceiver, LockLostReceiver, Privilege, WbApi,
+    Privilege, WbApi,
     error::{Context, WorterbuchResult},
-    protocol::v1::{
-        Ack, CSet, CState, CStateEvent, ClientMessage, Err, ErrorCode, Get, Lock, ServerMessage,
-        TransactionId,
-    },
+    protocol::v1::{Ack, CSet, CState, CStateEvent, ClientMessage, Get, Lock, ServerMessage},
 };
 
 #[derive(Clone)]
@@ -205,26 +201,7 @@ impl V1 {
 
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
-        spawn(async move {
-            debug!("Receiving lock lost message for transaction {transaction_id:?} …");
-
-            if !lost_rx.await.is_ok() {
-                debug!(
-                    "Did not receive a lock lost message for transaction id {transaction_id:?} before lock was released."
-                );
-                return;
-            }
-
-            debug!("Lock lost message for transaction {transaction_id:?} received.");
-
-            let _ = client
-                .send(ServerMessage::Err(Err {
-                    transaction_id,
-                    error_code: ErrorCode::LockLost,
-                    metadata: json!("Lock lost").to_string(),
-                }))
-                .await;
-        });
+        spawn(forward_lock_lost(client, transaction_id, lost_rx));
 
         Ok(())
     }
@@ -246,7 +223,7 @@ impl V1 {
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
 
-        spawn(forward_lock_events(
+        spawn(forward_lock_acquired(
             client,
             transaction_id,
             acquired_rx,

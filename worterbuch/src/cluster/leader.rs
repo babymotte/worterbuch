@@ -164,7 +164,6 @@ async fn try_forward_follower_connected(
             let (current_state, grave_goods, last_wills) = worterbuch.export();
             let state_sync = StateSync {
                 store: current_state,
-                lost_locks: Default::default(),
                 grave_goods,
                 last_wills,
             };
@@ -466,7 +465,7 @@ async fn process_handshake(
                 continue;
             };
             for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
-                spawn(protocol::forward_lock_events(
+                spawn(protocol::forward_lock_acquired(
                     client.to_owned(),
                     transaction_id,
                     acquired_rx,

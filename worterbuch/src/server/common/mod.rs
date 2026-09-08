@@ -608,7 +608,7 @@ impl WbApi for CloneableWbApi {
         }
         let res = rx.await;
         if trace {
-            trace!("Waiting for response to lock request done.");
+            trace!("Waiting for response to lock request done: {:#?}", res);
         }
         res?
     }

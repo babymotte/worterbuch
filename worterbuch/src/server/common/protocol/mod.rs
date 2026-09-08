@@ -177,7 +177,7 @@ impl Proto {
     }
 }
 
-pub async fn forward_lock_events(
+pub async fn forward_lock_acquired(
     client: ServerMessageBroadcaster,
     transaction_id: TransactionId,
     acquired_rx: LockAcquiredReceiver,
@@ -199,6 +199,14 @@ pub async fn forward_lock_events(
         return;
     }
 
+    forward_lock_lost(client, transaction_id, lost_rx).await;
+}
+
+async fn forward_lock_lost(
+    client: ServerMessageBroadcaster,
+    transaction_id: TransactionId,
+    lost_rx: LockLostReceiver,
+) {
     debug!("Receiving lock lost message for transaction {transaction_id:?} …");
     if !lost_rx.await.is_ok() {
         debug!(

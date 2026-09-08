@@ -24,7 +24,7 @@ use worterbuch_common::{
     ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
         CasVersion, ForceSet, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_ROOT_PREFIX,
-        ServerMessage, Trace, TransactionId, Value,
+        ServerMessage, Trace, Value,
     },
 };
 
@@ -48,8 +48,6 @@ pub struct LeaderWelcome {
 #[serde(rename_all = "camelCase")]
 pub struct StateSync {
     pub store: StoreNode,
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub lost_locks: HashMap<ClientId, Vec<(TransactionId, Key)>>,
     // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub grave_goods: HashMap<ClientId, GraveGoods>,
     // #[serde(skip_serializing_if = "HashMap::is_empty", default)]

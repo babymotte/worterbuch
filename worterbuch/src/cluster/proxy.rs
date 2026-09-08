@@ -280,7 +280,7 @@ async fn run_with_leader(
 
     let mut persistence_interval = config.persistence_interval();
 
-    let lost_locks = select! {
+    select! {
         biased;
         _ = subsys.shutdown_requested() => {
             warn!("Shutdown requested before initial sync completed.");
@@ -295,7 +295,6 @@ async fn run_with_leader(
                         initial_sync(state.store, worterbuch).await?;
                         persistence_interval.reset();
                         worterbuch.flush().await?;
-                        state.lost_locks
                     } else {
                         warn!("Expected initial sync message from leader, but got: {msg:?}");
                         return Ok(RunResult {
@@ -343,7 +342,7 @@ async fn run_with_leader(
         locks,
         response_interests,
     )
-    .run(lost_locks)
+    .run()
     .await?;
 
     info!(
@@ -390,7 +389,7 @@ struct ClientResponseInterests {
     ack: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
     state: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
     pstate: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
-    lock_acquired: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
+    lock_acquired: HashMap<TransactionId, (oneshot::Sender<WorterbuchResult<()>>, LockLostSender)>,
     lock_lost: HashMap<TransactionId, LockLostSender>,
 }
 
@@ -404,42 +403,13 @@ impl ClientResponseInterests {
     }
 }
 
-#[derive(Clone)]
-struct InternalApi(mpsc::Sender<InternalApiMessage>);
-
-impl InternalApi {
-    async fn lock_acquired(&self, client_id: ClientId, transaction_id: TransactionId) {
-        self.0
-            .send(InternalApiMessage::LockAcquired(client_id, transaction_id))
-            .await
-            .ok();
-    }
-
-    async fn lock_acquisition_failed(&self, client_id: ClientId, transaction_id: TransactionId) {
-        self.0
-            .send(InternalApiMessage::LockAcquisitionFailed(
-                client_id,
-                transaction_id,
-            ))
-            .await
-            .ok();
-    }
-}
-
-enum InternalApiMessage {
-    LockAcquired(ClientId, TransactionId),
-    LockAcquisitionFailed(ClientId, TransactionId),
-}
-
 struct LeaderConnection<'a> {
-    internal_api: InternalApi,
     subsys: &'a SubsystemHandle,
     response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
     proxy_request_tx: mpsc::Sender<ProxyMessage>,
     worterbuch: &'a mut Worterbuch,
     api_rx: &'a mut mpsc::Receiver<WbFunction>,
     lines: Lines<BufReader<OwnedReadHalf>>,
-    internal_api_rx: mpsc::Receiver<InternalApiMessage>,
     locks: &'a mut Locks,
 }
 
@@ -454,7 +424,6 @@ impl<'a> LeaderConnection<'a> {
         locks: &'a mut Locks,
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
     ) -> Self {
-        let (internal_api_tx, internal_api_rx) = mpsc::channel(config.channel_buffer_size);
         Self {
             subsys,
             response_interests,
@@ -462,36 +431,21 @@ impl<'a> LeaderConnection<'a> {
             worterbuch,
             api_rx,
             lines,
-            internal_api: InternalApi(internal_api_tx),
-            internal_api_rx,
             locks,
         }
     }
 
-    async fn run(
-        mut self,
-        lost_locks: HashMap<ClientId, Vec<(TransactionId, Key)>>,
-    ) -> WorterbuchAppResult<PendingRequests> {
+    async fn run(mut self) -> WorterbuchAppResult<PendingRequests> {
         debug!(
             "Starting new leder session with inherited response interests: {:#?}",
             self.response_interests
         );
-
-        for (client_id, lost_locks) in lost_locks {
-            for (transaction_id, key) in lost_locks {
-                self.locks.lost(client_id, transaction_id);
-                if let Some(tx) = self.get_lock_lost_interest(client_id, transaction_id) {
-                    tx.send(()).ok();
-                }
-            }
-        }
 
         while_select! {
             biased;
             _ = self.subsys.shutdown_requested() => break,
             recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
             recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
-            recv = self.internal_api_rx.recv() => self.try_process_internal_api_call(recv),
         }
         let pending_requests = self.pending_requests();
         Ok(pending_requests)
@@ -597,30 +551,6 @@ impl<'a> LeaderConnection<'a> {
         }
 
         Ok(())
-    }
-
-    fn try_process_internal_api_call(
-        &mut self,
-        recv: Option<InternalApiMessage>,
-    ) -> ControlFlow<()> {
-        match recv {
-            Some(function) => {
-                self.process_internal_api_call(function);
-                ControlFlow::Continue(())
-            }
-            None => ControlFlow::Break(()),
-        }
-    }
-
-    fn process_internal_api_call(&mut self, message: InternalApiMessage) {
-        match message {
-            InternalApiMessage::LockAcquired(client_id, transaction_id) => {
-                self.locks.acquired(client_id, transaction_id);
-            }
-            InternalApiMessage::LockAcquisitionFailed(client_id, transaction_id) => {
-                self.locks.acquisition_failed(client_id, transaction_id);
-            }
-        }
     }
 
     async fn try_process_api_call(
@@ -808,8 +738,23 @@ impl<'a> LeaderConnection<'a> {
                 let (ack_tx, ack_rx) = oneshot::channel();
                 let (lost_tx, lost_rx) = oneshot::channel();
                 spawn(async move {
-                    if ack_rx.await.is_ok() {
-                        tx.send(Ok(lost_rx)).ok();
+                    if let Ok(res) = ack_rx.await {
+                        match res {
+                            Ok(_) => {
+                                trace!(
+                                    "Lock acquired for client {}, transaction {}",
+                                    client_id, transaction_id
+                                );
+                                tx.send(Ok(lost_rx)).ok();
+                            }
+                            Err(e) => {
+                                trace!(
+                                    "Lock acquisition failed for client {}, transaction {}: {:?}",
+                                    client_id, transaction_id, e
+                                );
+                                tx.send(Err(e)).ok();
+                            }
+                        }
                     }
                 });
                 self.register_lock_acquired_interest(
@@ -817,9 +762,9 @@ impl<'a> LeaderConnection<'a> {
                     key.clone(),
                     transaction_id,
                     ack_tx,
+                    lost_tx,
                     false,
                 );
-                self.register_lock_lost_interest(client_id, key, transaction_id, lost_tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
@@ -844,9 +789,9 @@ impl<'a> LeaderConnection<'a> {
                     key.clone(),
                     transaction_id,
                     ack_tx,
+                    lost_tx,
                     true,
                 );
-                self.register_lock_lost_interest(client_id, key, transaction_id, lost_tx);
                 self.proxy_request_tx.send(request).await?;
                 tx.send(Ok((acked_rx, lost_rx))).ok();
             }
@@ -901,10 +846,11 @@ impl<'a> LeaderConnection<'a> {
             ServerMessage::Ack(ack) => {
                 if let Some(tx) = self.get_ack_response_interest(client_id, ack.transaction_id) {
                     tx.send(Ok(())).ok();
-                } else if let Some(tx) =
+                } else if let Some((tx, lost_tx)) =
                     self.get_lock_acquired_interest(client_id, ack.transaction_id)
                 {
-                    // TODO register lock lost interest!
+                    self.locks.acquired(client_id, ack.transaction_id);
+                    self.register_lock_lost_interest(client_id, ack.transaction_id, lost_tx);
                     tx.send(Ok(())).ok();
                 } else {
                     warn!(
@@ -941,23 +887,71 @@ impl<'a> LeaderConnection<'a> {
             ServerMessage::Err(e) => {
                 warn!("Received error message from leader for client {client_id}: {e:?}");
                 let transaction_id = e.transaction_id;
-                if e.error_code == ErrorCode::LockLost
-                    && let Some(tx) = self.get_lock_lost_interest(client_id, transaction_id)
-                {
-                    tx.send(()).ok();
+                let code = e.error_code;
+
+                let mut e = Some(e);
+
+                if code == ErrorCode::LockLost {
+                    warn!(
+                        "Received lock lost message for client {}, transaction {}",
+                        client_id, transaction_id
+                    );
+
                     let _ = self.get_lock_acquired_interest(client_id, transaction_id);
-                } else if let Some(tx) = self.get_lock_acquired_interest(client_id, transaction_id)
-                {
-                    tx.send(Err(e.into())).ok();
-                } else if let Some(tx) = self.get_ack_response_interest(client_id, transaction_id) {
-                    tx.send(Err(e.into())).ok();
-                } else if let Some(tx) = self.get_state_response_interest(client_id, transaction_id)
-                {
-                    tx.send(Err(e.into())).ok();
-                } else if let Some(tx) =
-                    self.get_pstate_response_interest(client_id, transaction_id)
-                {
-                    tx.send(Err(e.into())).ok();
+
+                    if let Some(tx) = self.get_lock_lost_interest(client_id, transaction_id) {
+                        trace!(
+                            "Forwarding lock lost notification to client {}, transaction {}",
+                            client_id, transaction_id
+                        );
+
+                        let e = e.take();
+                        debug_assert!(e.is_some(), "multiple interests registered for same error");
+                        if let Some(_) = e {
+                            tx.send(()).ok();
+                        }
+                    }
+                }
+
+                if let Some((tx, _)) = self.get_lock_acquired_interest(client_id, transaction_id) {
+                    self.locks.acquisition_failed(client_id, transaction_id);
+                    let e = e.take();
+                    debug_assert!(e.is_some(), "multiple interests registered for same error");
+                    if let Some(e) = e {
+                        let e = Err(e.into());
+                        trace!("{:#?}", e);
+                        tx.send(e).ok();
+                    }
+                }
+
+                if let Some(tx) = self.get_ack_response_interest(client_id, transaction_id) {
+                    let e = e.take();
+                    debug_assert!(e.is_some(), "multiple interests registered for same error");
+                    if let Some(e) = e {
+                        let e = Err(e.into());
+                        trace!("{:#?}", e);
+                        tx.send(e).ok();
+                    }
+                }
+
+                if let Some(tx) = self.get_state_response_interest(client_id, transaction_id) {
+                    let e = e.take();
+                    debug_assert!(e.is_some(), "multiple interests registered for same error");
+                    if let Some(e) = e {
+                        let e = Err(e.into());
+                        trace!("{:#?}", e);
+                        tx.send(e).ok();
+                    }
+                }
+
+                if let Some(tx) = self.get_pstate_response_interest(client_id, transaction_id) {
+                    let e = e.take();
+                    debug_assert!(e.is_some(), "multiple interests registered for same error");
+                    if let Some(e) = e {
+                        let e = Err(e.into());
+                        trace!("{:#?}", e);
+                        tx.send(e).ok();
+                    }
                 }
             }
             ServerMessage::LockLost(_) => {
@@ -1025,43 +1019,21 @@ impl<'a> LeaderConnection<'a> {
         key: Key,
         transaction_id: TransactionId,
         tx: oneshot::Sender<WorterbuchResult<()>>,
+        lost_tx: LockLostSender,
         wait_for_lock: bool,
     ) {
         trace!(
             "Registering lock acquired interest for client {client_id}, transaction {transaction_id}, key {key:?}"
         );
 
-        let api = self.internal_api.clone();
-        let k = key.clone();
-        let (acked_tx, acked_rx) = oneshot::channel::<WorterbuchResult<()>>();
-
         self.locks
-            .requested(client_id, transaction_id, k.clone(), wait_for_lock);
-
-        spawn(async move {
-            match acked_rx.await {
-                Ok(Ok(())) => {
-                    api.lock_acquired(client_id, transaction_id).await;
-                    tx.send(Ok(())).ok();
-                }
-                Ok(Err(e)) => {
-                    warn!(
-                        "Failed to receive lock acquired confirmation for transaction {transaction_id}: {e}"
-                    );
-                    api.lock_acquisition_failed(client_id, transaction_id).await;
-                    tx.send(Err(e.into())).ok();
-                }
-                Err(_) => {
-                    // system is shutting down, ignore
-                }
-            }
-        });
+            .requested(client_id, transaction_id, key, wait_for_lock);
 
         self.response_interests
             .entry(client_id)
             .or_default()
             .lock_acquired
-            .insert(transaction_id, acked_tx);
+            .insert(transaction_id, (tx, lost_tx));
 
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
     }
@@ -1069,12 +1041,11 @@ impl<'a> LeaderConnection<'a> {
     fn register_lock_lost_interest(
         &mut self,
         client_id: ClientId,
-        key: Key,
         transaction_id: TransactionId,
         tx: LockLostSender,
     ) {
         trace!(
-            "Registering lock lost interest for client {client_id}, transaction {transaction_id}, key {key:?}"
+            "Registering lock lost interest for client {client_id}, transaction {transaction_id}"
         );
 
         self.response_interests
@@ -1109,6 +1080,7 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests.remove(&client_id);
         }
 
+        trace!("found: {}", tx.is_some());
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx
@@ -1118,7 +1090,7 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
-    ) -> Option<oneshot::Sender<WorterbuchResult<()>>> {
+    ) -> Option<(oneshot::Sender<WorterbuchResult<()>>, LockLostSender)> {
         trace!(
             "Getting lock acquired interest for client {client_id}, transaction {transaction_id}"
         );
@@ -1129,6 +1101,7 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests.remove(&client_id);
         }
 
+        trace!("found: {}", tx.is_some());
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx
@@ -1147,6 +1120,7 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests.remove(&client_id);
         }
 
+        trace!("found: {}", tx.is_some());
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx
@@ -1167,6 +1141,7 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests.remove(&client_id);
         }
 
+        trace!("found: {}", tx.is_some());
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx
@@ -1187,6 +1162,7 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests.remove(&client_id);
         }
 
+        trace!("found: {}", tx.is_some());
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx

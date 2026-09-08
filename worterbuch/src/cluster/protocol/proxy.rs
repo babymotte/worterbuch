@@ -152,6 +152,12 @@ impl Locks {
                 self.requested.remove(&client_id);
             }
         }
+        if let Some(client_keys) = self.keys.get_mut(&client_id) {
+            client_keys.remove(&transaction_id);
+            if client_keys.is_empty() {
+                self.keys.remove(&client_id);
+            }
+        }
         trace!("Locks: {:?}", self);
     }
 
@@ -177,7 +183,7 @@ impl Locks {
                 self.keys.remove(&client_id);
             }
         }
-        trace!("Locks: {:?}", self);
+        trace!("Locks: {:#?}", self);
     }
 
     pub fn release_failed(&mut self, client_id: ClientId, transaction_id: TransactionId) {
@@ -196,7 +202,13 @@ impl Locks {
                 self.held.remove(&client_id);
             }
         }
-        trace!("Locks: {:?}", self);
+        if let Some(client_keys) = self.keys.get_mut(&client_id) {
+            client_keys.remove(&transaction_id);
+            if client_keys.is_empty() {
+                self.keys.remove(&client_id);
+            }
+        }
+        trace!("Locks: {:#?}", self);
     }
 
     pub fn lost(&mut self, client_id: ClientId, transaction_id: TransactionId) {
@@ -221,7 +233,7 @@ impl Locks {
                 self.keys.remove(&client_id);
             }
         }
-        trace!("Locks: {:?}", self);
+        trace!("Locks: {:#?}", self);
     }
 
     pub fn client_disconnected(&mut self, client_id: ClientId) {
@@ -229,7 +241,7 @@ impl Locks {
         self.requested.remove(&client_id);
         self.held.remove(&client_id);
         self.keys.remove(&client_id);
-        trace!("Locks: {:?}", self);
+        trace!("Locks: {:#?}", self);
     }
 }
 
