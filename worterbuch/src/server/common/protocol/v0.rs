@@ -20,7 +20,7 @@
 use crate::{
     Config,
     auth::{JwtClaims, get_claims},
-    server::common::{CloneableWbApi, SubscriptionInfo},
+    server::common::{CloneableWbApi, SubscriptionInfo, protocol::ServerMessageBroadcaster},
     worterbuch::PStateAggregator,
 };
 use serde_json::json;
@@ -41,7 +41,7 @@ use worterbuch_common::{
 #[derive(Clone)]
 pub struct V0 {
     pub client_id: ClientId,
-    pub tx: mpsc::Sender<ServerMessage>,
+    pub tx: ServerMessageBroadcaster,
     pub auth_required: bool,
     pub config: Config,
     pub worterbuch: CloneableWbApi,

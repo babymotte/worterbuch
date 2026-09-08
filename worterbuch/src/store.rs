@@ -31,7 +31,8 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
-    ClientId, KeySegment, RegularKeySegment, SubscriptionId, ValueEntry,
+    ClientId, KeySegment, LockAcquiredReceiver, LockAcquiredSender, LockLostReceiver,
+    LockLostSender, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
     protocol::v1::{CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
@@ -44,7 +45,6 @@ pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
 pub type StoreNode = Node<ValueEntry>;
 type LockNode = Node<Lock>;
-pub type SerializeableLockNode = Node<SerializeableLock>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedStore {
@@ -62,67 +62,90 @@ impl From<PersistedStore> for Store {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializeableLock {
-    holder: ClientId,
+#[derive(Debug)]
+struct LockHolder {
+    client_id: ClientId,
+    on_lost: Vec<LockLostSender>,
 }
 
-impl From<&Lock> for SerializeableLock {
-    fn from(lock: &Lock) -> Self {
-        SerializeableLock {
-            holder: lock.holder,
-        }
+impl PartialEq for LockHolder {
+    fn eq(&self, other: &Self) -> bool {
+        self.client_id == other.client_id
     }
 }
 
-impl From<&LockNode> for SerializeableLockNode {
-    fn from(lock_node: &LockNode) -> Self {
-        SerializeableLockNode {
-            value: lock_node.value.as_ref().map(|lock| lock.into()),
-            tree: lock_node
-                .tree
-                .as_ref()
-                .map(|tree| tree.iter().map(|(k, v)| (k.clone(), v.into())).collect()),
+#[derive(Debug)]
+struct LockHolderCandidate {
+    holder: LockHolder,
+    on_acquired: Vec<LockAcquiredSender>,
+}
+
+impl LockHolderCandidate {
+    fn new(client_id: ClientId, on_acquired: LockAcquiredSender, on_lost: LockLostSender) -> Self {
+        LockHolderCandidate {
+            holder: LockHolder {
+                client_id,
+                on_lost: vec![on_lost],
+            },
+            on_acquired: vec![on_acquired],
         }
     }
 }
 
 #[derive(Debug)]
 struct Lock {
-    holder: ClientId,
-    candidates: VecDeque<(ClientId, Vec<oneshot::Sender<()>>)>,
+    holder: LockHolder,
+    candidates: VecDeque<LockHolderCandidate>,
 }
 
 impl Lock {
-    fn new(client_id: ClientId) -> Self {
+    fn new(client_id: ClientId, on_lost: LockLostSender) -> Self {
         Lock {
-            holder: client_id,
+            holder: LockHolder {
+                client_id,
+                on_lost: vec![on_lost],
+            },
             candidates: VecDeque::new(),
         }
     }
 
-    async fn release(&mut self, client_id: ClientId) -> (bool, Option<ClientId>) {
-        if client_id == self.holder {
-            if let Some((id, txs)) = self.candidates.pop_front() {
-                self.holder = id;
-                for tx in txs {
+    fn release(
+        &mut self,
+        client_id: ClientId,
+    ) -> (bool, Option<ClientId>, Option<Vec<LockLostSender>>) {
+        if client_id == self.holder.client_id {
+            let on_lost = Some(self.holder.on_lost.drain(..).collect());
+            if let Some(candidate) = self.candidates.pop_front() {
+                self.holder = candidate.holder;
+                for tx in candidate.on_acquired {
                     tx.send(()).ok();
                 }
-                (true, Some(self.holder))
+                (true, Some(self.holder.client_id), on_lost)
             } else {
-                (true, None)
+                (true, None, on_lost)
             }
         } else {
-            self.candidates.retain(|(c, _)| c != &client_id);
-            (false, Some(self.holder))
+            self.candidates.retain(|c| c.holder.client_id != client_id);
+            (false, Some(self.holder.client_id), None)
         }
     }
 
-    async fn queue(&mut self, client_id: ClientId, tx: oneshot::Sender<()>) {
-        if let Some((_, txs)) = self.candidates.iter_mut().find(|(id, _)| id == &client_id) {
-            txs.push(tx);
+    fn queue(
+        &mut self,
+        client_id: ClientId,
+        on_acquired: LockAcquiredSender,
+        on_lost: LockLostSender,
+    ) {
+        if let Some(candidate) = self
+            .candidates
+            .iter_mut()
+            .find(|candidate| candidate.holder.client_id == client_id)
+        {
+            candidate.on_acquired.push(on_acquired);
+            candidate.holder.on_lost.push(on_lost);
         } else {
-            self.candidates.push_back((client_id, vec![tx]));
+            self.candidates
+                .push_back(LockHolderCandidate::new(client_id, on_acquired, on_lost));
         }
     }
 }
@@ -396,14 +419,6 @@ impl Store {
             Store::ncount_values(&original_data)
         );
         original_data
-    }
-
-    #[instrument(level=Level::DEBUG, skip(self))]
-    pub fn export_locks(&mut self) -> SerializeableLockNode {
-        debug!("Exporting copy of locks …");
-        let locks_copy = (&self.locks).into();
-        debug!("Exported locks.");
-        locks_copy
     }
 
     #[instrument(level=Level::DEBUG, skip(self))]
@@ -1090,47 +1105,49 @@ impl Store {
         &mut self,
         client_id: ClientId,
         path: Box<[RegularKeySegment]>,
-    ) -> WorterbuchResult<()> {
+    ) -> WorterbuchResult<LockLostReceiver> {
+        let (lock_lost_tx, lock_lost_rx) = oneshot::channel();
         let node = self.get_or_create_lock_node(path.clone());
         match &mut node.value() {
             Some(lock) => {
-                if client_id == lock.holder {
+                if client_id == lock.holder.client_id {
                     debug!("Client {client_id} already holds the lock on {path:?}");
                 } else {
                     return Err(WorterbuchError::KeyIsLocked(path.join("/")));
                 }
             }
             None => {
-                node.set_value(Lock::new(client_id));
+                node.set_value(Lock::new(client_id, lock_lost_tx));
                 let paths = self.locked_keys.entry(client_id).or_default();
                 paths.push(path);
             }
         }
 
-        Ok(())
+        Ok(lock_lost_rx)
     }
 
-    pub async fn acquire_lock(
+    pub fn acquire_lock(
         &mut self,
         client_id: ClientId,
         path: Box<[RegularKeySegment]>,
-    ) -> (oneshot::Receiver<()>, Option<ClientId>) {
-        let (tx, rx) = oneshot::channel();
+    ) -> (LockAcquiredReceiver, LockLostReceiver, Option<ClientId>) {
+        let (lock_acquired_tx, lock_acquired_rx) = oneshot::channel();
+        let (lock_lost_tx, lock_lost_rx) = oneshot::channel();
         let node = self.get_or_create_lock_node(path.clone());
         let holder = match &mut node.value_mut() {
             Some(lock) => {
-                if client_id == lock.holder {
+                if client_id == lock.holder.client_id {
                     debug!("Client {client_id} already holds the lock on {path:?}");
-                    tx.send(()).ok();
+                    lock_acquired_tx.send(()).ok();
                     Some(client_id)
                 } else {
-                    lock.queue(client_id, tx).await;
-                    Some(lock.holder)
+                    lock.queue(client_id, lock_acquired_tx, lock_lost_tx);
+                    Some(lock.holder.client_id)
                 }
             }
             None => {
-                node.set_value(Lock::new(client_id));
-                tx.send(()).ok();
+                node.set_value(Lock::new(client_id, lock_lost_tx));
+                lock_acquired_tx.send(()).ok();
                 Some(client_id)
             }
         };
@@ -1138,18 +1155,19 @@ impl Store {
         let paths = self.locked_keys.entry(client_id).or_default();
         paths.push(path);
 
-        (rx, holder)
+        (lock_acquired_rx, lock_lost_rx, holder)
     }
 
-    pub async fn unlock_all(
+    pub fn unlock_all(
         &mut self,
         client_id: ClientId,
-    ) -> Option<Vec<(String, Option<ClientId>)>> {
+    ) -> Option<Vec<(String, Option<ClientId>, Option<Vec<LockLostSender>>)>> {
         if let Some(paths) = self.locked_keys.remove(&client_id) {
             let mut out = vec![];
             for path in paths {
-                let client_id = self.unlock(client_id, &path).await.ok().flatten();
-                out.push((path.join("/"), client_id));
+                if let Some((client_id, lock_lost_txs)) = self.unlock(client_id, &path).ok() {
+                    out.push((path.join("/"), client_id, lock_lost_txs));
+                }
             }
             Some(out)
         } else {
@@ -1157,21 +1175,21 @@ impl Store {
         }
     }
 
-    pub async fn unlock(
+    pub fn unlock(
         &mut self,
         client_id: ClientId,
         path: &[RegularKeySegment],
-    ) -> WorterbuchResult<Option<ClientId>> {
+    ) -> WorterbuchResult<(Option<ClientId>, Option<Vec<LockLostSender>>)> {
         let node = self.get_or_create_lock_node(path.into());
 
         if let Some(lock) = node.value_mut() {
-            let (was_holder, new_holder) = lock.release(client_id).await;
+            let (was_holder, new_holder, lost_txs) = lock.release(client_id);
             if !was_holder {
                 return Err(WorterbuchError::KeyIsLocked(path.join("/")));
             } else if new_holder.is_none() {
                 self.delete_lock_node(path);
             }
-            Ok(new_holder)
+            Ok((new_holder, lost_txs))
         } else {
             warn!("Node {path:?} is not locked.");
             Err(WorterbuchError::KeyIsNotLocked(path.join("/")))
@@ -1634,15 +1652,15 @@ mod test {
         assert!(store.lock(client_2, path).is_err());
     }
 
-    #[tokio::test]
-    async fn lock_can_be_re_acquired_after_unlock() {
+    #[test]
+    fn lock_can_be_re_acquired_after_unlock() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let client_1 = ClientId::new_v4();
         let client_2 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.lock(client_2, path.clone()).is_err());
-        store.unlock(client_1, &path).await.unwrap();
+        store.unlock(client_1, &path).unwrap();
         assert!(store.lock(client_2, path).is_ok());
     }
 
@@ -1668,26 +1686,26 @@ mod test {
         assert_eq!(store.get(&path), None);
     }
 
-    #[tokio::test]
-    async fn unlocking_a_key_does_not_delete_its_value() {
+    #[test]
+    fn unlocking_a_key_does_not_delete_its_value() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path, json!("hello"), false).is_ok());
-        store.unlock(client_1, &path).await.unwrap();
+        store.unlock(client_1, &path).unwrap();
         assert_eq!(store.get(&path), Some(&json!("hello")));
     }
 
-    #[tokio::test]
-    async fn unlocking_a_key_does_not_delete_its_sub_tree() {
+    #[test]
+    fn unlocking_a_key_does_not_delete_its_sub_tree() {
         let mut store = Store::default();
         let path = reg_key_segs("hello/cas");
         let path2 = reg_key_segs("hello/cas/test");
         let client_1 = ClientId::new_v4();
         assert!(store.lock(client_1, path.clone()).is_ok());
         assert!(store.insert_plain(&path2, json!("hello"), false).is_ok());
-        store.unlock(client_1, &path).await.unwrap();
+        store.unlock(client_1, &path).unwrap();
         assert_eq!(store.get(&path2), Some(&json!("hello")));
     }
 

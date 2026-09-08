@@ -31,8 +31,8 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, debug, instrument, trace, warn};
 use worterbuch_common::{
-    ClientId, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription, ValueEntry,
-    WbApi,
+    ClientId, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription, Protocol,
+    RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::WorterbuchResult,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
@@ -51,10 +51,16 @@ struct SubscriptionInfo {
 }
 
 pub type InsertedValues = Vec<(String, (ValueEntry, bool))>;
-pub type UpdatedLocks = (
-    HashMap<ClientId, Vec<Key>>,
-    HashMap<ClientId, Vec<oneshot::Receiver<()>>>,
-);
+
+pub struct UpdatedLocks {
+    /// locks that were previously held and have now been granted again
+    pub held: HashMap<ClientId, Vec<(TransactionId, Key)>>,
+    /// locks that were previously held but have not been granted again because another client got them first
+    pub lost: HashMap<ClientId, Vec<(TransactionId, Key)>>,
+    /// locks that were previously pending. Some of these may now have already been granted, but the result still needs to be polled
+    pub pending:
+        HashMap<ClientId, Vec<(TransactionId, Key, LockAcquiredReceiver, LockLostReceiver)>>,
+}
 
 pub enum WbFunction {
     Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
@@ -170,14 +176,14 @@ pub enum WbFunction {
         Interface,
         Key,
         ClientId,
-        oneshot::Sender<WorterbuchResult<()>>,
+        oneshot::Sender<WorterbuchResult<LockLostReceiver>>,
     ),
     AcquireLock(
         TransactionId,
         Interface,
         Key,
         ClientId,
-        oneshot::Sender<WorterbuchResult<oneshot::Receiver<()>>>,
+        oneshot::Sender<WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)>>,
     ),
     ReleaseLock(
         TransactionId,
@@ -577,7 +583,7 @@ impl WbApi for CloneableWbApi {
         transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    ) -> WorterbuchResult<LockLostReceiver> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {
@@ -612,7 +618,7 @@ impl WbApi for CloneableWbApi {
         transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
-    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+    ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
         let (tx, rx) = oneshot::channel();
         let trace = client_id != INTERNAL_CLIENT_ID;
         if trace {

@@ -18,14 +18,19 @@
  */
 
 use super::v0::V0;
-use crate::auth::JwtClaims;
+use crate::{
+    auth::JwtClaims,
+    server::common::protocol::{ServerMessageBroadcaster, forward_lock_events},
+};
+use serde_json::json;
 use tokio::spawn;
 use tracing::{Level, debug, instrument, trace};
 use worterbuch_common::{
-    Privilege, WbApi,
+    LockAcquiredReceiver, LockLostReceiver, Privilege, WbApi,
     error::{Context, WorterbuchResult},
     protocol::v1::{
         Ack, CSet, CState, CStateEvent, ClientMessage, Err, ErrorCode, Get, Lock, ServerMessage,
+        TransactionId,
     },
 };
 
@@ -171,15 +176,18 @@ impl V1 {
     }
 
     pub async fn lock(&self, msg: Lock) -> WorterbuchResult<()> {
-        if let Err(e) = self
+        let lost_rx = match self
             .v0
             .worterbuch
             .lock(msg.transaction_id, msg.key, self.v0.client_id)
             .await
         {
-            self.v0.handle_store_error(e, msg.transaction_id).await?;
-            return Ok(());
-        }
+            Ok(it) => it,
+            Err(e) => {
+                self.v0.handle_store_error(e, msg.transaction_id).await?;
+                return Ok(());
+            }
+        };
 
         let response = Ack {
             transaction_id: msg.transaction_id,
@@ -195,11 +203,34 @@ impl V1 {
             )
         })?;
 
+        let client = self.v0.tx.clone();
+        let transaction_id = msg.transaction_id;
+        spawn(async move {
+            debug!("Receiving lock lost message for transaction {transaction_id:?} …");
+
+            if !lost_rx.await.is_ok() {
+                debug!(
+                    "Did not receive a lock lost message for transaction id {transaction_id:?} before lock was released."
+                );
+                return;
+            }
+
+            debug!("Lock lost message for transaction {transaction_id:?} received.");
+
+            let _ = client
+                .send(ServerMessage::Err(Err {
+                    transaction_id,
+                    error_code: ErrorCode::LockLost,
+                    metadata: json!("Lock lost").to_string(),
+                }))
+                .await;
+        });
+
         Ok(())
     }
 
     pub async fn acquire_lock(&self, msg: Lock) -> WorterbuchResult<()> {
-        let rx = match self
+        let (acquired_rx, lost_rx) = match self
             .v0
             .worterbuch
             .acquire_lock(msg.transaction_id, msg.key, self.v0.client_id)
@@ -214,28 +245,13 @@ impl V1 {
 
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
-        spawn(async move {
-            debug!("Receiving lock confirmation for transaction {transaction_id:?} …");
 
-            match rx.await {
-                Ok(_) => {
-                    client
-                        .send(ServerMessage::Ack(Ack { transaction_id }))
-                        .await
-                        .ok();
-                }
-                Err(_) => {
-                    client
-                        .send(ServerMessage::Err(Err {
-                            transaction_id,
-                            error_code: ErrorCode::LockAcquisitionCancelled,
-                            metadata: "lock acquisition was cancelled".to_owned(),
-                        }))
-                        .await
-                        .ok();
-                }
-            }
-        });
+        spawn(forward_lock_events(
+            client,
+            transaction_id,
+            acquired_rx,
+            lost_rx,
+        ));
 
         Ok(())
     }

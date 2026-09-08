@@ -296,7 +296,7 @@ impl ServerInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr, JsonSchema)]
 #[repr(u8)]
 pub enum ErrorCode {
     IllegalWildcard = 0,
@@ -325,6 +325,7 @@ pub enum ErrorCode {
     FeatureDisabled = 23,
     ClientIDCollision = 24,
     EmptyKey = 25,
+    LockLost = 26,
     Other = u8::MAX,
 }
 

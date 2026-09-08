@@ -25,7 +25,7 @@ use crate::{
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
     server::common::UpdatedLocks,
-    store::{PersistedStore, SerializeableLockNode, Store, StoreNode},
+    store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
 use chrono::prelude::{DateTime, Utc};
@@ -48,8 +48,8 @@ use tokio::{
 };
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
-    ClientId, KeySegment, LsSubscription, PSubscription, Protocol, RegularKeySegment, Subscription,
-    SubscriptionId, ValueEntry,
+    ClientId, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
+    Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     is_client_sys_wildcard_topic, parse_segments,
     protocol::v1::{
@@ -845,23 +845,6 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
-    #[instrument(level=Level::DEBUG, skip(self))]
-    pub(crate) fn export_with_locks(
-        &mut self,
-    ) -> (
-        StoreNode,
-        SerializeableLockNode,
-        HashMap<ClientId, GraveGoods>,
-        HashMap<ClientId, LastWill>,
-    ) {
-        let store = self.store.export();
-        let locks = self.store.export_locks();
-        let grave_goods = self.grave_goods();
-        let last_wills = self.last_wills();
-
-        (store, locks, grave_goods, last_wills)
-    }
-
     #[instrument(level=Level::DEBUG, skip(self, tx))]
     pub fn export_for_persistence(
         &mut self,
@@ -1317,7 +1300,7 @@ impl Worterbuch {
         client_id: ClientId,
         transaction_id: TransactionId,
         interface: Interface,
-    ) -> WorterbuchResult<()> {
+    ) -> WorterbuchResult<LockLostReceiver> {
         let trace = Trace::ClientRequest {
             client_id,
             transaction_id,
@@ -1333,14 +1316,14 @@ impl Worterbuch {
         key: Key,
         client_id: ClientId,
         trace: Trace,
-    ) -> WorterbuchResult<()> {
+    ) -> WorterbuchResult<LockLostReceiver> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
-        self.store.lock(client_id, path)?;
+        let rx = self.store.lock(client_id, path)?;
 
         self.locked(Some(client_id), &key, trace).await;
 
-        Ok(())
+        Ok(rx)
     }
 
     pub async fn acquire_lock(
@@ -1349,7 +1332,7 @@ impl Worterbuch {
         client_id: ClientId,
         transaction_id: TransactionId,
         interface: Interface,
-    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+    ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
         let trace = Trace::ClientRequest {
             client_id,
             transaction_id,
@@ -1365,14 +1348,14 @@ impl Worterbuch {
         key: Key,
         client_id: ClientId,
         trace: Trace,
-    ) -> WorterbuchResult<oneshot::Receiver<()>> {
+    ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
-        let (rx, client_id) = self.store.acquire_lock(client_id, path).await;
+        let (acquired_rx, lost_rx, client_id) = self.store.acquire_lock(client_id, path);
 
         self.locked(client_id, &key, trace).await;
 
-        Ok(rx)
+        Ok((acquired_rx, lost_rx))
     }
 
     async fn locked(&mut self, client_id: Option<ClientId>, key: &str, cause: Trace) {
@@ -1423,7 +1406,7 @@ impl Worterbuch {
             interface,
         };
 
-        let client_id = self.store.unlock(client_id, &path).await?;
+        let (client_id, _) = self.store.unlock(client_id, &path)?;
 
         self.locked(client_id, &key, trace).await;
 
@@ -1702,12 +1685,12 @@ impl Worterbuch {
             protocol,
         });
 
-        if let Some(keys) = self.store.unlock_all(client_id).await
+        if let Some(keys) = self.store.unlock_all(client_id)
             && self.config.extended_monitoring
             && !keys.is_empty()
         {
             info!("Dropping locks of client {}.", client_id);
-            for (key, client_id) in keys {
+            for (key, client_id, _) in keys {
                 self.locked(client_id, &key, trace.clone()).await;
             }
         }
@@ -2146,22 +2129,40 @@ impl Worterbuch {
     }
 
     pub(crate) async fn re_grant_locks(&mut self, locks: Locks) -> WorterbuchResult<UpdatedLocks> {
-        let mut lost: HashMap<ClientId, Vec<Key>> = HashMap::new();
-        let mut acquire: HashMap<ClientId, Vec<oneshot::Receiver<()>>> = HashMap::new();
+        let mut lost: HashMap<ClientId, Vec<(TransactionId, Key)>> = HashMap::new();
+        let mut held: HashMap<ClientId, Vec<(TransactionId, Key)>> = HashMap::new();
+        let mut pending: HashMap<
+            ClientId,
+            Vec<(TransactionId, Key, LockAcquiredReceiver, LockLostReceiver)>,
+        > = HashMap::new();
 
         for (client_id, held_locks) in locks.held {
-            for key in held_locks {
+            for transaction_id in held_locks {
+                let Some(key) = locks
+                    .keys
+                    .get(&client_id)
+                    .and_then(|keys| keys.get(&transaction_id))
+                else {
+                    error!("No key found for client {client_id} and transaction {transaction_id}");
+                    continue;
+                };
                 match self
                     .internal_lock(
-                        key,
+                        key.to_owned(),
                         client_id,
                         Trace::InternalAction(InternalAction::LeaderSync),
                     )
                     .await
                 {
-                    Ok(_) => (),
+                    Ok(_) => {
+                        held.entry(client_id)
+                            .or_default()
+                            .push((transaction_id, key.to_owned()));
+                    }
                     Err(WorterbuchError::KeyIsLocked(key)) => {
-                        lost.entry(client_id).or_default().push(key);
+                        lost.entry(client_id)
+                            .or_default()
+                            .push((transaction_id, key.to_owned()));
                     }
                     Err(e) => return Err(e),
                 }
@@ -2169,22 +2170,39 @@ impl Worterbuch {
         }
 
         for (client_id, requested_locks) in locks.requested {
-            for key in requested_locks {
+            for transaction_id in requested_locks {
+                let Some(key) = locks
+                    .keys
+                    .get(&client_id)
+                    .and_then(|keys| keys.get(&transaction_id))
+                else {
+                    error!("No key found for client {client_id} and transaction {transaction_id}");
+                    continue;
+                };
                 match self
                     .internal_acquire_lock(
-                        key,
+                        key.to_owned(),
                         client_id,
                         Trace::InternalAction(InternalAction::LeaderSync),
                     )
                     .await
                 {
-                    Ok(rx) => acquire.entry(client_id).or_default().push(rx),
+                    Ok((acquired_rx, lost_rx)) => pending.entry(client_id).or_default().push((
+                        transaction_id,
+                        key.to_owned(),
+                        acquired_rx,
+                        lost_rx,
+                    )),
                     Err(e) => return Err(e),
                 }
             }
         }
 
-        Ok((lost, acquire))
+        Ok(UpdatedLocks {
+            lost,
+            held,
+            pending,
+        })
     }
 }
 

@@ -29,7 +29,10 @@ use crate::{
         shutdown,
     },
     error::WorterbuchAppResult,
-    server::common::{CloneableWbApi, WbFunction, protocol::Proto},
+    server::common::{
+        self, CloneableWbApi, WbFunction,
+        protocol::{self, Proto, ServerMessageBroadcaster},
+    },
     worterbuch_version,
 };
 use hashbrown::HashMap;
@@ -46,18 +49,18 @@ use tokio::{
         TcpSocket, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
-    select,
+    select, spawn,
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
 use totils::while_select;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{Level, debug, enabled, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi, WorterbuchVersion,
     protocol::v1::{
-        ClientMessage, GraveGoods, Interface, InternalAction, LastWill, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT,
-        ServerMessage, Trace,
+        ClientMessage, Err, ErrorCode, GraveGoods, Interface, InternalAction, LastWill,
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_MODE,
+        SYSTEM_TOPIC_ROOT, ServerMessage, Trace,
     },
     topic, write_line_and_flush,
 };
@@ -158,10 +161,10 @@ async fn try_forward_follower_connected(
     match recv {
         Some((state_tx, remote_addr, is_proxy)) => {
             let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
-            let (current_state, locks, grave_goods, last_wills) = worterbuch.export_with_locks();
+            let (current_state, grave_goods, last_wills) = worterbuch.export();
             let state_sync = StateSync {
                 store: current_state,
-                locks,
+                lost_locks: Default::default(),
                 grave_goods,
                 last_wills,
             };
@@ -341,6 +344,7 @@ async fn follower_serve_loop(
         .wrap_err("failed to forward follower connected event")?;
 
     let (state, mut commands) = sync_rx.await.into_diagnostic()?;
+
     send_initial_state(&subsys, &mut socket_tx, follower, &config, state).await?;
 
     while_select! {
@@ -431,10 +435,45 @@ async fn process_handshake(
         .wrap_err("could not authenticate follower/proxy")?;
 
     if let Handshake::Proxy(proxy_handshake) = handshake {
-        proxy_server
+        let client_txs = proxy_server
             .register_clients(&proxy_handshake.connected_clients)
             .await?;
-        proxy_server.restore_locks(proxy_handshake.locks).await?;
+        let updated_locks = proxy_server.restore_locks(proxy_handshake.locks).await?;
+
+        for (client_id, keys) in &updated_locks.lost {
+            let Some(tx) = client_txs.get(client_id) else {
+                error!(
+                    "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                );
+                continue;
+            };
+            for (tid, _) in keys {
+                tx.send(ServerMessage::Err(Err {
+                    transaction_id: *tid,
+                    error_code: ErrorCode::LockLost,
+                    metadata: json!("lock lost").to_string(),
+                }))
+                .await
+                .ok();
+            }
+        }
+
+        for (client_id, pending_locks) in updated_locks.pending {
+            let Some(client) = client_txs.get(&client_id) else {
+                error!(
+                    "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                );
+                continue;
+            };
+            for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
+                spawn(protocol::forward_lock_events(
+                    client.to_owned(),
+                    transaction_id,
+                    acquired_rx,
+                    lost_rx,
+                ));
+            }
+        }
 
         Ok(true)
     } else {
@@ -627,7 +666,7 @@ impl VirtualProxyServer {
         protocol: Protocol,
         config: Config,
         worterbuch: CloneableWbApi,
-    ) -> miette::Result<()> {
+    ) -> miette::Result<ServerMessageBroadcaster> {
         let auth_required = config.auth_token_key.is_some();
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
 
@@ -645,7 +684,13 @@ impl VirtualProxyServer {
             .await
             .into_diagnostic()?;
 
-        let proto = Proto::new(client_id, send_client_tx, auth_required, config, worterbuch);
+        let proto = Proto::new(
+            client_id,
+            send_client_tx.clone(),
+            auth_required,
+            config,
+            worterbuch,
+        );
 
         let client = VirtualProxyClientHandler {
             authorized: None,
@@ -659,7 +704,7 @@ impl VirtualProxyServer {
             client_id, self.proxy_address, protocol
         );
 
-        Ok(())
+        Ok(send_client_tx)
     }
 
     async fn stop_virtual_client(
@@ -723,33 +768,69 @@ impl VirtualProxyServer {
         Ok(())
     }
 
-    async fn register_clients(&mut self, connected_clients: &[Connected]) -> miette::Result<()> {
+    async fn register_clients(
+        &mut self,
+        connected_clients: &[Connected],
+    ) -> miette::Result<HashMap<ClientId, ServerMessageBroadcaster>> {
+        let mut client_txs = HashMap::new();
+
         for Connected {
             client_id,
             protocol,
         } in connected_clients
         {
-            self.spawn_virtual_client(
-                *client_id,
-                protocol.clone(),
-                self.config.clone(),
-                self.worterbuch.named(format!("client/{client_id}")),
-            )
-            .await?;
+            let tx = self
+                .spawn_virtual_client(
+                    *client_id,
+                    protocol.clone(),
+                    self.config.clone(),
+                    self.worterbuch.named(format!("client/{client_id}")),
+                )
+                .await?;
+            client_txs.insert(*client_id, tx);
         }
 
-        Ok(())
+        Ok(client_txs)
     }
 
-    async fn restore_locks(&self, locks: Locks) -> miette::Result<()> {
-        let (loat, now_held) = self
+    async fn restore_locks(&self, locks: Locks) -> miette::Result<common::UpdatedLocks> {
+        let updated_locks = self
             .worterbuch
-            .re_grant_locks(locks)
+            .re_grant_locks(locks.clone())
             .await
             .wrap_err("error while trying to re-grant previously held locks")?;
 
-        // TODO report lost and newly acquired locks to clients
-        Ok(())
+        for (client_id, keys) in &updated_locks.lost {
+            if enabled!(Level::DEBUG) {
+                let lost_keys: Vec<_> = keys.iter().map(|(_, key)| key).collect();
+                debug!(
+                    "Client {client_id} lost locks on keys {:?} after reconnecting to leader.",
+                    lost_keys
+                );
+            }
+        }
+
+        for (client_id, keys) in &updated_locks.held {
+            if enabled!(Level::DEBUG) {
+                let held_keys: Vec<_> = keys.iter().map(|(_, key)| key).collect();
+                debug!(
+                    "Client {client_id} still holds locks on keys {:?} after reconnecting to leader.",
+                    held_keys
+                );
+            }
+        }
+
+        for (client_id, pending_locks) in &updated_locks.pending {
+            if enabled!(Level::DEBUG) {
+                let pending_keys: Vec<_> = pending_locks.iter().map(|(_, key, _, _)| key).collect();
+                debug!(
+                    "Client {client_id} is still waiting for lock on keys {:?} after reconnecting to leader.",
+                    pending_keys
+                );
+            }
+        }
+
+        Ok(updated_locks)
     }
 
     async fn apply_grave_goods_and_last_will(

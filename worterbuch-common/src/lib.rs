@@ -76,6 +76,10 @@ pub type LsSubscriptionReceiver = mpsc::Receiver<(Vec<RegularKeySegment>, Option
 pub type SubscriptionSender = mpsc::Sender<(StateEvent, Option<Trace>)>;
 pub type PSubscriptionSender = mpsc::Sender<(PStateEvent, Option<Trace>)>;
 pub type LsSubscriptionSender = mpsc::Sender<(Vec<RegularKeySegment>, Option<Trace>)>;
+pub type LockAcquiredSender = oneshot::Sender<()>;
+pub type LockAcquiredReceiver = oneshot::Receiver<()>;
+pub type LockLostSender = oneshot::Sender<()>;
+pub type LockLostReceiver = oneshot::Receiver<()>;
 
 pub type Subscription = (SubscriptionReceiver, SubscriptionId);
 pub type PSubscription = (PSubscriptionReceiver, SubscriptionId);
@@ -486,14 +490,14 @@ pub trait WbApi {
         transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
-    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+    ) -> impl Future<Output = WorterbuchResult<LockLostReceiver>> + Send;
 
     fn acquire_lock(
         &self,
         transaction_id: TransactionId,
         key: Key,
         client_id: ClientId,
-    ) -> impl Future<Output = WorterbuchResult<oneshot::Receiver<()>>> + Send;
+    ) -> impl Future<Output = WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)>> + Send;
 
     fn release_lock(
         &self,

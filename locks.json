@@ -1,4 +1,0 @@
-{"lock": {"transactionId": 2, "key": "hello/world"}}
-{"acquireLock": {"transactionId": 3, "key": "hello/world"}}
-{"lock": {"transactionId": 2, "key": "hello/you"}}
-{"acquireLock": {"transactionId": 3, "key": "hello/you"}}

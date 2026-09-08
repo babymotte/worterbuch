@@ -23,15 +23,20 @@ mod v2;
 
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
+use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    ClientId, WbApi,
+    ClientId, LockAcquiredReceiver, LockLostReceiver, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
-    protocol::v1::{Ack, ClientMessage, ProtocolVersionSegment, ServerMessage},
+    protocol::v1::{
+        Ack, ClientMessage, Err, ErrorCode, ProtocolVersionSegment, ServerMessage, TransactionId,
+    },
 };
+
+pub type ServerMessageBroadcaster = mpsc::Sender<ServerMessage>;
 
 enum ProtocolHandler {
     V0(V0),
@@ -47,7 +52,7 @@ pub struct Proto {
 impl Proto {
     pub fn new(
         client_id: ClientId,
-        tx: mpsc::Sender<ServerMessage>,
+        tx: ServerMessageBroadcaster,
         auth_required: bool,
         config: Config,
         worterbuch: CloneableWbApi,
@@ -170,4 +175,44 @@ impl Proto {
     fn tx(&self) -> &mpsc::Sender<ServerMessage> {
         &self.latest.v1.v0.tx
     }
+}
+
+pub async fn forward_lock_events(
+    client: ServerMessageBroadcaster,
+    transaction_id: TransactionId,
+    acquired_rx: LockAcquiredReceiver,
+    lost_rx: LockLostReceiver,
+) {
+    debug!("Receiving lock confirmation for transaction {transaction_id:?} …");
+    if !acquired_rx.await.is_ok() {
+        debug!("Lock acquisition for transaction {transaction_id:?} failed.");
+        return;
+    }
+
+    debug!("Lock confirmation for transaction {transaction_id:?} received.");
+    if client
+        .send(ServerMessage::Ack(Ack { transaction_id }))
+        .await
+        .is_err()
+    {
+        // client has apparently already disconnected
+        return;
+    }
+
+    debug!("Receiving lock lost message for transaction {transaction_id:?} …");
+    if !lost_rx.await.is_ok() {
+        debug!(
+            "Did not receive a lock lost message for transaction id {transaction_id:?} before lock was released."
+        );
+        return;
+    }
+
+    debug!("Lock lost message for transaction {transaction_id:?} received.");
+    let _ = client
+        .send(ServerMessage::Err(Err {
+            transaction_id,
+            error_code: ErrorCode::LockLost,
+            metadata: json!("Lock lost").to_string(),
+        }))
+        .await;
 }
