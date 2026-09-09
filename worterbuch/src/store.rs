@@ -1165,7 +1165,7 @@ impl Store {
         if let Some(paths) = self.locked_keys.remove(&client_id) {
             let mut out = vec![];
             for path in paths {
-                if let Some((client_id, lock_lost_txs)) = self.unlock(client_id, &path).ok() {
+                if let Ok((client_id, lock_lost_txs)) = self.unlock(client_id, &path) {
                     out.push((path.join("/"), client_id, lock_lost_txs));
                 }
             }

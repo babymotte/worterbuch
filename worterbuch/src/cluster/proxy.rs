@@ -332,6 +332,7 @@ async fn run_with_leader(
         )
         .await?;
 
+    // TODO implement pending requests
     let pending_requests = LeaderConnection::new(
         subsys,
         proxy_request_tx,
@@ -907,7 +908,7 @@ impl<'a> LeaderConnection<'a> {
 
                         let e = e.take();
                         debug_assert!(e.is_some(), "multiple interests registered for same error");
-                        if let Some(_) = e {
+                        if e.is_some() {
                             tx.send(()).ok();
                         }
                     }

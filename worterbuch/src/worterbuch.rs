@@ -1959,9 +1959,7 @@ impl Worterbuch {
                     .expect(
                         "we know the key is valid because it has to match the requested pattern",
                     )
-                    .parse::<ClientId>()
-                    .ok()
-                    .expect("invalid client ID");
+                    .parse::<ClientId>().expect("invalid client ID");
                 if let Ok(keys) = serde_json::from_value::<Vec<String>>(value) {
                     ggs.insert(client_id, keys);
                 }
@@ -1990,9 +1988,7 @@ impl Worterbuch {
                     .expect(
                         "we know the key is valid because it has to match the requested pattern",
                     )
-                    .parse::<ClientId>()
-                    .ok()
-                    .expect("invalid client ID");
+                    .parse::<ClientId>().expect("invalid client ID");
                 if let Ok(kvps) = serde_json::from_value::<Vec<KeyValuePair>>(value) {
                     lws.insert(client_id, kvps);
                 }
