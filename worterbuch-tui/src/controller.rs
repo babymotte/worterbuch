@@ -1,17 +1,38 @@
-use std::{fmt, net::SocketAddr, ops::ControlFlow};
+use crate::tui;
+use std::{fmt, net::SocketAddr};
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
-use totils::while_select;
-use worterbuch_common::{ClientId, error::ConnectionError};
+use worterbuch_common::{
+    ClientId,
+    protocol::v1::{Key, TransactionId, Value},
+};
 
-use crate::tui::Tui;
-
-#[derive(Debug, Clone, Copy)]
+/// Transport protocol used to reach a Wörterbuch server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Tcp,
     Ws,
     Wss,
-    Unix,
+}
+
+impl Protocol {
+    pub const ALL: [Protocol; 3] = [Protocol::Tcp, Protocol::Ws, Protocol::Wss];
+
+    pub fn next(self) -> Self {
+        match self {
+            Protocol::Tcp => Protocol::Ws,
+            Protocol::Ws => Protocol::Wss,
+            Protocol::Wss => Protocol::Tcp,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Protocol::Tcp => Protocol::Wss,
+            Protocol::Ws => Protocol::Tcp,
+            Protocol::Wss => Protocol::Ws,
+        }
+    }
 }
 
 impl fmt::Display for Protocol {
@@ -20,114 +41,179 @@ impl fmt::Display for Protocol {
             Protocol::Tcp => "tcp".fmt(f),
             Protocol::Ws => "ws".fmt(f),
             Protocol::Wss => "wss".fmt(f),
-            Protocol::Unix => "unix".fmt(f),
         }
     }
 }
 
+/// A resolved server address a client is connected to.
 #[derive(Debug, Clone, Copy)]
 pub struct ClientAddress {
     pub protocol: Protocol,
     pub socket: SocketAddr,
 }
 
-#[derive(Debug, Clone)]
-pub struct AppApi {
-    tx: mpsc::Sender<ApiMessage>,
+impl fmt::Display for ClientAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}://{}", self.protocol, self.socket)
+    }
 }
 
-impl AppApi {
+/// Handle the backend uses to push updates into the TUI.
+#[derive(Debug, Clone)]
+pub struct TuiApi {
+    tx: mpsc::Sender<TuiMessage>,
+}
+
+impl TuiApi {
+    /// Spawn the TUI subsystem and return a handle for pushing updates to it,
+    /// together with the receiver over which the backend gets user actions.
     pub fn new(subsys: &SubsystemHandle) -> (Self, mpsc::Receiver<UserAction>) {
-        let (api_tx, api_rx) = mpsc::channel(32);
-        let (client_address_tx, client_address_rx) = mpsc::channel(32);
+        let (msg_tx, msg_rx) = mpsc::channel(256);
+        let (action_tx, action_rx) = mpsc::channel(256);
 
-        subsys.spawn("backend", |s| {
-            AppActor::new(s, api_rx, client_address_tx).run()
-        });
+        subsys.spawn("tui", move |s| tui::run(s, msg_rx, action_tx));
 
-        (Self { tx: api_tx }, client_address_rx)
+        (Self { tx: msg_tx }, action_rx)
     }
 
-    pub async fn connection_failed(&self, address: ClientAddress, e: ConnectionError) {
-        self.tx
-            .send(ApiMessage::ConnectionFailed(address, e))
-            .await
-            .ok();
+    async fn send(&self, msg: TuiMessage) {
+        self.tx.send(msg).await.ok();
+    }
+
+    pub async fn connection_failed(&self, protocol: Protocol, address: String, error: String) {
+        self.send(TuiMessage::ConnectionFailed {
+            protocol,
+            address,
+            error,
+        })
+        .await;
     }
 
     pub async fn client_added(&self, address: ClientAddress, client_id: ClientId) {
-        self.tx
-            .send(ApiMessage::ClientAdded(address, client_id))
-            .await
-            .ok();
+        self.send(TuiMessage::ClientAdded { address, client_id }).await;
     }
 
     pub async fn client_disconnected(&self, client_id: ClientId) {
-        self.tx
-            .send(ApiMessage::ClientDisconnected(client_id))
-            .await
-            .ok();
+        self.send(TuiMessage::ClientDisconnected { client_id }).await;
+    }
+
+    pub async fn client_reconnected(
+        &self,
+        old_client_id: ClientId,
+        client_id: ClientId,
+        address: ClientAddress,
+    ) {
+        self.send(TuiMessage::ClientReconnected {
+            old_client_id,
+            client_id,
+            address,
+        })
+        .await;
+    }
+
+    pub async fn action_failed(&self, client_id: ClientId, error: String) {
+        self.send(TuiMessage::ActionFailed { client_id, error }).await;
+    }
+
+    pub async fn get_result(&self, client_id: ClientId, key: Key, value: Option<Value>) {
+        self.send(TuiMessage::GetResult {
+            client_id,
+            key,
+            value,
+        })
+        .await;
+    }
+
+    pub async fn set_ok(&self, client_id: ClientId, key: Key) {
+        self.send(TuiMessage::SetOk { client_id, key }).await;
+    }
+
+    pub async fn subscription_started(&self, client_id: ClientId, sub: TransactionId, key: Key) {
+        self.send(TuiMessage::SubscriptionStarted {
+            client_id,
+            sub,
+            key,
+        })
+        .await;
+    }
+
+    pub async fn subscription_event(
+        &self,
+        client_id: ClientId,
+        sub: TransactionId,
+        value: Option<Value>,
+    ) {
+        self.send(TuiMessage::SubscriptionEvent {
+            client_id,
+            sub,
+            value,
+        })
+        .await;
+    }
+
+    pub async fn subscription_stopped(&self, client_id: ClientId, sub: TransactionId) {
+        self.send(TuiMessage::SubscriptionStopped { client_id, sub })
+            .await;
     }
 }
 
-enum ApiMessage {
-    ClientAdded(ClientAddress, ClientId),
-    ConnectionFailed(ClientAddress, ConnectionError),
-    ClientDisconnected(ClientId),
+/// Updates sent from the backend to the TUI.
+#[derive(Debug)]
+pub enum TuiMessage {
+    ClientAdded {
+        address: ClientAddress,
+        client_id: ClientId,
+    },
+    ConnectionFailed {
+        protocol: Protocol,
+        address: String,
+        error: String,
+    },
+    ClientDisconnected {
+        client_id: ClientId,
+    },
+    ClientReconnected {
+        old_client_id: ClientId,
+        client_id: ClientId,
+        address: ClientAddress,
+    },
+    ActionFailed {
+        client_id: ClientId,
+        error: String,
+    },
+    GetResult {
+        client_id: ClientId,
+        key: Key,
+        value: Option<Value>,
+    },
+    SetOk {
+        client_id: ClientId,
+        key: Key,
+    },
+    SubscriptionStarted {
+        client_id: ClientId,
+        sub: TransactionId,
+        key: Key,
+    },
+    SubscriptionEvent {
+        client_id: ClientId,
+        sub: TransactionId,
+        value: Option<Value>,
+    },
+    SubscriptionStopped {
+        client_id: ClientId,
+        sub: TransactionId,
+    },
 }
 
+/// Actions the user triggers in the TUI, handled by the backend.
+#[derive(Debug)]
 pub enum UserAction {
-    CreateClient(ClientAddress),
+    CreateClient { protocol: Protocol, address: String },
     CloseClient(ClientId),
-}
-
-struct AppActor {
-    subsys: SubsystemHandle,
-    api_rx: mpsc::Receiver<ApiMessage>,
-    tui: Tui,
-}
-
-impl AppActor {
-    fn new(
-        subsys: SubsystemHandle,
-        api_rx: mpsc::Receiver<ApiMessage>,
-        user_action_tx: mpsc::Sender<UserAction>,
-    ) -> Self {
-        let tui = Tui::new(user_action_tx);
-        Self {
-            subsys,
-            api_rx,
-            tui,
-        }
-    }
-
-    async fn run(mut self) -> miette::Result<()> {
-        while_select! {
-            biased;
-            _ = self.subsys.shutdown_requested() => break,
-            recv = self.api_rx.recv() => self.process_api_message(recv).await,
-        }
-
-        Ok(())
-    }
-
-    async fn process_api_message(&mut self, recv: Option<ApiMessage>) -> ControlFlow<()> {
-        let Some(msg) = recv else {
-            return ControlFlow::Break(());
-        };
-
-        match msg {
-            ApiMessage::ClientAdded(client_address, uuid) => {
-                // TODO add new client view to TUI
-            }
-            ApiMessage::ConnectionFailed(client_address, connection_error) => {
-                // TODO show error message in TUI reporting the failed connection attempt
-            }
-            ApiMessage::ClientDisconnected(uuid) => {
-                // TODO show error message in TUI reporting the closed connection if client view is still open
-            }
-        }
-
-        ControlFlow::Continue(())
-    }
+    Reconnect { client: ClientId },
+    Get { client: ClientId, key: Key },
+    Set { client: ClientId, key: Key, value: String },
+    Subscribe { client: ClientId, key: Key, unique: bool, live_only: bool },
+    Unsubscribe { client: ClientId, sub: TransactionId },
 }

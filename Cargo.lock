@@ -932,6 +932,7 @@ dependencies = [
  "crossterm_winapi",
  "derive_more",
  "document-features",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix 1.1.4",
@@ -6265,8 +6266,11 @@ dependencies = [
 name = "worterbuch-tui"
 version = "1.7.0-alpha.1"
 dependencies = [
+ "crossterm",
+ "futures",
  "miette",
  "ratatui",
+ "serde_json",
  "supports-color",
  "tokio",
  "tosub",
