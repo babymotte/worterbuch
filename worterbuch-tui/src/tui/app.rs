@@ -2,7 +2,8 @@ use crate::{
     controller::{ClientAddress, Protocol, TuiMessage, UserAction},
     tui::input::Input,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::{Position, Rect};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -183,12 +184,29 @@ pub struct Toast {
     created: Instant,
 }
 
+/// Screen rectangles recorded while rendering, so that mouse clicks can be
+/// hit-tested against UI elements.
+#[derive(Default)]
+pub struct Regions {
+    pub tabs: Vec<(usize, Rect)>,
+    pub key: Option<Rect>,
+    pub value: Option<Rect>,
+    pub action: Option<Rect>,
+    pub action_items: Vec<(ActionKind, Rect)>,
+    pub subs: Option<Rect>,
+    pub sub_rows: Vec<(usize, Rect)>,
+    pub dialog_protocol: Option<Rect>,
+    pub dialog_protocol_items: Vec<(Protocol, Rect)>,
+    pub dialog_address: Option<Rect>,
+}
+
 pub struct App {
     pub mode: Mode,
     pub tabs: Vec<ClientTab>,
     pub selected: usize,
     pub toasts: Vec<Toast>,
     pub should_quit: bool,
+    pub regions: Regions,
     actions: mpsc::Sender<UserAction>,
 }
 
@@ -200,6 +218,7 @@ impl App {
             selected: 0,
             toasts: Vec::new(),
             should_quit: false,
+            regions: Regions::default(),
             actions,
         }
     }
@@ -541,6 +560,94 @@ impl App {
         self.send(UserAction::Reconnect { client });
         if let Some(tab) = self.tabs.get_mut(self.selected) {
             tab.push_log(LogKind::Info, "reconnecting…");
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Mouse events
+    // ----------------------------------------------------------------------
+
+    pub fn on_mouse(&mut self, ev: MouseEvent) {
+        if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+        let pos = Position::new(ev.column, ev.row);
+        if matches!(self.mode, Mode::Connect(_)) {
+            self.on_mouse_connect(pos);
+        } else {
+            self.on_mouse_normal(pos);
+        }
+    }
+
+    fn on_mouse_normal(&mut self, pos: Position) {
+        let r = &self.regions;
+
+        if let Some((idx, _)) = r.tabs.iter().find(|(_, rect)| rect.contains(pos)) {
+            let idx = *idx;
+            if idx < self.tabs.len() {
+                self.selected = idx;
+            }
+            return;
+        }
+
+        let hit_key = r.key.is_some_and(|rect| rect.contains(pos));
+        let hit_value = r.value.is_some_and(|rect| rect.contains(pos));
+        let hit_action_item = r
+            .action_items
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))
+            .map(|(action, _)| *action);
+        let hit_action = r.action.is_some_and(|rect| rect.contains(pos));
+        let hit_sub_row = r
+            .sub_rows
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))
+            .map(|(row, _)| *row);
+        let hit_subs = r.subs.is_some_and(|rect| rect.contains(pos));
+
+        let Some(tab) = self.tabs.get_mut(self.selected) else {
+            return;
+        };
+
+        if hit_key {
+            tab.focus = Focus::Key;
+        } else if hit_value {
+            tab.focus = Focus::Value;
+        } else if let Some(action) = hit_action_item {
+            tab.focus = Focus::Action;
+            tab.action = action;
+        } else if hit_action {
+            tab.focus = Focus::Action;
+        } else if let Some(row) = hit_sub_row {
+            tab.focus = Focus::Subs;
+            if row < tab.subscriptions.len() {
+                tab.sub_selected = row;
+            }
+        } else if hit_subs {
+            tab.focus = Focus::Subs;
+        }
+    }
+
+    fn on_mouse_connect(&mut self, pos: Position) {
+        let r = &self.regions;
+        let proto = r
+            .dialog_protocol_items
+            .iter()
+            .find(|(_, rect)| rect.contains(pos))
+            .map(|(proto, _)| *proto);
+        let hit_protocol = r.dialog_protocol.is_some_and(|rect| rect.contains(pos));
+        let hit_address = r.dialog_address.is_some_and(|rect| rect.contains(pos));
+
+        let Mode::Connect(dialog) = &mut self.mode else {
+            return;
+        };
+        if let Some(proto) = proto {
+            dialog.field = ConnectField::Protocol;
+            dialog.protocol = proto;
+        } else if hit_protocol {
+            dialog.field = ConnectField::Protocol;
+        } else if hit_address {
+            dialog.field = ConnectField::Address;
         }
     }
 
