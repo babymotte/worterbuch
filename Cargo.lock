@@ -6267,6 +6267,7 @@ name = "worterbuch-tui"
 version = "1.7.0-alpha.1"
 dependencies = [
  "crossterm",
+ "dotenvy",
  "futures",
  "miette",
  "ratatui",

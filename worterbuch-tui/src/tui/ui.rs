@@ -1,7 +1,5 @@
 use crate::controller::Protocol;
-use crate::tui::app::{
-    ActionKind, App, ClientTab, ConnectField, Focus, LogKind, Mode, Regions, ToastKind,
-};
+use crate::tui::app::{App, ClientTab, ConnectField, Focus, LogKind, Mode, Regions, ToastKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Position, Rect},
@@ -23,40 +21,33 @@ fn draw(frame: &mut Frame, app: &App, regions: &mut Regions) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
             Constraint::Min(0),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(area);
-
-    render_tab_bar(frame, app, chunks[0], regions);
+    let main = chunks[0];
 
     if app.tabs.is_empty() {
-        render_welcome(frame, chunks[1]);
+        render_welcome(frame, main);
     } else if let Some(tab) = app.selected_tab() {
-        render_client(frame, tab, chunks[1], regions);
+        render_client(frame, tab, main, regions);
     }
 
+    render_tab_bar(frame, app, chunks[1], regions);
     render_footer(frame, app, chunks[2]);
 
     if let Mode::Connect(_) = &app.mode {
         render_connect_dialog(frame, app, area, regions);
     }
 
-    render_toasts(frame, app, chunks[1]);
+    render_toasts(frame, app, main);
 }
 
 fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Regions) {
-    if app.tabs.is_empty() {
-        let hint = Line::from(vec![
-            Span::styled(" worterbuch ", Style::new().fg(Color::Black).bg(ACCENT)),
-            Span::raw("  no connections"),
-        ]);
-        frame.render_widget(Paragraph::new(hint), area);
-        return;
-    }
-
     let end = area.x.saturating_add(area.width);
+    let connecting = matches!(app.mode, Mode::Connect(_));
+    let divider = Style::new().fg(Color::DarkGray);
     let mut spans = Vec::new();
     let mut x = area.x;
 
@@ -77,7 +68,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Region
             },
         ));
 
-        let style = if i == app.selected {
+        let style = if i == app.selected && !connecting {
             Style::new().fg(Color::Black).bg(ACCENT).bold()
         } else {
             Style::new().fg(Color::Gray)
@@ -85,10 +76,33 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Region
         spans.push(Span::styled(label, style));
         x = x.saturating_add(w);
 
-        if i + 1 < app.tabs.len() {
-            spans.push(Span::styled("│", Style::new().fg(Color::DarkGray)));
-            x = x.saturating_add(1);
-        }
+        spans.push(Span::styled("│", divider));
+        x = x.saturating_add(1);
+    }
+
+    // "+" tab: opens the new-connection dialog when clicked.
+    if x < end {
+        let label = " + ";
+        let w = label.chars().count() as u16;
+        regions.new_tab = Some(Rect {
+            x,
+            y: area.y,
+            width: w.min(end - x),
+            height: 1,
+        });
+        let style = if connecting {
+            Style::new().fg(Color::Black).bg(ACCENT).bold()
+        } else {
+            Style::new().fg(Color::Green).bold()
+        };
+        spans.push(Span::styled(label, style));
+    }
+
+    if app.tabs.is_empty() {
+        spans.push(Span::styled(
+            "  no connections",
+            Style::new().fg(Color::DarkGray),
+        ));
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -128,49 +142,90 @@ fn render_client(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut R
         rows[1]
     };
 
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
-        .split(area);
-
-    render_form(frame, tab, cols[0], regions);
-    render_log(frame, tab, cols[1]);
-}
-
-fn render_form(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut Regions) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Min(3),
         ])
         .split(area);
 
-    regions.key = Some(rows[0]);
-    regions.value = Some(rows[1]);
-    regions.action = Some(rows[2]);
-    regions.subs = Some(rows[3]);
-
+    // Key row: [ Key input ][ Get ][ Subscribe ]
+    let key_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(10),
+            Constraint::Length(9),
+            Constraint::Length(15),
+        ])
+        .split(rows[0]);
+    regions.key = Some(key_row[0]);
+    regions.get = Some(key_row[1]);
+    regions.subscribe = Some(key_row[2]);
     render_input(
         frame,
-        rows[0],
+        key_row[0],
         "Key",
         tab.key.value(),
         tab.focus == Focus::Key,
         Some(tab.key.cursor()),
     );
+    render_button(frame, key_row[1], "Get", tab.focus == Focus::Get);
+    render_button(
+        frame,
+        key_row[2],
+        "Subscribe",
+        tab.focus == Focus::Subscribe,
+    );
+
+    // Value row: [ Value input ][ Set ]
+    let value_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(10), Constraint::Length(9)])
+        .split(rows[1]);
+    regions.value = Some(value_row[0]);
+    regions.set = Some(value_row[1]);
     render_input(
         frame,
-        rows[1],
+        value_row[0],
         "Value",
         tab.value.value(),
         tab.focus == Focus::Value,
         Some(tab.value.cursor()),
     );
-    render_action_row(frame, tab, rows[2], regions);
-    render_subs(frame, tab, rows[3], regions);
+    render_button(frame, value_row[1], "Set", tab.focus == Focus::Set);
+
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(rows[2]);
+
+    regions.subs = Some(bottom[0]);
+    render_subs(frame, tab, bottom[0], regions);
+    render_log(frame, tab, bottom[1]);
+}
+
+/// A 3-row bordered action button. Enter fires it while focused.
+fn render_button(frame: &mut Frame, area: Rect, label: &str, focused: bool) {
+    let border_style = if focused {
+        Style::new().fg(ACCENT)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+    let label_style = if focused {
+        Style::new().fg(Color::Black).bg(ACCENT).bold()
+    } else {
+        Style::new().fg(Color::Gray)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style);
+    frame.render_widget(
+        Paragraph::new(Line::from(label).centered().style(label_style)).block(block),
+        area,
+    );
 }
 
 fn render_input(
@@ -189,40 +244,6 @@ fn render_input(
         let x = inner.x + (cursor as u16).min(inner.width.saturating_sub(1));
         frame.set_cursor_position(Position::new(x, inner.y));
     }
-}
-
-fn render_action_row(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut Regions) {
-    let focused = tab.focus == Focus::Action;
-    let block = bordered("Action  (Enter to run)", focused);
-    let inner = block.inner(area);
-
-    let mut spans = vec![Span::raw(" ")];
-    let mut x = inner.x.saturating_add(1);
-
-    for action in ActionKind::ALL {
-        let selected = action == tab.action;
-        let style = match (focused, selected) {
-            (true, true) => Style::new().fg(Color::Black).bg(ACCENT).bold(),
-            (false, true) => Style::new().fg(ACCENT).bold(),
-            _ => Style::new().fg(Color::DarkGray),
-        };
-        let text = format!(" {} ", action.label());
-        let w = text.chars().count() as u16;
-        regions.action_items.push((
-            action,
-            Rect {
-                x,
-                y: inner.y,
-                width: w,
-                height: inner.height.max(1),
-            },
-        ));
-        x = x.saturating_add(w + 1);
-        spans.push(Span::styled(text, style));
-        spans.push(Span::raw(" "));
-    }
-
-    frame.render_widget(Paragraph::new(Line::from(spans)).block(block), area);
 }
 
 fn render_subs(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut Regions) {

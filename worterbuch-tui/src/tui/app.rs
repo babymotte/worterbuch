@@ -47,20 +47,26 @@ impl Default for ConnectDialog {
     }
 }
 
+/// A focusable element in a client view. `Get` / `Subscribe` / `Set` are the
+/// inline action buttons; pressing Enter on one fires it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Key,
+    Get,
+    Subscribe,
     Value,
-    Action,
+    Set,
     Subs,
 }
 
 impl Focus {
     fn next(self) -> Self {
         match self {
-            Focus::Key => Focus::Value,
-            Focus::Value => Focus::Action,
-            Focus::Action => Focus::Subs,
+            Focus::Key => Focus::Get,
+            Focus::Get => Focus::Subscribe,
+            Focus::Subscribe => Focus::Value,
+            Focus::Value => Focus::Set,
+            Focus::Set => Focus::Subs,
             Focus::Subs => Focus::Key,
         }
     }
@@ -68,44 +74,11 @@ impl Focus {
     fn prev(self) -> Self {
         match self {
             Focus::Key => Focus::Subs,
-            Focus::Value => Focus::Key,
-            Focus::Action => Focus::Value,
-            Focus::Subs => Focus::Action,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ActionKind {
-    Get,
-    Set,
-    Subscribe,
-}
-
-impl ActionKind {
-    pub const ALL: [ActionKind; 3] = [ActionKind::Get, ActionKind::Set, ActionKind::Subscribe];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ActionKind::Get => "Get",
-            ActionKind::Set => "Set",
-            ActionKind::Subscribe => "Subscribe",
-        }
-    }
-
-    fn next(self) -> Self {
-        match self {
-            ActionKind::Get => ActionKind::Set,
-            ActionKind::Set => ActionKind::Subscribe,
-            ActionKind::Subscribe => ActionKind::Get,
-        }
-    }
-
-    fn prev(self) -> Self {
-        match self {
-            ActionKind::Get => ActionKind::Subscribe,
-            ActionKind::Set => ActionKind::Get,
-            ActionKind::Subscribe => ActionKind::Set,
+            Focus::Get => Focus::Key,
+            Focus::Subscribe => Focus::Get,
+            Focus::Value => Focus::Subscribe,
+            Focus::Set => Focus::Value,
+            Focus::Subs => Focus::Set,
         }
     }
 }
@@ -136,7 +109,6 @@ pub struct ClientTab {
     pub focus: Focus,
     pub key: Input,
     pub value: Input,
-    pub action: ActionKind,
     pub log: VecDeque<LogEntry>,
     pub subscriptions: Vec<Subscription>,
     pub sub_selected: usize,
@@ -151,7 +123,6 @@ impl ClientTab {
             focus: Focus::Key,
             key: Input::default(),
             value: Input::default(),
-            action: ActionKind::Get,
             log: VecDeque::new(),
             subscriptions: Vec::new(),
             sub_selected: 0,
@@ -189,10 +160,12 @@ pub struct Toast {
 #[derive(Default)]
 pub struct Regions {
     pub tabs: Vec<(usize, Rect)>,
+    pub new_tab: Option<Rect>,
     pub key: Option<Rect>,
     pub value: Option<Rect>,
-    pub action: Option<Rect>,
-    pub action_items: Vec<(ActionKind, Rect)>,
+    pub get: Option<Rect>,
+    pub subscribe: Option<Rect>,
+    pub set: Option<Rect>,
     pub subs: Option<Rect>,
     pub sub_rows: Vec<(usize, Rect)>,
     pub dialog_protocol: Option<Rect>,
@@ -464,14 +437,6 @@ impl App {
                 tab.focus = focus.prev();
                 return;
             }
-            KeyCode::Left if focus == Focus::Action => {
-                tab.action = tab.action.prev();
-                return;
-            }
-            KeyCode::Right if focus == Focus::Action => {
-                tab.action = tab.action.next();
-                return;
-            }
             KeyCode::Up if focus == Focus::Subs => {
                 tab.sub_selected = tab.sub_selected.saturating_sub(1);
                 return;
@@ -502,9 +467,13 @@ impl App {
         }
 
         let client = tab.client_id;
-        let action = tab.action;
+        let focus = tab.focus;
         let key = tab.key.value().trim().to_owned();
         let value = tab.value.value().to_owned();
+
+        if matches!(focus, Focus::Subs) {
+            return;
+        }
 
         if key.is_empty() {
             if let Some(tab) = self.tabs.get_mut(self.selected) {
@@ -513,15 +482,18 @@ impl App {
             return;
         }
 
-        match action {
-            ActionKind::Get => self.send(UserAction::Get { client, key }),
-            ActionKind::Set => self.send(UserAction::Set { client, key, value }),
-            ActionKind::Subscribe => self.send(UserAction::Subscribe {
+        // Enter in the Key field runs Get, Enter in the Value field runs Set;
+        // otherwise the focused button decides.
+        match focus {
+            Focus::Key | Focus::Get => self.send(UserAction::Get { client, key }),
+            Focus::Value | Focus::Set => self.send(UserAction::Set { client, key, value }),
+            Focus::Subscribe => self.send(UserAction::Subscribe {
                 client,
                 key,
                 unique: false,
                 live_only: false,
             }),
+            Focus::Subs => {}
         }
     }
 
@@ -582,6 +554,11 @@ impl App {
     fn on_mouse_normal(&mut self, pos: Position) {
         let r = &self.regions;
 
+        if r.new_tab.is_some_and(|rect| rect.contains(pos)) {
+            self.mode = Mode::Connect(ConnectDialog::default());
+            return;
+        }
+
         if let Some((idx, _)) = r.tabs.iter().find(|(_, rect)| rect.contains(pos)) {
             let idx = *idx;
             if idx < self.tabs.len() {
@@ -592,12 +569,9 @@ impl App {
 
         let hit_key = r.key.is_some_and(|rect| rect.contains(pos));
         let hit_value = r.value.is_some_and(|rect| rect.contains(pos));
-        let hit_action_item = r
-            .action_items
-            .iter()
-            .find(|(_, rect)| rect.contains(pos))
-            .map(|(action, _)| *action);
-        let hit_action = r.action.is_some_and(|rect| rect.contains(pos));
+        let hit_get = r.get.is_some_and(|rect| rect.contains(pos));
+        let hit_subscribe = r.subscribe.is_some_and(|rect| rect.contains(pos));
+        let hit_set = r.set.is_some_and(|rect| rect.contains(pos));
         let hit_sub_row = r
             .sub_rows
             .iter()
@@ -609,15 +583,22 @@ impl App {
             return;
         };
 
+        // Clicking an action button focuses it *and* fires it right away;
+        // focusing it via Tab does not fire.
+        let mut fire = false;
         if hit_key {
             tab.focus = Focus::Key;
+        } else if hit_get {
+            tab.focus = Focus::Get;
+            fire = true;
+        } else if hit_subscribe {
+            tab.focus = Focus::Subscribe;
+            fire = true;
         } else if hit_value {
             tab.focus = Focus::Value;
-        } else if let Some(action) = hit_action_item {
-            tab.focus = Focus::Action;
-            tab.action = action;
-        } else if hit_action {
-            tab.focus = Focus::Action;
+        } else if hit_set {
+            tab.focus = Focus::Set;
+            fire = true;
         } else if let Some(row) = hit_sub_row {
             tab.focus = Focus::Subs;
             if row < tab.subscriptions.len() {
@@ -625,6 +606,10 @@ impl App {
             }
         } else if hit_subs {
             tab.focus = Focus::Subs;
+        }
+
+        if fire {
+            self.run_action();
         }
     }
 

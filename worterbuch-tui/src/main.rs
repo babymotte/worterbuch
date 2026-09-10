@@ -29,6 +29,8 @@ fn init_logging() {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> SubsystemResult {
+    dotenvy::dotenv().ok();
+
     init_logging();
 
     tosub::build_default_root("worterbuch-tui")
