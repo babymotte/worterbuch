@@ -153,11 +153,17 @@ impl Config {
         config
     }
 
-    #[instrument]
-    pub fn with_servers(proto: String, servers: Box<[SocketAddr]>) -> Self {
+    pub fn with_servers(
+        proto: String,
+        servers: impl IntoIterator<Item = impl ToSocketAddrs>,
+    ) -> Self {
         let mut config = Config::new();
         config.proto = proto;
-        config.servers = servers;
+        config.servers = servers
+            .into_iter()
+            .flat_map(|it| it.to_socket_addrs())
+            .flatten()
+            .collect();
         config
     }
 }

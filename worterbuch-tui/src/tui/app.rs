@@ -130,7 +130,7 @@ impl ClientTab {
     }
 
     pub fn title(&self) -> String {
-        format!("{}://{}", self.address.protocol, self.address.socket)
+        format!("{}://{}", self.address.protocol, self.address.address)
     }
 
     fn push_log(&mut self, kind: LogKind, text: impl Into<String>) {
@@ -230,7 +230,7 @@ impl App {
     pub fn on_message(&mut self, msg: TuiMessage) {
         match msg {
             TuiMessage::ClientAdded { address, client_id } => {
-                self.tabs.push(ClientTab::new(client_id, address));
+                self.tabs.push(ClientTab::new(client_id, address.clone()));
                 self.selected = self.tabs.len() - 1;
                 self.mode = Mode::Normal;
                 self.toast(ToastKind::Info, format!("Connected to {address}"));

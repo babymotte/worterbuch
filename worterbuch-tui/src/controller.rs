@@ -1,5 +1,5 @@
 use crate::tui;
-use std::{fmt, net::SocketAddr};
+use std::fmt;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use worterbuch_common::{
@@ -46,15 +46,15 @@ impl fmt::Display for Protocol {
 }
 
 /// A resolved server address a client is connected to.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ClientAddress {
     pub protocol: Protocol,
-    pub socket: SocketAddr,
+    pub address: String,
 }
 
 impl fmt::Display for ClientAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}://{}", self.protocol, self.socket)
+        write!(f, "{}://{}", self.protocol, self.address)
     }
 }
 

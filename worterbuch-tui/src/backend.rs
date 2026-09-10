@@ -1,6 +1,6 @@
 use crate::controller::{ClientAddress, Protocol, TuiApi, UserAction};
 use std::{collections::HashMap, ops::ControlFlow};
-use tokio::{net::lookup_host, spawn, sync::mpsc, task::JoinHandle};
+use tokio::{spawn, sync::mpsc, task::JoinHandle};
 use tosub::SubsystemHandle;
 use totils::while_select;
 use worterbuch_client::{Worterbuch, config::Config};
@@ -77,28 +77,14 @@ impl BackendActor {
     }
 
     async fn add_client(&mut self, protocol: Protocol, address: String) {
-        let socket = match lookup_host(&address)
-            .await
-            .ok()
-            .and_then(|mut it| it.next())
-        {
-            Some(socket) => socket,
-            None => {
-                self.tui
-                    .connection_failed(protocol, address, "could not resolve address".to_owned())
-                    .await;
-                return;
-            }
-        };
-
-        let client_address = ClientAddress { protocol, socket };
-        let config = Config::with_servers(protocol.to_string(), Box::new([socket]));
+        let config = Config::with_servers(protocol.to_string(), [&address]);
+        let client_address = ClientAddress { protocol, address };
 
         let (client, on_disconnect) = match worterbuch_client::connect(config).await {
             Ok(it) => it,
             Err(e) => {
                 self.tui
-                    .connection_failed(protocol, address, e.to_string())
+                    .connection_failed(protocol, client_address.address, e.to_string())
                     .await;
                 return;
             }
@@ -116,7 +102,7 @@ impl BackendActor {
             client_id,
             ClientHandle {
                 wb: client,
-                address: client_address,
+                address: client_address.clone(),
                 subscriptions: HashMap::new(),
             },
         );
@@ -134,12 +120,12 @@ impl BackendActor {
         let Some(old) = self.clients.remove(&client_id) else {
             return;
         };
-        let address = old.address;
+        let address = old.address.clone();
         // Drop the old handle first, closing its socket and aborting its
         // subscription tasks before we dial again.
         drop(old);
 
-        let config = Config::with_servers(address.protocol.to_string(), Box::new([address.socket]));
+        let config = Config::with_servers(address.protocol.to_string(), [&address.address]);
         let (client, on_disconnect) = match worterbuch_client::connect(config).await {
             Ok(it) => it,
             Err(e) => {
@@ -160,7 +146,7 @@ impl BackendActor {
             new_client_id,
             ClientHandle {
                 wb: client,
-                address,
+                address: address.clone(),
                 subscriptions: HashMap::new(),
             },
         );
