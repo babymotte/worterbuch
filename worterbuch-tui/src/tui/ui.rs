@@ -22,19 +22,21 @@ fn draw(frame: &mut Frame, app: &App, regions: &mut Regions) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Length(1),
         ])
         .split(area);
+
     let main = chunks[0];
 
+    let selected_tab = app.selected_tab();
     if app.tabs.is_empty() {
         render_welcome(frame, main);
-    } else if let Some(tab) = app.selected_tab() {
+    } else if let Some(tab) = selected_tab {
         render_client(frame, tab, main, regions);
     }
 
-    render_tab_bar(frame, app, chunks[1], regions);
+    render_tab_bar(frame, app, chunks[1], regions, selected_tab);
     render_footer(frame, app, chunks[2]);
 
     if let Mode::Connect(_) = &app.mode {
@@ -44,15 +46,32 @@ fn draw(frame: &mut Frame, app: &App, regions: &mut Regions) {
     render_toasts(frame, app, main);
 }
 
-fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Regions) {
+fn render_tab_bar(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    regions: &mut Regions,
+    selected_tab: Option<&ClientTab>,
+) {
     let end = area.x.saturating_add(area.width);
+
+    // Right-aligned client id of the selected tab. Only shown when the tab bar
+    // is wide enough that it doesn't crowd out the tabs themselves.
+    let id_text = selected_tab
+        .map(|t| t.client_id.to_string())
+        .unwrap_or_default();
+    let id_w = id_text.chars().count() as u16;
+    let show_id = id_w > 0 && area.width > id_w + 16;
+    let reserve = if show_id { id_w + 2 } else { 0 };
+    let tabs_end = end.saturating_sub(reserve).max(area.x);
+
     let connecting = matches!(app.mode, Mode::Connect(_));
     let divider = Style::new().fg(Color::DarkGray);
     let mut spans = Vec::new();
     let mut x = area.x;
 
     for (i, tab) in app.tabs.iter().enumerate() {
-        if x >= end {
+        if x >= tabs_end {
             break;
         }
         let marker = if tab.connected { "" } else { " (offline)" };
@@ -63,7 +82,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Region
             Rect {
                 x,
                 y: area.y,
-                width: w.min(end - x),
+                width: w.min(tabs_end - x),
                 height: 1,
             },
         ));
@@ -81,13 +100,13 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Region
     }
 
     // "+" tab: opens the new-connection dialog when clicked.
-    if x < end {
+    if x < tabs_end {
         let label = " + ";
         let w = label.chars().count() as u16;
         regions.new_tab = Some(Rect {
             x,
             y: area.y,
-            width: w.min(end - x),
+            width: w.min(tabs_end - x),
             height: 1,
         });
         let style = if connecting {
@@ -105,7 +124,27 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect, regions: &mut Region
         ));
     }
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    // Tab strip, clipped so it never overlaps the right-aligned client id.
+    let strip = Rect {
+        x: area.x,
+        y: area.y,
+        width: tabs_end.saturating_sub(area.x),
+        height: 1,
+    };
+    frame.render_widget(Paragraph::new(Line::from(spans)), strip);
+
+    if show_id {
+        let id_area = Rect {
+            x: tabs_end,
+            y: area.y,
+            width: end - tabs_end,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(id_text).right_aligned().fg(Color::Gray)),
+            id_area,
+        );
+    }
 }
 
 fn render_welcome(frame: &mut Frame, area: Rect) {
@@ -333,7 +372,7 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect, regions: &mut
         return;
     };
 
-    let rect = centered(area, 60, 12);
+    let rect = centered(area, 60, 15);
     frame.render_widget(Clear, rect);
 
     let block = Block::default()
@@ -351,7 +390,9 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect, regions: &mut
             Constraint::Length(1),
             Constraint::Length(3),
             Constraint::Length(1),
-            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .margin(1)
         .split(inner);
@@ -392,9 +433,9 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect, regions: &mut
     let addr_focused = dialog.field == ConnectField::Address;
     regions.dialog_address = Some(rows[2]);
     let addr_label = if dialog.protocol.is_unix() {
-        "Address  (socket path)"
+        "Address (/path/to/socket)"
     } else {
-        "Address  (host:port)"
+        "Address (host:port)"
     };
     let addr_block = bordered(addr_label, addr_focused);
     let addr_inner = addr_block.inner(rows[2]);
@@ -408,10 +449,26 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect, regions: &mut
         frame.set_cursor_position(Position::new(x, addr_inner.y));
     }
 
+    // Name input
+    let name_focused = dialog.field == ConnectField::Name;
+    regions.dialog_name = Some(rows[4]);
+    let name_label = "Client Name (optional)";
+    let name_block = bordered(name_label, name_focused);
+    let name_inner = name_block.inner(rows[4]);
+    frame.render_widget(
+        Paragraph::new(dialog.name.value()).block(name_block),
+        rows[4],
+    );
+    if name_focused {
+        let x =
+            name_inner.x + (dialog.name.cursor() as u16).min(name_inner.width.saturating_sub(1));
+        frame.set_cursor_position(Position::new(x, name_inner.y));
+    }
+
     if let Some(err) = &dialog.error {
         frame.render_widget(
             Paragraph::new(Line::from(err.as_str()).fg(Color::Red)).wrap(Wrap { trim: true }),
-            rows[4],
+            rows[6],
         );
     }
 }

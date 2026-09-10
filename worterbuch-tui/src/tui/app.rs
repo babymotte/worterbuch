@@ -27,11 +27,13 @@ pub enum Mode {
 pub enum ConnectField {
     Protocol,
     Address,
+    Name,
 }
 
 pub struct ConnectDialog {
     pub protocol: Protocol,
     pub address: Input,
+    pub name: Input,
     pub field: ConnectField,
     pub error: Option<String>,
 }
@@ -41,6 +43,7 @@ impl Default for ConnectDialog {
         Self {
             protocol: Protocol::Tcp,
             address: Input::default(),
+            name: Input::default(),
             field: ConnectField::Address,
             error: None,
         }
@@ -105,6 +108,7 @@ pub struct Subscription {
 pub struct ClientTab {
     pub client_id: ClientId,
     pub address: ClientAddress,
+    pub name: Option<String>,
     pub connected: bool,
     pub focus: Focus,
     pub key: Input,
@@ -115,10 +119,11 @@ pub struct ClientTab {
 }
 
 impl ClientTab {
-    fn new(client_id: ClientId, address: ClientAddress) -> Self {
+    fn new(client_id: ClientId, address: ClientAddress, name: Option<String>) -> Self {
         Self {
             client_id,
             address,
+            name,
             connected: true,
             focus: Focus::Key,
             key: Input::default(),
@@ -130,7 +135,11 @@ impl ClientTab {
     }
 
     pub fn title(&self) -> String {
-        format!("{}://{}", self.address.protocol, self.address.address)
+        if let Some(name) = self.name.clone() {
+            name
+        } else {
+            self.address.to_string()
+        }
     }
 
     fn push_log(&mut self, kind: LogKind, text: impl Into<String>) {
@@ -161,6 +170,7 @@ pub struct Toast {
 pub struct Regions {
     pub tabs: Vec<(usize, Rect)>,
     pub new_tab: Option<Rect>,
+    pub address: Option<Rect>,
     pub key: Option<Rect>,
     pub value: Option<Rect>,
     pub get: Option<Rect>,
@@ -171,6 +181,7 @@ pub struct Regions {
     pub dialog_protocol: Option<Rect>,
     pub dialog_protocol_items: Vec<(Protocol, Rect)>,
     pub dialog_address: Option<Rect>,
+    pub dialog_name: Option<Rect>,
 }
 
 pub struct App {
@@ -229,8 +240,13 @@ impl App {
 
     pub fn on_message(&mut self, msg: TuiMessage) {
         match msg {
-            TuiMessage::ClientAdded { address, client_id } => {
-                self.tabs.push(ClientTab::new(client_id, address.clone()));
+            TuiMessage::ClientAdded {
+                address,
+                client_id,
+                name,
+            } => {
+                self.tabs
+                    .push(ClientTab::new(client_id, address.clone(), name));
                 self.selected = self.tabs.len() - 1;
                 self.mode = Mode::Normal;
                 self.toast(ToastKind::Info, format!("Connected to {address}"));
@@ -389,7 +405,8 @@ impl App {
             KeyCode::Tab | KeyCode::BackTab => {
                 dialog.field = match dialog.field {
                     ConnectField::Protocol => ConnectField::Address,
-                    ConnectField::Address => ConnectField::Protocol,
+                    ConnectField::Address => ConnectField::Name,
+                    ConnectField::Name => ConnectField::Protocol,
                 };
             }
             KeyCode::Enter => {
@@ -399,7 +416,14 @@ impl App {
                     return;
                 }
                 let protocol = dialog.protocol;
-                self.send(UserAction::CreateClient { protocol, address });
+
+                let name = dialog.name.value().trim().to_owned();
+                let name = if name.is_empty() { None } else { Some(name) };
+                self.send(UserAction::CreateClient {
+                    protocol,
+                    address,
+                    name,
+                });
             }
             KeyCode::Left if dialog.field == ConnectField::Protocol => {
                 dialog.protocol = dialog.protocol.prev();
@@ -409,6 +433,9 @@ impl App {
             }
             _ if dialog.field == ConnectField::Address => {
                 dialog.address.handle_key(key);
+            }
+            _ if dialog.field == ConnectField::Name => {
+                dialog.name.handle_key(key);
             }
             _ => {}
         }
@@ -622,6 +649,7 @@ impl App {
             .map(|(proto, _)| *proto);
         let hit_protocol = r.dialog_protocol.is_some_and(|rect| rect.contains(pos));
         let hit_address = r.dialog_address.is_some_and(|rect| rect.contains(pos));
+        let hit_name = r.dialog_name.is_some_and(|rect| rect.contains(pos));
 
         let Mode::Connect(dialog) = &mut self.mode else {
             return;
@@ -634,6 +662,8 @@ impl App {
             dialog.field = ConnectField::Protocol;
         } else if hit_address {
             dialog.field = ConnectField::Address;
+        } else if hit_name {
+            dialog.field = ConnectField::Name;
         }
     }
 

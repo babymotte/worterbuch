@@ -10,7 +10,7 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 /// therefore opt-in: set `WORTERBUCH_TUI_LOG` to a file path to enable it, and
 /// use `RUST_LOG` to control verbosity.
 fn init_logging() {
-    let Ok(path) = std::env::var("WORTERBUCH_TUI_LOG") else {
+    let Ok(path) = std::env::var("WORTERBUCH_TUI_LOG_FILE") else {
         return;
     };
     let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) else {
@@ -22,7 +22,7 @@ fn init_logging() {
             fmt::layer()
                 .with_ansi(false)
                 .with_writer(file)
-                .with_filter(EnvFilter::from_default_env()),
+                .with_filter(EnvFilter::from_env("WORTERBUCH_LOG")),
         )
         .init();
 }

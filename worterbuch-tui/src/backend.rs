@@ -14,6 +14,7 @@ struct ClientHandle {
     wb: Worterbuch,
     address: ClientAddress,
     subscriptions: HashMap<TransactionId, JoinHandle<()>>,
+    name: Option<String>,
 }
 
 impl Drop for ClientHandle {
@@ -57,9 +58,11 @@ impl BackendActor {
         };
 
         match action {
-            UserAction::CreateClient { protocol, address } => {
-                self.add_client(protocol, address).await
-            }
+            UserAction::CreateClient {
+                protocol,
+                address,
+                name,
+            } => self.add_client(protocol, address, name).await,
             UserAction::CloseClient(client_id) => self.close_client(client_id),
             UserAction::Reconnect { client } => self.reconnect(client).await,
             UserAction::Get { client, key } => self.get(client, key).await,
@@ -76,7 +79,7 @@ impl BackendActor {
         ControlFlow::Continue(())
     }
 
-    async fn add_client(&mut self, protocol: Protocol, address: String) {
+    async fn add_client(&mut self, protocol: Protocol, address: String, name: Option<String>) {
         let config = match build_config(protocol, &address) {
             Some(config) => config,
             None => {
@@ -106,16 +109,21 @@ impl BackendActor {
             tui.client_disconnected(client_id).await;
         });
 
+        if let Some(name) = name.clone() {
+            client.set_client_name(name).await.ok();
+        }
+
         self.clients.insert(
             client_id,
             ClientHandle {
                 wb: client,
                 address: client_address.clone(),
                 subscriptions: HashMap::new(),
+                name: name.clone(),
             },
         );
 
-        self.tui.client_added(client_address, client_id).await;
+        self.tui.client_added(client_address, client_id, name).await;
     }
 
     fn close_client(&mut self, client_id: ClientId) {
@@ -129,6 +137,7 @@ impl BackendActor {
             return;
         };
         let address = old.address.clone();
+        let name = old.name.clone();
         // Drop the old handle first, closing its socket and aborting its
         // subscription tasks before we dial again.
         drop(old);
@@ -147,6 +156,10 @@ impl BackendActor {
             }
         };
 
+        if let Some(name) = name.clone() {
+            client.set_client_name(name).await.ok();
+        }
+
         let new_client_id = client.client_id();
 
         let tui = self.tui.clone();
@@ -161,6 +174,7 @@ impl BackendActor {
                 wb: client,
                 address: address.clone(),
                 subscriptions: HashMap::new(),
+                name,
             },
         );
 

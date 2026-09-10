@@ -99,9 +99,18 @@ impl TuiApi {
         .await;
     }
 
-    pub async fn client_added(&self, address: ClientAddress, client_id: ClientId) {
-        self.send(TuiMessage::ClientAdded { address, client_id })
-            .await;
+    pub async fn client_added(
+        &self,
+        address: ClientAddress,
+        client_id: ClientId,
+        name: Option<String>,
+    ) {
+        self.send(TuiMessage::ClientAdded {
+            address,
+            client_id,
+            name,
+        })
+        .await;
     }
 
     pub async fn client_disconnected(&self, client_id: ClientId) {
@@ -176,6 +185,7 @@ pub enum TuiMessage {
     ClientAdded {
         address: ClientAddress,
         client_id: ClientId,
+        name: Option<String>,
     },
     ConnectionFailed {
         protocol: Protocol,
@@ -225,6 +235,7 @@ pub enum UserAction {
     CreateClient {
         protocol: Protocol,
         address: String,
+        name: Option<String>,
     },
     CloseClient(ClientId),
     Reconnect {
