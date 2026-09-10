@@ -150,6 +150,10 @@ impl TuiApi {
         self.send(TuiMessage::SetOk { client_id, key }).await;
     }
 
+    pub async fn publish_ok(&self, client_id: ClientId, key: Key) {
+        self.send(TuiMessage::PublishOk { client_id, key }).await;
+    }
+
     pub async fn subscription_started(&self, client_id: ClientId, sub: TransactionId, key: Key) {
         self.send(TuiMessage::SubscriptionStarted {
             client_id,
@@ -213,6 +217,10 @@ pub enum TuiMessage {
         client_id: ClientId,
         key: Key,
     },
+    PublishOk {
+        client_id: ClientId,
+        key: Key,
+    },
     SubscriptionStarted {
         client_id: ClientId,
         sub: TransactionId,
@@ -246,6 +254,11 @@ pub enum UserAction {
         key: Key,
     },
     Set {
+        client: ClientId,
+        key: Key,
+        value: String,
+    },
+    Publish {
         client: ClientId,
         key: Key,
         value: String,

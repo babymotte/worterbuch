@@ -218,13 +218,18 @@ fn render_client(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut R
         tab.focus == Focus::Subscribe,
     );
 
-    // Value row: [ Value input ][ Set ]
+    // Value row: [ Value input ][ Set ][ Publish ]
     let value_row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(10), Constraint::Length(9)])
+        .constraints([
+            Constraint::Min(10),
+            Constraint::Length(9),
+            Constraint::Length(13),
+        ])
         .split(rows[1]);
     regions.value = Some(value_row[0]);
     regions.set = Some(value_row[1]);
+    regions.publish = Some(value_row[2]);
     render_input(
         frame,
         value_row[0],
@@ -234,6 +239,12 @@ fn render_client(frame: &mut Frame, tab: &ClientTab, area: Rect, regions: &mut R
         Some(tab.value.cursor()),
     );
     render_button(frame, value_row[1], "Set", tab.focus == Focus::Set);
+    render_button(
+        frame,
+        value_row[2],
+        " Publish ",
+        tab.focus == Focus::Publish,
+    );
 
     let bottom = Layout::default()
         .direction(Direction::Horizontal)

@@ -67,6 +67,7 @@ impl BackendActor {
             UserAction::Reconnect { client } => self.reconnect(client).await,
             UserAction::Get { client, key } => self.get(client, key).await,
             UserAction::Set { client, key, value } => self.set(client, key, value).await,
+            UserAction::Publish { client, key, value } => self.publish(client, key, value).await,
             UserAction::Subscribe {
                 client,
                 key,
@@ -201,6 +202,18 @@ impl BackendActor {
         let value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw));
         match handle.wb.set_generic(key.clone(), value).await {
             Ok(()) => self.tui.set_ok(client_id, key).await,
+            Err(e) => self.tui.action_failed(client_id, e.to_string()).await,
+        }
+    }
+
+    async fn publish(&mut self, client_id: ClientId, key: Key, raw: String) {
+        let Some(handle) = self.clients.get(&client_id) else {
+            return;
+        };
+        // Accept JSON if it parses, otherwise treat the input as a plain string.
+        let value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw));
+        match handle.wb.publish_generic(key.clone(), value).await {
+            Ok(()) => self.tui.publish_ok(client_id, key).await,
             Err(e) => self.tui.action_failed(client_id, e.to_string()).await,
         }
     }

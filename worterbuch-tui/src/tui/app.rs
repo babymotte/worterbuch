@@ -50,8 +50,8 @@ impl Default for ConnectDialog {
     }
 }
 
-/// A focusable element in a client view. `Get` / `Subscribe` / `Set` are the
-/// inline action buttons; pressing Enter on one fires it.
+/// A focusable element in a client view. `Get` / `Subscribe` / `Set` / `Publish`
+/// are the inline action buttons; pressing Enter on one fires it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Key,
@@ -59,6 +59,7 @@ pub enum Focus {
     Subscribe,
     Value,
     Set,
+    Publish,
     Subs,
 }
 
@@ -69,7 +70,8 @@ impl Focus {
             Focus::Get => Focus::Subscribe,
             Focus::Subscribe => Focus::Value,
             Focus::Value => Focus::Set,
-            Focus::Set => Focus::Subs,
+            Focus::Set => Focus::Publish,
+            Focus::Publish => Focus::Subs,
             Focus::Subs => Focus::Key,
         }
     }
@@ -81,7 +83,8 @@ impl Focus {
             Focus::Subscribe => Focus::Get,
             Focus::Value => Focus::Subscribe,
             Focus::Set => Focus::Value,
-            Focus::Subs => Focus::Set,
+            Focus::Publish => Focus::Set,
+            Focus::Subs => Focus::Publish,
         }
     }
 }
@@ -176,6 +179,7 @@ pub struct Regions {
     pub get: Option<Rect>,
     pub subscribe: Option<Rect>,
     pub set: Option<Rect>,
+    pub publish: Option<Rect>,
     pub subs: Option<Rect>,
     pub sub_rows: Vec<(usize, Rect)>,
     pub dialog_protocol: Option<Rect>,
@@ -308,6 +312,11 @@ impl App {
             TuiMessage::SetOk { client_id, key } => {
                 if let Some(tab) = self.tab_mut(client_id) {
                     tab.push_log(LogKind::Ok, format!("set {key}"));
+                }
+            }
+            TuiMessage::PublishOk { client_id, key } => {
+                if let Some(tab) = self.tab_mut(client_id) {
+                    tab.push_log(LogKind::Ok, format!("published {key}"));
                 }
             }
             TuiMessage::SubscriptionStarted {
@@ -514,6 +523,7 @@ impl App {
         match focus {
             Focus::Key | Focus::Get => self.send(UserAction::Get { client, key }),
             Focus::Value | Focus::Set => self.send(UserAction::Set { client, key, value }),
+            Focus::Publish => self.send(UserAction::Publish { client, key, value }),
             Focus::Subscribe => self.send(UserAction::Subscribe {
                 client,
                 key,
@@ -599,6 +609,7 @@ impl App {
         let hit_get = r.get.is_some_and(|rect| rect.contains(pos));
         let hit_subscribe = r.subscribe.is_some_and(|rect| rect.contains(pos));
         let hit_set = r.set.is_some_and(|rect| rect.contains(pos));
+        let hit_publish = r.publish.is_some_and(|rect| rect.contains(pos));
         let hit_sub_row = r
             .sub_rows
             .iter()
@@ -625,6 +636,9 @@ impl App {
             tab.focus = Focus::Value;
         } else if hit_set {
             tab.focus = Focus::Set;
+            fire = true;
+        } else if hit_publish {
+            tab.focus = Focus::Publish;
             fire = true;
         } else if let Some(row) = hit_sub_row {
             tab.focus = Focus::Subs;
