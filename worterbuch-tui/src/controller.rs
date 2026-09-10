@@ -90,11 +90,13 @@ impl TuiApi {
     }
 
     pub async fn client_added(&self, address: ClientAddress, client_id: ClientId) {
-        self.send(TuiMessage::ClientAdded { address, client_id }).await;
+        self.send(TuiMessage::ClientAdded { address, client_id })
+            .await;
     }
 
     pub async fn client_disconnected(&self, client_id: ClientId) {
-        self.send(TuiMessage::ClientDisconnected { client_id }).await;
+        self.send(TuiMessage::ClientDisconnected { client_id })
+            .await;
     }
 
     pub async fn client_reconnected(
@@ -112,7 +114,8 @@ impl TuiApi {
     }
 
     pub async fn action_failed(&self, client_id: ClientId, error: String) {
-        self.send(TuiMessage::ActionFailed { client_id, error }).await;
+        self.send(TuiMessage::ActionFailed { client_id, error })
+            .await;
     }
 
     pub async fn get_result(&self, client_id: ClientId, key: Key, value: Option<Value>) {
@@ -209,11 +212,31 @@ pub enum TuiMessage {
 /// Actions the user triggers in the TUI, handled by the backend.
 #[derive(Debug)]
 pub enum UserAction {
-    CreateClient { protocol: Protocol, address: String },
+    CreateClient {
+        protocol: Protocol,
+        address: String,
+    },
     CloseClient(ClientId),
-    Reconnect { client: ClientId },
-    Get { client: ClientId, key: Key },
-    Set { client: ClientId, key: Key, value: String },
-    Subscribe { client: ClientId, key: Key, unique: bool, live_only: bool },
-    Unsubscribe { client: ClientId, sub: TransactionId },
+    Reconnect {
+        client: ClientId,
+    },
+    Get {
+        client: ClientId,
+        key: Key,
+    },
+    Set {
+        client: ClientId,
+        key: Key,
+        value: String,
+    },
+    Subscribe {
+        client: ClientId,
+        key: Key,
+        unique: bool,
+        live_only: bool,
+    },
+    Unsubscribe {
+        client: ClientId,
+        sub: TransactionId,
+    },
 }

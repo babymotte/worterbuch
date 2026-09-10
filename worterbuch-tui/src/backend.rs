@@ -77,15 +77,15 @@ impl BackendActor {
     }
 
     async fn add_client(&mut self, protocol: Protocol, address: String) {
-        let socket = match lookup_host(&address).await.ok().and_then(|mut it| it.next()) {
+        let socket = match lookup_host(&address)
+            .await
+            .ok()
+            .and_then(|mut it| it.next())
+        {
             Some(socket) => socket,
             None => {
                 self.tui
-                    .connection_failed(
-                        protocol,
-                        address,
-                        "could not resolve address".to_owned(),
-                    )
+                    .connection_failed(protocol, address, "could not resolve address".to_owned())
                     .await;
                 return;
             }
@@ -139,10 +139,7 @@ impl BackendActor {
         // subscription tasks before we dial again.
         drop(old);
 
-        let config = Config::with_servers(
-            address.protocol.to_string(),
-            Box::new([address.socket]),
-        );
+        let config = Config::with_servers(address.protocol.to_string(), Box::new([address.socket]));
         let (client, on_disconnect) = match worterbuch_client::connect(config).await {
             Ok(it) => it,
             Err(e) => {

@@ -1,13 +1,13 @@
-use crate::tui::app::{
-    ActionKind, App, ClientTab, ConnectField, Focus, LogKind, Mode, ToastKind,
-};
 use crate::controller::Protocol;
+use crate::tui::app::{ActionKind, App, ClientTab, ConnectField, Focus, LogKind, Mode, ToastKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap,
+    },
 };
 
 const ACCENT: Color = Color::Cyan;
@@ -238,10 +238,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             "Tab: focus   Enter: run   d: unsubscribe   Ctrl+N: connect   Ctrl+W: close   Alt+←/→: switch   Ctrl+Q: quit"
         }
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(hint).fg(Color::DarkGray)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Line::from(hint).fg(Color::DarkGray)), area);
 }
 
 fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect) {
@@ -299,8 +296,8 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect) {
         rows[2],
     );
     if addr_focused {
-        let x = addr_inner.x
-            + (dialog.address.cursor() as u16).min(addr_inner.width.saturating_sub(1));
+        let x =
+            addr_inner.x + (dialog.address.cursor() as u16).min(addr_inner.width.saturating_sub(1));
         frame.set_cursor_position(Position::new(x, addr_inner.y));
     }
 

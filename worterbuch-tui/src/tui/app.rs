@@ -259,7 +259,10 @@ impl App {
             TuiMessage::ClientDisconnected { client_id } => {
                 if let Some(tab) = self.tab_mut(client_id) {
                     tab.connected = false;
-                    tab.push_log(LogKind::Error, "connection lost — press Ctrl+R to reconnect");
+                    tab.push_log(
+                        LogKind::Error,
+                        "connection lost — press Ctrl+R to reconnect",
+                    );
                     let title = tab.title();
                     self.toast(ToastKind::Error, format!("{title} disconnected"));
                 }
