@@ -225,7 +225,7 @@ async fn serve_loop(
     let supported_protocol_versions = worterbuch.supported_protocol_versions();
     unix_send_tx
         .send(ServerMessage::Welcome(Welcome {
-            client_id: client_id.to_string(),
+            client_id,
             info: ServerInfo::new(
                 VERSION.to_owned(),
                 supported_protocol_versions,

@@ -1,0 +1,37 @@
+[package]
+name = "worterbuch-tui"
+version = "1.7.0-alpha.1"
+edition = "2024"
+authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
+description = "TUI client for Wörterbuch."
+repository = "https://github.com/babymotte/worterbuch"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+keywords = ["message", "broker", "data", "base", "pubsub"]
+categories = ["database", "command-line-utilities"]
+
+[[bin]]
+name = "wbtui"
+path = "src/main.rs"
+
+[dependencies]
+miette.workspace = true
+ratatui = "0.30.2"
+supports-color = { workspace = true }
+tokio.workspace = true
+tosub.workspace = true
+totils = { workspace = true, features = ["while_select"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+worterbuch-client.workspace = true
+worterbuch-common.workspace = true
+
+[lints.rust]
+# unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+enum_glob_use = "deny"
+# pedantic = "deny"
+# nursery = "deny"
+unwrap_used = "deny"

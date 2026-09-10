@@ -63,7 +63,7 @@ async fn forward_loop(
     let spv = api.supported_protocol_versions();
     let version = api.version().to_owned();
     let welcome = Welcome {
-        client_id: INTERNAL_CLIENT_ID.to_string(),
+        client_id: INTERNAL_CLIENT_ID,
         info: ServerInfo::new(version, spv, false),
     };
 

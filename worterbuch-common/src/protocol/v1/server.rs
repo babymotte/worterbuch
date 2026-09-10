@@ -17,9 +17,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::v1::{
-    CasVersion, Key, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern, Trace,
-    TransactionId, Value, Version,
+use crate::{
+    ClientId,
+    protocol::v1::{
+        CasVersion, Key, KeyValuePair, KeyValuePairs, MetaData, ProtocolVersion, RequestPattern,
+        Trace, TransactionId, Value, Version,
+    },
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -60,7 +63,7 @@ impl ServerMessage {
 #[serde(rename_all = "camelCase")]
 pub struct Welcome {
     pub info: ServerInfo,
-    pub client_id: String,
+    pub client_id: ClientId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -234,7 +234,7 @@ impl ClientSocket {
 
 pub struct WorterbuchConnection {
     commands: mpsc::Sender<Command>,
-    client_id: String,
+    client_id: ClientId,
     cancellation_token: CancellationToken,
 }
 
@@ -242,7 +242,7 @@ impl WorterbuchConnection {
     fn new(
         commands: mpsc::Sender<Command>,
         cancellation_token: CancellationToken,
-        client_id: String,
+        client_id: ClientId,
     ) -> Self {
         Self {
             commands,
@@ -1158,8 +1158,8 @@ impl WorterbuchConnection {
         Ok(rx)
     }
 
-    pub fn client_id(&self) -> &str {
-        &self.client_id
+    pub fn client_id(&self) -> ClientId {
+        self.client_id
     }
 }
 
@@ -1355,7 +1355,7 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
     });
 
     Worterbuch(Arc::new(WorterbuchConnection {
-        client_id: "internal".to_owned(),
+        client_id: INTERNAL_CLIENT_ID,
         commands: commands_tx,
         cancellation_token,
     }))
@@ -1993,7 +1993,7 @@ fn connected(
     client_socket: ClientSocket,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
-    client_id: String,
+    client_id: ClientId,
 ) -> Result<Worterbuch, ConnectionError> {
     let cancellation_token = CancellationToken::new();
     let (cmd_tx, cmd_rx) = mpsc::channel(1);

@@ -8,9 +8,12 @@ use std::{
     process::{Child, Command, Stdio},
     time::Duration,
 };
-use worterbuch_common::protocol::v1::{
-    ClientMessage, ErrorCode, Get, Key, KeyValuePair, ServerMessage, State, StateEvent,
-    TransactionId,
+use worterbuch_common::{
+    ClientId,
+    protocol::v1::{
+        ClientMessage, ErrorCode, Get, Key, KeyValuePair, ServerMessage, State, StateEvent,
+        TransactionId,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,7 +60,7 @@ pub struct TestRunner {
 pub struct Client {
     writer: BufWriter<TcpStream>,
     reader: Lines<BufReader<TcpStream>>,
-    id: String,
+    id: ClientId,
 }
 
 pub struct ActiveTestRunner {
@@ -147,7 +150,7 @@ impl ActiveTestRunner {
             id: welcome.client_id,
         };
 
-        let tests = self.materialize_tests(&client.id);
+        let tests = self.materialize_tests(&client.id.to_string());
         (client, tests)
     }
 
