@@ -5,7 +5,8 @@ members = [
     "worterbuch",
     "worterbuch-cluster-orchestrator",
     "worterbuch-cli",
-    "worterbuch-speedtest", "worterbuch-tui",
+    "worterbuch-speedtest",
+    "worterbuch-tui",
 ]
 resolver = "3"
 
@@ -78,7 +79,7 @@ tokio-tungstenite = "0.30.0"
 tokio-tungstenite-wasm = "0.9.0"
 tosub = "1.1.5"
 totils = { version = "1.0.0", features = ["while_select"] }
-tower-http = "0.7.0"
+tower-http = "0.7.1"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = "0.3.20"
