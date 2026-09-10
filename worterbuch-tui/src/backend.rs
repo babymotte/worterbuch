@@ -77,7 +77,15 @@ impl BackendActor {
     }
 
     async fn add_client(&mut self, protocol: Protocol, address: String) {
-        let config = Config::with_servers(protocol.to_string(), [&address]);
+        let config = match build_config(protocol, &address) {
+            Some(config) => config,
+            None => {
+                self.tui
+                    .connection_failed(protocol, address, UNIX_UNSUPPORTED.to_owned())
+                    .await;
+                return;
+            }
+        };
         let client_address = ClientAddress { protocol, address };
 
         let (client, on_disconnect) = match worterbuch_client::connect(config).await {
@@ -125,7 +133,12 @@ impl BackendActor {
         // subscription tasks before we dial again.
         drop(old);
 
-        let config = Config::with_servers(address.protocol.to_string(), [&address.address]);
+        let Some(config) = build_config(address.protocol, &address.address) else {
+            self.tui
+                .action_failed(client_id, UNIX_UNSUPPORTED.to_owned())
+                .await;
+            return;
+        };
         let (client, on_disconnect) = match worterbuch_client::connect(config).await {
             Ok(it) => it,
             Err(e) => {
@@ -219,6 +232,32 @@ impl BackendActor {
         }
         self.tui.subscription_stopped(client_id, sub).await;
     }
+}
+
+const UNIX_UNSUPPORTED: &str = "unix sockets are not supported on this platform";
+
+/// Build a client [`Config`] for the given protocol and address. Returns `None`
+/// only for `unix` on a non-unix platform.
+fn build_config(protocol: Protocol, address: &str) -> Option<Config> {
+    match protocol {
+        Protocol::Tcp | Protocol::Ws | Protocol::Wss => {
+            Some(Config::with_servers(protocol.to_string(), [address]))
+        }
+        Protocol::Unix => unix_config(address),
+    }
+}
+
+#[cfg(target_family = "unix")]
+fn unix_config(path: &str) -> Option<Config> {
+    let mut config = Config::new();
+    config.proto = "unix".to_owned();
+    config.socket_path = Some(std::path::PathBuf::from(path));
+    Some(config)
+}
+
+#[cfg(not(target_family = "unix"))]
+fn unix_config(_path: &str) -> Option<Config> {
+    None
 }
 
 pub async fn start(subsys: SubsystemHandle) -> miette::Result<()> {

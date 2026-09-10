@@ -627,8 +627,9 @@ impl App {
             return;
         };
         if let Some(proto) = proto {
-            dialog.field = ConnectField::Protocol;
+            // Picking a protocol is done; move on to typing the address.
             dialog.protocol = proto;
+            dialog.field = ConnectField::Address;
         } else if hit_protocol {
             dialog.field = ConnectField::Protocol;
         } else if hit_address {

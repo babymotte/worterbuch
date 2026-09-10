@@ -1310,16 +1310,22 @@ pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDi
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let cancellation_token = CancellationToken::new();
     let mut err = None;
-    for addr in &config.servers {
-        info!("Trying to connect to server {addr} …");
-        match try_connect(cancellation_token.clone(), config.clone(), *addr).await {
-            Ok(con) => {
-                info!("Successfully connected to server {addr}");
-                return Ok(con);
-            }
-            Err(e) => {
-                warn!("Could not connect to server {addr}: {e}");
-                err = Some(e);
+    if config.proto == "unix" {
+        let con = try_connect(cancellation_token.clone(), config.clone(), None).await?;
+        info!("Successfully connected to unix socket");
+        return Ok(con);
+    } else {
+        for addr in &config.servers {
+            info!("Trying to connect to server {addr} …");
+            match try_connect(cancellation_token.clone(), config.clone(), Some(*addr)).await {
+                Ok(con) => {
+                    info!("Successfully connected to server {addr}");
+                    return Ok(con);
+                }
+                Err(e) => {
+                    warn!("Could not connect to server {addr}: {e}");
+                    err = Some(e);
+                }
             }
         }
     }
@@ -1365,7 +1371,7 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
 async fn try_connect(
     cancellation_token: CancellationToken,
     config: Config,
-    host_addr: SocketAddr,
+    host_addr: Option<SocketAddr>,
 ) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
     let proto = &config.proto;
     let tcp = proto == "tcp";
@@ -1380,7 +1386,12 @@ async fn try_connect(
             .to_string_lossy()
             .to_string()
     } else {
-        format!("{proto}://{host_addr}{path}")
+        format!(
+            "{}://{}{}",
+            proto,
+            host_addr.expect("no host address"),
+            path
+        )
     };
     #[cfg(not(target_family = "unix"))]
     let url = format!("{proto}://{host_addr}{path}");
@@ -1393,7 +1404,13 @@ async fn try_connect(
         #[cfg(not(feature = "tcp"))]
         panic!("tcp not supported, binary was compiled without the tcp feature flag");
         #[cfg(feature = "tcp")]
-        connect_tcp(cancellation_token, host_addr, disco_tx, config).await?
+        connect_tcp(
+            cancellation_token,
+            host_addr.expect("no host address"),
+            disco_tx,
+            config,
+        )
+        .await?
     } else if unix {
         #[cfg(not(all(target_family = "unix", feature = "unix")))]
         panic!(
@@ -1405,7 +1422,7 @@ async fn try_connect(
         #[cfg(not(any(feature = "ws", feature = "wasm")))]
         panic!("websocket not supported, binary was compiled without the ws feature flag");
         #[cfg(any(feature = "ws", feature = "wasm"))]
-        connect_ws(url, host_addr, disco_tx, config).await?
+        connect_ws(url, host_addr.expect("no host address"), disco_tx, config).await?
     };
 
     let disconnected = OnDisconnect { rx: disco_rx };

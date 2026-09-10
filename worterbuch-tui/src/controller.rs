@@ -13,25 +13,34 @@ pub enum Protocol {
     Tcp,
     Ws,
     Wss,
+    Unix,
 }
 
 impl Protocol {
-    pub const ALL: [Protocol; 3] = [Protocol::Tcp, Protocol::Ws, Protocol::Wss];
+    pub const ALL: [Protocol; 4] = [Protocol::Tcp, Protocol::Ws, Protocol::Wss, Protocol::Unix];
 
     pub fn next(self) -> Self {
         match self {
             Protocol::Tcp => Protocol::Ws,
             Protocol::Ws => Protocol::Wss,
-            Protocol::Wss => Protocol::Tcp,
+            Protocol::Wss => Protocol::Unix,
+            Protocol::Unix => Protocol::Tcp,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Protocol::Tcp => Protocol::Wss,
+            Protocol::Tcp => Protocol::Unix,
             Protocol::Ws => Protocol::Tcp,
             Protocol::Wss => Protocol::Ws,
+            Protocol::Unix => Protocol::Wss,
         }
+    }
+
+    /// Whether the address for this protocol is a unix socket path rather than a
+    /// network `host:port`.
+    pub fn is_unix(self) -> bool {
+        matches!(self, Protocol::Unix)
     }
 }
 
@@ -41,6 +50,7 @@ impl fmt::Display for Protocol {
             Protocol::Tcp => "tcp".fmt(f),
             Protocol::Ws => "ws".fmt(f),
             Protocol::Wss => "wss".fmt(f),
+            Protocol::Unix => "unix".fmt(f),
         }
     }
 }

@@ -391,7 +391,12 @@ fn render_connect_dialog(frame: &mut Frame, app: &App, area: Rect, regions: &mut
     // Address input
     let addr_focused = dialog.field == ConnectField::Address;
     regions.dialog_address = Some(rows[2]);
-    let addr_block = bordered("Address  (host:port)", addr_focused);
+    let addr_label = if dialog.protocol.is_unix() {
+        "Address  (socket path)"
+    } else {
+        "Address  (host:port)"
+    };
+    let addr_block = bordered(addr_label, addr_focused);
     let addr_inner = addr_block.inner(rows[2]);
     frame.render_widget(
         Paragraph::new(dialog.address.value()).block(addr_block),
