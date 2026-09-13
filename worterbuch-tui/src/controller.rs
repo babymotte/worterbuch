@@ -2,9 +2,10 @@ use crate::tui;
 use std::fmt;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
+use worterbuch_client::{KeyValuePairs, PStateEvent};
 use worterbuch_common::{
     ClientId,
-    protocol::v1::{Key, TransactionId, Value},
+    protocol::v1::{Key, TransactionId},
 };
 
 /// Transport protocol used to reach a Wörterbuch server.
@@ -147,7 +148,7 @@ impl TuiApi {
             .await;
     }
 
-    pub async fn get_result(&self, client_id: ClientId, key: Key, value: Option<Value>) {
+    pub async fn get_result(&self, client_id: ClientId, key: Key, value: KeyValuePairs) {
         self.send(TuiMessage::GetResult {
             client_id,
             key,
@@ -177,7 +178,7 @@ impl TuiApi {
         &self,
         client_id: ClientId,
         sub: TransactionId,
-        value: Option<Value>,
+        value: PStateEvent,
     ) {
         self.send(TuiMessage::SubscriptionEvent {
             client_id,
@@ -221,7 +222,7 @@ pub enum TuiMessage {
     GetResult {
         client_id: ClientId,
         key: Key,
-        value: Option<Value>,
+        value: KeyValuePairs,
     },
     SetOk {
         client_id: ClientId,
@@ -239,7 +240,7 @@ pub enum TuiMessage {
     SubscriptionEvent {
         client_id: ClientId,
         sub: TransactionId,
-        value: Option<Value>,
+        value: PStateEvent,
     },
     SubscriptionStopped {
         client_id: ClientId,

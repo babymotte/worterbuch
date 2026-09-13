@@ -1,5 +1,5 @@
 use crate::controller::{ClientAddress, Protocol, TuiApi, UserAction};
-use std::{collections::HashMap, ops::ControlFlow};
+use std::{collections::HashMap, ops::ControlFlow, time::Duration};
 use tokio::{spawn, sync::mpsc, task::JoinHandle};
 use tosub::SubsystemHandle;
 use totils::while_select;
@@ -188,7 +188,7 @@ impl BackendActor {
         let Some(handle) = self.clients.get(&client_id) else {
             return;
         };
-        match handle.wb.get_generic(key.clone()).await {
+        match handle.wb.pget_generic(key.clone()).await {
             Ok(value) => self.tui.get_result(client_id, key, value).await,
             Err(e) => self.tui.action_failed(client_id, e.to_string()).await,
         }
@@ -225,7 +225,13 @@ impl BackendActor {
 
         let (mut events, tid) = match handle
             .wb
-            .subscribe_generic(key.clone(), unique, live_only, false)
+            .psubscribe_generic(
+                key.clone(),
+                unique,
+                live_only,
+                false,
+                Some(Duration::from_millis(100)),
+            )
             .await
         {
             Ok(it) => it,

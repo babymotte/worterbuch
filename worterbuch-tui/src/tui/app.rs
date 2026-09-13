@@ -9,10 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
-use worterbuch_common::{
-    ClientId,
-    protocol::v1::{TransactionId, Value},
-};
+use worterbuch_client::PStateEvent;
+use worterbuch_common::{ClientId, protocol::v1::TransactionId};
 
 const MAX_LOG_LINES: usize = 500;
 const TOAST_TTL: Duration = Duration::from_secs(5);
@@ -173,7 +171,6 @@ pub struct Toast {
 pub struct Regions {
     pub tabs: Vec<(usize, Rect)>,
     pub new_tab: Option<Rect>,
-    pub address: Option<Rect>,
     pub key: Option<Rect>,
     pub value: Option<Rect>,
     pub get: Option<Rect>,
@@ -306,7 +303,12 @@ impl App {
                 value,
             } => {
                 if let Some(tab) = self.tab_mut(client_id) {
-                    tab.push_log(LogKind::Result, format!("{key} = {}", render_value(&value)));
+                    for kvp in value {
+                        tab.push_log(
+                            LogKind::Result,
+                            format!("{key} -> {} = {}", kvp.key, kvp.value),
+                        );
+                    }
                 }
             }
             TuiMessage::SetOk { client_id, key } => {
@@ -344,7 +346,24 @@ impl App {
                         .find(|s| s.id == sub)
                         .map(|s| s.key.clone())
                         .unwrap_or_else(|| format!("#{sub}"));
-                    tab.push_log(LogKind::Event, format!("{key} -> {}", render_value(&value)));
+                    match value {
+                        PStateEvent::KeyValuePairs(kvps) => {
+                            for kvp in kvps {
+                                tab.push_log(
+                                    LogKind::Event,
+                                    format!("{key} -> {} = {}", kvp.key, kvp.value),
+                                );
+                            }
+                        }
+                        PStateEvent::Deleted(kvps) => {
+                            for kvp in kvps {
+                                tab.push_log(
+                                    LogKind::Event,
+                                    format!("{key} -> {} = <deleted>", kvp.key),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             TuiMessage::SubscriptionStopped { client_id, sub } => {
@@ -691,13 +710,5 @@ impl App {
         if !self.tabs.is_empty() {
             self.selected = (self.selected + self.tabs.len() - 1) % self.tabs.len();
         }
-    }
-}
-
-fn render_value(value: &Option<Value>) -> String {
-    match value {
-        None => "<none>".to_owned(),
-        Some(Value::String(s)) => s.clone(),
-        Some(v) => v.to_string(),
     }
 }
