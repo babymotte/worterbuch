@@ -61,8 +61,10 @@ opentelemetry-otlp = { workspace = true, features = [
 ], optional = true }
 opentelemetry-resource-detectors = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
+quinn = { workspace = true }
 redb = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

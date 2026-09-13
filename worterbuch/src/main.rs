@@ -18,11 +18,12 @@
  */
 
 use clap::Parser;
-use miette::{IntoDiagnostic, Result};
 use std::env;
+use tosub::IntoSubsystemResult;
+use tosub::SubsystemResult;
 use worterbuch::{Args, Config, run_worterbuch};
 
-fn main() -> Result<()> {
+fn main() -> SubsystemResult {
     if env::var("WORTERBUCH_SINGLE_THREADED")
         .map(|v| v.to_ascii_lowercase())
         .as_deref()
@@ -34,36 +35,36 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_single_threaded() -> Result<()> {
+fn run_single_threaded() -> SubsystemResult {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .into_diagnostic()?
-        .block_on(start())?;
-    Ok(())
+        .into_subsystem_result("Failed to build single-threaded runtime")?
+        .block_on(start())
 }
 
-fn run_multi_threaded() -> Result<()> {
+fn run_multi_threaded() -> SubsystemResult {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .into_diagnostic()?
-        .block_on(start())?;
-    Ok(())
+        .into_subsystem_result("Failed to build multi-threaded runtime")?
+        .block_on(start())
 }
 
-async fn start() -> Result<()> {
+async fn start() -> SubsystemResult {
     dotenvy::dotenv().ok();
 
     let args = Args::parse();
 
-    let config = Config::new(Some(args.clone())).await?;
+    let config = Config::new(Some(args.clone()))
+        .await
+        .into_subsystem_result("Failed to create config")?;
 
     #[cfg(feature = "telemetry")]
-    let shutdown_telemetry = {
+    let _telemetry_drop_guard = {
         use worterbuch::{Commands, telemetry};
 
-        let hostname = hostname::get().into_diagnostic()?;
+        let hostname = hostname::get().into_subsystem_result("Failed to get hostname")?;
         let cluster_role = match args.command {
             Some(Commands::Leader { .. }) => Some("leader".to_owned()),
             Some(Commands::Follower { .. }) => Some("follower".to_owned()),
@@ -75,19 +76,15 @@ async fn start() -> Result<()> {
                 .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
             cluster_role,
         )
-        .await?;
-        move || drop(drop_guard)
+        .await
+        .into_subsystem_result("telemetry initialization failed")?;
+        drop_guard
     };
 
     #[cfg(not(feature = "telemetry"))]
-    let shutdown_telemetry = {
+    {
         use worterbuch::logging;
-
         logging::init()?;
-
-        move || {
-            // TODO shutdown logging correctly
-        }
     };
 
     let cfg = config.clone();
@@ -101,9 +98,5 @@ async fn start() -> Result<()> {
 
     root_builder
         .start(async |s| run_worterbuch(s, config).await)
-        .await?;
-
-    shutdown_telemetry();
-
-    Ok(())
+        .await
 }

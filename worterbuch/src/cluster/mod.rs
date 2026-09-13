@@ -327,4 +327,10 @@ async fn shutdown_servers(servers: Servers) {
         it.request_local_shutdown();
         it.join().await;
     }
+
+    if let Some(it) = servers.quic_server {
+        info!("Shutting down QUIC server …");
+        it.request_local_shutdown();
+        it.join().await;
+    }
 }

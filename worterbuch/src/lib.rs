@@ -101,6 +101,7 @@ struct Servers {
     web_server: Option<SubsystemHandle>,
     tcp_server: Option<SubsystemHandle>,
     unix_socket: Option<SubsystemHandle>,
+    quic_server: Option<SubsystemHandle>,
 }
 
 pub async fn spawn_worterbuch(
@@ -142,6 +143,7 @@ async fn do_run_worterbuch(
     let web_server = web_server(&api, &subsys, &config);
     let tcp_server = tcp_server(&api, &subsys, &config);
     let unix_socket = unix_socket(&api, &subsys, &config);
+    let quic_server = quic_server(&api, &subsys, &config);
 
     if config.role.provide_server_metadata() {
         server_metadata(api.named("server-metadata"), &mut worterbuch, &subsys).await?;
@@ -158,6 +160,7 @@ async fn do_run_worterbuch(
                     web_server,
                     tcp_server,
                     unix_socket,
+                    quic_server,
                 },
             )
             .await?;
@@ -173,6 +176,7 @@ async fn do_run_worterbuch(
                     web_server,
                     tcp_server,
                     unix_socket,
+                    quic_server,
                 },
                 sync_port,
             )
@@ -191,6 +195,7 @@ async fn do_run_worterbuch(
                     web_server,
                     tcp_server,
                     unix_socket,
+                    quic_server,
                 },
                 leader_addresses,
             )
@@ -309,6 +314,33 @@ fn unix_socket(
 
     #[cfg(not(target_family = "unix"))]
     None
+}
+
+fn quic_server(
+    api: &CloneableWbApi,
+    subsys: &SubsystemHandle,
+    config: &Config,
+) -> Option<SubsystemHandle> {
+    if config.role.accept_client_connections()
+        && let Some(QuicEndpoint {
+            bind_addr,
+            port,
+            cert_path,
+            key_path,
+        }) = &config.quic_endpoint
+        && !config.quic_disabled
+    {
+        let sapi = api.for_interface("server/quic", Interface::Protocol(Protocol::QUIC));
+        let bind_addr = bind_addr.to_owned();
+        let port = port.to_owned();
+        let cert_path = cert_path.clone();
+        let key_path = key_path.clone();
+        Some(subsys.spawn("quicserver", async move |subsys| {
+            server::quic::start(sapi, bind_addr, port, cert_path, key_path, subsys).await
+        }))
+    } else {
+        None
+    }
 }
 
 async fn server_metadata(

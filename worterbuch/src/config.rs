@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     env,
-    net::{IpAddr, TcpListener},
+    net::{IpAddr, SocketAddr, TcpListener},
     path::PathBuf,
     str::FromStr,
     time::Duration,
@@ -99,6 +99,14 @@ pub struct UnixEndpoint {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QuicEndpoint {
+    pub bind_addr: IpAddr,
+    pub port: u16,
+    pub cert_path: PathBuf,
+    pub key_path: PathBuf,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub enum ClusterRole {
     #[default]
@@ -145,6 +153,7 @@ pub struct Config {
     pub tcp_endpoint: Option<Endpoint>,
     #[cfg(target_family = "unix")]
     pub unix_endpoint: Option<UnixEndpoint>,
+    pub quic_endpoint: Option<QuicEndpoint>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub persistence_mode: PersistenceMode,
@@ -168,6 +177,7 @@ pub struct Config {
     pub tcp_disabled: bool,
     #[cfg(target_family = "unix")]
     pub unix_disabled: bool,
+    pub quic_disabled: bool,
     pub exit_on_stdin_close: bool,
     pub license_file: Option<PathBuf>,
     pub initial_sync_timeout: Option<Duration>,
@@ -222,6 +232,34 @@ impl Config {
             } else {
                 self.unix_endpoint = Some(UnixEndpoint { path: val.into() });
             }
+        }
+
+        let quic_cert_path = env::var(prefix.to_owned() + "_QUIC_CERT_PATH").ok();
+        let quic_key_path = env::var(prefix.to_owned() + "_QUIC_KEY_PATH").ok();
+        if let (Some(cert_path), Some(key_path)) = (quic_cert_path, quic_key_path) {
+            if let Some(ep) = &mut self.quic_endpoint {
+                ep.cert_path = cert_path.into();
+                ep.key_path = key_path.into();
+            } else {
+                self.quic_endpoint = Some(QuicEndpoint {
+                    bind_addr: [127, 0, 0, 1].into(),
+                    port: 8082,
+                    cert_path: cert_path.into(),
+                    key_path: key_path.into(),
+                });
+            }
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_QUIC_SERVER_PORT")
+            && let Some(ep) = &mut self.quic_endpoint
+        {
+            ep.port = val.parse().to_port()?;
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_QUIC_BIND_ADDRESS")
+            && let Some(ep) = &mut self.quic_endpoint
+        {
+            ep.bind_addr = val.parse()?;
         }
 
         if matches!(
@@ -328,6 +366,12 @@ impl Config {
             self.unix_disabled = disabled == "true" || disabled == "1";
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_DISABLE_QUIC") {
+            let disabled = val.to_lowercase();
+            let disabled = disabled.trim();
+            self.quic_disabled = disabled == "true" || disabled == "1";
+        }
+
         if let Ok(val) = env::var(prefix.to_owned() + "_EXIT_ON_STDIN_CLOSE") {
             let enabled = val.to_lowercase();
             let enabled = enabled.trim();
@@ -369,6 +413,7 @@ impl Config {
             }),
             #[cfg(target_family = "unix")]
             unix_endpoint: None,
+            quic_endpoint: None,
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             persistence_mode: PersistenceMode::Json,
@@ -392,6 +437,7 @@ impl Config {
             tcp_disabled: false,
             #[cfg(target_family = "unix")]
             unix_disabled: false,
+            quic_disabled: false,
             exit_on_stdin_close: false,
             license_file: None,
             initial_sync_timeout: None,
@@ -461,6 +507,7 @@ impl Config {
 enum EndpointAddress {
     Tcp { ip: IpAddr, port: u16 },
     Ws { ip: IpAddr, port: u16 },
+    Quic { ip: IpAddr, port: u16 },
 }
 
 pub fn print_endpoint(listener: &TcpListener, tcp: bool) -> Result<(), miette::Error> {
@@ -475,6 +522,16 @@ pub fn print_endpoint(listener: &TcpListener, tcp: bool) -> Result<(), miette::E
             ip: addr.ip(),
             port: addr.port(),
         }
+    };
+    let json = json!(addr);
+    println!("{json}");
+    Ok(())
+}
+
+pub fn print_quic_endpoint(addr: SocketAddr) -> Result<(), miette::Error> {
+    let addr = EndpointAddress::Quic {
+        ip: addr.ip(),
+        port: addr.port(),
     };
     let json = json!(addr);
     println!("{json}");

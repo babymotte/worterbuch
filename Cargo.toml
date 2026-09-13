@@ -51,11 +51,13 @@ opentelemetry-otlp = "0.32.0"
 opentelemetry-resource-detectors = "0.12.0"
 opentelemetry-semantic-conventions = "0.32.1"
 pprof_util = { version = "0.8.0", features = ["flamegraph"] }
+quinn = "0.11.11"
 rand = "0.10.2"
 random_word = { version = "0.5.0", features = ["en"] }
 redb = "4.2.0"
 regex = "1.13.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+rustls-pemfile = "2.2.0"
 schemars = "1.2.2"
 serde = "1.0.229"
 serde_json = "1.0.151"
@@ -77,7 +79,7 @@ tokio-process-terminate = "0.3.2"
 tokio-stream = "0.1.19"
 tokio-tungstenite = "0.30.0"
 tokio-tungstenite-wasm = "0.9.0"
-tosub = "1.1.5"
+tosub = "1.1.6"
 totils = { version = "1.0.0", features = ["while_select"] }
 tower-http = "0.7.1"
 tracing = "0.1.41"

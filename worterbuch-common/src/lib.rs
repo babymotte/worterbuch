@@ -240,6 +240,7 @@ pub enum Protocol {
     WS,
     HTTP,
     UNIX,
+    QUIC,
     Proxied(Box<Protocol>),
 }
 
