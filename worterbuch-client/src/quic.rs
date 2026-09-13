@@ -153,7 +153,7 @@ pub(crate) fn build_client_config(config: &Config) -> ConnectionResult<quinn::Cl
 
         let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
             .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
-        return Ok(quinn::ClientConfig::new(Arc::new(quic_crypto)));
+        return Ok(client_config_with_keepalive(quic_crypto));
     }
 
     if let Some(ca_cert) = &config.quic_ca_cert {
@@ -177,7 +177,7 @@ pub(crate) fn build_client_config(config: &Config) -> ConnectionResult<quinn::Cl
 
         let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
             .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
-        return Ok(quinn::ClientConfig::new(Arc::new(quic_crypto)));
+        return Ok(client_config_with_keepalive(quic_crypto));
     }
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -191,7 +191,22 @@ pub(crate) fn build_client_config(config: &Config) -> ConnectionResult<quinn::Cl
 
     let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
         .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
-    Ok(quinn::ClientConfig::new(Arc::new(quic_crypto)))
+    Ok(client_config_with_keepalive(quic_crypto))
+}
+
+/// quinn's default max_idle_timeout is 30s and it never sends keep-alive
+/// packets on its own, so a connection with no application traffic for that
+/// long would otherwise be silently dropped - which is exactly what happens
+/// to a worterbuch connection sitting idle between requests. A periodic PING
+/// well under that timeout keeps it alive.
+fn client_config_with_keepalive(
+    quic_crypto: quinn::crypto::rustls::QuicClientConfig,
+) -> quinn::ClientConfig {
+    let mut config = quinn::ClientConfig::new(Arc::new(quic_crypto));
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
+    config.transport_config(Arc::new(transport_config));
+    config
 }
 
 /// Accepts any server certificate without verification. Only appropriate for

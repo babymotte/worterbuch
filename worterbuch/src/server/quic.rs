@@ -427,7 +427,16 @@ fn load_server_config(cert_path: &Path, key_path: &Path) -> Result<quinn::Server
         .into_diagnostic()
         .context("failed to build QUIC crypto configuration")?;
 
-    Ok(quinn::ServerConfig::with_crypto(Arc::new(quic_crypto)))
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
+    // quinn's default max_idle_timeout is 30s and it never sends keep-alive
+    // packets on its own, so a connection with no application traffic for
+    // that long (e.g. an idle TUI session) would otherwise be silently
+    // dropped. A periodic PING well under that timeout keeps it alive.
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
+    server_config.transport_config(Arc::new(transport_config));
+
+    Ok(server_config)
 }
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
