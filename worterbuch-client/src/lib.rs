@@ -37,6 +37,8 @@ use futures_util::FutureExt;
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use futures_util::{SinkExt, StreamExt};
 use hashbrown::HashMap;
+#[cfg(feature = "quic")]
+use quic::QuicClientSocket;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{self as json};
 use std::{
@@ -48,8 +50,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-#[cfg(feature = "quic")]
-use quic::QuicClientSocket;
 #[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
 #[cfg(feature = "tcp")]
@@ -2187,9 +2187,9 @@ async fn connect_quic(
             msg.push('\n');
             debug!("Sending authorization message: {msg}");
             quic_tx
-        .write_all(msg.as_bytes())
-        .await
-        .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+                .write_all(msg.as_bytes())
+                .await
+                .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
 
             match quic_rx.next_line().await {
                 Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
