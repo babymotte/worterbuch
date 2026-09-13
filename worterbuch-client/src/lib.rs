@@ -21,6 +21,8 @@ pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod local;
+#[cfg(feature = "quic")]
+pub mod quic;
 #[cfg(feature = "tcp")]
 pub mod tcp;
 #[cfg(all(target_family = "unix", feature = "unix"))]
@@ -46,6 +48,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+#[cfg(feature = "quic")]
+use quic::QuicClientSocket;
 #[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
 #[cfg(feature = "tcp")]
@@ -53,7 +57,7 @@ use tokio::net::TcpStream;
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use tokio::net::UnixStream;
 use tokio::sync::watch;
-#[cfg(any(feature = "tcp", feature = "unix"))]
+#[cfg(any(feature = "tcp", feature = "unix", feature = "quic"))]
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     time::sleep,
@@ -67,7 +71,7 @@ use tokio::{
 use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 #[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
-#[cfg(feature = "tcp")]
+#[cfg(any(feature = "tcp", feature = "quic"))]
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
@@ -187,6 +191,8 @@ enum ClientSocket {
     Ws(WsClientSocket),
     #[cfg(all(target_family = "unix", feature = "unix"))]
     Unix(UnixClientSocket),
+    #[cfg(feature = "quic")]
+    Quic(QuicClientSocket),
     Local(LocalClientSocket),
 }
 
@@ -200,6 +206,8 @@ impl ClientSocket {
             ClientSocket::Ws(sock) => sock.send_msg(&msg).await,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.send_msg(msg).await,
+            #[cfg(feature = "quic")]
+            ClientSocket::Quic(sock) => sock.send_msg(msg, wait).await,
             ClientSocket::Local(sock) => sock.send_msg(msg).await,
         }
     }
@@ -213,6 +221,8 @@ impl ClientSocket {
             ClientSocket::Ws(sock) => sock.receive_msg().await,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(sock) => sock.receive_msg().await,
+            #[cfg(feature = "quic")]
+            ClientSocket::Quic(sock) => sock.receive_msg().await,
             ClientSocket::Local(sock) => sock.receive_msg().await,
         }
     }
@@ -226,6 +236,8 @@ impl ClientSocket {
             ClientSocket::Ws(ws_client_socket) => ws_client_socket.close().await?,
             #[cfg(all(target_family = "unix", feature = "unix"))]
             ClientSocket::Unix(unix_client_socket) => unix_client_socket.close().await?,
+            #[cfg(feature = "quic")]
+            ClientSocket::Quic(quic_client_socket) => quic_client_socket.close().await?,
             ClientSocket::Local(unix_client_socket) => unix_client_socket.close().await?,
         }
         Ok(())
@@ -1376,7 +1388,8 @@ async fn try_connect(
     let proto = &config.proto;
     let tcp = proto == "tcp";
     let unix = proto == "unix";
-    let path = if tcp { "" } else { "/ws" };
+    let quic = proto == "quic";
+    let path = if tcp || quic { "" } else { "/ws" };
     #[cfg(target_family = "unix")]
     let url = if unix {
         config
@@ -1418,6 +1431,17 @@ async fn try_connect(
         );
         #[cfg(all(target_family = "unix", feature = "unix"))]
         connect_unix(cancellation_token, url, disco_tx, config).await?
+    } else if quic {
+        #[cfg(not(feature = "quic"))]
+        panic!("quic not supported, binary was compiled without the quic feature flag");
+        #[cfg(feature = "quic")]
+        connect_quic(
+            cancellation_token,
+            host_addr.expect("no host address"),
+            disco_tx,
+            config,
+        )
+        .await?
     } else {
         #[cfg(not(any(feature = "ws", feature = "wasm")))]
         panic!("websocket not supported, binary was compiled without the ws feature flag");
@@ -2002,6 +2026,238 @@ async fn connect_unix(
             .await,
         );
         connected(client_socket, on_disconnect, config, client_id)
+    }
+}
+
+#[cfg(feature = "quic")]
+#[instrument(skip(cancellation_token, config, on_disconnect), err(level = Level::WARN))]
+async fn connect_quic(
+    cancellation_token: CancellationToken,
+    host_addr: SocketAddr,
+    on_disconnect: oneshot::Sender<()>,
+    config: Config,
+) -> Result<Worterbuch, ConnectionError> {
+    let timeout = config.connection_timeout;
+    debug!(
+        "Connecting to server quic://{host_addr} (timeout: {} ms) …",
+        timeout.as_millis()
+    );
+
+    let client_config = quic::build_client_config(&config)?;
+
+    let local_addr: SocketAddr = if host_addr.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    };
+    let endpoint = quinn::Endpoint::client(local_addr)?;
+    let server_name = host_addr.ip().to_string();
+
+    let connection = select! {
+        conn = async {
+            let connecting = endpoint
+                .connect_with(client_config, host_addr, &server_name)
+                .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+            connecting
+                .await
+                .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))
+        } => conn?,
+        _ = sleep(timeout) => {
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for QUIC connection.".to_owned())));
+        },
+    };
+    debug!("Connected to quic://{host_addr}.");
+
+    // worterbuch speaks first over QUIC (it sends a Welcome message
+    // unprompted), and QUIC requires whoever calls open_bi() to write to it
+    // before the peer's accept_bi() can succeed - so it is the *server* that
+    // opens the single bidirectional stream used for the connection, and the
+    // client has to accept it here rather than opening it itself.
+    let (mut quic_tx, quic_rx) = select! {
+        streams = connection.accept_bi() => streams.map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?,
+        _ = sleep(timeout) => {
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for QUIC stream.".to_owned())));
+        },
+    };
+    let mut quic_rx = BufReader::new(quic_rx).lines();
+
+    debug!("Connected to server.");
+
+    let Welcome { client_id, info } = select! {
+        line = quic_rx.next_line() => match line {
+            Ok(None) => {
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before welcome message",
+                ))))
+            }
+            Ok(Some(line)) => {
+                let msg = json::from_str::<ServerMessage>(&line);
+                match msg {
+                    Ok(ServerMessage::Welcome(welcome)) => {
+                        debug!("Welcome message received: {welcome:?}");
+                        welcome
+                    }
+                    Ok(msg) => {
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid welcome message: {msg:?}"),
+                        ))))
+                    }
+                    Err(e) => {
+                        return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error parsing welcome message '{line}': {e}"),
+                        ))))
+                    }
+                }
+            }
+            Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
+        },
+        _ = sleep(timeout) => {
+            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
+        },
+    };
+
+    let proto_version = if let Some(v) = info
+        .supported_protocol_versions
+        .iter()
+        .find(|v| PROTOCOL_VERSION.is_compatible_with_server(v))
+    {
+        v
+    } else {
+        return Err(ConnectionError::WorterbuchError(Box::new(
+            WorterbuchError::ProtocolNegotiationFailed(PROTOCOL_VERSION.major()),
+        )));
+    };
+
+    debug!("Found compatible protocol version {proto_version}.");
+
+    let proto_switch = ProtocolSwitchRequest {
+        version: proto_version.major(),
+    };
+    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
+    msg.push('\n');
+    debug!("Sending protocol switch message: {msg}");
+    quic_tx
+        .write_all(msg.as_bytes())
+        .await
+        .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+
+    match quic_rx.next_line().await {
+        Ok(None) => {
+            return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "connection closed before handshake",
+            ))));
+        }
+        Ok(Some(line)) => match serde_json::from_str(&line) {
+            Ok(ServerMessage::Ack(_)) => {
+                debug!("Protocol switched to v{}.", proto_version.major());
+            }
+            Ok(ServerMessage::Err(e)) => {
+                error!("Protocol switch failed: {e}");
+                return Err(ConnectionError::WorterbuchError(Box::new(
+                    WorterbuchError::ServerResponse(e),
+                )));
+            }
+            Ok(msg) => {
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("server sent invalid protocol switch response: {msg:?}"),
+                ))));
+            }
+            Err(e) => {
+                return Err(ConnectionError::IoError(Box::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("error receiving protocol switch response: {e}"),
+                ))));
+            }
+        },
+        Err(e) => {
+            warn!("Server closed the connection");
+            return Err(ConnectionError::IoError(Box::new(e)));
+        }
+    }
+
+    if info.authorization_required {
+        if let Some(auth_token) = config.auth_token.clone() {
+            let handshake = AuthorizationRequest { auth_token };
+            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
+            msg.push('\n');
+            debug!("Sending authorization message: {msg}");
+            quic_tx
+        .write_all(msg.as_bytes())
+        .await
+        .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+
+            match quic_rx.next_line().await {
+                Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection closed before handshake",
+                )))),
+                Ok(Some(line)) => {
+                    let msg = json::from_str::<ServerMessage>(&line);
+                    match msg {
+                        Ok(ServerMessage::Authorized(_)) => {
+                            debug!("Authorization accepted.");
+                            connected(
+                                ClientSocket::Quic(
+                                    QuicClientSocket::new(
+                                        cancellation_token,
+                                        connection,
+                                        quic_tx,
+                                        quic_rx,
+                                        config.send_timeout,
+                                        config.channel_buffer_size,
+                                    )
+                                    .await,
+                                ),
+                                on_disconnect,
+                                config,
+                                client_id,
+                            )
+                        }
+                        Ok(ServerMessage::Err(e)) => {
+                            error!("Authorization failed: {e}");
+                            Err(ConnectionError::WorterbuchError(Box::new(
+                                WorterbuchError::ServerResponse(e),
+                            )))
+                        }
+                        Ok(msg) => Err(ConnectionError::IoError(Box::new(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("server sent invalid authentication response: {msg:?}"),
+                        )))),
+                        Err(e) => Err(ConnectionError::IoError(Box::new(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("error receiving authorization response: {e}"),
+                        )))),
+                    }
+                }
+                Err(e) => Err(ConnectionError::IoError(Box::new(e))),
+            }
+        } else {
+            Err(ConnectionError::AuthorizationError(Box::new(
+                "Server requires authorization but no auth token was provided.".to_owned(),
+            )))
+        }
+    } else {
+        connected(
+            ClientSocket::Quic(
+                QuicClientSocket::new(
+                    cancellation_token,
+                    connection,
+                    quic_tx,
+                    quic_rx,
+                    config.send_timeout,
+                    config.channel_buffer_size,
+                )
+                .await,
+            ),
+            on_disconnect,
+            config,
+            client_id,
+        )
     }
 }
 

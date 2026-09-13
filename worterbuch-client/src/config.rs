@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#[cfg(target_family = "unix")]
+#[cfg(any(target_family = "unix", feature = "quic"))]
 use std::path::PathBuf;
 use std::{
     env,
@@ -38,6 +38,14 @@ pub struct Config {
     pub channel_buffer_size: usize,
     #[cfg(target_family = "unix")]
     pub socket_path: Option<PathBuf>,
+    /// Verify the QUIC server certificate against this CA/self-signed
+    /// certificate instead of the platform's trust store.
+    #[cfg(feature = "quic")]
+    pub quic_ca_cert: Option<PathBuf>,
+    /// Accept any QUIC server certificate without verification. Only ever
+    /// appropriate for local testing against a self-signed certificate.
+    #[cfg(feature = "quic")]
+    pub quic_insecure: bool,
 }
 
 impl Config {
@@ -56,6 +64,7 @@ impl Config {
         } else if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
             let default_port = match self.proto.to_lowercase().deref() {
                 "ws" | "wss" | "http" | "https" => 8080,
+                "quic" => 8082,
                 _ => 8081,
             };
             let port = if let Ok(val) = env::var("WORTERBUCH_PORT") {
@@ -111,6 +120,17 @@ impl Config {
                 self.socket_path = Some(PathBuf::from(val));
             }
         }
+
+        #[cfg(feature = "quic")]
+        {
+            if let Ok(val) = env::var("WORTERBUCH_QUIC_CA_CERT") {
+                self.quic_ca_cert = Some(PathBuf::from(val));
+            }
+
+            if let Ok(val) = env::var("WORTERBUCH_QUIC_INSECURE") {
+                self.quic_insecure = val.to_lowercase() == "true";
+            }
+        }
     }
 }
 
@@ -139,6 +159,10 @@ impl Default for Config {
             use_backpressure,
             #[cfg(target_family = "unix")]
             socket_path,
+            #[cfg(feature = "quic")]
+            quic_ca_cert: None,
+            #[cfg(feature = "quic")]
+            quic_insecure: false,
         }
     }
 }
