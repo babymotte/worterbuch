@@ -14,26 +14,35 @@ pub enum Protocol {
     Ws,
     Wss,
     Unix,
+    Quic,
 }
 
 impl Protocol {
-    pub const ALL: [Protocol; 4] = [Protocol::Tcp, Protocol::Ws, Protocol::Wss, Protocol::Unix];
+    pub const ALL: [Protocol; 5] = [
+        Protocol::Tcp,
+        Protocol::Ws,
+        Protocol::Wss,
+        Protocol::Unix,
+        Protocol::Quic,
+    ];
 
     pub fn next(self) -> Self {
         match self {
             Protocol::Tcp => Protocol::Ws,
             Protocol::Ws => Protocol::Wss,
             Protocol::Wss => Protocol::Unix,
-            Protocol::Unix => Protocol::Tcp,
+            Protocol::Unix => Protocol::Quic,
+            Protocol::Quic => Protocol::Tcp,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Protocol::Tcp => Protocol::Unix,
+            Protocol::Tcp => Protocol::Quic,
             Protocol::Ws => Protocol::Tcp,
             Protocol::Wss => Protocol::Ws,
             Protocol::Unix => Protocol::Wss,
+            Protocol::Quic => Protocol::Unix,
         }
     }
 
@@ -51,6 +60,7 @@ impl fmt::Display for Protocol {
             Protocol::Ws => "ws".fmt(f),
             Protocol::Wss => "wss".fmt(f),
             Protocol::Unix => "unix".fmt(f),
+            Protocol::Quic => "quic".fmt(f),
         }
     }
 }

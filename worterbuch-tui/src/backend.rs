@@ -270,6 +270,11 @@ fn build_config(protocol: Protocol, address: &str) -> Option<Config> {
         Protocol::Tcp | Protocol::Ws | Protocol::Wss => {
             Some(Config::with_servers(protocol.to_string(), [address]))
         }
+        Protocol::Quic => {
+            let mut config = Config::with_servers(protocol.to_string(), [address]);
+            config.quic_insecure = true;
+            Some(config)
+        }
         Protocol::Unix => unix_config(address),
     }
 }
