@@ -45,7 +45,7 @@ use quinn::{
 };
 use std::{
     io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::ControlFlow,
     path::{Path, PathBuf},
     sync::Arc,
@@ -80,20 +80,67 @@ pub async fn start(
     key_path: PathBuf,
     subsys: SubsystemHandle,
 ) -> Result<()> {
-    let addr = format!("{bind_addr}:{port}");
-
-    info!("Serving QUIC endpoint at {addr}");
-
     let server_config = load_server_config(&cert_path, &key_path)?;
-    let addr: SocketAddr = addr.parse().into_diagnostic()?;
-    let endpoint = Endpoint::server(server_config, addr)
-        .into_diagnostic()
-        .context("failed to create QUIC endpoint")?;
 
+    let mut endpoints = Vec::new();
+    let mut last_error = None;
+    for addr in bind_addrs(bind_addr, port) {
+        match bind_endpoint(server_config.clone(), addr) {
+            Ok(endpoint) => {
+                info!("Serving QUIC endpoint at {addr}");
+                endpoints.push(endpoint);
+            }
+            Err(e) => {
+                warn!("Failed to bind QUIC endpoint to {addr}: {e}");
+                last_error = Some(e);
+            }
+        }
+    }
+    if endpoints.is_empty() {
+        return Err(
+            last_error.unwrap_or_else(|| miette::miette!("failed to bind any QUIC endpoint")),
+        );
+    }
+
+    bind_endpoints_and_run(worterbuch, endpoints, subsys).await
+}
+
+async fn bind_endpoints_and_run(
+    worterbuch: CloneableWbApi,
+    endpoints: Vec<Endpoint>,
+    subsys: SubsystemHandle,
+) -> Result<()> {
     let config = worterbuch.config().to_owned();
     if config.print_endpoints {
-        print_quic_endpoint(endpoint.local_addr().into_diagnostic()?)?;
+        for endpoint in &endpoints {
+            print_quic_endpoint(endpoint.local_addr().into_diagnostic()?)?;
+        }
     }
+
+    // Multiple UDP sockets (one per bound address, see `bind_addrs`) are
+    // funneled into a single incoming-connection queue so the rest of this
+    // function can treat "a QUIC endpoint" as one logical thing regardless of
+    // how many address families it is actually listening on.
+    let (incoming_tx, mut incoming_rx) = mpsc::channel(100);
+    for (i, endpoint) in endpoints.iter().enumerate() {
+        let endpoint = endpoint.clone();
+        let incoming_tx = incoming_tx.clone();
+        subsys.spawn(format!("quic-accept-{i}"), async move |s| {
+            loop {
+                select! {
+                    incoming = endpoint.accept() => match incoming {
+                        Some(incoming) => if incoming_tx.send(incoming).await.is_err() {
+                            break;
+                        },
+                        None => break,
+                    },
+                    _ = s.shutdown_requested() => break,
+                }
+            }
+            Ok::<(), miette::Error>(())
+        });
+    }
+    drop(incoming_tx);
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
@@ -103,7 +150,7 @@ pub async fn start(
         let evt = next_socket_event(
             &subsys,
             &mut conn_closed_rx,
-            &endpoint,
+            &mut incoming_rx,
             waiting_for_free_connections,
         )
         .await;
@@ -160,8 +207,12 @@ pub async fn start(
     }
     debug!("All clients disconnected.");
 
-    endpoint.close(0u32.into(), b"server shutting down");
-    endpoint.wait_idle().await;
+    for endpoint in &endpoints {
+        endpoint.close(0u32.into(), b"server shutting down");
+    }
+    for endpoint in &endpoints {
+        endpoint.wait_idle().await;
+    }
 
     debug!("quicserver subsystem completed.");
 
@@ -171,12 +222,12 @@ pub async fn start(
 async fn next_socket_event(
     subsys: &SubsystemHandle,
     conn_closed_rx: &mut mpsc::Receiver<ClientId>,
-    endpoint: &Endpoint,
+    incoming_rx: &mut mpsc::Receiver<Incoming>,
     waiting_for_free_connections: bool,
 ) -> SocketEvent {
     select! {
         recv = conn_closed_rx.recv() => SocketEvent::Disconnected(recv),
-        incoming = endpoint.accept() => if waiting_for_free_connections {
+        incoming = incoming_rx.recv() => if waiting_for_free_connections {
             // dropping `incoming` here implicitly refuses the connection attempt
             SocketEvent::Suppressed
         } else {
@@ -186,6 +237,31 @@ async fn next_socket_event(
             }
         },
         _ = subsys.shutdown_requested() => SocketEvent::ShutdownRequested,
+    }
+}
+
+/// The addresses to bind a QUIC UDP socket to for the given configured
+/// `bind_addr`. "Loopback" is expanded to *both* the IPv4 and IPv6 loopback
+/// addresses, bound as two separate sockets: unlike the unspecified/wildcard
+/// address, binding to one specific loopback address does not also cover the
+/// other family for free. Defaulting to a single family instead would mean a
+/// client that resolves "localhost" to the family we didn't bind hangs for
+/// its entire connection timeout instead of just connecting, since UDP has no
+/// equivalent of TCP's immediate `ECONNREFUSED` when nothing is listening.
+///
+/// Anything else - a specific non-loopback address, or the wildcard address -
+/// is bound exactly as configured, with no such expansion: only "give me the
+/// loopback" is ambiguous enough between address families to warrant it, and
+/// silently listening on more than what was explicitly configured would be a
+/// security surprise.
+fn bind_addrs(bind_addr: IpAddr, port: u16) -> Vec<SocketAddr> {
+    if bind_addr.is_loopback() {
+        vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port),
+        ]
+    } else {
+        vec![SocketAddr::new(bind_addr, port)]
     }
 }
 
@@ -399,6 +475,52 @@ impl ServeLoop {
         );
         Ok(ControlFlow::Break(()))
     }
+}
+
+/// Binds the QUIC UDP socket and wraps it in an [`Endpoint`].
+///
+/// If `addr` is the unspecified IPv6 address (`::`), the socket is bound with
+/// `IPV6_V6ONLY` explicitly disabled so it also accepts IPv4 traffic
+/// (including IPv4-mapped addresses from dual-stack-aware peers). This
+/// matters because UDP has no equivalent of TCP's immediate `ECONNREFUSED`
+/// when nothing is listening: a client that resolves "localhost" to `::1`
+/// first (as most systems do, per RFC 6724, regardless of `/etc/hosts`
+/// ordering) would otherwise burn its entire connection timeout on a QUIC
+/// handshake attempt that can never get a response, before falling back to
+/// an address that actually works.
+fn bind_endpoint(server_config: quinn::ServerConfig, addr: SocketAddr) -> Result<Endpoint> {
+    let domain = if addr.is_ipv6() {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))
+        .into_diagnostic()
+        .context("failed to create QUIC UDP socket")?;
+    if addr.ip().is_unspecified() && domain == socket2::Domain::IPV6 {
+        // Best-effort: platforms without dual-stack support (or where this
+        // isn't permitted) still get a working, IPv6-only QUIC endpoint.
+        socket.set_only_v6(false).ok();
+    }
+    socket
+        .bind(&addr.into())
+        .into_diagnostic()
+        .with_context(|| format!("failed to bind QUIC UDP socket to {addr}"))?;
+    socket
+        .set_nonblocking(true)
+        .into_diagnostic()
+        .context("failed to configure QUIC UDP socket")?;
+
+    let runtime = quinn::default_runtime()
+        .ok_or_else(|| miette::miette!("no async runtime found for QUIC endpoint"))?;
+    Endpoint::new(
+        quinn::EndpointConfig::default(),
+        Some(server_config),
+        socket.into(),
+        runtime,
+    )
+    .into_diagnostic()
+    .context("failed to create QUIC endpoint")
 }
 
 /// QUIC mandates ALPN protocol negotiation (unlike TLS over TCP, where it is

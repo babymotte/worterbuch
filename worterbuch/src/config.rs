@@ -204,7 +204,10 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_BIND_ADDRESS")
             && let Some(ep) = &mut self.ws_endpoint
         {
-            ep.endpoint.bind_addr = val.parse()?;
+            ep.endpoint.bind_addr = val.parse().map_err(|e| ConfigError::InvalidWsBindAddress {
+                addr: val,
+                source: e,
+            })?;
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS")
@@ -222,7 +225,12 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_BIND_ADDRESS")
             && let Some(ep) = &mut self.tcp_endpoint
         {
-            ep.bind_addr = val.parse()?;
+            ep.bind_addr = val
+                .parse()
+                .map_err(|e| ConfigError::InvalidTcpBindAddress {
+                    addr: val,
+                    source: e,
+                })?;
         }
 
         #[cfg(target_family = "unix")]
@@ -242,6 +250,13 @@ impl Config {
                 ep.key_path = key_path.into();
             } else {
                 self.quic_endpoint = Some(QuicEndpoint {
+                    // Loopback only, matching the tcp/ws endpoint defaults:
+                    // a freshly-configured server should not become reachable
+                    // from other hosts just because a cert/key path was set.
+                    // The QUIC server binds both loopback addresses (not a
+                    // wildcard) for this, so "127.0.0.1" and "localhost"
+                    // (which most systems resolve to "::1" first) both reach
+                    // it - see `bind_addrs` in server/quic.rs.
                     bind_addr: [127, 0, 0, 1].into(),
                     port: 8082,
                     cert_path: cert_path.into(),
@@ -259,7 +274,12 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_QUIC_BIND_ADDRESS")
             && let Some(ep) = &mut self.quic_endpoint
         {
-            ep.bind_addr = val.parse()?;
+            ep.bind_addr = val
+                .parse()
+                .map_err(|e| ConfigError::InvalidQuicBindAddress {
+                    addr: val,
+                    source: e,
+                })?;
         }
 
         if matches!(

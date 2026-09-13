@@ -28,7 +28,7 @@ use jsonwebtoken::Algorithm;
 use miette::Diagnostic;
 #[cfg(feature = "telemetry")]
 use opentelemetry_otlp::ExporterBuildError;
-use std::{fmt, io, net::AddrParseError, num::ParseIntError};
+use std::{fmt, io, num::ParseIntError};
 use thiserror::Error;
 use tokio::sync::{
     broadcast,
@@ -46,8 +46,6 @@ pub enum ConfigError {
     InvalidMultiWildcard(String),
     #[error("invalid port: {0}")]
     InvalidPort(ParseIntError),
-    #[error("invalid address: {0}")]
-    InvalidAddr(AddrParseError),
     #[error("invalid interval: {0}")]
     InvalidInterval(ParseIntError),
     #[error("license file could not be loaded: {0}")]
@@ -65,6 +63,21 @@ pub enum ConfigError {
     ParseError(#[from] serde_json::Error),
     #[error("invalid leader address(es) {1:?}: {0}")]
     InvalidLeaderAddress(io::Error, Vec<String>),
+    #[error("invalid TCP bind address: {addr}: {source}")]
+    InvalidTcpBindAddress {
+        addr: String,
+        source: std::net::AddrParseError,
+    },
+    #[error("invalid WS bind address: {addr}: {source}")]
+    InvalidWsBindAddress {
+        addr: String,
+        source: std::net::AddrParseError,
+    },
+    #[error("invalid QUIC bind address: {addr}: {source}")]
+    InvalidQuicBindAddress {
+        addr: String,
+        source: std::net::AddrParseError,
+    },
 }
 
 pub trait ConfigIntContext<I> {
@@ -78,12 +91,6 @@ impl<I> ConfigIntContext<I> for Result<I, ParseIntError> {
     }
     fn to_interval(self) -> Result<I, ConfigError> {
         self.map_err(ConfigError::InvalidInterval)
-    }
-}
-
-impl From<AddrParseError> for ConfigError {
-    fn from(e: AddrParseError) -> Self {
-        ConfigError::InvalidAddr(e)
     }
 }
 
