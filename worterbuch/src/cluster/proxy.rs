@@ -204,18 +204,34 @@ fn update_leader_addresses(
     new_addresses: Option<String>,
     leader_addresses: &mut Vec<SocketAddr>,
 ) -> bool {
-    if let Some(new_addresses) = new_addresses {
-        if let Ok(addresses) =
-            parse_leader_addresses(&new_addresses.split_whitespace().collect::<Vec<_>>())
-        {
-            *leader_addresses = addresses;
-            info!("Updated leader addresses: {:?}", leader_addresses);
-            return true;
-        } else {
-            error!("Invalid leader addresses: {}", new_addresses);
-        }
+    let Some(new_addresses) = new_addresses else {
+        return false;
+    };
+
+    if new_addresses.trim().is_empty() {
+        return false;
     }
-    false
+
+    let addresses = match serde_json::from_str::<Vec<String>>(&new_addresses) {
+        Ok(it) => it,
+        Err(e) => {
+            error!("Could not parse address array '{}': {}", new_addresses, e);
+            return false;
+        }
+    };
+
+    let addresses = match parse_leader_addresses(&addresses) {
+        Ok(it) => it,
+        Err(_) => {
+            error!("Invalid leader addresses: {}", new_addresses);
+            return false;
+        }
+    };
+
+    *leader_addresses = addresses;
+    info!("Updated leader addresses: {:?}", leader_addresses);
+
+    true
 }
 
 fn parse_leader_addresses<S: AsRef<str> + ToString>(
@@ -289,46 +305,63 @@ async fn run_with_leader(
         )
         .await?;
 
-    let welcome = select! {
-        biased;
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before receiving leader welcome message.");
-            return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
-        },
-        recv = receive_msg(&mut lines, timeout) => {
-            debug!("Received leader message");
-            match recv {
-                Ok(Some(msg)) => {
-                    if let LeaderMessage::Welcome(welcome) = msg {
-                        debug!("Received welcome message from leader: {welcome:?}");
-                        welcome
-                    } else {
-                        warn!("Expected welcome message from leader, but got: {msg:?}");
+    let welcome = loop {
+        select! {
+            biased;
+            _ = subsys.shutdown_requested() => {
+                warn!("Shutdown requested before receiving leader welcome message.");
+                return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
+            },
+            recv = stdin.recv() => {
+                if update_leader_addresses(recv, leader_addresses) {
+                    if !leader_addresses.contains(&leader_address) {
+                        warn!(
+                            "Current leader address {} is no longer in the list of known leader addresses {:?}",
+                            leader_address, leader_addresses
+                        );
+                        return Ok(RunResult {
+                            leader_addresses_updated: true,
+                            initial_connection_successful: false,
+                            pending_requests,
+                        });
+                    }
+                }
+            },
+            recv = receive_msg(&mut lines, timeout) => {
+                debug!("Received leader message");
+                match recv {
+                    Ok(Some(msg)) => {
+                        if let LeaderMessage::Welcome(welcome) = msg {
+                            debug!("Received welcome message from leader: {welcome:?}");
+                            break welcome;
+                        } else {
+                            warn!("Expected welcome message from leader, but got: {msg:?}");
+                            return Ok(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                                pending_requests,
+                            });
+                        }
+                    },
+                    Ok(None) => {
+                        warn!("Leader closed connection before sending welcome message.");
+                        return Ok(RunResult {
+                            leader_addresses_updated: false,
+                            initial_connection_successful: false,
+                            pending_requests,
+                        });
+                    },
+                    Err(e) => {
+                        warn!("Error receiving welcome message from leader: {e}");
                         return Ok(RunResult {
                             leader_addresses_updated: false,
                             initial_connection_successful: false,
                             pending_requests,
                         });
                     }
-                },
-                Ok(None) => {
-                    warn!("Leader closed connection before sending welcome message.");
-                    return Ok(RunResult {
-                        leader_addresses_updated: false,
-                        initial_connection_successful: false,
-                        pending_requests,
-                    });
-                },
-                Err(e) => {
-                    warn!("Error receiving welcome message from leader: {e}");
-                    return Ok(RunResult {
-                        leader_addresses_updated: false,
-                        initial_connection_successful: false,
-                        pending_requests,
-                    });
                 }
-            }
-        },
+            },
+        };
     };
 
     // TODO check version
@@ -348,49 +381,67 @@ async fn run_with_leader(
 
     let mut persistence_interval = config.persistence_interval();
 
-    select! {
-        biased;
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before initial sync completed.");
-            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
-        },
-        recv = receive_msg(&mut lines, timeout) => {
-            debug!("Received leader message");
-            match recv {
-                Ok(Some(msg)) => {
-                    if let LeaderMessage::Init(state) = msg {
-                        debug!("Received initial sync message from leader: {state:?}");
-                        initial_sync(state.store, worterbuch).await?;
-                        persistence_interval.reset();
-                        worterbuch.flush().await?;
-                    } else {
-                        warn!("Expected initial sync message from leader, but got: {msg:?}");
+    loop {
+        select! {
+            biased;
+            _ = subsys.shutdown_requested() => {
+                warn!("Shutdown requested before initial sync completed.");
+                return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
+            },
+            recv = stdin.recv() => {
+                if update_leader_addresses(recv, leader_addresses) {
+                    if !leader_addresses.contains(&leader_address) {
+                        warn!(
+                            "Current leader address {} is no longer in the list of known leader addresses {:?}",
+                            leader_address, leader_addresses
+                        );
+                        return Ok(RunResult {
+                            leader_addresses_updated: true,
+                            initial_connection_successful: false,
+                            pending_requests,
+                        });
+                    }
+                }
+            },
+            recv = receive_msg(&mut lines, timeout) => {
+                debug!("Received leader message");
+                match recv {
+                    Ok(Some(msg)) => {
+                        if let LeaderMessage::Init(state) = msg {
+                            debug!("Received initial sync message from leader: {state:?}");
+                            initial_sync(state.store, worterbuch).await?;
+                            persistence_interval.reset();
+                            worterbuch.flush().await?;
+                            break;
+                        } else {
+                            warn!("Expected initial sync message from leader, but got: {msg:?}");
+                            return Ok(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                                pending_requests,
+                            });
+                        }
+                    },
+                    Ok(None) => {
+                        warn!("Leader closed connection before sending initial sync message.");
+                        return Ok(RunResult {
+                            leader_addresses_updated: false,
+                            initial_connection_successful: false,
+                            pending_requests,
+                        });
+                    },
+                    Err(e) => {
+                        warn!("Error receiving initial sync message from leader: {e}");
                         return Ok(RunResult {
                             leader_addresses_updated: false,
                             initial_connection_successful: false,
                             pending_requests,
                         });
                     }
-                },
-                Ok(None) => {
-                    warn!("Leader closed connection before sending initial sync message.");
-                    return Ok(RunResult {
-                        leader_addresses_updated: false,
-                        initial_connection_successful: false,
-                        pending_requests,
-                    });
-                },
-                Err(e) => {
-                    warn!("Error receiving initial sync message from leader: {e}");
-                    return Ok(RunResult {
-                        leader_addresses_updated: false,
-                        initial_connection_successful: false,
-                        pending_requests,
-                    });
                 }
-            }
-        },
-    };
+            },
+        };
+    }
     info!("Successfully synced with leader.");
 
     worterbuch
