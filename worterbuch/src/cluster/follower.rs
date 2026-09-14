@@ -87,7 +87,7 @@ pub(crate) async fn run(
 
     let follower_request_tx = init_request_sender(subsys, leader_tx, &config, leader_address);
 
-    let timeout = config.initial_sync_timeout;
+    let timeout = Some(config.initial_sync_timeout);
 
     info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
 

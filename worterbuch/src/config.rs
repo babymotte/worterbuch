@@ -174,7 +174,7 @@ pub struct Config {
     pub quic_disabled: bool,
     pub exit_on_stdin_close: bool,
     pub license_file: Option<PathBuf>,
-    pub initial_sync_timeout: Option<Duration>,
+    pub initial_sync_timeout: Duration,
 }
 
 impl Config {
@@ -392,7 +392,7 @@ impl Config {
 
         if let Ok(val) = env::var(prefix.to_owned() + "_INITIAL_SYNC_TIMEOUT") {
             let secs = val.parse().to_interval()?;
-            self.initial_sync_timeout = Some(Duration::from_secs(secs));
+            self.initial_sync_timeout = Duration::from_secs(secs);
         }
 
         debug!(
@@ -445,7 +445,7 @@ impl Config {
             quic_disabled: false,
             exit_on_stdin_close: false,
             license_file: None,
-            initial_sync_timeout: None,
+            initial_sync_timeout: Duration::from_secs(10),
         };
         config.load_env()?;
         if let Some(args) = args {
