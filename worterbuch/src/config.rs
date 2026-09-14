@@ -75,7 +75,7 @@ pub enum Commands {
     /// Start server in proxy mode
     Proxy {
         /// Socket addresses of potential leader nodes to sync to
-        #[arg(long, short, value_name = "HOST:PORT", required = true)]
+        #[arg(long, short, value_name = "HOST:PORT")]
         leader_addresses: Vec<String>,
     },
 }

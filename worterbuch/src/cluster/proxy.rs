@@ -116,6 +116,22 @@ pub(crate) async fn run<S: AsRef<str> + ToString>(
     let mut pending_requests = ();
 
     'outer: loop {
+        if leader_addresses.is_empty() {
+            warn!(
+                "No leader addresses provided. Waiting to receive new list of leader addresses from stdin …"
+            );
+            select! {
+                biased;
+                _ = subsys.shutdown_requested() => break 'outer,
+                recv = stdin.recv() => {
+                    if update_leader_addresses(recv, &mut leader_addresses) {
+                        counter = 0;
+                        continue 'outer;
+                    }
+                },
+            }
+        }
+
         for leader_address in leader_addresses.clone() {
             worterbuch
                 .internal_set(
