@@ -216,7 +216,7 @@ async fn run(
 async fn update_timestamp_file(
     timestamp_file_path: &PathBuf,
 ) -> Result<(), super::error::PersistenceError> {
-    info!(
+    debug!(
         "Updating timestamp file {} …",
         timestamp_file_path.display()
     );
