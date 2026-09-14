@@ -19,8 +19,8 @@
 
 use clap::Parser;
 use std::env;
-use tosub::IntoSubsystemResult;
-use tosub::SubsystemResult;
+use tokio::sync::mpsc;
+use tosub::{IntoSubsystemResult, SubsystemResult};
 use worterbuch::{Args, Config, run_worterbuch};
 
 fn main() -> SubsystemResult {
@@ -89,14 +89,19 @@ async fn start() -> SubsystemResult {
 
     let cfg = config.clone();
 
-    let mut root_builder =
-        tosub::build_default_root("worterbuch").with_timeout(cfg.shutdown_timeout);
+    let (stdin_tx, stdin_rx) = mpsc::channel(cfg.channel_buffer_size);
+
+    let mut root_builder = tosub::build_default_root("worterbuch")
+        .with_timeout(cfg.shutdown_timeout)
+        .with_stdin_consumer(move |line| {
+            stdin_tx.blocking_send(line).ok();
+        });
 
     if cfg.role.is_orchestrated() || cfg.exit_on_stdin_close {
         root_builder = root_builder.shutdown_on_stdin_close();
     }
 
     root_builder
-        .start(async |s| run_worterbuch(s, config).await)
+        .start(async |s| run_worterbuch(s, config, Some(stdin_rx)).await)
         .await
 }

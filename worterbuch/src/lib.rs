@@ -107,14 +107,21 @@ struct Servers {
 pub async fn spawn_worterbuch(
     subsys: &SubsystemHandle,
     config: Config,
+    stdin: Option<mpsc::Receiver<String>>,
 ) -> WorterbuchAppResult<CloneableWbApi> {
     let (api_tx, api_rx) = oneshot::channel();
-    subsys.spawn("worterbuch", |s| do_run_worterbuch(s, config, Some(api_tx)));
+    subsys.spawn("worterbuch", |s| {
+        do_run_worterbuch(s, config, Some(api_tx), stdin)
+    });
     Ok(api_rx.await?)
 }
 
-pub async fn run_worterbuch(subsys: SubsystemHandle, config: Config) -> WorterbuchAppResult<()> {
-    do_run_worterbuch(subsys, config, None).await?;
+pub async fn run_worterbuch(
+    subsys: SubsystemHandle,
+    config: Config,
+    stdin: Option<mpsc::Receiver<String>>,
+) -> WorterbuchAppResult<()> {
+    do_run_worterbuch(subsys, config, None, stdin).await?;
     Ok(())
 }
 
@@ -122,6 +129,7 @@ async fn do_run_worterbuch(
     subsys: SubsystemHandle,
     config: Config,
     tx: Option<oneshot::Sender<CloneableWbApi>>,
+    stdin: Option<mpsc::Receiver<String>>,
 ) -> WorterbuchAppResult<()> {
     let channel_buffer_size = config.channel_buffer_size;
     let (api_tx, api_rx) = mpsc::channel(channel_buffer_size);
@@ -148,6 +156,8 @@ async fn do_run_worterbuch(
     if config.role.provide_server_metadata() {
         server_metadata(api.named("server-metadata"), &mut worterbuch, &subsys).await?;
     }
+
+    let stdin = stdin.unwrap_or_else(|| mpsc::channel(1).1);
 
     match config.role.clone() {
         ClusterRole::Standalone => {
@@ -197,7 +207,8 @@ async fn do_run_worterbuch(
                     unix_socket,
                     quic_server,
                 },
-                leader_addresses,
+                &leader_addresses,
+                stdin,
             )
             .await?;
         }

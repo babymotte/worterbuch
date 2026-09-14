@@ -70,16 +70,18 @@ type PendingRequests = ();
 
 struct RunResult {
     initial_connection_successful: bool,
+    leader_addresses_updated: bool,
     pending_requests: PendingRequests,
 }
 
-pub(crate) async fn run(
+pub(crate) async fn run<S: AsRef<str> + ToString>(
     subsys: &SubsystemHandle,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     servers: Servers,
-    leader_addresses: Vec<String>,
+    leader_addresses: &[S],
+    mut stdin: mpsc::Receiver<String>,
 ) -> WorterbuchAppResult<()> {
     #[cfg(feature = "commercial")]
     if !config.license.features.proxy {
@@ -88,16 +90,7 @@ pub(crate) async fn run(
         ));
     }
 
-    let leader_addresses = leader_addresses
-        .iter()
-        .map(ToSocketAddrs::to_socket_addrs)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(e, leader_addresses))
-        })?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<SocketAddr>>();
+    let mut leader_addresses = parse_leader_addresses(&leader_addresses)?;
 
     info!("Running in PROXY mode. Leaders: {:?}", leader_addresses);
 
@@ -123,7 +116,7 @@ pub(crate) async fn run(
     let mut pending_requests = ();
 
     'outer: loop {
-        for leader_address in &leader_addresses {
+        for leader_address in leader_addresses.clone() {
             worterbuch
                 .internal_set(
                     topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
@@ -140,7 +133,18 @@ pub(crate) async fn run(
                     biased;
                     _ = subsys.shutdown_requested() => break 'outer,
                     _ = tokio::time::sleep(Duration::from_secs(retry_seconds)) => counter = 0,
+                    recv = stdin.recv() => {
+                        if update_leader_addresses(recv, &mut leader_addresses) {
+                            counter = 0;
+                            continue 'outer;
+                        }
+                    },
                 }
+            }
+
+            if update_leader_addresses(stdin.try_recv().ok(), &mut leader_addresses) {
+                counter = 0;
+                continue 'outer;
             }
 
             select! {
@@ -151,15 +155,20 @@ pub(crate) async fn run(
                     &mut worterbuch,
                     &mut api_rx,
                     config.clone(),
-                    *leader_address,
+                    leader_address,
                     pending_requests,
                     &mut locks,
-                    &mut response_interests
+                    &mut response_interests,
+                    &mut stdin,
+                    &mut leader_addresses,
                 ) => {
                     let res = res?;
-                    if res.initial_connection_successful {
+                    if res.leader_addresses_updated {
+                        counter = 0;
+                        continue 'outer;
+                    } else if res.initial_connection_successful {
                         info!("Connection to leader {} lost. Trying next leader …", leader_address);
-                        counter = 1;
+                        counter += 1;
                     } else {
                         info!("Could not connect to leader {}. Trying next leader …", leader_address);
                         counter += 1;
@@ -175,6 +184,43 @@ pub(crate) async fn run(
     shutdown(subsys, worterbuch, config, servers).await
 }
 
+fn update_leader_addresses(
+    new_addresses: Option<String>,
+    leader_addresses: &mut Vec<SocketAddr>,
+) -> bool {
+    if let Some(new_addresses) = new_addresses {
+        if let Ok(addresses) =
+            parse_leader_addresses(&new_addresses.split_whitespace().collect::<Vec<_>>())
+        {
+            *leader_addresses = addresses;
+            info!("Updated leader addresses: {:?}", leader_addresses);
+            return true;
+        } else {
+            error!("Invalid leader addresses: {}", new_addresses);
+        }
+    }
+    false
+}
+
+fn parse_leader_addresses<S: AsRef<str> + ToString>(
+    leader_addresses: &[S],
+) -> Result<Vec<SocketAddr>, WorterbuchAppError> {
+    Ok(leader_addresses
+        .iter()
+        .map(|s| s.as_ref())
+        .map(ToSocketAddrs::to_socket_addrs)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
+                e,
+                leader_addresses.iter().map(|s| s.to_string()).collect(),
+            ))
+        })?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<SocketAddr>>())
+}
+
 async fn run_with_leader(
     subsys: &SubsystemHandle,
     worterbuch: &mut Worterbuch,
@@ -184,6 +230,8 @@ async fn run_with_leader(
     pending_requests: PendingRequests,
     locks: &mut Locks,
     response_interests: &mut HashMap<ClientId, ClientResponseInterests>,
+    stdin: &mut mpsc::Receiver<String>,
+    leader_addresses: &mut Vec<SocketAddr>,
 ) -> WorterbuchAppResult<RunResult> {
     worterbuch
         .internal_set(
@@ -200,6 +248,7 @@ async fn run_with_leader(
         Err(e) => {
             warn!("Failed to connect to leader {}: {}", leader_address, e);
             return Ok(RunResult {
+                leader_addresses_updated: false,
                 initial_connection_successful: false,
                 pending_requests,
             });
@@ -240,6 +289,7 @@ async fn run_with_leader(
                     } else {
                         warn!("Expected welcome message from leader, but got: {msg:?}");
                         return Ok(RunResult {
+                            leader_addresses_updated: false,
                             initial_connection_successful: false,
                             pending_requests,
                         });
@@ -248,6 +298,7 @@ async fn run_with_leader(
                 Ok(None) => {
                     warn!("Leader closed connection before sending welcome message.");
                     return Ok(RunResult {
+                        leader_addresses_updated: false,
                         initial_connection_successful: false,
                         pending_requests,
                     });
@@ -255,6 +306,7 @@ async fn run_with_leader(
                 Err(e) => {
                     warn!("Error receiving welcome message from leader: {e}");
                     return Ok(RunResult {
+                        leader_addresses_updated: false,
                         initial_connection_successful: false,
                         pending_requests,
                     });
@@ -298,6 +350,7 @@ async fn run_with_leader(
                     } else {
                         warn!("Expected initial sync message from leader, but got: {msg:?}");
                         return Ok(RunResult {
+                            leader_addresses_updated: false,
                             initial_connection_successful: false,
                             pending_requests,
                         });
@@ -306,6 +359,7 @@ async fn run_with_leader(
                 Ok(None) => {
                     warn!("Leader closed connection before sending initial sync message.");
                     return Ok(RunResult {
+                        leader_addresses_updated: false,
                         initial_connection_successful: false,
                         pending_requests,
                     });
@@ -313,6 +367,7 @@ async fn run_with_leader(
                 Err(e) => {
                     warn!("Error receiving initial sync message from leader: {e}");
                     return Ok(RunResult {
+                        leader_addresses_updated: false,
                         initial_connection_successful: false,
                         pending_requests,
                     });
@@ -333,17 +388,19 @@ async fn run_with_leader(
         .await?;
 
     // TODO implement pending requests
-    let pending_requests = LeaderConnection::new(
+    let (pending_requests, leader_addresses_updated) = LeaderConnection::new(
         subsys,
         proxy_request_tx,
         worterbuch,
         api_rx,
         lines,
         &config,
+        leader_address,
         locks,
         response_interests,
+        leader_addresses,
     )
-    .run()
+    .run(stdin)
     .await?;
 
     info!(
@@ -352,6 +409,7 @@ async fn run_with_leader(
     );
 
     Ok(RunResult {
+        leader_addresses_updated,
         initial_connection_successful: true,
         pending_requests,
     })
@@ -405,6 +463,7 @@ impl ClientResponseInterests {
 }
 
 struct LeaderConnection<'a> {
+    leader_address: SocketAddr,
     subsys: &'a SubsystemHandle,
     response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
     proxy_request_tx: mpsc::Sender<ProxyMessage>,
@@ -412,6 +471,8 @@ struct LeaderConnection<'a> {
     api_rx: &'a mut mpsc::Receiver<WbFunction>,
     lines: Lines<BufReader<OwnedReadHalf>>,
     locks: &'a mut Locks,
+    leader_addresses: &'a mut Vec<SocketAddr>,
+    leader_addresses_updated: bool,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -422,10 +483,14 @@ impl<'a> LeaderConnection<'a> {
         api_rx: &'a mut mpsc::Receiver<WbFunction>,
         lines: Lines<BufReader<OwnedReadHalf>>,
         config: &Config,
+        leader_address: SocketAddr,
         locks: &'a mut Locks,
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
+
+        leader_addresses: &'a mut Vec<SocketAddr>,
     ) -> Self {
         Self {
+            leader_address,
             subsys,
             response_interests,
             proxy_request_tx,
@@ -433,10 +498,15 @@ impl<'a> LeaderConnection<'a> {
             api_rx,
             lines,
             locks,
+            leader_addresses,
+            leader_addresses_updated: false,
         }
     }
 
-    async fn run(mut self) -> WorterbuchAppResult<PendingRequests> {
+    async fn run(
+        mut self,
+        stdin: &'a mut mpsc::Receiver<String>,
+    ) -> WorterbuchAppResult<(PendingRequests, bool)> {
         debug!(
             "Starting new leder session with inherited response interests: {:#?}",
             self.response_interests
@@ -445,11 +515,30 @@ impl<'a> LeaderConnection<'a> {
         while_select! {
             biased;
             _ = self.subsys.shutdown_requested() => break,
+            recv = stdin.recv() => self.update_leader_address(recv),
             recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
             recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
         }
+        let leader_addresses_updated = self.leader_addresses_updated;
         let pending_requests = self.pending_requests();
-        Ok(pending_requests)
+        Ok((pending_requests, leader_addresses_updated))
+    }
+
+    fn update_leader_address(&mut self, recv: Option<String>) -> ControlFlow<()> {
+        if update_leader_addresses(recv, self.leader_addresses) {
+            self.leader_addresses_updated = true;
+            if self.leader_addresses.contains(&self.leader_address) {
+                ControlFlow::Continue(())
+            } else {
+                warn!(
+                    "Current leader address {} is no longer in the list of known leader addresses {:?}",
+                    self.leader_address, self.leader_addresses
+                );
+                ControlFlow::Break(())
+            }
+        } else {
+            ControlFlow::Continue(())
+        }
     }
 
     async fn try_process_leader_message(
