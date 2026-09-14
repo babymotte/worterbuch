@@ -37,6 +37,7 @@ use crate::{
 use hashbrown::HashMap;
 use serde_json::json;
 use std::{
+    collections::BTreeSet,
     net::{SocketAddr, ToSocketAddrs},
     ops::ControlFlow,
     time::Duration,
@@ -212,13 +213,14 @@ fn update_leader_addresses(
         return false;
     }
 
-    let addresses = match serde_json::from_str::<Vec<String>>(&new_addresses) {
+    let addresses = match serde_json::from_str::<BTreeSet<String>>(&new_addresses) {
         Ok(it) => it,
         Err(e) => {
             error!("Could not parse address array '{}': {}", new_addresses, e);
             return false;
         }
     };
+    let addresses = addresses.into_iter().collect::<Vec<String>>();
 
     let addresses = match parse_leader_addresses(&addresses) {
         Ok(it) => it,
