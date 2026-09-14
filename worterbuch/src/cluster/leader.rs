@@ -502,7 +502,8 @@ fn authenticate(auth_token: Option<&str>, config: &Config) -> miette::Result<()>
 }
 
 fn authenticate_against_key(auth_token: Option<&str>, key: &str) -> miette::Result<()> {
-    todo!()
+    // TODO
+    Ok(())
 }
 
 async fn send_initial_state(
