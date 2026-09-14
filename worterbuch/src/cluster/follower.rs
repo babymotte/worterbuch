@@ -183,7 +183,8 @@ async fn send_handshake(
 ) -> WorterbuchAppResult<()> {
     let version = worterbuch_version();
     let auth_token = if welcome.authentication_required {
-        todo!()
+        // TODO
+        None
     } else {
         None
     };

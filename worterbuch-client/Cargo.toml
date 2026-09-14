@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-client"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "Client library for Wörterbuch."
@@ -15,7 +15,12 @@ default = ["tcp", "unix", "ws", "quic"]
 tcp = ["tokio/net"]
 ws = ["worterbuch-common/ws", "tokio/rt", "tokio-tungstenite", "async-stream"]
 unix = ["tokio/net"]
-quic = ["dep:quinn", "dep:rustls-pemfile", "dep:rustls-platform-verifier", "tokio/net"]
+quic = [
+    "dep:quinn",
+    "dep:rustls-pemfile",
+    "dep:rustls-platform-verifier",
+    "tokio/net",
+]
 wasm = [
     "tokio",
     "worterbuch-common/wasm",

@@ -6436,7 +6436,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "worterbuch"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "axum",
  "axum-extra",
@@ -6492,7 +6492,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "clap",
  "dotenvy",
@@ -6508,7 +6508,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -6533,7 +6533,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "axum",
  "clap",
@@ -6565,7 +6565,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "axum",
  "hashbrown 0.17.1",
@@ -6598,7 +6598,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-speedtest"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "axum",
  "clap",
@@ -6621,7 +6621,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-tui"
-version = "1.7.0-alpha.1"
+version = "1.7.0-alpha.2"
 dependencies = [
  "crossterm",
  "dotenvy",
