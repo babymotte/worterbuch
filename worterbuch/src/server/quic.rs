@@ -98,7 +98,7 @@ pub async fn start(
     }
     if endpoints.is_empty() {
         return Err(
-            last_error.unwrap_or_else(|| miette::miette!("failed to bind any QUIC endpoint")),
+            last_error.unwrap_or_else(|| miette::miette!("failed to bind any QUIC endpoint"))
         );
     }
 
