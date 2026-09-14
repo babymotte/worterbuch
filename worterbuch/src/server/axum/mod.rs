@@ -817,14 +817,13 @@ pub(crate) async fn start(
     tls: bool,
     bind_addr: IpAddr,
     port: u16,
-    public_addr: String,
     subsys: SubsystemHandle,
     ws_enabled: bool,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
 
     let router =
-        build_worterbuch_router(&subsys, worterbuch, tls, port, public_addr, ws_enabled).await?;
+        build_worterbuch_router(&subsys, worterbuch, tls, port, bind_addr, ws_enabled).await?;
 
     let handle = Handle::new();
 
@@ -863,7 +862,7 @@ pub async fn build_worterbuch_router(
     worterbuch: CloneableWbApi,
     tls: bool,
     port: u16,
-    public_addr: String,
+    bind_addr: IpAddr,
     ws_enabled: bool,
 ) -> WorterbuchAppResult<Router> {
     let proto = if tls { "wss" } else { "ws" };
@@ -878,7 +877,7 @@ pub async fn build_worterbuch_router(
         subsys.spawn("wsserver", async |s| {
             run_ws_server(s, ws_stream_rx, wb).await
         });
-        info!("Serving websocket endpoint at {proto}://{public_addr}:{port}/ws");
+        info!("Serving websocket endpoint at {proto}://{bind_addr}:{port}/ws");
         app = app.route("/ws", get(ws).with_state(ws_stream_tx));
     }
 
@@ -886,7 +885,7 @@ pub async fn build_worterbuch_router(
     let rest_api_version = 1;
     let rest_root = format!("/api/v{rest_api_version}");
 
-    info!("Serving REST API at {rest_proto}://{public_addr}:{port}{rest_root}");
+    info!("Serving REST API at {rest_proto}://{bind_addr}:{port}{rest_root}");
 
     api = api
         .route(&format!("{rest_root}/get/{{*key}}"), get(get_value))
@@ -942,7 +941,7 @@ pub async fn build_worterbuch_router(
             )
     }
 
-    info!("Serving server info at {rest_proto}://{public_addr}:{port}/info");
+    info!("Serving server info at {rest_proto}://{bind_addr}:{port}/info");
 
     app = app.route(
         "/info",
@@ -952,7 +951,7 @@ pub async fn build_worterbuch_router(
     if let Some(web_root_path) = &config.web_root_path {
         let web_root_path = PathBuf::from(web_root_path);
         info!(
-            "Serving custom web app from {web_root_path:?} at {rest_proto}://{public_addr}:{port}/"
+            "Serving custom web app from {web_root_path:?} at {rest_proto}://{bind_addr}:{port}/"
         );
 
         app = app.fallback_service(

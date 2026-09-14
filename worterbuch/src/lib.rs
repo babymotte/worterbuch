@@ -243,13 +243,10 @@ fn web_server(
     subsys: &SubsystemHandle,
     config: &Config,
 ) -> Option<SubsystemHandle> {
-    if let Some(WsEndpoint {
-        endpoint: Endpoint {
-            tls,
-            bind_addr,
-            port,
-        },
-        public_addr,
+    if let Some(Endpoint {
+        tls,
+        bind_addr,
+        port,
     }) = &config.ws_endpoint
     {
         info!("Starting web server …");
@@ -257,10 +254,9 @@ fn web_server(
         let tls = tls.to_owned();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
-        let public_addr = public_addr.to_owned();
         let ws_enabled = config.role.accept_client_connections() && !config.ws_disabled;
         Some(subsys.spawn("webserver", async move |subsys| {
-            server::axum::start(sapi, tls, bind_addr, port, public_addr, subsys, ws_enabled).await
+            server::axum::start(sapi, tls, bind_addr, port, subsys, ws_enabled).await
         }))
     } else {
         info!("Web server disabled.");

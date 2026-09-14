@@ -87,12 +87,6 @@ pub struct Endpoint {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct WsEndpoint {
-    pub endpoint: Endpoint,
-    pub public_addr: String,
-}
-
 #[cfg(target_family = "unix")]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UnixEndpoint {
@@ -149,7 +143,7 @@ impl ClusterRole {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Config {
     pub instance_name: Option<String>,
-    pub ws_endpoint: Option<WsEndpoint>,
+    pub ws_endpoint: Option<Endpoint>,
     pub tcp_endpoint: Option<Endpoint>,
     #[cfg(target_family = "unix")]
     pub unix_endpoint: Option<UnixEndpoint>,
@@ -192,28 +186,22 @@ impl Config {
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_TLS")
             && let Some(ep) = &mut self.ws_endpoint
         {
-            ep.endpoint.tls = val.to_lowercase() == "true" || val == "1";
+            ep.tls = val.to_lowercase() == "true" || val == "1";
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_SERVER_PORT")
             && let Some(ep) = &mut self.ws_endpoint
         {
-            ep.endpoint.port = val.parse().to_port()?;
+            ep.port = val.parse().to_port()?;
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_WS_BIND_ADDRESS")
             && let Some(ep) = &mut self.ws_endpoint
         {
-            ep.endpoint.bind_addr = val.parse().map_err(|e| ConfigError::InvalidWsBindAddress {
+            ep.bind_addr = val.parse().map_err(|e| ConfigError::InvalidWsBindAddress {
                 addr: val,
                 source: e,
             })?;
-        }
-
-        if let Ok(val) = env::var(prefix.to_owned() + "_PUBLIC_ADDRESS")
-            && let Some(ep) = &mut self.ws_endpoint
-        {
-            ep.public_addr = val;
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_TCP_SERVER_PORT")
@@ -418,13 +406,10 @@ impl Config {
     pub async fn new(args: Option<Args>) -> ConfigResult<Self> {
         let mut config = Config {
             instance_name: None,
-            ws_endpoint: Some(WsEndpoint {
-                endpoint: Endpoint {
-                    tls: false,
-                    bind_addr: [127, 0, 0, 1].into(),
-                    port: 8080,
-                },
-                public_addr: "localhost".to_owned(),
+            ws_endpoint: Some(Endpoint {
+                tls: false,
+                bind_addr: [127, 0, 0, 1].into(),
+                port: 8080,
             }),
             tcp_endpoint: Some(Endpoint {
                 tls: false,
