@@ -26,7 +26,7 @@ use crate::{
 use serde_json::json;
 use std::time::Duration;
 use tokio::{spawn, sync::mpsc};
-use tracing::{Level, debug, error, instrument, trace, warn};
+use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
     AuthCheck, ClientId, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
@@ -521,6 +521,7 @@ impl V0 {
         let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
         let client_id = self.client_id;
+
         spawn(async move {
             debug!("Receiving events for subscription {subscription:?} …");
             while let Some((event, trace)) = rx.recv().await {
@@ -541,7 +542,7 @@ impl V0 {
                 }
                 Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                 Err(e) => {
-                    warn!("Error while unsubscribing: {e}");
+                    debug!("Error while unsubscribing: {e}");
                 }
             }
         });
@@ -612,7 +613,7 @@ impl V0 {
                     }
                     Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                     Err(e) => {
-                        warn!("Error while unsubscribing: {e}");
+                        debug!("Error while unsubscribing: {e}");
                     }
                 }
             });
@@ -633,7 +634,7 @@ impl V0 {
                     }
                     Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                     Err(e) => {
-                        warn!("Error while unsubscribing: {e}");
+                        debug!("Error while unsubscribing: {e}");
                     }
                 }
             });
@@ -856,7 +857,7 @@ impl V0 {
                 }
                 Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
                 Err(e) => {
-                    warn!("Error while unsubscribing ls: {e}");
+                    debug!("Error while unsubscribing ls: {e}");
                 }
             }
         });

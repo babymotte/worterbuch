@@ -1760,7 +1760,7 @@ impl Worterbuch {
                 .do_unsubscribe(&subscription, client_id, trace.clone())
                 .await
             {
-                error!("Inconsistent subscription state: {e}");
+                debug!("Inconsistent subscription state: {e}");
             }
         }
 
