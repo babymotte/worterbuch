@@ -392,7 +392,7 @@ async fn forward_api_call(
         | WbFunction::SubscribeLs(_, _, _, _, _, _)
         | WbFunction::Unsubscribe(_, _, _, _)
         | WbFunction::UnsubscribeLs(_, _, _)
-        | WbFunction::Connected(_, _, _, _)
+        | WbFunction::Connected(_, _, _, _, _)
         | WbFunction::ProtocolSwitched(_, _, _)
         | WbFunction::Disconnected(_, _, _)
         | WbFunction::Config(_)

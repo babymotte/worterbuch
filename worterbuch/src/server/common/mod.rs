@@ -196,7 +196,8 @@ pub enum WbFunction {
         ClientId,
         Option<SocketAddr>,
         Protocol,
-        oneshot::Sender<WorterbuchResult<()>>,
+        mpsc::Sender<()>,                      // signal for ejecting this client
+        oneshot::Sender<WorterbuchResult<()>>, // response channel
     ),
     ProtocolSwitched(ClientId, Interface, ProtocolMajorVersion),
     Disconnected(ClientId, Protocol, Option<SocketAddr>),
@@ -367,7 +368,7 @@ impl fmt::Debug for WbFunction {
                 .field(key)
                 .field(client_id)
                 .finish(),
-            WbFunction::Connected(client_id, remote_addr, protocol, _) => f
+            WbFunction::Connected(client_id, remote_addr, protocol, _, _) => f
                 .debug_tuple("Connected")
                 .field(client_id)
                 .field(remote_addr)
@@ -934,12 +935,20 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
         remote_addr: Option<SocketAddr>,
         protocol: Protocol,
-    ) -> WorterbuchResult<()> {
+    ) -> WorterbuchResult<mpsc::Receiver<()>> {
         let (tx, rx) = oneshot::channel();
+        let (eject, eject_rx) = mpsc::channel(1);
         self.tx
-            .send(WbFunction::Connected(client_id, remote_addr, protocol, tx))
+            .send(WbFunction::Connected(
+                client_id,
+                remote_addr,
+                protocol,
+                eject,
+                tx,
+            ))
             .await?;
-        rx.await?
+        rx.await??;
+        Ok(eject_rx)
     }
 
     async fn protocol_switched(

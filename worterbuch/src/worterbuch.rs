@@ -89,13 +89,23 @@ impl SubscriptionFlags {
 pub struct ClientInfo {
     pub subscriptions: usize,
     pub protocol: Protocol,
+    pub eject: Option<mpsc::Sender<()>>,
 }
 
 impl ClientInfo {
-    fn new(protocol: Protocol) -> Self {
+    fn new(protocol: Protocol, eject: mpsc::Sender<()>) -> Self {
         Self {
             subscriptions: 0,
             protocol,
+            eject: Some(eject),
+        }
+    }
+
+    async fn eject(&mut self) -> bool {
+        if let Some(eject) = self.eject.take() {
+            eject.send(()).await.is_ok()
+        } else {
+            false
         }
     }
 }
@@ -1486,6 +1496,7 @@ impl Worterbuch {
         client_id: ClientId,
         remote_addr: Option<SocketAddr>,
         protocol: Protocol,
+        eject: mpsc::Sender<()>,
     ) -> WorterbuchResult<()> {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
@@ -1496,7 +1507,7 @@ impl Worterbuch {
         let now = SystemTime::now().into();
 
         self.clients
-            .insert(client_id, ClientInfo::new(protocol.clone()));
+            .insert(client_id, ClientInfo::new(protocol.clone(), eject));
         let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         let trace = Trace::InternalAction(InternalAction::ClientConnected {
             client_id,
@@ -2217,6 +2228,14 @@ impl Worterbuch {
             held,
             pending,
         })
+    }
+
+    pub async fn eject_client(&mut self, client_id: ClientId) -> bool {
+        if let Some(client) = self.clients.get_mut(&client_id) {
+            client.eject().await
+        } else {
+            false
+        }
     }
 }
 

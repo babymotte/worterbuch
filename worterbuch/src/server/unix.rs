@@ -31,6 +31,7 @@ use tokio::{
     sync::mpsc,
 };
 use tosub::SubsystemHandle;
+use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -166,22 +167,24 @@ async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr:?})");
 
-    if let Err(e) = worterbuch.connected(client_id, None, Protocol::UNIX).await {
-        error!("Error while adding new client: {e}");
-    } else {
-        debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
+    match worterbuch.connected(client_id, None, Protocol::UNIX).await {
+        Ok(ejected) => {
+            debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
-        if let Err(e) = serve_loop(
-            subsys,
-            client_id,
-            remote_addr,
-            worterbuch.named("serve-loop"),
-            socket,
-        )
-        .await
-        {
-            error!("Error in serve loop: {e}");
+            if let Err(e) = serve_loop(
+                subsys,
+                client_id,
+                remote_addr,
+                worterbuch.named("serve-loop"),
+                socket,
+                ejected,
+            )
+            .await
+            {
+                error!("Error in serve loop: {e}");
+            }
         }
+        Err(e) => error!("Error while adding new client: {e}"),
     }
 
     info!("Client disconnected: {client_id} ({remote_addr:?})");
@@ -199,6 +202,7 @@ struct ServeLoop<'a> {
     authorized: Option<JwtClaims>,
     unix_rx: Lines<BufReader<OwnedReadHalf>>,
     proto: Proto,
+    ejected: mpsc::Receiver<()>,
 }
 
 async fn serve_loop(
@@ -207,6 +211,7 @@ async fn serve_loop(
     remote_addr: &SocketAddr,
     worterbuch: CloneableWbApi,
     socket: UnixStream,
+    ejected: mpsc::Receiver<()>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
@@ -249,6 +254,7 @@ async fn serve_loop(
         proto,
         remote_addr,
         unix_rx,
+        ejected,
     };
 
     serve_loop.run().await
@@ -284,12 +290,15 @@ async fn forward_messages_to_socket(
 
 impl ServeLoop<'_> {
     async fn run(mut self) -> Result<()> {
-        loop {
-            let next_line = self.unix_rx.next_line().await;
-            if let ControlFlow::Break(it) = self.process_next_line(next_line).await? {
-                break Ok(it);
-            }
+        while_select! {
+            biased;
+            _ = self.ejected.recv() => {
+                info!("Client {} was ejected.", self.client_id);
+                break;
+            },
+            recv = self.unix_rx.next_line() => self.process_next_line(recv).await?,
         }
+        Ok(())
     }
 
     async fn process_next_line(

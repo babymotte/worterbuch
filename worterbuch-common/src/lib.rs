@@ -599,7 +599,7 @@ pub trait WbApi {
         client_id: ClientId,
         remote_addr: Option<SocketAddr>,
         protocol: Protocol,
-    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
+    ) -> impl Future<Output = WorterbuchResult<mpsc::Receiver<()>>> + Send;
 
     fn protocol_switched(
         &self,

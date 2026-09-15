@@ -57,6 +57,7 @@ use tokio::{
     sync::mpsc,
 };
 use tosub::SubsystemHandle;
+use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -301,26 +302,28 @@ async fn serve(
 
     info!("New client connected: {client_id} ({remote_addr})");
 
-    if let Err(e) = worterbuch
+    match worterbuch
         .connected(client_id, Some(remote_addr), Protocol::QUIC)
         .await
     {
-        error!("Error while adding new client: {e}");
-    } else {
-        debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+        Ok(ejected) => {
+            debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-        if let Err(e) = serve_loop(
-            subsys,
-            client_id,
-            remote_addr,
-            worterbuch.named("serve-loop"),
-            connection,
-            supported_protocol_versions,
-        )
-        .await
-        {
-            error!("Error in serve loop: {e}");
+            if let Err(e) = serve_loop(
+                subsys,
+                client_id,
+                remote_addr,
+                worterbuch.named("serve-loop"),
+                connection,
+                supported_protocol_versions,
+                ejected,
+            )
+            .await
+            {
+                error!("Error in serve loop: {e}");
+            }
         }
+        Err(e) => error!("Error while adding new client: {e}"),
     }
 
     info!("Client disconnected: {client_id} ({remote_addr})");
@@ -338,6 +341,7 @@ struct ServeLoop {
     authorized: Option<JwtClaims>,
     quic_rx: Lines<BufReader<RecvStream>>,
     proto: Proto,
+    ejected: mpsc::Receiver<()>,
 }
 
 async fn serve_loop(
@@ -347,6 +351,7 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     connection: Connection,
     supported_protocol_versions: Box<[ProtocolVersion]>,
+    ejected: mpsc::Receiver<()>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
@@ -393,6 +398,7 @@ async fn serve_loop(
         proto,
         remote_addr,
         quic_rx,
+        ejected,
     };
 
     serve_loop.run().await
@@ -428,12 +434,15 @@ async fn forward_messages_to_socket(
 
 impl ServeLoop {
     async fn run(mut self) -> Result<()> {
-        loop {
-            let next_line = self.quic_rx.next_line().await;
-            if let ControlFlow::Break(it) = self.process_next_line(next_line).await? {
-                break Ok(it);
-            }
+        while_select! {
+            biased;
+            _ = self.ejected.recv() => {
+                info!("Client {} was ejected.", self.client_id);
+                break;
+            },
+            recv = self.quic_rx.next_line() => self.process_next_line(recv).await?,
         }
+        Ok(())
     }
 
     async fn process_next_line(

@@ -35,6 +35,7 @@ pub enum LeaderMessage {
     Init(StateSync),
     Mut(ClusterStateChange),
     ClientResponse(ClientId, ServerMessage),
+    EjectClient(ClientId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

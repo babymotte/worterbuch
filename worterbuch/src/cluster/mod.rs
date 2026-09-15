@@ -243,8 +243,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             )
             .ok();
         }
-        WbFunction::Connected(client_id, remote_addr, protocol, tx) => {
-            let res = worterbuch.connected(client_id, remote_addr, protocol).await;
+        WbFunction::Connected(client_id, remote_addr, protocol, eject, tx) => {
+            let res = worterbuch
+                .connected(client_id, remote_addr, protocol, eject)
+                .await;
             tx.send(res).ok();
         }
         WbFunction::ProtocolSwitched(client_id, interface, protocol) => {

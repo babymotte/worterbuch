@@ -685,6 +685,7 @@ impl<'a> LeaderConnection<'a> {
                 self.forward_leader_response(client_id, server_message)
                     .await
             }
+            LeaderMessage::EjectClient(client_id) => self.eject_client(client_id).await,
         };
 
         if let Err(e) = res {
@@ -710,7 +711,7 @@ impl<'a> LeaderConnection<'a> {
     async fn process_api_call(&mut self, function: WbFunction) -> WorterbuchAppResult<()> {
         debug!("Processing API call: {function:?}");
         match function {
-            WbFunction::Connected(client_id, addr, protocol, tx) => {
+            WbFunction::Connected(client_id, addr, protocol, eject, tx) => {
                 let request = ProxyMessage::Connected(Connected {
                     client_id,
                     protocol: protocol.clone(),
@@ -718,7 +719,7 @@ impl<'a> LeaderConnection<'a> {
                 self.proxy_request_tx.send(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
-                    WbFunction::Connected(client_id, addr, protocol, tx),
+                    WbFunction::Connected(client_id, addr, protocol, eject, tx),
                 )
                 .await;
             }
@@ -1100,6 +1101,12 @@ impl<'a> LeaderConnection<'a> {
             }
         }
 
+        Ok(())
+    }
+
+    async fn eject_client(&mut self, client_id: ClientId) -> WorterbuchResult<()> {
+        warn!("Disconnecting client {client_id}");
+        self.worterbuch.eject_client(client_id).await;
         Ok(())
     }
 

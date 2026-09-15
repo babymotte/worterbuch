@@ -552,16 +552,27 @@ async fn forward_change_to_follower(
 
 async fn forward_response_to_proxy(
     subsys: &SubsystemHandle,
-    recv: Option<(ClientId, ServerMessage)>,
+    recv: Option<VirtualServerMessage>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
     follower: SocketAddr,
 ) -> miette::Result<ControlFlow<()>> {
     match recv {
-        Some((client_id, server_message)) => {
+        Some(VirtualServerMessage::ServerMessage((client_id, server_message))) => {
             write_line_and_flush(
                 || subsys.shutdown_requested(),
                 LeaderMessage::ClientResponse(client_id, server_message),
+                socket_tx,
+                config.send_timeout,
+                follower,
+            )
+            .await
+            .wrap_err("could not write command to follower/proxy")?;
+        }
+        Some(VirtualServerMessage::Disconnect(client_id)) => {
+            write_line_and_flush(
+                || subsys.shutdown_requested(),
+                LeaderMessage::EjectClient(client_id),
                 socket_tx,
                 config.send_timeout,
                 follower,
@@ -580,13 +591,18 @@ struct VirtualProxyClientHandler {
     proto: Proto,
 }
 
+enum VirtualServerMessage {
+    ServerMessage((ClientId, ServerMessage)),
+    Disconnect(ClientId),
+}
+
 struct VirtualProxyServer {
     subsys: SubsystemHandle,
     clients: HashMap<ClientId, VirtualProxyClientHandler>,
     worterbuch: CloneableWbApi,
     config: Config,
     proxy_address: SocketAddr,
-    send_tx: mpsc::Sender<(ClientId, ServerMessage)>,
+    send_tx: mpsc::Sender<VirtualServerMessage>,
 }
 
 impl VirtualProxyServer {
@@ -654,8 +670,15 @@ impl VirtualProxyServer {
                 msg,
                 interface,
             }) => {
-                self.process_client_request(client_id, msg, interface)
+                let processed = self
+                    .process_client_request(client_id, msg, interface)
                     .await?;
+                if !processed {
+                    self.send_tx
+                        .send(VirtualServerMessage::Disconnect(client_id))
+                        .await
+                        .ok();
+                }
             }
         }
 
@@ -744,7 +767,7 @@ impl VirtualProxyServer {
         client_id: ClientId,
         msg: ClientMessage,
         interface: Interface,
-    ) -> miette::Result<()> {
+    ) -> miette::Result<bool> {
         trace!("Processing incoming message …");
         let Some(client_handler) = self.clients.get_mut(&client_id) else {
             return Err(miette!(
@@ -758,16 +781,10 @@ impl VirtualProxyServer {
             .proto
             .process_client_message(msg, &mut client_handler.authorized)
             .await?;
-        if !msg_processed {
-            return Err(miette!(
-                "Message processing failed for client {client_id} ({}/{:?})",
-                self.proxy_address,
-                interface
-            ));
-        }
+
         trace!("Processing incoming message done.");
 
-        Ok(())
+        Ok(msg_processed)
     }
 
     async fn register_clients(
@@ -876,7 +893,7 @@ impl VirtualProxyServer {
 async fn response_forwarder_loop(
     subsys: SubsystemHandle,
     mut send_client_rx: mpsc::Receiver<ServerMessage>,
-    send_tx: mpsc::Sender<(ClientId, ServerMessage)>,
+    send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: uuid::Uuid,
     worterbuch: CloneableWbApi,
     protocol: Protocol,
@@ -903,13 +920,13 @@ async fn response_forwarder_loop(
 
 async fn forward_leader_response(
     recv: Option<ServerMessage>,
-    send_tx: &mpsc::Sender<(ClientId, ServerMessage)>,
+    send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
 ) -> miette::Result<ControlFlow<()>> {
     match recv {
         Some(msg) => {
             send_tx
-                .send((client_id, msg))
+                .send(VirtualServerMessage::ServerMessage((client_id, msg)))
                 .await
                 .into_diagnostic()
                 .wrap_err("could not forward response to proxy")?;

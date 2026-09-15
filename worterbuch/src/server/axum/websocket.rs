@@ -18,6 +18,7 @@
  */
 
 use crate::{
+    auth::JwtClaims,
     server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
@@ -27,8 +28,9 @@ use futures::{
     stream::{SplitSink, StreamExt},
 };
 use miette::{IntoDiagnostic, Result, miette};
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
+use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -44,25 +46,29 @@ pub(crate) async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
-    if let Err(e) = worterbuch
+    match worterbuch
         .connected(client_id, Some(remote_addr), Protocol::WS)
         .await
     {
-        error!("Error while adding new client: {e}");
-        eprintln!("{e:?}");
-    } else {
-        debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
+        Ok(ejected) => {
+            debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
-        if let Err(e) = serve_loop(
-            client_id,
-            remote_addr,
-            worterbuch.named(format!("client/{client_id}")),
-            websocket,
-            supported_protocol_versions,
-        )
-        .await
-        {
-            error!("Error in serve loop: {e}");
+            if let Err(e) = serve_loop(
+                client_id,
+                remote_addr,
+                worterbuch.named(format!("client/{client_id}")),
+                websocket,
+                supported_protocol_versions,
+                ejected,
+            )
+            .await
+            {
+                error!("Error in serve loop: {e}");
+            }
+        }
+        Err(e) => {
+            error!("Error while adding new client: {e}");
+            eprintln!("{e:?}");
         }
     }
 
@@ -83,6 +89,7 @@ async fn serve_loop(
     worterbuch: CloneableWbApi,
     websocket: WebSocket,
     supported_protocol_versions: Box<[ProtocolVersion]>,
+    mut ejected: mpsc::Receiver<()>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     let authorization_required = config.auth_token_key.is_some();
@@ -115,32 +122,46 @@ async fn serve_loop(
         worterbuch,
     );
 
-    loop {
-        if let Some(msg) = ws_rx.next().await {
-            match msg {
-                Ok(incoming_msg) => {
-                    debug!("Processing incoming message …");
-                    if let Message::Text(text) = incoming_msg {
-                        let msg_processed = proto
-                            .process_incoming_message(&text, &mut authorized)
-                            .await?;
-                        if !msg_processed {
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Error in WebSocket connection: {e}");
-                    break;
-                }
-            }
-        } else {
-            info!("WS stream of client {client_id} ({remote_addr}) closed.");
+    while_select! {
+        biased;
+        _ = ejected.recv() => {
+            info!("Client {client_id} was ejected.");
             break;
-        }
+        },
+        recv = ws_rx.next() => process_next_message(recv, client_id, remote_addr, &mut proto, &mut authorized).await?,
     }
 
     Ok(())
+}
+
+async fn process_next_message(
+    recv: Option<Result<Message, axum::Error>>,
+    client_id: ClientId,
+    remote_addr: SocketAddr,
+    proto: &mut Proto,
+    authorized: &mut Option<JwtClaims>,
+) -> Result<ControlFlow<()>> {
+    if let Some(msg) = recv {
+        match msg {
+            Ok(incoming_msg) => {
+                debug!("Processing incoming message …");
+                if let Message::Text(text) = incoming_msg {
+                    let msg_processed = proto.process_incoming_message(&text, authorized).await?;
+                    if !msg_processed {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error in WebSocket connection: {e}");
+                return Ok(ControlFlow::Break(()));
+            }
+        }
+    } else {
+        info!("WS stream of client {client_id} ({remote_addr}) closed.");
+        return Ok(ControlFlow::Break(()));
+    }
+    Ok(ControlFlow::Continue(()))
 }
 
 async fn send_loop(

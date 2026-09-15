@@ -407,7 +407,7 @@ async fn process_leader_message(
                 .await
                 .map(|_| ()),
         },
-        LeaderMessage::ClientResponse(_, _) => {
+        LeaderMessage::ClientResponse(_, _) | LeaderMessage::EjectClient(_) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "leader should never send a ClientResponse to a follower".to_owned(),
             ));
