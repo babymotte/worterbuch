@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fmt::{self, Display},
     io,
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     ops::Deref,
     time::Duration,
 };
@@ -804,6 +804,33 @@ pub fn is_client_sys_wildcard_topic(pattern: &str) -> Option<Uuid> {
     } else {
         None
     }
+}
+
+pub fn parse_addresses<S: AsRef<str> + ToString>(addresses: &[S]) -> io::Result<Box<[SocketAddr]>> {
+    Ok(addresses
+        .iter()
+        .map(|s| s.as_ref())
+        .flat_map(|s| s.split(","))
+        .map(str::trim)
+        .map(ToSocketAddrs::to_socket_addrs)
+        .collect::<Result<Box<[_]>, _>>()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Invalid address '{}': {}",
+                    addresses
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    e
+                ),
+            )
+        })?
+        .into_iter()
+        .flatten()
+        .collect::<Box<[SocketAddr]>>())
 }
 
 #[cfg(test)]

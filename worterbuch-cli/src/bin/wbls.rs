@@ -27,7 +27,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect};
+use worterbuch_client::{AuthToken, connect, parse_addresses};
 
 #[derive(Parser)]
 #[command(author, version, about = "List child keys on a Wörterbuch server.", long_about = None)]
@@ -37,7 +37,7 @@ struct Args {
     ssl: bool,
     /// The addresses of the Wörterbuch servers in form <ip>:<port>[,<ip2>:<port2>,…]. When omitted, the value of the env var WORTERBUCH_SERVERS will be used. If that is not set, 127.0.0.1:8081 will be used.
     #[arg(short, long)]
-    addr: Option<String>,
+    addr: Vec<String>,
     /// Output data in JSON and expect input data to be JSON.
     #[arg(short, long)]
     json: bool,
@@ -73,20 +73,12 @@ async fn run(subsys: SubsystemHandle) -> Result<()> {
 
     config.auth_token = args.auth.or(config.auth_token);
 
-    config.proto = if args.ssl {
-        "wss".to_owned()
-    } else {
-        config.proto
-    };
-    config.servers = args
-        .addr
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        })
-        .unwrap_or(config.servers);
+    if args.ssl {
+        config.proto = "wss".to_owned();
+    }
+    if let Ok(servers) = parse_addresses(&args.addr) {
+        config.servers = servers;
+    }
     let json = args.json;
     let parent = args.parent;
 

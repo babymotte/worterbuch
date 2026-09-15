@@ -36,12 +36,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use serde_json::json;
-use std::{
-    collections::BTreeSet,
-    net::{SocketAddr, ToSocketAddrs},
-    ops::ControlFlow,
-    time::Duration,
-};
+use std::{collections::BTreeSet, net::SocketAddr, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     net::{
@@ -57,7 +52,7 @@ use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID, LockLostSender,
     error::{ConfigError, ConnectionResult, WorterbuchResult},
-    is_grave_goods_topic, is_last_will_topic,
+    is_grave_goods_topic, is_last_will_topic, parse_addresses,
     protocol::v1::{
         CSet, ClientMessage, Delete, ErrorCode, InternalAction, Key, KeyValuePairs, Lock, PDelete,
         PStateEvent, ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLUSTER,
@@ -91,7 +86,12 @@ pub(crate) async fn run<S: AsRef<str> + ToString>(
         ));
     }
 
-    let mut leader_addresses = parse_leader_addresses(&leader_addresses)?;
+    let mut leader_addresses = parse_addresses(&leader_addresses).map_err(|e| {
+        WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
+            e,
+            leader_addresses.iter().map(|s| s.to_string()).collect(),
+        ))
+    })?;
 
     info!("Running in PROXY mode. Leaders: {:?}", leader_addresses);
 
@@ -203,7 +203,7 @@ pub(crate) async fn run<S: AsRef<str> + ToString>(
 
 fn update_leader_addresses(
     new_addresses: Option<String>,
-    leader_addresses: &mut Vec<SocketAddr>,
+    leader_addresses: &mut Box<[SocketAddr]>,
 ) -> bool {
     let Some(new_addresses) = new_addresses else {
         return false;
@@ -222,7 +222,7 @@ fn update_leader_addresses(
     };
     let addresses = addresses.into_iter().collect::<Vec<String>>();
 
-    let addresses = match parse_leader_addresses(&addresses) {
+    let addresses = match parse_addresses(&addresses) {
         Ok(it) => it,
         Err(_) => {
             error!("Invalid leader addresses: {}", new_addresses);
@@ -236,25 +236,6 @@ fn update_leader_addresses(
     true
 }
 
-fn parse_leader_addresses<S: AsRef<str> + ToString>(
-    leader_addresses: &[S],
-) -> Result<Vec<SocketAddr>, WorterbuchAppError> {
-    Ok(leader_addresses
-        .iter()
-        .map(|s| s.as_ref())
-        .map(ToSocketAddrs::to_socket_addrs)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
-                e,
-                leader_addresses.iter().map(|s| s.to_string()).collect(),
-            ))
-        })?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<SocketAddr>>())
-}
-
 async fn run_with_leader(
     subsys: &SubsystemHandle,
     worterbuch: &mut Worterbuch,
@@ -265,7 +246,7 @@ async fn run_with_leader(
     locks: &mut Locks,
     response_interests: &mut HashMap<ClientId, ClientResponseInterests>,
     stdin: &mut mpsc::Receiver<String>,
-    leader_addresses: &mut Vec<SocketAddr>,
+    leader_addresses: &mut Box<[SocketAddr]>,
 ) -> WorterbuchAppResult<RunResult> {
     worterbuch
         .internal_set(
@@ -541,7 +522,7 @@ struct LeaderConnection<'a> {
     api_rx: &'a mut mpsc::Receiver<WbFunction>,
     lines: Lines<BufReader<OwnedReadHalf>>,
     locks: &'a mut Locks,
-    leader_addresses: &'a mut Vec<SocketAddr>,
+    leader_addresses: &'a mut Box<[SocketAddr]>,
     leader_addresses_updated: bool,
 }
 
@@ -557,7 +538,7 @@ impl<'a> LeaderConnection<'a> {
         locks: &'a mut Locks,
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
 
-        leader_addresses: &'a mut Vec<SocketAddr>,
+        leader_addresses: &'a mut Box<[SocketAddr]>,
     ) -> Self {
         Self {
             leader_address,
