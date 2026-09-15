@@ -1019,7 +1019,7 @@ async fn run_ws_server(
 
                     let client = subsys.spawn(format!("client-{id}"), async move |s|  {
                         select! {
-                            s = serve(id, remote_addr, worterbuch, socket, supported_protocol_versions) => if let Err(e) = s {
+                            s = serve(&s, id, remote_addr, worterbuch, socket, supported_protocol_versions) => if let Err(e) = s {
                                 error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
                             },
                             _ = s.shutdown_requested() => (),

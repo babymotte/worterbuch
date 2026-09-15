@@ -530,7 +530,7 @@ impl V0 {
                     trace,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
-                    error!("Error sending STATE message to client: {e}");
+                    debug!("Error sending STATE message to client: {e}");
                     break;
                 };
             }
@@ -845,7 +845,7 @@ impl V0 {
                     trace,
                 };
                 if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
-                    error!("Error sending STATE message to client: {e}");
+                    debug!("Error sending LSSTATE message to client: {e}");
                     break;
                 };
             }
@@ -907,7 +907,7 @@ async fn forward_loop(
             trace,
         };
         if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
-            error!("Error sending STATE message to client: {e}");
+            debug!("Error sending PSTATE message to client: {e}");
             break;
         }
     }
@@ -931,7 +931,7 @@ async fn aggregate_loop(
             };
 
             if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
-                error!("Error sending STATE message to client: {e}");
+                debug!("Error sending PSTATE message to client: {e}");
                 return;
             }
         } else {
@@ -952,7 +952,7 @@ async fn aggregate_loop(
 
     while let Some((event, _)) = rx.recv().await {
         if let Err(e) = aggregator.aggregate(event).await {
-            error!("Error sending STATE message to client: {e}");
+            debug!("Error sending STATE message to client: {e}");
             break;
         }
     }

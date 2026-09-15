@@ -1747,7 +1747,7 @@ impl Worterbuch {
             .map(ToOwned::to_owned)
             .collect();
         if !subscription_keys.is_empty() {
-            info!(
+            debug!(
                 "Removing {} subscription(s) of client {client_id} ({}).",
                 subscription_keys.len(),
                 remote_addr
@@ -2077,7 +2077,7 @@ impl Worterbuch {
         cause: Trace,
         remote_addr: Option<SocketAddr>,
     ) {
-        info!(
+        debug!(
             "Publishing last will of client {} ({}).",
             cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
             remote_addr

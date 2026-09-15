@@ -3,7 +3,6 @@ mod controller;
 mod tui;
 
 use std::fs::OpenOptions;
-use tosub::SubsystemResult;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// The TUI owns the terminal, so logs must not go to stdout/stderr. Logging is
@@ -28,12 +27,14 @@ fn init_logging() {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> SubsystemResult {
+async fn main() -> miette::Result<()> {
     dotenvy::dotenv().ok();
 
     init_logging();
 
     tosub::build_default_root("worterbuch-tui")
         .start(backend::start)
-        .await
+        .await?;
+
+    Ok(())
 }

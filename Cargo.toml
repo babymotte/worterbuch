@@ -80,7 +80,7 @@ tokio-process-terminate = "0.3.2"
 tokio-stream = "0.1.19"
 tokio-tungstenite = "0.30.0"
 tokio-tungstenite-wasm = "0.9.0"
-tosub = "2.0.0"
+tosub = "2.1.0"
 totils = { version = "1.0.0", features = ["while_select"] }
 tower-http = "0.7.1"
 tracing = "0.1.41"

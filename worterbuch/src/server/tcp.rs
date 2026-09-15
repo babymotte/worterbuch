@@ -217,7 +217,8 @@ async fn serve(
     Ok(())
 }
 
-struct ServeLoop {
+struct ServeLoop<'a> {
+    subsys: &'a Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     authorized: Option<JwtClaims>,
@@ -226,8 +227,8 @@ struct ServeLoop {
     ejected: mpsc::Receiver<()>,
 }
 
-async fn serve_loop(
-    subsys: &Subsystem,
+async fn serve_loop<'a>(
+    subsys: &'a Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -271,6 +272,7 @@ async fn serve_loop(
     );
 
     let serve_loop = ServeLoop {
+        subsys,
         authorized,
         client_id,
         proto,
@@ -289,28 +291,27 @@ async fn forward_messages_to_socket(
     client_id: ClientId,
     send_timeout: Option<Duration>,
 ) -> Result<()> {
-    loop {
-        select! {
-            recv = tcp_send_rx.recv() => if let Some(msg) = recv {
-                if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout, client_id).await {
-                    error!("Error sending TCP message '{msg:?}': {e}");
-                    break;
-                }
-            } else {
-                debug!("Message forwarding to client {client_id} stopped: channel closed.");
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        recv = tcp_send_rx.recv() => if let Some(msg) = recv {
+            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout, client_id).await {
+                error!("Error sending TCP message '{msg:?}': {e}");
                 break;
-            },
-            _ = subsys.shutdown_requested() => {
-                debug!("Message forwarding to client {client_id} stopped: subsystem stopped.");
-                break;
-            },
+            }
+            ControlFlow::Continue(())
+        } else {
+            debug!("Message forwarding to client {client_id} stopped: channel closed.");
+            break;
         }
     }
+
+    subsys.request_local_shutdown();
 
     Ok(())
 }
 
-impl ServeLoop {
+impl<'a> ServeLoop<'a> {
     async fn run(mut self) -> Result<()> {
         while_select! {
             biased;
@@ -320,6 +321,9 @@ impl ServeLoop {
             },
             recv = self.tcp_rx.next_line() => self.process_next_line(recv).await?,
         }
+
+        self.subsys.request_local_shutdown();
+
         Ok(())
     }
 

@@ -20,10 +20,10 @@
 use clap::Parser;
 use std::env;
 use tokio::sync::mpsc;
-use tosub::{IntoSubsystemResult, SubsystemResult};
+use tosub::IntoSubsystemResult;
 use worterbuch::{Args, Config, run_worterbuch};
 
-fn main() -> SubsystemResult {
+fn main() -> miette::Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
         .map(|v| v.to_ascii_lowercase())
         .as_deref()
@@ -35,7 +35,7 @@ fn main() -> SubsystemResult {
     }
 }
 
-fn run_single_threaded() -> SubsystemResult {
+fn run_single_threaded() -> miette::Result<()> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -43,7 +43,7 @@ fn run_single_threaded() -> SubsystemResult {
         .block_on(start())
 }
 
-fn run_multi_threaded() -> SubsystemResult {
+fn run_multi_threaded() -> miette::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -51,7 +51,7 @@ fn run_multi_threaded() -> SubsystemResult {
         .block_on(start())
 }
 
-async fn start() -> SubsystemResult {
+async fn start() -> miette::Result<()> {
     dotenvy::dotenv().ok();
 
     let args = Args::parse();
@@ -103,5 +103,7 @@ async fn start() -> SubsystemResult {
 
     root_builder
         .start(async |s| run_worterbuch(s, config, Some(stdin_rx)).await)
-        .await
+        .await?;
+
+    Ok(())
 }

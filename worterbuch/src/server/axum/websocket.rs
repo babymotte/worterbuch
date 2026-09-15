@@ -29,7 +29,8 @@ use futures::{
 };
 use miette::{IntoDiagnostic, Result, bail};
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
-use tokio::{spawn, sync::mpsc, time::timeout};
+use tokio::{select, sync::mpsc, time::timeout};
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
@@ -38,6 +39,7 @@ use worterbuch_common::{
 };
 
 pub(crate) async fn serve(
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -54,6 +56,7 @@ pub(crate) async fn serve(
             debug!("Receiving messages from client {client_id} ({remote_addr}) …",);
 
             if let Err(e) = serve_loop(
+                subsys,
                 client_id,
                 remote_addr,
                 worterbuch.named(format!("client/{client_id}")),
@@ -84,6 +87,7 @@ pub(crate) async fn serve(
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
 async fn serve_loop(
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -100,7 +104,9 @@ async fn serve_loop(
     let (ws_send_tx, ws_send_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
-    spawn(send_loop(client_id, send_timeout, ws_tx, ws_send_rx));
+    subsys.spawn("send-loop", move |s| {
+        send_loop(s, client_id, send_timeout, ws_tx, ws_send_rx)
+    });
 
     ws_send_tx
         .send(ServerMessage::Welcome(Welcome {
@@ -131,6 +137,8 @@ async fn serve_loop(
         recv = ws_rx.next() => process_next_message(recv, client_id, remote_addr, &mut proto, &mut authorized).await?,
     }
 
+    subsys.request_local_shutdown();
+
     Ok(())
 }
 
@@ -158,24 +166,42 @@ async fn process_next_message(
             }
         }
     } else {
-        info!("WS stream of client {client_id} ({remote_addr}) closed.");
+        debug!("WS stream of client {client_id} ({remote_addr}) closed.");
         return Ok(ControlFlow::Break(()));
     }
     Ok(ControlFlow::Continue(()))
 }
 
 async fn send_loop(
+    subsys: Subsystem,
     client_id: ClientId,
     send_timeout: Option<Duration>,
     mut ws_tx: SplitSink<WebSocket, Message>,
     mut ws_send_rx: mpsc::Receiver<ServerMessage>,
-) {
-    while let Some(msg) = ws_send_rx.recv().await {
-        if let Err(e) = send_with_timeout(&msg, &mut ws_tx, send_timeout, client_id).await {
-            error!("Error sending WS message '{msg:?}': {e}");
+) -> miette::Result<()> {
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        recv = ws_send_rx.recv() => if let Some(msg) = recv {
+            select! {
+                biased;
+                _ = subsys.shutdown_requested() => break,
+                res = send_with_timeout(&msg, &mut ws_tx, send_timeout, client_id) => {
+                    if let Err(e) = res {
+                        error!("Error sending WS message '{msg:?}': {e}");
+                        break;
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        } else {
             break;
-        }
+        },
     }
+
+    subsys.request_local_shutdown();
+
+    Ok(())
 }
 
 async fn send_with_timeout(
