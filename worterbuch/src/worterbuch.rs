@@ -281,6 +281,20 @@ struct Follower {
     pub is_proxy: bool,
 }
 
+impl Follower {
+    fn is_interested(&self, msg: &ClusterStateChange) -> bool {
+        match &msg.command {
+            ClientWriteCommand::Set(_, _, _)
+            | ClientWriteCommand::CSet(_, _, _, _)
+            | ClientWriteCommand::Delete(_)
+            | ClientWriteCommand::PDelete(_)
+            | ClientWriteCommand::Import(_) => true,
+            ClientWriteCommand::Publish(_, _) if self.is_proxy => true,
+            ClientWriteCommand::Publish(_, _) => false,
+        }
+    }
+}
+
 pub struct Worterbuch {
     config: Config,
     store: Store,
@@ -1135,17 +1149,19 @@ impl Worterbuch {
                 continue;
             }
 
-            if let Err(e) = follower.tx.send(msg.clone()).await {
-                error!("Error forwarding state change to follower/proxy: {e}");
-                match dead.take() {
-                    Some(mut the_dead) => {
-                        the_dead.push(follower.addr);
-                        dead = Some(the_dead);
-                    }
-                    None => {
-                        let mut new_dead = Vec::new();
-                        new_dead.push(follower.addr);
-                        dead = Some(new_dead);
+            if follower.is_interested(&msg) {
+                if let Err(e) = follower.tx.send(msg.clone()).await {
+                    error!("Error forwarding state change to follower/proxy: {e}");
+                    match dead.take() {
+                        Some(mut the_dead) => {
+                            the_dead.push(follower.addr);
+                            dead = Some(the_dead);
+                        }
+                        None => {
+                            let mut new_dead = Vec::new();
+                            new_dead.push(follower.addr);
+                            dead = Some(new_dead);
+                        }
                     }
                 }
             }
