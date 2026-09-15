@@ -286,7 +286,7 @@ impl ChildProcessManager {
     #[instrument(skip(self), err)]
     pub async fn stop(&mut self) -> Result<()> {
         self.subsys.request_local_shutdown();
-        self.subsys.join().await;
+        self.subsys.join().await.ok();
         Ok(())
     }
 }

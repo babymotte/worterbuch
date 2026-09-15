@@ -36,7 +36,7 @@ use crate::{
     worterbuch_version,
 };
 use hashbrown::HashMap;
-use miette::{Context, Error, IntoDiagnostic, Result, miette};
+use miette::{Context, Error, IntoDiagnostic, Result, bail, ensure};
 use serde_json::json;
 use std::{
     io::{self},
@@ -405,22 +405,22 @@ async fn receive_handshake(
 
             match msg {
                 ProxyMessage::Handshake(handshake) => Ok(handshake),
-                msg => Err(miette!(
+                msg => bail!(
                     "expected handshake message from follower/proxy {}, but got:\n{:?}",
                     follower,
                     msg
-                )),
+                ),
             }
         }
-        Ok(None) => Err(miette!(
+        Ok(None) => bail!(
             "connection to follower/proxy {} closed before handshake",
             follower
-        )),
-        Err(e) => Err(miette!(
+        ),
+        Err(e) => bail!(
             "error receiving handshake message from follower/proxy {}: {}",
             follower,
             e
-        )),
+        ),
     }
 }
 
@@ -483,14 +483,12 @@ async fn process_handshake(
 }
 
 fn check_version(version: &WorterbuchVersion, config: &Config) -> miette::Result<()> {
-    if version != &worterbuch_version() {
-        return Err(miette!(
-            "follower/proxy version mismatch: expected {}, got {}",
-            worterbuch_version(),
-            version
-        ));
-    }
-
+    ensure!(
+        version == &worterbuch_version(),
+        "follower/proxy version mismatch: expected {}, got {}",
+        worterbuch_version(),
+        version
+    );
     Ok(())
 }
 
@@ -517,7 +515,7 @@ async fn send_initial_state(
         biased;
         _ = subsys.shutdown_requested() => {
             warn!("Shutdown requested before initial sync completed.");
-            Err(miette!("shut down before initial sync"))
+            bail!("shut down before initial sync")
         },
         res = write_line_and_flush(|| subsys.shutdown_requested(), LeaderMessage::Init(state), tcp_stream, config.send_timeout, follower) => {
             res.into_diagnostic().wrap_err("could not send current state to follower/proxy")
@@ -639,9 +637,7 @@ impl VirtualProxyServer {
 
         match msg {
             ProxyMessage::Handshake(_) => {
-                return Err(miette!(
-                    "received handshake message from proxy after initial handshake"
-                ));
+                bail!("received handshake message from proxy after initial handshake");
             }
             ProxyMessage::Connected(Connected {
                 client_id,
@@ -770,11 +766,11 @@ impl VirtualProxyServer {
     ) -> miette::Result<bool> {
         trace!("Processing incoming message …");
         let Some(client_handler) = self.clients.get_mut(&client_id) else {
-            return Err(miette!(
+            bail!(
                 "Received request for unknown client {client_id} ({}/{:?})",
                 self.proxy_address,
                 interface
-            ));
+            );
         };
 
         let msg_processed = client_handler

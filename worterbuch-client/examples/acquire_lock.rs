@@ -1,4 +1,4 @@
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, Result, bail};
 use std::{io, time::Duration};
 use tokio::{spawn, time::sleep};
 use tracing::info;
@@ -69,5 +69,5 @@ fn do_something_that_might_fail() -> Result<()> {
 
 fn _fail() -> Result<()> {
     eprintln!("Oops, something went wrong!");
-    Err(miette::miette!("Simulated error"))
+    bail!("Simulated error")
 }

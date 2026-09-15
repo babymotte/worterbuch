@@ -18,7 +18,7 @@
  */
 
 use crate::web_ui::Settings;
-use miette::{Context, IntoDiagnostic};
+use miette::{Context, IntoDiagnostic, bail};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -241,7 +241,7 @@ impl ThroughputTest {
         let conn = conn_rx.recv().await;
         if conn.is_none() {
             debug!("Connection result channel closed.");
-            return Err(miette::miette!("Failed to spawn agent {i}."));
+            bail!("Failed to spawn agent {i}.");
         }
         debug!("Agent {i} spawned.");
         self.ui_tx

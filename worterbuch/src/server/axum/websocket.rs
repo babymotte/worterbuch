@@ -27,7 +27,7 @@ use futures::{
     sink::SinkExt,
     stream::{SplitSink, StreamExt},
 };
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{IntoDiagnostic, Result, bail};
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
 use tokio::{spawn, sync::mpsc, time::timeout};
 use totils::while_select;
@@ -193,7 +193,7 @@ async fn send_with_timeout(
             Ok(r) => r.into_diagnostic()?,
             Err(_) => {
                 error!("Send timeout for client {client_id}");
-                return Err(miette!("Send timeout for client {client_id}"));
+                bail!("Send timeout for client {client_id}");
             }
         }
     } else {

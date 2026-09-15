@@ -18,7 +18,7 @@
 use super::PeerInfo;
 use crate::{Priority, load_millis_since_active, telemetry};
 use clap::Parser;
-use miette::{Context, IntoDiagnostic, Result, miette};
+use miette::{Context, IntoDiagnostic, Result, bail, miette};
 use serde::Deserialize;
 use std::{
     collections::HashSet,
@@ -190,13 +190,11 @@ fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usi
     };
 
     if node_count < 1 {
-        return Err(miette!(
-            "You have not configured any nodes for your cluster."
-        ));
+        bail!("You have not configured any nodes for your cluster.");
     } else if quorum > node_count {
-        return Err(miette!(
+        bail!(
             "The leader election quorum ({quorum}) is TOO HIGH for the number of nodes ({node_count}). Your cluster will not be able to elect a leader."
-        ));
+        );
     } else if node_count == 1 {
         error!(
             "You have configured only one node, your cluster is NOT redundant! If this is what you want, you should use worterbuch in standalone mode, not as a cluster.",
@@ -371,10 +369,10 @@ async fn load_config(
         })
         .collect();
     let Some(me) = me else {
-        return Err(miette!(
+        bail!(
             "Node '{}' is not defined in the cluster config.",
             args.node_id
-        ));
+        );
     };
     debug!("Configured nodes: {nodes:?}");
     debug!("Configured peers: {peers:?}");
@@ -460,10 +458,7 @@ async fn reload_config(
         let Some(me) = me else {
             error!("This node is no longer part of the cluster config, shutting down …");
             subsys.request_global_shutdown();
-            return Err(miette!(
-                "Node '{}' is not defined in the cluster config.",
-                node_id
-            ));
+            bail!("Node '{}' is not defined in the cluster config.", node_id);
         };
 
         let peers = Peers(peers);

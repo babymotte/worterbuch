@@ -18,7 +18,7 @@
  */
 
 use hashbrown::{HashMap, hash_map::Entry};
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{IntoDiagnostic, Result, bail};
 use tracing::{debug, warn};
 use worterbuch_common::{
     KeySegment, LsSubscriptionSender, PSubscriptionSender, RegularKeySegment, SubscriptionId,
@@ -67,9 +67,7 @@ impl Subscriber {
             tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
-            Err(miette!(
-                "Tried to send a PStateEvent to a StateEvent subscriber"
-            ))
+            bail!("Tried to send a PStateEvent to a StateEvent subscriber")
         }
     }
 
@@ -79,9 +77,7 @@ impl Subscriber {
             tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
-            Err(miette!(
-                "Tried to send a StateEvent to a PStateEvent subscriber"
-            ))
+            bail!("Tried to send a StateEvent to a PStateEvent subscriber")
         }
     }
 
