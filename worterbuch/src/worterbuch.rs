@@ -1561,7 +1561,7 @@ impl Worterbuch {
             interface,
         };
         self.internal_protocol_switched(client_id, protocol, trace)
-            .await
+            .await;
     }
 
     pub(crate) async fn internal_protocol_switched(

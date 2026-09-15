@@ -62,143 +62,500 @@ use worterbuch_common::{
     receive_msg, topic, write_line_and_flush,
 };
 
-type PendingRequests = ();
-
 struct RunResult {
     initial_connection_successful: bool,
     leader_addresses_updated: bool,
-    pending_requests: PendingRequests,
 }
 
-pub(crate) async fn run<S: AsRef<str> + ToString>(
-    subsys: &SubsystemHandle,
-    mut worterbuch: Worterbuch,
-    mut api_rx: mpsc::Receiver<WbFunction>,
+struct Proxy<'a> {
+    subsys: &'a SubsystemHandle,
+    worterbuch: Worterbuch,
+    api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     servers: Servers,
-    leader_addresses: &[S],
-    mut stdin: mpsc::Receiver<String>,
-) -> WorterbuchAppResult<()> {
-    #[cfg(feature = "commercial")]
-    if !config.license.features.proxy {
-        return Err(crate::error::WorterbuchAppError::NoLicense(
-            "proxy".to_owned(),
-        ));
-    }
+    leader_addresses: Box<[SocketAddr]>,
+    stdin: mpsc::Receiver<String>,
+    counter: usize,
+    retry_seconds: u64,
+    locks: Locks,
+    response_interests: HashMap<ClientId, ClientResponseInterests>,
+}
 
-    let mut leader_addresses = parse_addresses(&leader_addresses).map_err(|e| {
-        WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
-            e,
-            leader_addresses.iter().map(|s| s.to_string()).collect(),
-        ))
-    })?;
-
-    info!("Running in PROXY mode. Leaders: {:?}", leader_addresses);
-
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
-            json!(Mode::Proxy),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::Startup),
-            true,
-        )
-        .await?;
-
-    // TODO get from config
-    let retry_seconds = 1;
-
-    let mut counter = 0;
-
-    let mut locks = Locks::default();
-
-    let mut response_interests = HashMap::new();
-
-    let mut pending_requests = ();
-
-    'outer: loop {
-        if leader_addresses.is_empty() {
-            warn!(
-                "No leader addresses provided. Waiting to receive new list of leader addresses from stdin …"
-            );
-            select! {
-                biased;
-                _ = subsys.shutdown_requested() => break 'outer,
-                recv = stdin.recv() => {
-                    if update_leader_addresses(recv, &mut leader_addresses) {
-                        counter = 0;
-                        continue 'outer;
-                    }
-                },
-            }
+impl<'a> Proxy<'a> {
+    fn new<S: AsRef<str> + ToString>(
+        subsys: &'a SubsystemHandle,
+        worterbuch: Worterbuch,
+        api_rx: mpsc::Receiver<WbFunction>,
+        config: Config,
+        servers: Servers,
+        leader_addresses: &[S],
+        stdin: mpsc::Receiver<String>,
+    ) -> WorterbuchAppResult<Self> {
+        #[cfg(feature = "commercial")]
+        if !config.license.features.proxy {
+            return Err(crate::error::WorterbuchAppError::NoLicense(
+                "proxy".to_owned(),
+            ));
         }
 
-        for leader_address in leader_addresses.clone() {
-            worterbuch
-                .internal_set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-                    json!(&LeaderState::Disconnected),
-                    INTERNAL_CLIENT_ID,
-                    Trace::InternalAction(InternalAction::LeaderSync),
-                    true,
-                )
-                .await?;
+        let leader_addresses = parse_addresses(&leader_addresses).map_err(|e| {
+            WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
+                e,
+                leader_addresses.iter().map(|s| s.to_string()).collect(),
+            ))
+        })?;
 
-            if counter >= leader_addresses.len() {
-                warn!("Could not connect to any leader. Retrying in {retry_seconds} second(s) …");
+        // TODO get from config
+        let retry_seconds = 1;
+        let counter = 0;
+        let locks = Locks::default();
+        let response_interests = HashMap::new();
+
+        Ok(Proxy {
+            subsys,
+            worterbuch,
+            api_rx,
+            config,
+            servers,
+            leader_addresses,
+            stdin,
+            // TODO get from config
+            retry_seconds,
+            counter,
+            locks,
+            response_interests,
+        })
+    }
+
+    async fn run(mut self) -> WorterbuchAppResult<()> {
+        info!(
+            "Running in PROXY mode. Leaders: {:?}",
+            self.leader_addresses
+        );
+
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+                json!(Mode::Proxy),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::Startup),
+                true,
+            )
+            .await?;
+
+        self.main_loop().await?;
+
+        info!("Main loop stopped, shutting down.");
+
+        shutdown(self.subsys, self.worterbuch, self.config, self.servers).await
+    }
+
+    async fn main_loop(&mut self) -> Result<(), WorterbuchAppError> {
+        'outer: loop {
+            if self.leader_addresses.is_empty() {
+                warn!(
+                    "No leader addresses provided. Waiting to receive new list of leader addresses from stdin …"
+                );
                 select! {
                     biased;
-                    _ = subsys.shutdown_requested() => break 'outer,
-                    _ = tokio::time::sleep(Duration::from_secs(retry_seconds)) => counter = 0,
-                    recv = stdin.recv() => {
-                        if update_leader_addresses(recv, &mut leader_addresses) {
-                            counter = 0;
+                    _ = self.subsys.shutdown_requested() => break 'outer,
+                    recv = self.stdin.recv() => {
+                        if update_leader_addresses(recv, &mut self.leader_addresses) {
+                            self.counter = 0;
                             continue 'outer;
                         }
                     },
                 }
             }
 
-            if update_leader_addresses(stdin.try_recv().ok(), &mut leader_addresses) {
-                counter = 0;
-                continue 'outer;
-            }
+            for leader_address in self.leader_addresses.clone() {
+                self.worterbuch
+                    .internal_set(
+                        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                        json!(&LeaderState::Disconnected),
+                        INTERNAL_CLIENT_ID,
+                        Trace::InternalAction(InternalAction::LeaderSync),
+                        true,
+                    )
+                    .await?;
 
-            select! {
-                biased;
-                _ = subsys.shutdown_requested() => break 'outer,
-                res = run_with_leader(
-                    subsys,
-                    &mut worterbuch,
-                    &mut api_rx,
-                    config.clone(),
-                    leader_address,
-                    pending_requests,
-                    &mut locks,
-                    &mut response_interests,
-                    &mut stdin,
-                    &mut leader_addresses,
-                ) => {
-                    let res = res?;
-                    if res.leader_addresses_updated {
-                        counter = 0;
-                        continue 'outer;
-                    } else if res.initial_connection_successful {
-                        info!("Connection to leader {} lost. Trying next leader …", leader_address);
-                        counter += 1;
-                    } else {
-                        info!("Could not connect to leader {}. Trying next leader …", leader_address);
-                        counter += 1;
+                if self.counter >= self.leader_addresses.len() {
+                    warn!(
+                        "Could not connect to any leader. Retrying in {} second(s) …",
+                        self.retry_seconds
+                    );
+                    select! {
+                        biased;
+                        _ = self.subsys.shutdown_requested() => break 'outer,
+                        _ = tokio::time::sleep(Duration::from_secs(self.retry_seconds)) => self.counter = 0,
+                        recv = self.stdin.recv() => {
+                            if update_leader_addresses(recv, &mut self.leader_addresses) {
+                                self.counter = 0;
+                                continue 'outer;
+                            }
+                        },
                     }
-                    pending_requests = res.pending_requests;
-                },
+                }
+
+                if update_leader_addresses(self.stdin.try_recv().ok(), &mut self.leader_addresses) {
+                    self.counter = 0;
+                    continue 'outer;
+                }
+
+                select! {
+                    biased;
+                    _ = self.subsys.shutdown_requested() => break 'outer,
+                    res = self.run_with_leader(leader_address) => {
+                        let res = res?;
+                        if res.leader_addresses_updated {
+                            self.counter = 0;
+                            continue 'outer;
+                        } else if res.initial_connection_successful {
+                            info!("Connection to leader {} lost. Trying next leader …", leader_address);
+                            self.counter += 1;
+                        } else {
+                            info!("Could not connect to leader {}. Trying next leader …", leader_address);
+                            self.counter += 1;
+                        }
+                    },
+                }
             }
         }
+
+        Ok(())
     }
 
-    info!("Main loop stopped, shutting down.");
+    async fn run_with_leader(
+        &mut self,
+        leader_address: SocketAddr,
+    ) -> WorterbuchAppResult<RunResult> {
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                json!(LeaderState::Connecting(leader_address)),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
 
-    shutdown(subsys, worterbuch, config, servers).await
+        let stream = match TcpStream::connect(leader_address).await {
+            Ok(it) => it,
+            Err(e) => {
+                warn!("Failed to connect to leader {}: {}", leader_address, e);
+                return Ok(RunResult {
+                    leader_addresses_updated: false,
+                    initial_connection_successful: false,
+                });
+            }
+        };
+        let (leader_rx, leader_tx) = stream.into_split();
+        let mut lines = BufReader::new(leader_rx).lines();
+
+        let proxy_request_tx =
+            init_request_sender(self.subsys, leader_tx, &self.config, leader_address);
+
+        let timeout = Some(self.config.initial_sync_timeout);
+
+        if let Err(result) = self
+            .establish_leader_session(leader_address, &mut lines, &proxy_request_tx, timeout)
+            .await?
+        {
+            return Ok(result);
+        }
+
+        let leader_addresses_updated = LeaderConnection::new(
+            &self.subsys,
+            proxy_request_tx,
+            &mut self.worterbuch,
+            &mut self.api_rx,
+            lines,
+            &self.config,
+            leader_address,
+            &mut self.locks,
+            &mut self.response_interests,
+            &mut self.leader_addresses,
+        )
+        .run(&mut self.stdin)
+        .await?;
+
+        info!(
+            "Proxy loop for leader {} stopped, closing connection.",
+            leader_address
+        );
+
+        Ok(RunResult {
+            leader_addresses_updated,
+            initial_connection_successful: true,
+        })
+    }
+
+    async fn establish_leader_session(
+        &mut self,
+        leader_address: SocketAddr,
+        lines: &mut Lines<BufReader<OwnedReadHalf>>,
+        proxy_request_tx: &mpsc::Sender<ProxyMessage>,
+        timeout: Option<Duration>,
+    ) -> WorterbuchAppResult<Result<(), RunResult>> {
+        info!("Successfully connected to leader {leader_address}. Performing handshake …");
+
+        let welcome = match self
+            .receive_welcome_message(leader_address, lines, timeout)
+            .await?
+        {
+            Ok(welcome) => welcome,
+            Err(result) => return Ok(Err(result)),
+        };
+
+        self.send_handshake(welcome, proxy_request_tx).await?;
+
+        if let Err(result) = self
+            .sync_with_leader(leader_address, lines, timeout)
+            .await?
+        {
+            return Ok(Err(result));
+        }
+
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                json!(LeaderState::Synced(leader_address)),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+
+        Ok(Ok(()))
+    }
+
+    async fn receive_welcome_message(
+        &mut self,
+        leader_address: SocketAddr,
+        lines: &mut Lines<BufReader<OwnedReadHalf>>,
+        timeout: Option<Duration>,
+    ) -> WorterbuchAppResult<Result<LeaderWelcome, RunResult>> {
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                json!(LeaderState::Handshake(leader_address)),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+        let welcome = loop {
+            select! {
+                biased;
+                _ = self.subsys.shutdown_requested() => {
+                    warn!("Shutdown requested before receiving leader welcome message.");
+                    return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
+                },
+                recv = self.stdin.recv() => {
+                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                        if !self.leader_addresses.contains(&leader_address) {
+                            warn!(
+                                "Current leader address {} is no longer in the list of known leader addresses {:?}",
+                                leader_address, self.leader_addresses
+                            );
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: true,
+                                initial_connection_successful: false,
+                            }));
+                        }
+                    }
+                },
+                recv = receive_msg(lines, timeout) => {
+                    debug!("Received leader message");
+                    match recv {
+                        Ok(Some(msg)) => {
+                            if let LeaderMessage::Welcome(welcome) = msg {
+                                debug!("Received welcome message from leader: {welcome:?}");
+                                break welcome;
+                            } else {
+                                warn!("Expected welcome message from leader, but got: {msg:?}");
+                                return Ok(Err(RunResult {
+                                    leader_addresses_updated: false,
+                                    initial_connection_successful: false,
+                                }));
+                            }
+                        },
+                        Ok(None) => {
+                            warn!("Leader closed connection before sending welcome message.");
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                            }));
+                        },
+                        Err(e) => {
+                            warn!("Error receiving welcome message from leader: {e}");
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                            }));
+                        }
+                    }
+                },
+            };
+        };
+
+        Ok(Ok(welcome))
+    }
+
+    async fn send_handshake(
+        &self,
+        welcome: LeaderWelcome,
+        proxy_request_tx: &mpsc::Sender<ProxyMessage>,
+    ) -> WorterbuchAppResult<()> {
+        let version = worterbuch_version();
+        let auth_token = if welcome.authentication_required {
+            // TODO
+            None
+        } else {
+            None
+        };
+
+        let connected_clients = connected_clients(&self.worterbuch);
+
+        let handshake = ProxyMessage::Handshake(Handshake::Proxy(ProxyHandshake {
+            version,
+            auth_token,
+            locks: self.locks.clone(),
+            connected_clients,
+        }));
+
+        proxy_request_tx.send(handshake).await?;
+
+        Ok(())
+    }
+
+    async fn sync_with_leader(
+        &mut self,
+        leader_address: SocketAddr,
+        lines: &mut Lines<BufReader<OwnedReadHalf>>,
+        timeout: Option<Duration>,
+    ) -> WorterbuchAppResult<Result<(), RunResult>> {
+        info!("Handshake complete. Waiting for initial sync message …");
+
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
+                json!(LeaderState::Syncing(leader_address)),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+        let mut persistence_interval = self.config.persistence_interval();
+        loop {
+            select! {
+                biased;
+                _ = self.subsys.shutdown_requested() => {
+                    warn!("Shutdown requested before initial sync completed.");
+                    return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
+                },
+                recv = self.stdin.recv() => {
+                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                        if !self.leader_addresses.contains(&leader_address) {
+                            warn!(
+                                "Current leader address {} is no longer in the list of known leader addresses {:?}",
+                                leader_address, self.leader_addresses
+                            );
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: true,
+                                initial_connection_successful: false,
+                            }));
+                        }
+                    }
+                },
+                recv = receive_msg(lines, timeout) => {
+                    debug!("Received leader message");
+                    match recv {
+                        Ok(Some(msg)) => {
+                            if let LeaderMessage::Init(state) = msg {
+                                debug!("Received initial sync message from leader: {state:?}");
+                                self.initial_sync(state.store).await?;
+                                persistence_interval.reset();
+                                self.worterbuch.flush().await?;
+                                break;
+                            } else {
+                                warn!("Expected initial sync message from leader, but got: {msg:?}");
+                                return Ok(Err(RunResult {
+                                    leader_addresses_updated: false,
+                                    initial_connection_successful: false,
+                                }));
+                            }
+                        },
+                        Ok(None) => {
+                            warn!("Leader closed connection before sending initial sync message.");
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                            }));
+                        },
+                        Err(e) => {
+                            warn!("Error receiving initial sync message from leader: {e}");
+                            return Ok(Err(RunResult {
+                                leader_addresses_updated: false,
+                                initial_connection_successful: false,
+                            }));
+                        }
+                    }
+                },
+            };
+        }
+
+        info!("Successfully synced with leader.");
+
+        Ok(Ok(()))
+    }
+
+    async fn initial_sync(&mut self, store: StoreNode) -> WorterbuchAppResult<()> {
+        self.worterbuch
+            .reset_store_and_notify_subscribers(store, true)
+            .await?;
+
+        self.worterbuch
+            .internal_set(
+                topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
+                json!(Mode::Proxy),
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::LeaderSync),
+                true,
+            )
+            .await?;
+
+        unlock_persistence();
+
+        self.worterbuch.flush().await.map_err(|e| {
+            WorterbuchAppError::ClusterError(format!(
+                "Failed to flush storage after initial sync: {e}"
+            ))
+        })?;
+        Ok(())
+    }
+}
+
+pub(crate) async fn run<S: AsRef<str> + ToString>(
+    subsys: &SubsystemHandle,
+    worterbuch: Worterbuch,
+    api_rx: mpsc::Receiver<WbFunction>,
+    config: Config,
+    servers: Servers,
+    leader_addresses: &[S],
+    stdin: mpsc::Receiver<String>,
+) -> WorterbuchAppResult<()> {
+    Proxy::new(
+        subsys,
+        worterbuch,
+        api_rx,
+        config,
+        servers,
+        leader_addresses,
+        stdin,
+    )?
+    .run()
+    .await
 }
 
 fn update_leader_addresses(
@@ -236,270 +593,25 @@ fn update_leader_addresses(
     true
 }
 
-async fn run_with_leader(
-    subsys: &SubsystemHandle,
-    worterbuch: &mut Worterbuch,
-    api_rx: &mut mpsc::Receiver<WbFunction>,
-    config: Config,
-    leader_address: SocketAddr,
-    pending_requests: PendingRequests,
-    locks: &mut Locks,
-    response_interests: &mut HashMap<ClientId, ClientResponseInterests>,
-    stdin: &mut mpsc::Receiver<String>,
-    leader_addresses: &mut Box<[SocketAddr]>,
-) -> WorterbuchAppResult<RunResult> {
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-            json!(LeaderState::Connecting(leader_address)),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::LeaderSync),
-            true,
-        )
-        .await?;
-
-    let stream = match TcpStream::connect(leader_address).await {
-        Ok(it) => it,
-        Err(e) => {
-            warn!("Failed to connect to leader {}: {}", leader_address, e);
-            return Ok(RunResult {
-                leader_addresses_updated: false,
-                initial_connection_successful: false,
-                pending_requests,
-            });
-        }
-    };
-    let (leader_rx, leader_tx) = stream.into_split();
-    let mut lines = BufReader::new(leader_rx).lines();
-
-    let proxy_request_tx = init_request_sender(subsys, leader_tx, &config, leader_address);
-
-    let timeout = Some(config.initial_sync_timeout);
-
-    info!("Successfully connected to leader {leader_address}. Performing handshake …");
-
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-            json!(LeaderState::Handshake(leader_address)),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::LeaderSync),
-            true,
-        )
-        .await?;
-
-    let welcome = loop {
-        select! {
-            biased;
-            _ = subsys.shutdown_requested() => {
-                warn!("Shutdown requested before receiving leader welcome message.");
-                return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
-            },
-            recv = stdin.recv() => {
-                if update_leader_addresses(recv, leader_addresses) {
-                    if !leader_addresses.contains(&leader_address) {
-                        warn!(
-                            "Current leader address {} is no longer in the list of known leader addresses {:?}",
-                            leader_address, leader_addresses
-                        );
-                        return Ok(RunResult {
-                            leader_addresses_updated: true,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    }
-                }
-            },
-            recv = receive_msg(&mut lines, timeout) => {
-                debug!("Received leader message");
-                match recv {
-                    Ok(Some(msg)) => {
-                        if let LeaderMessage::Welcome(welcome) = msg {
-                            debug!("Received welcome message from leader: {welcome:?}");
-                            break welcome;
-                        } else {
-                            warn!("Expected welcome message from leader, but got: {msg:?}");
-                            return Ok(RunResult {
-                                leader_addresses_updated: false,
-                                initial_connection_successful: false,
-                                pending_requests,
-                            });
-                        }
-                    },
-                    Ok(None) => {
-                        warn!("Leader closed connection before sending welcome message.");
-                        return Ok(RunResult {
-                            leader_addresses_updated: false,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    },
-                    Err(e) => {
-                        warn!("Error receiving welcome message from leader: {e}");
-                        return Ok(RunResult {
-                            leader_addresses_updated: false,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    }
-                }
-            },
-        };
-    };
-
-    // TODO check version
-    send_handshake(welcome, worterbuch, &config, &proxy_request_tx, locks).await?;
-
-    info!("Handshake complete. Waiting for initial sync message …");
-
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-            json!(LeaderState::Syncing(leader_address)),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::LeaderSync),
-            true,
-        )
-        .await?;
-
-    let mut persistence_interval = config.persistence_interval();
-
-    loop {
-        select! {
-            biased;
-            _ = subsys.shutdown_requested() => {
-                warn!("Shutdown requested before initial sync completed.");
-                return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
-            },
-            recv = stdin.recv() => {
-                if update_leader_addresses(recv, leader_addresses) {
-                    if !leader_addresses.contains(&leader_address) {
-                        warn!(
-                            "Current leader address {} is no longer in the list of known leader addresses {:?}",
-                            leader_address, leader_addresses
-                        );
-                        return Ok(RunResult {
-                            leader_addresses_updated: true,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    }
-                }
-            },
-            recv = receive_msg(&mut lines, timeout) => {
-                debug!("Received leader message");
-                match recv {
-                    Ok(Some(msg)) => {
-                        if let LeaderMessage::Init(state) = msg {
-                            debug!("Received initial sync message from leader: {state:?}");
-                            initial_sync(state.store, worterbuch).await?;
-                            persistence_interval.reset();
-                            worterbuch.flush().await?;
-                            break;
-                        } else {
-                            warn!("Expected initial sync message from leader, but got: {msg:?}");
-                            return Ok(RunResult {
-                                leader_addresses_updated: false,
-                                initial_connection_successful: false,
-                                pending_requests,
-                            });
-                        }
-                    },
-                    Ok(None) => {
-                        warn!("Leader closed connection before sending initial sync message.");
-                        return Ok(RunResult {
-                            leader_addresses_updated: false,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    },
-                    Err(e) => {
-                        warn!("Error receiving initial sync message from leader: {e}");
-                        return Ok(RunResult {
-                            leader_addresses_updated: false,
-                            initial_connection_successful: false,
-                            pending_requests,
-                        });
-                    }
-                }
-            },
-        };
-    }
-    info!("Successfully synced with leader.");
-
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-            json!(LeaderState::Synced(leader_address)),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::LeaderSync),
-            true,
-        )
-        .await?;
-
-    // TODO implement pending requests
-    let (pending_requests, leader_addresses_updated) = LeaderConnection::new(
-        subsys,
-        proxy_request_tx,
-        worterbuch,
-        api_rx,
-        lines,
-        &config,
-        leader_address,
-        locks,
-        response_interests,
-        leader_addresses,
-    )
-    .run(stdin)
-    .await?;
-
-    info!(
-        "Proxy loop for leader {} stopped, closing connection.",
-        leader_address
-    );
-
-    Ok(RunResult {
-        leader_addresses_updated,
-        initial_connection_successful: true,
-        pending_requests,
-    })
-}
-
-async fn send_handshake(
-    welcome: LeaderWelcome,
-    worterbuch: &Worterbuch,
-    config: &Config,
-    proxy_request_tx: &mpsc::Sender<ProxyMessage>,
-    locks: &Locks,
-) -> WorterbuchAppResult<()> {
-    let version = worterbuch_version();
-    let auth_token = if welcome.authentication_required {
-        // TODO
-        None
-    } else {
-        None
-    };
-
-    let connected_clients = connected_clients(worterbuch);
-
-    let handshake = ProxyMessage::Handshake(Handshake::Proxy(ProxyHandshake {
-        version,
-        auth_token,
-        locks: locks.clone(),
-        connected_clients,
-    }));
-
-    proxy_request_tx.send(handshake).await?;
-
-    Ok(())
-}
-
 #[derive(Debug, Default)]
 struct ClientResponseInterests {
-    ack: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<()>>>,
-    state: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<Value>>>,
-    pstate: HashMap<TransactionId, oneshot::Sender<WorterbuchResult<KeyValuePairs>>>,
-    lock_acquired: HashMap<TransactionId, (oneshot::Sender<WorterbuchResult<()>>, LockLostSender)>,
+    ack: HashMap<TransactionId, (ClientMessage, oneshot::Sender<WorterbuchResult<()>>)>,
+    state: HashMap<TransactionId, (ClientMessage, oneshot::Sender<WorterbuchResult<Value>>)>,
+    pstate: HashMap<
+        TransactionId,
+        (
+            ClientMessage,
+            oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
+        ),
+    >,
+    lock_acquired: HashMap<
+        TransactionId,
+        (
+            ClientMessage,
+            oneshot::Sender<WorterbuchResult<()>>,
+            LockLostSender,
+        ),
+    >,
     lock_lost: HashMap<TransactionId, LockLostSender>,
 }
 
@@ -554,10 +666,7 @@ impl<'a> LeaderConnection<'a> {
         }
     }
 
-    async fn run(
-        mut self,
-        stdin: &'a mut mpsc::Receiver<String>,
-    ) -> WorterbuchAppResult<(PendingRequests, bool)> {
+    async fn run(mut self, stdin: &'a mut mpsc::Receiver<String>) -> WorterbuchAppResult<bool> {
         debug!(
             "Starting new leder session with inherited response interests: {:#?}",
             self.response_interests
@@ -571,8 +680,8 @@ impl<'a> LeaderConnection<'a> {
             recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
         }
         let leader_addresses_updated = self.leader_addresses_updated;
-        let pending_requests = self.pending_requests();
-        Ok((pending_requests, leader_addresses_updated))
+
+        Ok(leader_addresses_updated)
     }
 
     fn update_leader_address(&mut self, recv: Option<String>) -> ControlFlow<()> {
@@ -749,12 +858,16 @@ impl<'a> LeaderConnection<'a> {
                 self.drop_response_interests(client_id);
             }
             WbFunction::ProtocolSwitched(client_id, interface, version) => {
+                let client_message =
+                    ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest { version });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest { version }),
+                    msg: client_message.clone(),
                     interface: interface.clone(),
                 });
-                // TODO register response interest
+                let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+                spawn(ack_rx);
+                self.register_ack_interest(client_id, 0, client_message, ack_tx);
                 self.proxy_request_tx.send(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
@@ -772,80 +885,86 @@ impl<'a> LeaderConnection<'a> {
                     )
                     .await;
                 } else {
+                    let client_message = ClientMessage::Set(Set {
+                        transaction_id,
+                        key,
+                        value,
+                    });
                     let request = ProxyMessage::Request(Request {
                         client_id,
-                        msg: ClientMessage::Set(Set {
-                            transaction_id,
-                            key,
-                            value,
-                        }),
+                        msg: client_message.clone(),
                         interface,
                     });
-                    self.register_ack_interest(client_id, transaction_id, tx);
+                    self.register_ack_interest(client_id, transaction_id, client_message, tx);
                     self.proxy_request_tx.send(request).await?;
                 }
             }
             WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
+                let client_message = ClientMessage::CSet(CSet {
+                    transaction_id,
+                    key,
+                    value,
+                    version,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::CSet(CSet {
-                        transaction_id,
-                        key,
-                        value,
-                        version,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_ack_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
+                let client_message = ClientMessage::SPubInit(SPubInit {
+                    transaction_id,
+                    key,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::SPubInit(SPubInit {
-                        transaction_id,
-                        key,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_ack_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
+                let client_message = ClientMessage::SPub(SPub {
+                    transaction_id,
+                    value,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::SPub(SPub {
-                        transaction_id,
-                        value,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_ack_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
+                let client_message = ClientMessage::Publish(Publish {
+                    transaction_id,
+                    key,
+                    value,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::Publish(Publish {
-                        transaction_id,
-                        key,
-                        value,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_ack_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
+                let client_message = ClientMessage::Delete(Delete {
+                    transaction_id,
+                    key,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::Delete(Delete {
-                        transaction_id,
-                        key,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_state_interest(client_id, transaction_id, tx);
+                self.register_state_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::PDelete(
@@ -856,25 +975,27 @@ impl<'a> LeaderConnection<'a> {
                 client_id,
                 tx,
             ) => {
+                let client_message = ClientMessage::PDelete(PDelete {
+                    transaction_id,
+                    request_pattern,
+                    quiet,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::PDelete(PDelete {
-                        transaction_id,
-                        request_pattern,
-                        quiet,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
-                self.register_pstate_interest(client_id, transaction_id, tx);
+                self.register_pstate_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
+                let client_message = ClientMessage::Lock(Lock {
+                    transaction_id,
+                    key: key.clone(),
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::Lock(Lock {
-                        transaction_id,
-                        key: key.clone(),
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
                 let (ack_tx, ack_rx) = oneshot::channel();
@@ -903,6 +1024,7 @@ impl<'a> LeaderConnection<'a> {
                     client_id,
                     key.clone(),
                     transaction_id,
+                    client_message,
                     ack_tx,
                     lost_tx,
                     false,
@@ -910,12 +1032,13 @@ impl<'a> LeaderConnection<'a> {
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
+                let client_message = ClientMessage::AcquireLock(Lock {
+                    transaction_id,
+                    key: key.clone(),
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::AcquireLock(Lock {
-                        transaction_id,
-                        key: key.clone(),
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
                 let (ack_tx, ack_rx) = oneshot::channel();
@@ -930,6 +1053,7 @@ impl<'a> LeaderConnection<'a> {
                     client_id,
                     key.clone(),
                     transaction_id,
+                    client_message,
                     ack_tx,
                     lost_tx,
                     true,
@@ -938,18 +1062,19 @@ impl<'a> LeaderConnection<'a> {
                 tx.send(Ok((acked_rx, lost_rx))).ok();
             }
             WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
+                let client_message = ClientMessage::ReleaseLock(Lock {
+                    transaction_id,
+                    key,
+                });
                 let request = ProxyMessage::Request(Request {
                     client_id,
-                    msg: ClientMessage::ReleaseLock(Lock {
-                        transaction_id,
-                        key,
-                    }),
+                    msg: client_message.clone(),
                     interface,
                 });
                 self.locks.released(client_id, transaction_id);
                 let _ = self.get_lock_acquired_interest(client_id, transaction_id);
                 let _ = self.get_lock_lost_interest(client_id, transaction_id);
-                self.register_ack_interest(client_id, transaction_id, tx);
+                self.register_ack_interest(client_id, transaction_id, client_message, tx);
                 self.proxy_request_tx.send(request).await?;
             }
             WbFunction::Import(_, _, _, _, _) => {
@@ -1114,6 +1239,7 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        client_message: ClientMessage,
         tx: oneshot::Sender<WorterbuchResult<()>>,
     ) {
         trace!("Registering ack interest for client {client_id}, transaction {transaction_id}");
@@ -1122,7 +1248,7 @@ impl<'a> LeaderConnection<'a> {
             .entry(client_id)
             .or_default()
             .ack
-            .insert(transaction_id, tx);
+            .insert(transaction_id, (client_message, tx));
 
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
     }
@@ -1131,6 +1257,7 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        client_message: ClientMessage,
         tx: oneshot::Sender<WorterbuchResult<Value>>,
     ) {
         trace!("Registering state interest for client {client_id}, transaction {transaction_id}");
@@ -1139,7 +1266,7 @@ impl<'a> LeaderConnection<'a> {
             .entry(client_id)
             .or_default()
             .state
-            .insert(transaction_id, tx);
+            .insert(transaction_id, (client_message, tx));
 
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
     }
@@ -1148,6 +1275,7 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         client_id: ClientId,
         transaction_id: TransactionId,
+        client_message: ClientMessage,
         tx: oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
     ) {
         trace!("Registering pstate interest for client {client_id}, transaction {transaction_id}");
@@ -1156,7 +1284,7 @@ impl<'a> LeaderConnection<'a> {
             .entry(client_id)
             .or_default()
             .pstate
-            .insert(transaction_id, tx);
+            .insert(transaction_id, (client_message, tx));
 
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
     }
@@ -1166,6 +1294,7 @@ impl<'a> LeaderConnection<'a> {
         client_id: ClientId,
         key: Key,
         transaction_id: TransactionId,
+        client_message: ClientMessage,
         tx: oneshot::Sender<WorterbuchResult<()>>,
         lost_tx: LockLostSender,
         wait_for_lock: bool,
@@ -1181,7 +1310,7 @@ impl<'a> LeaderConnection<'a> {
             .entry(client_id)
             .or_default()
             .lock_acquired
-            .insert(transaction_id, (tx, lost_tx));
+            .insert(transaction_id, (client_message, tx, lost_tx));
 
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
     }
@@ -1223,7 +1352,7 @@ impl<'a> LeaderConnection<'a> {
         );
 
         let interests = self.response_interests.get_mut(&client_id)?;
-        let tx = interests.ack.remove(&transaction_id);
+        let tx = interests.ack.remove(&transaction_id).map(|(_, tx)| tx);
         if interests.is_empty() {
             self.response_interests.remove(&client_id);
         }
@@ -1244,7 +1373,10 @@ impl<'a> LeaderConnection<'a> {
         );
 
         let interests = self.response_interests.get_mut(&client_id)?;
-        let tx = interests.lock_acquired.remove(&transaction_id);
+        let tx = interests
+            .lock_acquired
+            .remove(&transaction_id)
+            .map(|(_, tx, lost_tx)| (tx, lost_tx));
         if interests.is_empty() {
             self.response_interests.remove(&client_id);
         }
@@ -1284,7 +1416,7 @@ impl<'a> LeaderConnection<'a> {
         );
 
         let interests = self.response_interests.get_mut(&client_id)?;
-        let tx = interests.state.remove(&transaction_id);
+        let tx = interests.state.remove(&transaction_id).map(|(_, tx)| tx);
         if interests.is_empty() {
             self.response_interests.remove(&client_id);
         }
@@ -1305,7 +1437,7 @@ impl<'a> LeaderConnection<'a> {
         );
 
         let interests = self.response_interests.get_mut(&client_id)?;
-        let tx = interests.pstate.remove(&transaction_id);
+        let tx = interests.pstate.remove(&transaction_id).map(|(_, tx)| tx);
         if interests.is_empty() {
             self.response_interests.remove(&client_id);
         }
@@ -1314,11 +1446,6 @@ impl<'a> LeaderConnection<'a> {
         trace!("ClientResponseInterests: {:#?}", self.response_interests);
 
         tx
-    }
-
-    fn pending_requests(self) -> PendingRequests {
-        // TODO
-        ()
     }
 }
 
@@ -1394,27 +1521,4 @@ async fn forward_client_request(
     trace!("Client request forwarded to leader.");
 
     ControlFlow::Continue(())
-}
-
-async fn initial_sync(store: StoreNode, worterbuch: &mut Worterbuch) -> WorterbuchAppResult<()> {
-    worterbuch
-        .reset_store_and_notify_subscribers(store, true)
-        .await?;
-
-    worterbuch
-        .internal_set(
-            topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_MODE),
-            json!(Mode::Proxy),
-            INTERNAL_CLIENT_ID,
-            Trace::InternalAction(InternalAction::LeaderSync),
-            true,
-        )
-        .await?;
-
-    unlock_persistence();
-
-    worterbuch.flush().await.map_err(|e| {
-        WorterbuchAppError::ClusterError(format!("Failed to flush storage after initial sync: {e}"))
-    })?;
-    Ok(())
 }
