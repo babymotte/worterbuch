@@ -23,7 +23,7 @@ use std::io;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_message, provide_keys};
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: Subsystem) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

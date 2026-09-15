@@ -24,7 +24,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{error, info};
 use worterbuch_client::{benchmark::generate_dummy_data, connect_with_default_config};
 use worterbuch_common::protocol::v1::ServerMessage;
@@ -53,7 +53,7 @@ pub enum UiApi {
 }
 
 pub async fn start_latency_test(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     ui_tx: mpsc::UnboundedSender<UiApi>,
     mut api_rx: mpsc::UnboundedReceiver<Api>,
 ) -> miette::Result<()> {

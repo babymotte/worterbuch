@@ -33,7 +33,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{Instrument, info};
 use worterbuch_common::protocol::v1::{InternalAction, Trace, TraceData};
 
@@ -287,7 +287,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
 }
 
 async fn shutdown(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     config: Config,
     servers: Servers,
@@ -315,24 +315,24 @@ async fn shutdown_servers(servers: Servers) {
     if let Some(it) = servers.web_server {
         info!("Shutting down web server …");
         it.request_local_shutdown();
-        it.join().await;
+        it.join().await.ok();
     }
 
     if let Some(it) = servers.tcp_server {
         info!("Shutting down tcp server …");
         it.request_local_shutdown();
-        it.join().await;
+        it.join().await.ok();
     }
 
     if let Some(it) = servers.unix_socket {
         info!("Shutting down unix socket …");
         it.request_local_shutdown();
-        it.join().await;
+        it.join().await.ok();
     }
 
     if let Some(it) = servers.quic_server {
         info!("Shutting down QUIC server …");
         it.request_local_shutdown();
-        it.join().await;
+        it.join().await.ok();
     }
 }

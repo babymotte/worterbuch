@@ -1,7 +1,7 @@
 use crate::controller::{ClientAddress, Protocol, TuiApi, UserAction};
 use std::{collections::HashMap, ops::ControlFlow, time::Duration};
 use tokio::{spawn, sync::mpsc, task::JoinHandle};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use worterbuch_client::{Worterbuch, config::Config};
 use worterbuch_common::{
@@ -26,14 +26,14 @@ impl Drop for ClientHandle {
 }
 
 struct BackendActor {
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     tui: TuiApi,
     clients: HashMap<ClientId, ClientHandle>,
     user_actions: mpsc::Receiver<UserAction>,
 }
 
 impl BackendActor {
-    fn new(subsys: SubsystemHandle, tui: TuiApi, user_actions: mpsc::Receiver<UserAction>) -> Self {
+    fn new(subsys: Subsystem, tui: TuiApi, user_actions: mpsc::Receiver<UserAction>) -> Self {
         Self {
             subsys,
             tui,
@@ -298,7 +298,7 @@ fn unix_config(_path: &str) -> Option<Config> {
     None
 }
 
-pub async fn start(subsys: SubsystemHandle) -> miette::Result<()> {
+pub async fn start(subsys: Subsystem) -> miette::Result<()> {
     let (tui, user_actions) = TuiApi::new(&subsys);
     BackendActor::new(subsys, tui, user_actions).run().await
 }

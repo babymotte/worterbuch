@@ -42,7 +42,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
@@ -62,7 +62,7 @@ pub async fn start(
     config: Config,
     bind_addr: IpAddr,
     port: u16,
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
@@ -146,7 +146,7 @@ pub async fn start(
     for (cid, subsys) in clients {
         subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await;
+        subsys.join().await.ok();
     }
     debug!("All clients disconnected.");
 
@@ -158,7 +158,7 @@ pub async fn start(
 }
 
 async fn next_socket_event(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     conn_closed_rx: &mut mpsc::Receiver<ClientId>,
     listener: &TcpListener,
     waiting_for_free_connections: bool,
@@ -175,7 +175,7 @@ async fn next_socket_event(
 }
 
 async fn serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -227,7 +227,7 @@ struct ServeLoop {
 }
 
 async fn serve_loop(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -283,7 +283,7 @@ async fn serve_loop(
 }
 
 async fn forward_messages_to_socket(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: ClientId,

@@ -59,7 +59,7 @@ use crate::{
 use serde_json::json;
 use server::common::WbFunction;
 use tokio::sync::{mpsc, oneshot};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, info};
 use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
@@ -98,14 +98,14 @@ pub fn worterbuch_version() -> WorterbuchVersion {
 
 #[derive(Default)]
 struct Servers {
-    web_server: Option<SubsystemHandle>,
-    tcp_server: Option<SubsystemHandle>,
-    unix_socket: Option<SubsystemHandle>,
-    quic_server: Option<SubsystemHandle>,
+    web_server: Option<Subsystem>,
+    tcp_server: Option<Subsystem>,
+    unix_socket: Option<Subsystem>,
+    quic_server: Option<Subsystem>,
 }
 
 pub async fn spawn_worterbuch(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: Config,
     stdin: Option<mpsc::Receiver<String>>,
 ) -> WorterbuchAppResult<CloneableWbApi> {
@@ -117,7 +117,7 @@ pub async fn spawn_worterbuch(
 }
 
 pub async fn run_worterbuch(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     config: Config,
     stdin: Option<mpsc::Receiver<String>>,
 ) -> WorterbuchAppResult<()> {
@@ -126,7 +126,7 @@ pub async fn run_worterbuch(
 }
 
 async fn do_run_worterbuch(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     config: Config,
     tx: Option<oneshot::Sender<CloneableWbApi>>,
     stdin: Option<mpsc::Receiver<String>>,
@@ -249,11 +249,7 @@ async fn set_instance_name(
     Ok(())
 }
 
-fn web_server(
-    api: &CloneableWbApi,
-    subsys: &SubsystemHandle,
-    config: &Config,
-) -> Option<SubsystemHandle> {
+fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
     if let Some(Endpoint {
         tls,
         bind_addr,
@@ -275,11 +271,7 @@ fn web_server(
     }
 }
 
-fn tcp_server(
-    api: &CloneableWbApi,
-    subsys: &SubsystemHandle,
-    config: &Config,
-) -> Option<SubsystemHandle> {
+fn tcp_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
     let cfg = config.clone();
     if config.role.accept_client_connections()
         && let Some(Endpoint {
@@ -300,11 +292,7 @@ fn tcp_server(
     }
 }
 
-fn unix_socket(
-    api: &CloneableWbApi,
-    subsys: &SubsystemHandle,
-    config: &Config,
-) -> Option<SubsystemHandle> {
+fn unix_socket(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
     #[cfg(target_family = "unix")]
     if config.role.accept_client_connections()
         && let Some(UnixEndpoint { path }) = &config.unix_endpoint
@@ -323,11 +311,7 @@ fn unix_socket(
     None
 }
 
-fn quic_server(
-    api: &CloneableWbApi,
-    subsys: &SubsystemHandle,
-    config: &Config,
-) -> Option<SubsystemHandle> {
+fn quic_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
     if config.role.accept_client_connections()
         && let Some(QuicEndpoint {
             bind_addr,
@@ -353,7 +337,7 @@ fn quic_server(
 async fn server_metadata(
     api: CloneableWbApi,
     worterbuch: &mut Worterbuch,
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
 ) -> Result<(), error::WorterbuchAppError> {
     worterbuch
         .internal_set(

@@ -39,7 +39,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
@@ -52,10 +52,10 @@ use worterbuch_common::{
 };
 
 pub(crate) async fn run(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     config: Config,
-    web_server: Option<SubsystemHandle>,
+    web_server: Option<Subsystem>,
     leader_address: String,
 ) -> WorterbuchAppResult<()> {
     #[cfg(feature = "commercial")]
@@ -223,7 +223,7 @@ async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFl
 }
 
 fn init_request_sender(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     leader_tx: OwnedWriteHalf,
     config: &Config,
     leader_addr: SocketAddr,
@@ -237,7 +237,7 @@ fn init_request_sender(
 }
 
 async fn request_sender_loop(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut leader_tx: OwnedWriteHalf,
     mut rx: mpsc::Receiver<ProxyMessage>,
     timeout: Option<Duration>,
@@ -252,7 +252,7 @@ async fn request_sender_loop(
 }
 
 async fn forward_client_request(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     recv: Option<ProxyMessage>,
     leader_tx: &mut OwnedWriteHalf,
     timeout: Option<Duration>,

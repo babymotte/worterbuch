@@ -46,7 +46,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
@@ -68,7 +68,7 @@ struct RunResult {
 }
 
 struct Proxy<'a> {
-    subsys: &'a SubsystemHandle,
+    subsys: &'a Subsystem,
     worterbuch: Worterbuch,
     api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
@@ -83,7 +83,7 @@ struct Proxy<'a> {
 
 impl<'a> Proxy<'a> {
     fn new<S: AsRef<str> + ToString>(
-        subsys: &'a SubsystemHandle,
+        subsys: &'a Subsystem,
         worterbuch: Worterbuch,
         api_rx: mpsc::Receiver<WbFunction>,
         config: Config,
@@ -264,7 +264,7 @@ impl<'a> Proxy<'a> {
             return Ok(result);
         }
 
-        let leader_addresses_updated = LeaderConnection::new(
+        let leader_connection = LeaderConnection::new(
             &self.subsys,
             proxy_request_tx,
             &mut self.worterbuch,
@@ -275,9 +275,10 @@ impl<'a> Proxy<'a> {
             &mut self.locks,
             &mut self.response_interests,
             &mut self.leader_addresses,
-        )
-        .run(&mut self.stdin)
-        .await?;
+            &mut self.stdin,
+        );
+
+        let leader_addresses_updated = leader_connection.run().await?;
 
         info!(
             "Proxy loop for leader {} stopped, closing connection.",
@@ -537,7 +538,7 @@ impl<'a> Proxy<'a> {
 }
 
 pub(crate) async fn run<S: AsRef<str> + ToString>(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     worterbuch: Worterbuch,
     api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
@@ -627,7 +628,7 @@ impl ClientResponseInterests {
 
 struct LeaderConnection<'a> {
     leader_address: SocketAddr,
-    subsys: &'a SubsystemHandle,
+    subsys: &'a Subsystem,
     response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
     proxy_request_tx: mpsc::Sender<ProxyMessage>,
     worterbuch: &'a mut Worterbuch,
@@ -636,11 +637,12 @@ struct LeaderConnection<'a> {
     locks: &'a mut Locks,
     leader_addresses: &'a mut Box<[SocketAddr]>,
     leader_addresses_updated: bool,
+    stdin: &'a mut mpsc::Receiver<String>,
 }
 
 impl<'a> LeaderConnection<'a> {
     fn new(
-        subsys: &'a SubsystemHandle,
+        subsys: &'a Subsystem,
         proxy_request_tx: mpsc::Sender<ProxyMessage>,
         worterbuch: &'a mut Worterbuch,
         api_rx: &'a mut mpsc::Receiver<WbFunction>,
@@ -649,8 +651,8 @@ impl<'a> LeaderConnection<'a> {
         leader_address: SocketAddr,
         locks: &'a mut Locks,
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
-
         leader_addresses: &'a mut Box<[SocketAddr]>,
+        stdin: &'a mut mpsc::Receiver<String>,
     ) -> Self {
         Self {
             leader_address,
@@ -663,10 +665,11 @@ impl<'a> LeaderConnection<'a> {
             locks,
             leader_addresses,
             leader_addresses_updated: false,
+            stdin,
         }
     }
 
-    async fn run(mut self, stdin: &'a mut mpsc::Receiver<String>) -> WorterbuchAppResult<bool> {
+    async fn run(mut self) -> WorterbuchAppResult<bool> {
         debug!(
             "Starting new leder session with inherited response interests: {:#?}",
             self.response_interests
@@ -675,7 +678,7 @@ impl<'a> LeaderConnection<'a> {
         while_select! {
             biased;
             _ = self.subsys.shutdown_requested() => break,
-            recv = stdin.recv() => self.update_leader_address(recv),
+            recv = self.stdin.recv() => self.update_leader_address(recv),
             recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
             recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
         }
@@ -1461,7 +1464,7 @@ fn connected_clients(worterbuch: &Worterbuch) -> Vec<Connected> {
 }
 
 fn init_request_sender(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     leader_tx: OwnedWriteHalf,
     config: &Config,
     leader_addr: SocketAddr,
@@ -1475,7 +1478,7 @@ fn init_request_sender(
 }
 
 async fn request_sender_loop(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut leader_tx: OwnedWriteHalf,
     mut rx: mpsc::Receiver<ProxyMessage>,
     timeout: Option<Duration>,
@@ -1490,7 +1493,7 @@ async fn request_sender_loop(
 }
 
 async fn forward_client_request(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     recv: Option<ProxyMessage>,
     leader_tx: &mut OwnedWriteHalf,
     timeout: Option<Duration>,

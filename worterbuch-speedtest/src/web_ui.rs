@@ -45,7 +45,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tower_http::{
     cors::CorsLayer,
     services::{ServeDir, ServeFile},
@@ -188,7 +188,7 @@ async fn latency_events(
 }
 
 pub async fn run_web_ui(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut throughput_backend_events: mpsc::UnboundedReceiver<throughput::UiApi>,
     mut latency_backend_events: mpsc::UnboundedReceiver<latency::UiApi>,
     throughput_api: mpsc::UnboundedSender<throughput::Api>,

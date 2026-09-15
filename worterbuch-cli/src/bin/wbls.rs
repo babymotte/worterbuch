@@ -22,7 +22,7 @@ use miette::Result;
 use std::io;
 use std::time::Duration;
 use tokio::select;
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: Subsystem) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

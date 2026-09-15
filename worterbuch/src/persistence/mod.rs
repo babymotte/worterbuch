@@ -21,7 +21,7 @@ use crate::{
 use lazy_static::lazy_static;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, info, trace, warn};
 use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID, ValueEntry, is_grave_goods_topic, is_last_will_topic,
@@ -312,7 +312,7 @@ impl PersistentStorageImpl {
 }
 
 pub(crate) async fn restore(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: Config,
     api: CloneableWbApi,
 ) -> PersistenceResult<Worterbuch> {
@@ -346,7 +346,7 @@ pub(crate) async fn restore(
 }
 
 async fn get_storage_instance(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: Config,
     api: CloneableWbApi,
 ) -> PersistenceResult<PersistentStorageImpl> {

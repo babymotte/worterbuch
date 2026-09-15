@@ -14,7 +14,7 @@ use futures::StreamExt;
 use miette::IntoDiagnostic;
 use std::{io::stdout, time::Duration};
 use tokio::{sync::mpsc, time::interval};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 
 /// Restores the terminal to a sane state when the TUI subsystem exits, however
 /// it exits.
@@ -28,7 +28,7 @@ impl Drop for TerminalGuard {
 }
 
 pub async fn run(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut messages: mpsc::Receiver<TuiMessage>,
     actions: mpsc::Sender<UserAction>,
 ) -> miette::Result<()> {

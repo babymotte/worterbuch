@@ -12,7 +12,7 @@ use tokio::{
     fs, select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, GraveGoods, Key, KeySegment, KeyValuePair, LastWill, ValueEntry, parse_segments,
@@ -51,7 +51,7 @@ pub struct PersistentTursoStore {
 }
 
 impl PersistentTursoStore {
-    pub async fn new(subsys: &SubsystemHandle, config: Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &Subsystem, config: Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.turso.db");
         let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 

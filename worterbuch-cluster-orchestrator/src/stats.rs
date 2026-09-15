@@ -12,7 +12,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 #[cfg(feature = "jemalloc")]
 use tower_http::cors::Any;
 #[cfg(feature = "jemalloc")]
@@ -178,7 +178,7 @@ impl Server {
     }
 }
 
-pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result<StatsSender> {
+pub async fn start_stats_endpoint(subsys: &Subsystem, port: u16) -> Result<StatsSender> {
     let (evt_tx, evt_rx) = mpsc::channel(1);
     let (api_tx, api_rx) = mpsc::channel(1);
 
@@ -192,7 +192,7 @@ pub async fn start_stats_endpoint(subsys: &SubsystemHandle, port: u16) -> Result
 }
 
 async fn run_server(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     api_tx: mpsc::Sender<StatsApiMessage>,
     port: u16,
 ) -> Result<()> {
@@ -259,7 +259,7 @@ fn cors() -> CorsLayer {
 }
 
 struct StatsActor {
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     stats_rx: mpsc::Receiver<StatsEvent>,
     api_rx: mpsc::Receiver<StatsApiMessage>,
     election_state: ElectionState,
@@ -267,7 +267,7 @@ struct StatsActor {
 
 impl StatsActor {
     fn start_stats_actor(
-        subsys: &SubsystemHandle,
+        subsys: &Subsystem,
         stats_rx: mpsc::Receiver<StatsEvent>,
         api_rx: mpsc::Receiver<StatsApiMessage>,
     ) {

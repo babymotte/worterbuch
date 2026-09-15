@@ -11,7 +11,7 @@ use tokio::{
     fs, select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, ValueEntry, parse_segments,
@@ -60,7 +60,7 @@ pub struct PersistentRedbStore {
 }
 
 impl PersistentRedbStore {
-    pub async fn new(subsys: &SubsystemHandle, config: Config) -> PersistenceResult<Self> {
+    pub async fn new(subsys: &Subsystem, config: Config) -> PersistenceResult<Self> {
         let path = PathBuf::from(&config.data_dir).join("worterbuch.re.db");
         let timestamp_file_path = PathBuf::from(&config.data_dir).join(TIMESTAMP_FILE_NAME);
 

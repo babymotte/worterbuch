@@ -5428,9 +5428,9 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "1.1.6"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19cc24bfaaa9d48ba3a5f9dc7f47cd7d6270b4a548d7c907b70bfff66dc44c88"
+checksum = "d6a4663753c485cd40f72cff43ef46aef5e4542828dcbaba4a1f3de2eeed65c0"
 dependencies = [
  "miette",
  "thiserror 2.0.20",

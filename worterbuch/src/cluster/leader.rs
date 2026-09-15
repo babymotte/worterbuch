@@ -52,7 +52,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{Level, debug, enabled, error, info, trace, warn};
 use worterbuch_common::{
@@ -66,7 +66,7 @@ use worterbuch_common::{
 };
 
 pub(crate) async fn run(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     api: &CloneableWbApi,
     mut api_rx: mpsc::Receiver<WbFunction>,
@@ -192,7 +192,7 @@ async fn try_forward_follower_disconnected(
 }
 
 async fn run_cluster_sync_port(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     config: Config,
     wb: CloneableWbApi,
     on_follower_connected: mpsc::Sender<(
@@ -239,7 +239,7 @@ async fn run_cluster_sync_port(
 
 async fn accecpt_client(
     client: io::Result<(TcpStream, SocketAddr)>,
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     config: &Config,
     wb: &CloneableWbApi,
     on_follower_connected: mpsc::Sender<(
@@ -272,7 +272,7 @@ async fn accecpt_client(
 }
 
 async fn serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client: (TcpStream, SocketAddr),
     on_follower_connected: mpsc::Sender<(
         oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
@@ -305,7 +305,7 @@ async fn serve(
 }
 
 async fn follower_serve_loop(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     tcp_stream: TcpStream,
     follower: SocketAddr,
     on_follower_connected: mpsc::Sender<(
@@ -368,7 +368,7 @@ async fn follower_serve_loop(
 }
 
 async fn send_welcome(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     tcp_stream: &mut OwnedWriteHalf,
     follower: SocketAddr,
     config: &Config,
@@ -507,7 +507,7 @@ fn authenticate_against_key(auth_token: Option<&str>, key: &str) -> miette::Resu
 }
 
 async fn send_initial_state(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     tcp_stream: &mut OwnedWriteHalf,
     follower: SocketAddr,
     config: &Config,
@@ -526,7 +526,7 @@ async fn send_initial_state(
 }
 
 async fn forward_change_to_follower(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     recv: Option<ClusterStateChange>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
@@ -551,7 +551,7 @@ async fn forward_change_to_follower(
 }
 
 async fn forward_response_to_proxy(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     recv: Option<VirtualServerMessage>,
     socket_tx: &mut OwnedWriteHalf,
     config: &Config,
@@ -597,7 +597,7 @@ enum VirtualServerMessage {
 }
 
 struct VirtualProxyServer {
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     clients: HashMap<ClientId, VirtualProxyClientHandler>,
     worterbuch: CloneableWbApi,
     config: Config,
@@ -891,7 +891,7 @@ impl VirtualProxyServer {
 }
 
 async fn response_forwarder_loop(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut send_client_rx: mpsc::Receiver<ServerMessage>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: uuid::Uuid,

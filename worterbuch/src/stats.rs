@@ -21,7 +21,7 @@ use crate::{INTERNAL_CLIENT_ID, server::common::CloneableWbApi};
 use serde_json::json;
 use std::{ops::ControlFlow, time::Duration};
 use tokio::time::{Instant, interval};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
@@ -43,7 +43,7 @@ pub const LICENSE: &str = "COMMERCIAL";
 #[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
-pub async fn track_stats(wb: CloneableWbApi, subsys: SubsystemHandle) -> WorterbuchResult<()> {
+pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchResult<()> {
     let start = Instant::now();
 
     wb.set(

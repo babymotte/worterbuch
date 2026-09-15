@@ -71,7 +71,7 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
@@ -817,7 +817,7 @@ pub(crate) async fn start(
     tls: bool,
     bind_addr: IpAddr,
     port: u16,
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     ws_enabled: bool,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
@@ -858,7 +858,7 @@ pub(crate) async fn start(
 }
 
 pub async fn build_worterbuch_router(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     worterbuch: CloneableWbApi,
     tls: bool,
     port: u16,
@@ -987,7 +987,7 @@ pub async fn build_worterbuch_router(
 }
 
 async fn run_ws_server(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut listener: mpsc::Receiver<(WebSocket, SocketAddr)>,
     worterbuch: CloneableWbApi,
 ) -> WorterbuchResult<()> {
@@ -1040,7 +1040,7 @@ async fn run_ws_server(
     for (cid, subsys) in clients {
         subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await;
+        subsys.join().await.ok();
     }
     debug!("All clients disconnected.");
 

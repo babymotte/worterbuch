@@ -1,7 +1,7 @@
 use crate::tui;
 use std::fmt;
 use tokio::sync::mpsc;
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use worterbuch_client::{KeyValuePairs, PStateEvent};
 use worterbuch_common::{
     ClientId,
@@ -88,7 +88,7 @@ pub struct TuiApi {
 impl TuiApi {
     /// Spawn the TUI subsystem and return a handle for pushing updates to it,
     /// together with the receiver over which the backend gets user actions.
-    pub fn new(subsys: &SubsystemHandle) -> (Self, mpsc::Receiver<UserAction>) {
+    pub fn new(subsys: &Subsystem) -> (Self, mpsc::Receiver<UserAction>) {
         let (msg_tx, msg_rx) = mpsc::channel(256);
         let (action_tx, action_rx) = mpsc::channel(256);
 

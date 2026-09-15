@@ -21,7 +21,7 @@ use clap::Parser;
 use miette::Result;
 use std::{io, time::Duration};
 use tokio::{select, sync::mpsc};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle) -> Result<()> {
+async fn run(subsys: Subsystem) -> Result<()> {
     let mut config = Config::new();
     let args: Args = Args::parse();
 

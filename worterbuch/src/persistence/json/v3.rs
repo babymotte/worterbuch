@@ -29,7 +29,7 @@ use worterbuch_common::{
 pub(crate) async fn periodic(
     worterbuch: CloneableWbApi,
     config: Config,
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
 ) -> PersistenceResult<()> {
     let mut interval = config.persistence_interval();
 

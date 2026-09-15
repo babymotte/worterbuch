@@ -26,7 +26,7 @@ use crate::{
 };
 use serde_json::json;
 use tokio::{select, sync::mpsc};
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::info;
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
@@ -35,7 +35,7 @@ use worterbuch_common::{
 };
 
 pub async fn run(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     mut worterbuch: Worterbuch,
     mut api_rx: mpsc::Receiver<WbFunction>,
     config: Config,

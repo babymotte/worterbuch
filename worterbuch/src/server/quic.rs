@@ -56,7 +56,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
-use tosub::SubsystemHandle;
+use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
@@ -79,7 +79,7 @@ pub async fn start(
     port: u16,
     cert_path: PathBuf,
     key_path: PathBuf,
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
 ) -> Result<()> {
     let server_config = load_server_config(&cert_path, &key_path)?;
 
@@ -109,7 +109,7 @@ pub async fn start(
 async fn bind_endpoints_and_run(
     worterbuch: CloneableWbApi,
     endpoints: Vec<Endpoint>,
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     if config.print_endpoints {
@@ -204,7 +204,7 @@ async fn bind_endpoints_and_run(
     for (cid, subsys) in clients {
         subsys.request_local_shutdown();
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await;
+        subsys.join().await.ok();
     }
     debug!("All clients disconnected.");
 
@@ -221,7 +221,7 @@ async fn bind_endpoints_and_run(
 }
 
 async fn next_socket_event(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     conn_closed_rx: &mut mpsc::Receiver<ClientId>,
     incoming_rx: &mut mpsc::Receiver<Incoming>,
     waiting_for_free_connections: bool,
@@ -267,7 +267,7 @@ fn bind_addrs(bind_addr: IpAddr, port: u16) -> Vec<SocketAddr> {
 }
 
 async fn accept_and_serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: ClientId,
     incoming: Incoming,
     worterbuch: CloneableWbApi,
@@ -292,7 +292,7 @@ async fn accept_and_serve(
 }
 
 async fn serve(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: ClientId,
     connection: Connection,
     worterbuch: CloneableWbApi,
@@ -345,7 +345,7 @@ struct ServeLoop {
 }
 
 async fn serve_loop(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,
@@ -405,7 +405,7 @@ async fn serve_loop(
 }
 
 async fn forward_messages_to_socket(
-    subsys: SubsystemHandle,
+    subsys: Subsystem,
     mut quic_send_rx: mpsc::Receiver<ServerMessage>,
     mut quic_tx: SendStream,
     client_id: ClientId,
