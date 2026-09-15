@@ -46,26 +46,21 @@ mod worterbuch;
 use core::fmt;
 
 use crate::{
-    cluster::{
-        ClusterStateChangeSender, follower, leader,
-        protocol::{ClientWriteCommand, ClusterStateChange},
-        proxy, standalone,
-    },
+    cluster::{follower, leader, proxy, standalone},
     error::WorterbuchAppResult,
     server::common::CloneableWbApi,
     stats::track_stats,
     worterbuch::Worterbuch,
 };
 use serde_json::json;
-use server::common::WbFunction;
 use tokio::sync::{mpsc, oneshot};
 use tosub::Subsystem;
 use tracing::{debug, info};
 use worterbuch_common::{
-    ClientId, INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
+    INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
     protocol::v1::{
-        Interface, InternalAction, Method, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
-        SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
+        Interface, InternalAction, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
     },
     topic,
 };
@@ -353,145 +348,4 @@ async fn server_metadata(
     subsys.spawn("stats", async |subsys| track_stats(api, subsys).await);
 
     Ok(())
-}
-
-async fn forward_api_call(
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
-    dead: &mut Vec<usize>,
-    function: &WbFunction,
-    filter_sys: bool,
-    followers_only: bool,
-) {
-    if let Some((cmd, client_id, trace)) = match function {
-        WbFunction::Get(_, _)
-        | WbFunction::CGet(_, _)
-        | WbFunction::SPubInit(_, _, _, _, _)
-        | WbFunction::SPub(_, _, _, _, _)
-        | WbFunction::Publish(_, _, _, _, _, _)
-        | WbFunction::Ls(_, _)
-        | WbFunction::PLs(_, _)
-        | WbFunction::PGet(_, _)
-        | WbFunction::Subscribe(_, _, _, _, _, _, _, _)
-        | WbFunction::PSubscribe(_, _, _, _, _, _, _, _)
-        | WbFunction::SubscribeLs(_, _, _, _, _, _)
-        | WbFunction::Unsubscribe(_, _, _, _)
-        | WbFunction::UnsubscribeLs(_, _, _)
-        | WbFunction::Connected(_, _, _, _, _)
-        | WbFunction::ProtocolSwitched(_, _, _)
-        | WbFunction::Disconnected(_, _, _)
-        | WbFunction::Config(_)
-        | WbFunction::Export(_, _)
-        | WbFunction::Import(_, _, _, _, _)
-        | WbFunction::Len(_)
-        | WbFunction::Lock(_, _, _, _, _)
-        | WbFunction::AcquireLock(_, _, _, _, _)
-        | WbFunction::ReleaseLock(_, _, _, _, _)
-        | WbFunction::ReGrantLocks(_, _) => None,
-        WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => {
-            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                let cmd = ClientWriteCommand::Set(key.to_owned(), value.to_owned(), false);
-                let client_id = *client_id;
-                let trace = Trace::ClientRequest {
-                    client_id,
-                    transaction_id: *transaction_id,
-                    method: Method::Set,
-                    interface: interface.to_owned(),
-                };
-                Some((cmd, client_id, trace))
-            } else {
-                None
-            }
-        }
-        WbFunction::CSet(transaction_id, interface, key, value, version, client_id, _) => {
-            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                let cmd = ClientWriteCommand::CSet(
-                    key.to_owned(),
-                    value.to_owned(),
-                    version.to_owned(),
-                    false,
-                );
-                let client_id = *client_id;
-                let trace = Trace::ClientRequest {
-                    client_id,
-                    transaction_id: *transaction_id,
-                    method: Method::CSet,
-                    interface: interface.to_owned(),
-                };
-                Some((cmd, client_id, trace))
-            } else {
-                None
-            }
-        }
-        WbFunction::Delete(transaction_id, interface, key, client_id, _) => {
-            if !filter_sys || !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                let cmd = ClientWriteCommand::Delete(key.to_owned());
-                let client_id = *client_id;
-                let trace = Trace::ClientRequest {
-                    client_id,
-                    transaction_id: *transaction_id,
-                    method: Method::Delete,
-                    interface: interface.to_owned(),
-                };
-                Some((cmd, client_id, trace))
-            } else {
-                None
-            }
-        }
-        WbFunction::PDelete(transaction_id, interface, pattern, _, client_id, _) => {
-            if !filter_sys || !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX) {
-                let cmd = ClientWriteCommand::PDelete(pattern.to_owned());
-                let client_id = *client_id;
-                let trace = Trace::ClientRequest {
-                    client_id,
-                    transaction_id: *transaction_id,
-                    method: Method::PDelete,
-                    interface: interface.to_owned(),
-                };
-                Some((cmd, client_id, trace))
-            } else {
-                None
-            }
-        }
-    } {
-        forward_to_followers(
-            cmd,
-            client_id,
-            trace,
-            client_write_txs,
-            dead,
-            followers_only,
-        )
-        .await;
-    }
-}
-
-async fn forward_to_followers(
-    cmd: ClientWriteCommand,
-    client_id: ClientId,
-    trace: Trace,
-    client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
-    dead: &mut Vec<usize>,
-    followers_only: bool,
-) {
-    for (id, tx, is_proxy) in client_write_txs.iter() {
-        if followers_only && *is_proxy {
-            continue;
-        }
-
-        if tx
-            .send(ClusterStateChange {
-                client_id,
-                command: cmd.clone(),
-                trace: trace.clone(),
-            })
-            .await
-            .is_err()
-        {
-            dead.push(*id);
-        }
-    }
-    if !dead.is_empty() {
-        client_write_txs.retain(|(i, _, _)| !dead.contains(i));
-        dead.clear();
-    }
 }
