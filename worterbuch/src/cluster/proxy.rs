@@ -336,6 +336,7 @@ impl<'a> Proxy<'a> {
         lines: &mut Lines<BufReader<OwnedReadHalf>>,
         timeout: Option<Duration>,
     ) -> WorterbuchAppResult<Result<LeaderWelcome, RunResult>> {
+        trace!("Updating leader sync state to Handshake …");
         self.worterbuch
             .internal_set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
@@ -345,6 +346,7 @@ impl<'a> Proxy<'a> {
                 true,
             )
             .await?;
+        debug!("Receiving welcome message from leader …");
         let welcome = loop {
             select! {
                 biased;
@@ -1469,6 +1471,7 @@ fn init_request_sender(
     config: &Config,
     leader_addr: SocketAddr,
 ) -> mpsc::Sender<ProxyMessage> {
+    trace!("Initializing request sender …");
     let (tx, rx) = mpsc::channel(config.channel_buffer_size);
     let send_timeout = config.send_timeout;
     subsys.spawn("proxy_request_sender", move |s| {
@@ -1484,6 +1487,7 @@ async fn request_sender_loop(
     timeout: Option<Duration>,
     leader_addr: SocketAddr,
 ) -> miette::Result<()> {
+    trace!("Request sender loop running, waiting for messages to write to socket …");
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,

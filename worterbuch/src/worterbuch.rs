@@ -447,10 +447,8 @@ impl Worterbuch {
                 .await;
             trace!("Notifying ls subscribers done.");
         }
-        trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false, cause)
             .await;
-        trace!("Notifying subscribers done.");
 
         Ok(())
     }
@@ -512,10 +510,8 @@ impl Worterbuch {
                 .await;
             trace!("Notifying ls subscribers done.");
         }
-        trace!("Notifying subscribers …");
         self.notify_subscribers(&path, &key, &value, changed, false, cause)
             .await;
-        trace!("Notifying subscribers done.");
 
         Ok(())
     }
@@ -1066,6 +1062,8 @@ impl Worterbuch {
         deleted: bool,
         trace: Trace,
     ) {
+        trace!("Notifying subscribers …");
+
         let subscribers = self.subscribers.get_subscribers(path);
 
         let filtered_subscribers: Vec<Subscriber> = subscribers
@@ -1106,7 +1104,9 @@ impl Worterbuch {
                 }
             }
         }
-        trace!("Calling {} subscribers: {} = {:?} done.", len, key, value);
+
+        trace!("Called {} subscribers: {} = {:?}", len, key, value);
+        trace!("Notifying subscribers done.");
     }
 
     async fn notify_ls_subscribers(
@@ -1134,8 +1134,11 @@ impl Worterbuch {
         trace: Trace,
         ignore_sys_checks: bool,
     ) {
+        debug!("Notifying followers of state change: {:?}", command);
+
         let len = self.followers.len();
         if len == 0 {
+            trace!("No followers to notify.");
             return;
         }
 
@@ -1174,6 +1177,11 @@ impl Worterbuch {
                         }
                     }
                 }
+            } else {
+                trace!(
+                    "Follower/proxy {} is not interested in the state change.",
+                    follower.addr
+                );
             }
         }
         if let Some(dead) = dead {
