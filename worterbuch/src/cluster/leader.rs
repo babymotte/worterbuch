@@ -36,7 +36,7 @@ use crate::{
     worterbuch_version,
 };
 use hashbrown::HashMap;
-use miette::{Context, Error, IntoDiagnostic, Result, bail, ensure};
+use miette::{Context, IntoDiagnostic, Result, bail, ensure};
 use serde_json::json;
 use std::{
     io::{self},
@@ -300,7 +300,6 @@ async fn serve(
             error!("Error in follower serve loop: {e}");
             eprintln!("{e:?}");
         }
-        Ok::<(), Error>(())
     });
 }
 
@@ -706,6 +705,7 @@ impl VirtualProxyServer {
         });
 
         let proto = Proto::new(
+            self.subsys.clone(),
             client_id,
             send_client_tx.clone(),
             auth_required,

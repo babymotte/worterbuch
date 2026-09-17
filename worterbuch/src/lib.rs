@@ -30,7 +30,6 @@ mod cluster;
 mod config;
 pub mod error;
 pub(crate) mod license;
-#[cfg(not(feature = "telemetry"))]
 pub mod logging;
 #[cfg(not(feature = "jemalloc"))]
 mod mem_tools;

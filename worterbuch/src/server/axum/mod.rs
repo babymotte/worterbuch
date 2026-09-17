@@ -1025,7 +1025,6 @@ async fn run_ws_server(
                             _ = s.shutdown_requested() => (),
                         }
                         conn_closed_tx.send(id).await.ok();
-                        Ok::<(),WorterbuchAppError>(())
                     });
                     clients.insert(id, client);
                 } else {

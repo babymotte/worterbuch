@@ -455,6 +455,12 @@ impl SubscriptionId {
     }
 }
 
+impl Display for SubscriptionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.transaction_id, self.client_id)
+    }
+}
+
 pub trait WbApi {
     fn supported_protocol_versions(&self) -> Box<[ProtocolVersion]>;
 

@@ -264,6 +264,7 @@ async fn serve_loop<'a>(
         .into_diagnostic()?;
 
     let proto = Proto::new(
+        subsys.clone(),
         client_id,
         tcp_send_tx,
         authorization_required,

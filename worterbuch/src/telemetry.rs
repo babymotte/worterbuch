@@ -25,11 +25,12 @@ use opentelemetry_sdk::{
     Resource, logs::SdkLoggerProvider, propagation::TraceContextPropagator,
     trace::SdkTracerProvider,
 };
-use std::{env, io};
-use supports_color::Stream;
+use std::env;
 use tracing::{info, level_filters::LevelFilter};
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use worterbuch_common::error::ConfigResult;
+
+use crate::logging;
 
 pub struct TelemetryDropGuard {
     logger_provider: SdkLoggerProvider,
@@ -50,18 +51,21 @@ impl Drop for TelemetryDropGuard {
 pub async fn init(
     node_id: String,
     cluster_role: Option<String>,
+    #[cfg(feature = "tokio-console")] tokio_console_port: Option<u16>,
 ) -> ConfigResult<Option<TelemetryDropGuard>> {
-    let subscriber = tracing_subscriber::registry().with(
-        fmt::Layer::new()
-            .with_ansi(supports_color::on(Stream::Stderr).is_some())
-            .with_writer(io::stderr)
-            .with_filter(
-                EnvFilter::builder()
-                    .with_default_directive(LevelFilter::INFO.into())
-                    .with_env_var("WORTERBUCH_LOG")
-                    .from_env_lossy(),
-            ),
-    );
+    let log_layer = logging::console_log_layer();
+
+    let subscriber = tracing_subscriber::registry().with(log_layer);
+
+    #[cfg(feature = "tokio-console")]
+    let subscriber = {
+        subscriber.with(
+            console_subscriber::ConsoleLayer::builder()
+                .with_default_env()
+                .server_addr(([0, 0, 0, 0], tokio_console_port.unwrap_or(6669)))
+                .spawn(),
+        )
+    };
 
     let endpoint = env::var("WORTERBUCH_OPENTELEMETRY_ENDPOINT").ok();
 

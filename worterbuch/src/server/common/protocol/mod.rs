@@ -25,7 +25,8 @@ use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::{Instrument, Level, debug, error, instrument, trace, trace_span};
+use tosub::Subsystem;
+use tracing::{Instrument, Level, debug, instrument, trace, trace_span, warn};
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
@@ -51,6 +52,7 @@ pub struct Proto {
 
 impl Proto {
     pub fn new(
+        subsys: Subsystem,
         client_id: ClientId,
         tx: ServerMessageBroadcaster,
         auth_required: bool,
@@ -58,6 +60,7 @@ impl Proto {
         worterbuch: CloneableWbApi,
     ) -> Self {
         let latest = V2::new(V1::new(V0 {
+            subsys,
             auth_required,
             client_id,
             config,
@@ -119,7 +122,7 @@ impl Proto {
                 Ok(false)
             }
             Err(e) => {
-                error!("Error decoding message: {e}");
+                warn!(%msg, err = %e, "Error decoding message");
                 Ok(false)
             }
         }

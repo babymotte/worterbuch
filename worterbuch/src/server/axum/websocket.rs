@@ -121,6 +121,7 @@ async fn serve_loop(
         .into_diagnostic()?;
 
     let mut proto = Proto::new(
+        subsys.clone(),
         client_id,
         ws_send_tx,
         authorization_required,

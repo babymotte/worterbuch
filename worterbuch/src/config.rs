@@ -148,6 +148,8 @@ pub struct Config {
     #[cfg(target_family = "unix")]
     pub unix_endpoint: Option<UnixEndpoint>,
     pub quic_endpoint: Option<QuicEndpoint>,
+    #[cfg(feature = "tokio-console")]
+    pub tokio_console_port: Option<u16>,
     pub use_persistence: bool,
     pub persistence_interval: Duration,
     pub persistence_mode: PersistenceMode,
@@ -395,6 +397,12 @@ impl Config {
             self.initial_sync_timeout = Duration::from_secs(secs);
         }
 
+        #[cfg(feature = "tokio-console")]
+        if let Ok(val) = env::var(prefix.to_owned() + "_TOKIO_CONSOLE_PORT") {
+            let port = val.parse().to_port()?;
+            self.tokio_console_port = Some(port);
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -419,6 +427,7 @@ impl Config {
             #[cfg(target_family = "unix")]
             unix_endpoint: None,
             quic_endpoint: None,
+            tokio_console_port: None,
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
             persistence_mode: PersistenceMode::Json,

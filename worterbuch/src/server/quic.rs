@@ -126,19 +126,19 @@ async fn bind_endpoints_and_run(
     for (i, endpoint) in endpoints.iter().enumerate() {
         let endpoint = endpoint.clone();
         let incoming_tx = incoming_tx.clone();
-        subsys.spawn(format!("quic-accept-{i}"), async move |s| {
-            loop {
-                select! {
-                    incoming = endpoint.accept() => match incoming {
-                        Some(incoming) => if incoming_tx.send(incoming).await.is_err() {
-                            break;
-                        },
-                        None => break,
+        subsys.spawn(format!("quic-accept-{i}"), async move |s: Subsystem| {
+            while_select! {
+                biased;
+                _ = s.shutdown_requested() => break,
+                incoming = endpoint.accept() => match incoming {
+                    Some(incoming) => if incoming_tx.send(incoming).await.is_err() {
+                        break;
+                    } else {
+                        ControlFlow::Continue(())
                     },
-                    _ = s.shutdown_requested() => break,
-                }
+                    None => break,
+                },
             }
-            Ok::<(), miette::Error>(())
         });
     }
     drop(incoming_tx);
@@ -187,7 +187,6 @@ async fn bind_endpoints_and_run(
                         _ = s.shutdown_requested() => (),
                     }
                     conn_closed_tx.send(id).await.ok();
-                    Ok::<(), miette::Error>(())
                 });
                 clients.insert(id, client);
                 debug!("Ready to accept new connections.");
@@ -386,6 +385,7 @@ async fn serve_loop(
         .into_diagnostic()?;
 
     let proto = Proto::new(
+        subsys.clone(),
         client_id,
         quic_send_tx,
         authorization_required,

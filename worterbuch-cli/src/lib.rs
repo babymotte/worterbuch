@@ -26,8 +26,9 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::{select, spawn, sync::mpsc, time::sleep};
+use tokio::{spawn, sync::mpsc, time::sleep};
 use tosub::Subsystem;
+use totils::while_select;
 use tracing::error;
 use worterbuch_client::{
     Key, KeyValuePair, KeyValuePairs,
@@ -54,7 +55,7 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: Subsystem, tx: mpsc::Send
             drop(tx);
         });
     } else {
-        subsys.spawn("read-stdin", async move |s| {
+        subsys.spawn("read-stdin", async move |s: Subsystem| {
             let (lines_tx, mut lines_rx) = mpsc::channel(1);
             thread::spawn(move || {
                 let mut lines = BufReader::new(std::io::stdin()).lines();
@@ -64,25 +65,30 @@ pub fn provide_keys(keys: Option<Vec<String>>, subsys: Subsystem, tx: mpsc::Send
                     }
                 }
             });
-            loop {
-                select! {
-                    _ = s.shutdown_requested() => break,
-                    recv = lines_rx.recv() => if let Some(key) = recv {
-                        if tx.send(key).await.is_err() {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
+            while_select! {
+                biased;
+                _ = s.shutdown_requested() => break,
+                recv = lines_rx.recv() => provide_key_from_line(recv, &tx).await,
             }
             Ok(()) as Result<()>
         });
     }
 }
 
+async fn provide_key_from_line(recv: Option<String>, tx: &mpsc::Sender<String>) -> ControlFlow<()> {
+    if let Some(key) = recv {
+        if tx.send(key).await.is_err() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    } else {
+        ControlFlow::Break(())
+    }
+}
+
 pub fn provide_values(json: bool, subsys: Subsystem, tx: mpsc::Sender<Value>) {
-    subsys.spawn("read-stdin", async move |s| {
+    subsys.spawn("read-stdin", async move |s: Subsystem| {
         let (lines_tx, mut lines_rx) = mpsc::channel(1);
         thread::spawn(move || {
             let mut lines = BufReader::new(std::io::stdin()).lines();
@@ -92,31 +98,43 @@ pub fn provide_values(json: bool, subsys: Subsystem, tx: mpsc::Sender<Value>) {
                 }
             }
         });
-        loop {
-            select! {
-                _ = s.shutdown_requested() => break,
-                recv = lines_rx.recv() => if let Some(line) = recv {
-                    if json {
-                        match serde_json::from_str::<Value>(&line) {
-                            Ok(value) => {
-                                if tx.send(value).await.is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error parsing json: {e}");
-                            }
-                        }
-                    } else if tx.send(json!(line)).await.is_err() {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
+        while_select! {
+            biased;
+            _ = s.shutdown_requested() => break,
+            recv = lines_rx.recv() => provide_value_from_line(recv, &tx, json).await,
         }
         Ok(()) as Result<()>
     });
+}
+
+async fn provide_value_from_line(
+    recv: Option<String>,
+    tx: &mpsc::Sender<Value>,
+    json: bool,
+) -> ControlFlow<()> {
+    if let Some(line) = recv {
+        if json {
+            match serde_json::from_str::<Value>(&line) {
+                Ok(value) => {
+                    if tx.send(value).await.is_err() {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error parsing json: {e}");
+                    ControlFlow::Continue(())
+                }
+            }
+        } else if tx.send(json!(line)).await.is_err() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    } else {
+        ControlFlow::Break(())
+    }
 }
 
 pub fn provide_key_value_pairs(
@@ -143,21 +161,26 @@ pub fn provide_key_value_pairs(
                 }
             }
         });
-        subsys.spawn("read-stdin", async move |s| {
-            loop {
-                select! {
-                    _ = s.shutdown_requested() => break,
-                    recv = lines_rx.recv() => if let Some(line) = recv {
-                        if let ControlFlow::Break(_) = provide_key_value_pair(json, line, &tx).await {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
+        subsys.spawn("read-stdin", async move |s: Subsystem| {
+            while_select! {
+                biased;
+                _ = s.shutdown_requested() => break,
+                recv = lines_rx.recv() => provide_key_value_pair_from_line(json, recv,  &tx).await,
             }
             Ok(()) as Result<()>
         });
+    }
+}
+
+async fn provide_key_value_pair_from_line(
+    json: bool,
+    recv: Option<String>,
+    tx: &mpsc::Sender<(Key, Value)>,
+) -> ControlFlow<()> {
+    if let Some(line) = recv {
+        provide_key_value_pair(json, line, &tx).await
+    } else {
+        ControlFlow::Break(())
     }
 }
 

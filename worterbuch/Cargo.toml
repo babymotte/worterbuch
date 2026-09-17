@@ -23,19 +23,21 @@ telemetry = [
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
 ]
+tokio-console = ["console-subscriber"]
 commercial = ["worterbuch-common/commercial"]
 redb = ["worterbuch-common/redb", "dep:redb"]
 sqlite = ["dep:rusqlite"]
 turso = ["dep:turso"]
-default = ["jemalloc", "telemetry", "redb", "sqlite"]
+default = ["jemalloc", "telemetry", "redb", "sqlite", "tokio-console"]
 
 [dependencies]
-axum = { workspace = true, features = ["http2", "ws"] }
+axum = { workspace = true, features = ["http2", "ws", "tracing"] }
 axum-extra = { workspace = true, features = ["cookie", "typed-header"] }
 axum-server = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
+console-subscriber = { workspace = true, optional = true }
 dotenvy = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
@@ -74,7 +76,7 @@ strum = { workspace = true }
 supports-color = { workspace = true }
 thiserror = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "fs"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "fs", "tracing"] }
 tokio-metrics = { workspace = true }
 tokio-stream = { workspace = true }
 tosub = { workspace = true }

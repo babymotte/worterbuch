@@ -82,7 +82,6 @@ impl PersistentSQLiteStore {
                     }
                 }
             }
-            Ok::<(), miette::Report>(())
         });
 
         thread::spawn(move || run(db, rx, config, timestamp_file_path));

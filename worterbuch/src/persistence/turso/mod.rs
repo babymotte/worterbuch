@@ -77,7 +77,6 @@ impl PersistentTursoStore {
                     }
                 }
             }
-            Ok::<(), miette::Report>(())
         });
 
         spawn(run(db, rx, config, timestamp_file_path));

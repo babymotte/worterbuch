@@ -18,9 +18,9 @@
  */
 
 use clap::Parser;
+use miette::{Context, IntoDiagnostic};
 use std::env;
 use tokio::sync::mpsc;
-use tosub::IntoSubsystemResult;
 use worterbuch::{Args, Config, run_worterbuch};
 
 fn main() -> miette::Result<()> {
@@ -39,7 +39,8 @@ fn run_single_threaded() -> miette::Result<()> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .into_subsystem_result("Failed to build single-threaded runtime")?
+        .into_diagnostic()
+        .wrap_err("Failed to build single-threaded runtime")?
         .block_on(start())
 }
 
@@ -47,7 +48,8 @@ fn run_multi_threaded() -> miette::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .into_subsystem_result("Failed to build multi-threaded runtime")?
+        .into_diagnostic()
+        .wrap_err("Failed to build multi-threaded runtime")?
         .block_on(start())
 }
 
@@ -58,13 +60,16 @@ async fn start() -> miette::Result<()> {
 
     let config = Config::new(Some(args.clone()))
         .await
-        .into_subsystem_result("Failed to create config")?;
+        .into_diagnostic()
+        .wrap_err("Failed to create config")?;
 
     #[cfg(feature = "telemetry")]
     let _telemetry_drop_guard = {
         use worterbuch::{Commands, telemetry};
 
-        let hostname = hostname::get().into_subsystem_result("Failed to get hostname")?;
+        let hostname = hostname::get()
+            .into_diagnostic()
+            .wrap_err("Failed to get hostname")?;
         let cluster_role = match args.command {
             Some(Commands::Leader { .. }) => Some("leader".to_owned()),
             Some(Commands::Follower { .. }) => Some("follower".to_owned()),
@@ -73,11 +78,15 @@ async fn start() -> miette::Result<()> {
         };
         let drop_guard = telemetry::init(
             args.instance_name
+                .clone()
                 .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
             cluster_role,
+            #[cfg(feature = "tokio-console")]
+            config.tokio_console_port.clone(),
         )
         .await
-        .into_subsystem_result("telemetry initialization failed")?;
+        .into_diagnostic()
+        .wrap_err("telemetry initialization failed")?;
         drop_guard
     };
 
@@ -91,7 +100,13 @@ async fn start() -> miette::Result<()> {
 
     let (stdin_tx, stdin_rx) = mpsc::channel(cfg.channel_buffer_size);
 
-    let mut root_builder = tosub::build_default_root("worterbuch")
+    let root_name = if let Some(instance_name) = &config.instance_name {
+        &format!("worterbuch-{}", instance_name)
+    } else {
+        "worterbuch"
+    };
+
+    let mut root_builder = tosub::build_default_root(root_name)
         .with_timeout(cfg.shutdown_timeout)
         .with_stdin_consumer(move |line| {
             stdin_tx.blocking_send(line).ok();
