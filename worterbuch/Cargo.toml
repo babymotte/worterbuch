@@ -79,7 +79,7 @@ tikv-jemalloc-ctl = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "tracing"] }
 tokio-metrics = { workspace = true }
 tokio-stream = { workspace = true }
-tosub = { workspace = true }
+tosub = { workspace = true, features = ["tokio_unstable"] }
 totils = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
 tracing = { workspace = true }
