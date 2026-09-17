@@ -813,13 +813,15 @@ pub fn is_client_sys_wildcard_topic(pattern: &str) -> Option<Uuid> {
 }
 
 pub fn parse_addresses<S: AsRef<str> + ToString>(addresses: &[S]) -> io::Result<Box<[SocketAddr]>> {
-    Ok(addresses
+    let mut addrs = Vec::new();
+
+    for addr in addresses
         .iter()
         .map(|s| s.as_ref())
         .flat_map(|s| s.split(","))
         .map(str::trim)
         .map(ToSocketAddrs::to_socket_addrs)
-        .collect::<Result<Box<[_]>, _>>()
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -836,7 +838,13 @@ pub fn parse_addresses<S: AsRef<str> + ToString>(addresses: &[S]) -> io::Result<
         })?
         .into_iter()
         .flatten()
-        .collect::<Box<[SocketAddr]>>())
+    {
+        if !addrs.contains(&addr) {
+            addrs.push(addr);
+        }
+    }
+
+    Ok(addrs.into())
 }
 
 #[cfg(test)]
@@ -845,12 +853,39 @@ mod test {
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
+    use super::*;
+
     #[test]
     fn topic_macro_generates_topic_correctly() {
         assert_eq!(
             "hello/world/foo/bar",
             topic!("hello", "world", "foo", "bar")
         );
+    }
+
+    #[test]
+    fn parsing_addresses_retains_order() {
+        let addresses = [
+            "127.0.0.1:8080",
+            "127.0.0.1:9090",
+            "::1:9090",
+            "127.0.0.1:8080",
+            "127.0.0.1:8080",
+            "127.0.0.1:8080",
+            "127.0.0.1:8080",
+            "127.0.0.1:8080",
+            "127.0.0.1:8080",
+        ];
+        let parsed_addresses = parse_addresses(&addresses).unwrap();
+
+        let addresses = vec![
+            ([127, 0, 0, 1], 8080).into(),
+            ([127, 0, 0, 1], 9090).into(),
+            ([0, 0, 0, 0, 0, 0, 0, 1], 9090).into(),
+        ]
+        .into_boxed_slice();
+
+        assert_eq!(addresses, parsed_addresses);
     }
 
     #[cfg(feature = "commercial")]

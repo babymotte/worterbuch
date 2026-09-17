@@ -6,4 +6,4 @@ WORTERBUCH_DATA_DIR=./data/proxy2 \
 WORTERBUCH_WS_SERVER_PORT=8085 \
 WORTERBUCH_TCP_SERVER_PORT=9095 \
 WORTERBUCH_INITIAL_SYNC_TIMEOUT=5 \
-cargo watch -cx 'run -- --instance-name proxy2 proxy -l 127.0.0.1:6060 -l 127.0.0.1:6061 -l 127.0.0.1:6062'
+cargo watch -cx 'run -- --instance-name proxy2 proxy -l localhost:6060 -l localhost:6061 -l localhost:6062'

@@ -36,7 +36,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use serde_json::json;
-use std::{collections::BTreeSet, net::SocketAddr, ops::ControlFlow, time::Duration};
+use std::{ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     net::{
@@ -46,13 +46,13 @@ use tokio::{
     select, spawn,
     sync::{mpsc, oneshot},
 };
-use tosub::Subsystem;
+use tosub::{CancelOnShutdown, Subsystem};
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID, LockLostSender,
-    error::{ConfigError, ConnectionResult, WorterbuchResult},
-    is_grave_goods_topic, is_last_will_topic, parse_addresses,
+    error::{ConnectionResult, WorterbuchResult},
+    is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
         CSet, ClientMessage, Delete, ErrorCode, InternalAction, Key, KeyValuePairs, Lock, PDelete,
         PStateEvent, ProtocolSwitchRequest, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLUSTER,
@@ -73,7 +73,7 @@ struct Proxy<'a> {
     api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     servers: Servers,
-    leader_addresses: Box<[SocketAddr]>,
+    leader_addresses: Box<[String]>,
     stdin: mpsc::Receiver<String>,
     counter: usize,
     retry_seconds: u64,
@@ -82,13 +82,13 @@ struct Proxy<'a> {
 }
 
 impl<'a> Proxy<'a> {
-    fn new<S: AsRef<str> + ToString>(
+    fn new(
         subsys: &'a Subsystem,
         worterbuch: Worterbuch,
         api_rx: mpsc::Receiver<WbFunction>,
         config: Config,
         servers: Servers,
-        leader_addresses: &[S],
+        leader_addresses: Box<[String]>,
         stdin: mpsc::Receiver<String>,
     ) -> WorterbuchAppResult<Self> {
         #[cfg(feature = "commercial")]
@@ -97,13 +97,6 @@ impl<'a> Proxy<'a> {
                 "proxy".to_owned(),
             ));
         }
-
-        let leader_addresses = parse_addresses(&leader_addresses).map_err(|e| {
-            WorterbuchAppError::ConfigError(ConfigError::InvalidLeaderAddress(
-                e,
-                leader_addresses.iter().map(|s| s.to_string()).collect(),
-            ))
-        })?;
 
         // TODO get from config
         let retry_seconds = 1;
@@ -119,7 +112,6 @@ impl<'a> Proxy<'a> {
             servers,
             leader_addresses,
             stdin,
-            // TODO get from config
             retry_seconds,
             counter,
             locks,
@@ -152,19 +144,23 @@ impl<'a> Proxy<'a> {
 
     async fn main_loop(&mut self) -> Result<(), WorterbuchAppError> {
         'outer: loop {
+            trace!("Entering main loop body");
+
+            trace!(
+                leader_addresses = ?self.leader_addresses,
+                "Checking configured leader addresses"
+            );
             if self.leader_addresses.is_empty() {
                 warn!(
                     "No leader addresses provided. Waiting to receive new list of leader addresses from stdin …"
                 );
-                select! {
-                    biased;
-                    _ = self.subsys.shutdown_requested() => break 'outer,
-                    recv = self.stdin.recv() => {
-                        if update_leader_addresses(recv, &mut self.leader_addresses) {
-                            self.counter = 0;
-                            continue 'outer;
-                        }
-                    },
+                if let Some(recv) = self.stdin.recv().or_cancel_on_shutdown(self.subsys).await {
+                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                        self.counter = 0;
+                        continue 'outer;
+                    }
+                } else {
+                    break 'outer;
                 }
             }
 
@@ -205,7 +201,7 @@ impl<'a> Proxy<'a> {
                 select! {
                     biased;
                     _ = self.subsys.shutdown_requested() => break 'outer,
-                    res = self.run_with_leader(leader_address) => {
+                    res = self.run_with_leader(leader_address.clone()) => {
                         let res = res?;
                         if res.leader_addresses_updated {
                             self.counter = 0;
@@ -225,21 +221,18 @@ impl<'a> Proxy<'a> {
         Ok(())
     }
 
-    async fn run_with_leader(
-        &mut self,
-        leader_address: SocketAddr,
-    ) -> WorterbuchAppResult<RunResult> {
+    async fn run_with_leader(&mut self, leader_address: String) -> WorterbuchAppResult<RunResult> {
         self.worterbuch
             .internal_set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-                json!(LeaderState::Connecting(leader_address)),
+                json!(LeaderState::Connecting(leader_address.clone())),
                 INTERNAL_CLIENT_ID,
                 Trace::InternalAction(InternalAction::LeaderSync),
                 true,
             )
             .await?;
 
-        let stream = match TcpStream::connect(leader_address).await {
+        let stream = match TcpStream::connect(leader_address.clone()).await {
             Ok(it) => it,
             Err(e) => {
                 warn!("Failed to connect to leader {}: {}", leader_address, e);
@@ -253,12 +246,17 @@ impl<'a> Proxy<'a> {
         let mut lines = BufReader::new(leader_rx).lines();
 
         let proxy_request_tx =
-            init_request_sender(self.subsys, leader_tx, &self.config, leader_address);
+            init_request_sender(self.subsys, leader_tx, &self.config, leader_address.clone());
 
         let timeout = Some(self.config.initial_sync_timeout);
 
         if let Err(result) = self
-            .establish_leader_session(leader_address, &mut lines, &proxy_request_tx, timeout)
+            .establish_leader_session(
+                leader_address.clone(),
+                &mut lines,
+                &proxy_request_tx,
+                timeout,
+            )
             .await?
         {
             return Ok(result);
@@ -271,7 +269,7 @@ impl<'a> Proxy<'a> {
             &mut self.api_rx,
             lines,
             &self.config,
-            leader_address,
+            leader_address.clone(),
             &mut self.locks,
             &mut self.response_interests,
             &mut self.leader_addresses,
@@ -293,7 +291,7 @@ impl<'a> Proxy<'a> {
 
     async fn establish_leader_session(
         &mut self,
-        leader_address: SocketAddr,
+        leader_address: String,
         lines: &mut Lines<BufReader<OwnedReadHalf>>,
         proxy_request_tx: &mpsc::Sender<ProxyMessage>,
         timeout: Option<Duration>,
@@ -301,7 +299,7 @@ impl<'a> Proxy<'a> {
         info!("Successfully connected to leader {leader_address}. Performing handshake …");
 
         let welcome = match self
-            .receive_welcome_message(leader_address, lines, timeout)
+            .receive_welcome_message(leader_address.clone(), lines, timeout)
             .await?
         {
             Ok(welcome) => welcome,
@@ -311,7 +309,7 @@ impl<'a> Proxy<'a> {
         self.send_handshake(welcome, proxy_request_tx).await?;
 
         if let Err(result) = self
-            .sync_with_leader(leader_address, lines, timeout)
+            .sync_with_leader(leader_address.clone(), lines, timeout)
             .await?
         {
             return Ok(Err(result));
@@ -332,7 +330,7 @@ impl<'a> Proxy<'a> {
 
     async fn receive_welcome_message(
         &mut self,
-        leader_address: SocketAddr,
+        leader_address: String,
         lines: &mut Lines<BufReader<OwnedReadHalf>>,
         timeout: Option<Duration>,
     ) -> WorterbuchAppResult<Result<LeaderWelcome, RunResult>> {
@@ -340,7 +338,7 @@ impl<'a> Proxy<'a> {
         self.worterbuch
             .internal_set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-                json!(LeaderState::Handshake(leader_address)),
+                json!(LeaderState::Handshake(leader_address.clone())),
                 INTERNAL_CLIENT_ID,
                 Trace::InternalAction(InternalAction::LeaderSync),
                 true,
@@ -434,7 +432,7 @@ impl<'a> Proxy<'a> {
 
     async fn sync_with_leader(
         &mut self,
-        leader_address: SocketAddr,
+        leader_address: String,
         lines: &mut Lines<BufReader<OwnedReadHalf>>,
         timeout: Option<Duration>,
     ) -> WorterbuchAppResult<Result<(), RunResult>> {
@@ -443,7 +441,7 @@ impl<'a> Proxy<'a> {
         self.worterbuch
             .internal_set(
                 topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER),
-                json!(LeaderState::Syncing(leader_address)),
+                json!(LeaderState::Syncing(leader_address.clone())),
                 INTERNAL_CLIENT_ID,
                 Trace::InternalAction(InternalAction::LeaderSync),
                 true,
@@ -539,13 +537,13 @@ impl<'a> Proxy<'a> {
     }
 }
 
-pub(crate) async fn run<S: AsRef<str> + ToString>(
+pub(crate) async fn run(
     subsys: &Subsystem,
     worterbuch: Worterbuch,
     api_rx: mpsc::Receiver<WbFunction>,
     config: Config,
     servers: Servers,
-    leader_addresses: &[S],
+    leader_addresses: Box<[String]>,
     stdin: mpsc::Receiver<String>,
 ) -> WorterbuchAppResult<()> {
     Proxy::new(
@@ -563,29 +561,29 @@ pub(crate) async fn run<S: AsRef<str> + ToString>(
 
 fn update_leader_addresses(
     new_addresses: Option<String>,
-    leader_addresses: &mut Box<[SocketAddr]>,
+    leader_addresses: &mut Box<[String]>,
 ) -> bool {
+    trace!(?new_addresses, "Updating leader addresses");
     let Some(new_addresses) = new_addresses else {
+        trace!("No input from stdin");
         return false;
     };
 
     if new_addresses.trim().is_empty() {
+        trace!("Read empty line from stdin");
         return false;
     }
 
-    let addresses = match serde_json::from_str::<BTreeSet<String>>(&new_addresses) {
-        Ok(it) => it,
+    let addresses = match serde_json::from_str::<Box<[String]>>(&new_addresses) {
+        Ok(addresses) => {
+            trace!(
+                ?addresses,
+                "Successfully deserialized new addresses addresses"
+            );
+            addresses
+        }
         Err(e) => {
             error!("Could not parse address array '{}': {}", new_addresses, e);
-            return false;
-        }
-    };
-    let addresses = addresses.into_iter().collect::<Vec<String>>();
-
-    let addresses = match parse_addresses(&addresses) {
-        Ok(it) => it,
-        Err(_) => {
-            error!("Invalid leader addresses: {}", new_addresses);
             return false;
         }
     };
@@ -629,7 +627,7 @@ impl ClientResponseInterests {
 }
 
 struct LeaderConnection<'a> {
-    leader_address: SocketAddr,
+    leader_address: String,
     subsys: &'a Subsystem,
     response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
     proxy_request_tx: mpsc::Sender<ProxyMessage>,
@@ -637,7 +635,7 @@ struct LeaderConnection<'a> {
     api_rx: &'a mut mpsc::Receiver<WbFunction>,
     lines: Lines<BufReader<OwnedReadHalf>>,
     locks: &'a mut Locks,
-    leader_addresses: &'a mut Box<[SocketAddr]>,
+    leader_addresses: &'a mut Box<[String]>,
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
 }
@@ -650,10 +648,10 @@ impl<'a> LeaderConnection<'a> {
         api_rx: &'a mut mpsc::Receiver<WbFunction>,
         lines: Lines<BufReader<OwnedReadHalf>>,
         config: &Config,
-        leader_address: SocketAddr,
+        leader_address: String,
         locks: &'a mut Locks,
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
-        leader_addresses: &'a mut Box<[SocketAddr]>,
+        leader_addresses: &'a mut Box<[String]>,
         stdin: &'a mut mpsc::Receiver<String>,
     ) -> Self {
         Self {
@@ -1469,7 +1467,7 @@ fn init_request_sender(
     subsys: &Subsystem,
     leader_tx: OwnedWriteHalf,
     config: &Config,
-    leader_addr: SocketAddr,
+    leader_addr: String,
 ) -> mpsc::Sender<ProxyMessage> {
     trace!("Initializing request sender …");
     let (tx, rx) = mpsc::channel(config.channel_buffer_size);
@@ -1485,13 +1483,13 @@ async fn request_sender_loop(
     mut leader_tx: OwnedWriteHalf,
     mut rx: mpsc::Receiver<ProxyMessage>,
     timeout: Option<Duration>,
-    leader_addr: SocketAddr,
+    leader_addr: String,
 ) -> miette::Result<()> {
     trace!("Request sender loop running, waiting for messages to write to socket …");
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        recv = rx.recv() => forward_client_request(&subsys, recv, &mut leader_tx, timeout, leader_addr).await,
+        recv = rx.recv() => forward_client_request(&subsys, recv, &mut leader_tx, timeout, leader_addr.clone()).await,
     }
     Ok(())
 }
@@ -1501,7 +1499,7 @@ async fn forward_client_request(
     recv: Option<ProxyMessage>,
     leader_tx: &mut OwnedWriteHalf,
     timeout: Option<Duration>,
-    leader_addr: SocketAddr,
+    leader_addr: String,
 ) -> ControlFlow<()> {
     let Some(request) = recv else {
         return ControlFlow::Break(());
@@ -1514,7 +1512,7 @@ async fn forward_client_request(
         request,
         leader_tx,
         timeout,
-        leader_addr,
+        leader_addr.clone(),
     )
     .await
     {

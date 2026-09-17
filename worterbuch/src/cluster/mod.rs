@@ -31,7 +31,6 @@ use crate::{
     worterbuch::{SubscriptionFlags, Worterbuch},
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tosub::Subsystem;
 use tracing::{Instrument, info};
@@ -53,10 +52,10 @@ pub enum Mode {
 #[serde(rename_all = "camelCase")]
 pub enum LeaderState {
     Disconnected,
-    Connecting(SocketAddr),
-    Handshake(SocketAddr),
-    Syncing(SocketAddr),
-    Synced(SocketAddr),
+    Connecting(String),
+    Handshake(String),
+    Syncing(String),
+    Synced(String),
 }
 
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {

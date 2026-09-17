@@ -112,7 +112,7 @@ pub enum ClusterRole {
         leader_address: String,
     },
     Proxy {
-        leader_addresses: Vec<String>,
+        leader_addresses: Box<[String]>,
     },
 }
 
@@ -479,7 +479,9 @@ impl Config {
                 self.role = ClusterRole::Follower { leader_address };
             }
             Some(Commands::Proxy { leader_addresses }) => {
-                self.role = ClusterRole::Proxy { leader_addresses };
+                self.role = ClusterRole::Proxy {
+                    leader_addresses: leader_addresses.into(),
+                };
             }
             None => {
                 self.role = ClusterRole::Standalone;

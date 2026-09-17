@@ -21,7 +21,7 @@
 use std::path::PathBuf;
 use std::{
     env,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     ops::Deref,
     time::Duration,
 };
@@ -137,11 +137,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         let proto = "tcp".to_owned();
-        let servers = vec![SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::new(127, 0, 0, 1),
-            8081,
-        ))]
-        .into();
+        let servers = Box::new([([127, 0, 0, 1], 8081).into()]);
         let send_timeout = None;
         let connection_timeout = Duration::from_secs(5);
         let channel_buffer_size = 1;
