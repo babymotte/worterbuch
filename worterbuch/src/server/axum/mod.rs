@@ -22,7 +22,7 @@ mod websocket;
 
 use crate::{
     auth::JwtClaims,
-    error::{WorterbuchAppError, WorterbuchAppResult},
+    error::WorterbuchAppResult,
     print_endpoint,
     server::common::{CloneableWbApi, init_server_socket},
     stats::VERSION,
