@@ -36,7 +36,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use serde_json::json;
-use std::{ops::ControlFlow, time::Duration};
+use std::{future::pending, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     net::{
@@ -79,6 +79,7 @@ struct Proxy {
     retry_seconds: u64,
     locks: Locks,
     response_interests: HashMap<ClientId, ClientResponseInterests>,
+    read_leader_addresses_from_stdin: bool,
 }
 
 impl Proxy {
@@ -116,6 +117,8 @@ impl Proxy {
             counter,
             locks,
             response_interests,
+            // TODO get from config
+            read_leader_addresses_from_stdin: true,
         })
     }
 
@@ -164,14 +167,22 @@ impl Proxy {
                 warn!(
                     "No leader addresses provided. Waiting to receive new list of leader addresses from stdin …"
                 );
-                if let Some(recv) = self
-                    .stdin
-                    .recv()
-                    .or_cancel_on(self.subsys.shutdown_requested())
+                if self.read_leader_addresses_from_stdin
+                    && let Some(recv) = read_stdin(
+                        &mut self.stdin,
+                        &mut self.read_leader_addresses_from_stdin,
+                        self.subsys.shutdown_requested(),
+                    )
                     .await
                 {
                     trace!(?recv, "received data on stdin");
-                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                    if self.read_leader_addresses_from_stdin
+                        && update_leader_addresses(
+                            Some(recv),
+                            &mut self.leader_addresses,
+                            self.read_leader_addresses_from_stdin,
+                        )
+                    {
                         continue 'outer;
                     }
                 } else {
@@ -183,10 +194,13 @@ impl Proxy {
                 trace!(counter = self.counter, "entering inner loop body");
 
                 for leader_address in self.leader_addresses.clone() {
-                    if update_leader_addresses(
-                        self.stdin.try_recv().ok(),
-                        &mut self.leader_addresses,
-                    ) {
+                    if self.read_leader_addresses_from_stdin
+                        && update_leader_addresses(
+                            self.stdin.try_recv().ok(),
+                            &mut self.leader_addresses,
+                            self.read_leader_addresses_from_stdin,
+                        )
+                    {
                         continue 'outer;
                     }
 
@@ -244,8 +258,8 @@ impl Proxy {
                             _ = tokio::time::sleep(Duration::from_secs(self.retry_seconds)) => {
                                 trace!("timeout elapsed, re-trying leader connections");
                             },
-                            recv = self.stdin.recv() => {
-                                if update_leader_addresses(recv, &mut self.leader_addresses) {
+                            recv = read_stdin(&mut self.stdin, &mut self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => {
+                                if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin) {
                                     continue 'outer;
                                 }
                             },
@@ -318,6 +332,7 @@ impl Proxy {
             &mut self.response_interests,
             &mut self.leader_addresses,
             &mut self.stdin,
+            &mut self.read_leader_addresses_from_stdin,
         );
 
         let leader_addresses_updated = leader_connection.run().await?;
@@ -405,8 +420,8 @@ impl Proxy {
                     trace!(exit = "receive_welcome_message");
                     return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
                 },
-                recv = self.stdin.recv() => {
-                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                recv = read_stdin(&mut self.stdin, &mut self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => {
+                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin) {
                         if !self.leader_addresses.contains(&leader_address) {
                             warn!(
                                 "Current leader address {} is no longer in the list of known leader addresses {:?}",
@@ -518,8 +533,8 @@ impl Proxy {
                     trace!(exit = "sync_with_leader");
                     return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
                 },
-                recv = self.stdin.recv() => {
-                    if update_leader_addresses(recv, &mut self.leader_addresses) {
+                recv = read_stdin(&mut self.stdin, &mut self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => {
+                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin) {
                         if !self.leader_addresses.contains(&leader_address) {
                             warn!(
                                 "Current leader address {} is no longer in the list of known leader addresses {:?}",
@@ -639,13 +654,44 @@ pub(crate) async fn run(
     Ok(())
 }
 
+async fn read_stdin(
+    stdin: &mut mpsc::Receiver<String>,
+    enabled: &mut bool,
+    shutdown_requested: impl Future,
+) -> Option<String> {
+    if !*enabled {
+        pending().or_cancel_on(shutdown_requested).await
+    } else {
+        match stdin
+            .recv()
+            .or_cancel_on(shutdown_requested)
+            .await
+            .flatten()
+        {
+            Some(line) => Some(line),
+            None => {
+                trace!("stdin closed, disabling further input from stdin");
+                *enabled = false;
+                None
+            }
+        }
+    }
+}
+
 fn update_leader_addresses(
     new_addresses: Option<String>,
     leader_addresses: &mut Box<[String]>,
+    enabled: bool,
 ) -> bool {
     trace!(enter = "update_leader_addresses", ?new_addresses);
+
+    if !enabled {
+        panic!(
+            "this is not supposed to be called if reading leader addresses from stdin is disabled"
+        );
+    }
+
     let Some(new_addresses) = new_addresses else {
-        trace!("No input from stdin");
         return false;
     };
 
@@ -723,6 +769,7 @@ struct LeaderConnection<'a> {
     leader_addresses: &'a mut Box<[String]>,
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
+    read_leader_addresses_from_stdin: &'a mut bool,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -738,6 +785,7 @@ impl<'a> LeaderConnection<'a> {
         response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
         leader_addresses: &'a mut Box<[String]>,
         stdin: &'a mut mpsc::Receiver<String>,
+        read_leader_addresses_from_stdin: &'a mut bool,
     ) -> Self {
         Self {
             leader_address,
@@ -751,6 +799,7 @@ impl<'a> LeaderConnection<'a> {
             leader_addresses,
             leader_addresses_updated: false,
             stdin,
+            read_leader_addresses_from_stdin,
         }
     }
 
@@ -763,7 +812,7 @@ impl<'a> LeaderConnection<'a> {
         while_select! {
             biased;
             _ = self.subsys.shutdown_requested() => break,
-            recv = self.stdin.recv() => self.update_leader_address(recv),
+            recv = read_stdin(self.stdin, self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => self.update_leader_address(recv),
             recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
             recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
         }
@@ -773,7 +822,13 @@ impl<'a> LeaderConnection<'a> {
     }
 
     fn update_leader_address(&mut self, recv: Option<String>) -> ControlFlow<()> {
-        if update_leader_addresses(recv, self.leader_addresses) {
+        if *self.read_leader_addresses_from_stdin
+            && update_leader_addresses(
+                recv,
+                self.leader_addresses,
+                *self.read_leader_addresses_from_stdin,
+            )
+        {
             self.leader_addresses_updated = true;
             if self.leader_addresses.contains(&self.leader_address) {
                 ControlFlow::Continue(())
