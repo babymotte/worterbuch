@@ -72,6 +72,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
+use totils::CancelOn;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
@@ -822,20 +823,22 @@ pub(crate) async fn start(
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
 
-    let router =
-        build_worterbuch_router(&subsys, worterbuch, tls, port, bind_addr, ws_enabled).await?;
+    let router = build_worterbuch_router(&subsys, worterbuch, tls, port, bind_addr, ws_enabled)
+        .await
+        .wrap_err("building worterbuch router failed")?;
 
     let handle = Handle::new();
 
-    let listener = init_server_socket(bind_addr, port, config.clone())?;
+    let listener = init_server_socket(bind_addr, port, config.clone())
+        .wrap_err("failed to initialize web server socket")?;
 
     if config.print_endpoints {
-        print_endpoint(&listener, false)?;
+        print_endpoint(&listener, false).wrap_err("error printing endpoints")?;
     }
 
     let mut server = axum_server::from_tcp(listener)
         .into_diagnostic()
-        .context("failed to create web server")?;
+        .wrap_err("failed to create web server")?;
     server.http_builder().http2().enable_connect_protocol();
 
     let mut serve = Box::pin(
@@ -844,12 +847,11 @@ pub(crate) async fn start(
             .serve(router.into_make_service_with_connect_info::<SocketAddr>()),
     );
 
-    select! {
-        res = &mut serve => res.into_diagnostic()?,
-        _ = subsys.shutdown_requested() => {
-            handle.graceful_shutdown(Some(Duration::from_secs(5)));
-            serve.await.into_diagnostic()?;
-        },
+    if let Some(res) = (&mut serve).or_cancel_on(subsys.shutdown_requested()).await {
+        res.into_diagnostic().wrap_err("server crashed")?;
+    } else {
+        handle.graceful_shutdown(Some(Duration::from_secs(5)));
+        serve.await.into_diagnostic()?;
     }
 
     debug!("webserver subsystem completed.");

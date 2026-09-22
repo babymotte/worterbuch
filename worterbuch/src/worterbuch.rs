@@ -35,17 +35,18 @@ use serde_json::{Value, from_str, json};
 use std::{
     io, mem,
     net::SocketAddr,
-    ops::Deref,
+    ops::{ControlFlow, Deref},
     time::{Duration, SystemTime},
 };
 use tokio::{
-    select, spawn,
+    spawn,
     sync::{
         mpsc::{self, Receiver, channel},
         oneshot,
     },
     time::sleep,
 };
+use totils::while_select;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
@@ -128,29 +129,32 @@ impl PStateAggregatorState {
     ) {
         let (send_trigger_tx, mut send_trigger_rx) = mpsc::channel::<()>(1);
 
-        loop {
-            select! {
-                event = aggregate_rx.recv() => if let Some(event) = event {
-                    if let Err(e) = self.aggregate(event, &send_trigger_tx, client_id).await {
-                        error!("Error aggregating PState event for client {client_id}: {e}");
-                        break;
-                    }
-                } else {
-                    break;
-                },
-                tick = send_trigger_rx.recv() => if tick.is_some() {
-                    if let Err(e) = self.send_current_state().await {
-                        error!("Error sending PState event to client {client_id}: {e}");
-                        break;
-                    }
-                } else {
-                    break;
-                },
-            }
+        while_select! {
+            biased;
+            event = aggregate_rx.recv() => self.try_aggregate(event, &send_trigger_tx, client_id).await,
+            tick = send_trigger_rx.recv() => self.try_send_current_state(tick, client_id).await,
         }
     }
 
-    async fn aggregate(
+    async fn try_aggregate(
+        &mut self,
+        event: Option<PStateEvent>,
+        send_trigger_tx: &mpsc::Sender<()>,
+        client_id: ClientId,
+    ) -> ControlFlow<()> {
+        if let Some(event) = event {
+            if let Err(e) = self.do_aggregate(event, &send_trigger_tx, client_id).await {
+                error!("Error aggregating PState event for client {client_id}: {e}");
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        } else {
+            ControlFlow::Break(())
+        }
+    }
+
+    async fn do_aggregate(
         &mut self,
         event: PStateEvent,
         send_trigger_tx: &mpsc::Sender<()>,
@@ -182,6 +186,23 @@ impl PStateAggregatorState {
         }
 
         Ok(())
+    }
+
+    async fn try_send_current_state(
+        &mut self,
+        tick: Option<()>,
+        client_id: ClientId,
+    ) -> ControlFlow<()> {
+        if tick.is_some() {
+            if let Err(e) = self.send_current_state().await {
+                error!("Error sending PState event to client {client_id}: {e}");
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        } else {
+            ControlFlow::Break(())
+        }
     }
 
     async fn send_current_state(&mut self) -> WorterbuchResult<()> {

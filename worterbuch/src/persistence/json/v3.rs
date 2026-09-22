@@ -20,6 +20,7 @@
 use super::*;
 use crate::persistence::{TIMESTAMP_FILE_NAME, is_persistence_locked};
 use std::fmt::Debug;
+use totils::CancelOn;
 use tracing::{Instrument, Level, debug_span, instrument};
 use worterbuch_common::{
     WbApi,
@@ -33,11 +34,13 @@ pub(crate) async fn periodic(
 ) -> PersistenceResult<()> {
     let mut interval = config.persistence_interval();
 
-    loop {
-        select! {
-            _ = interval.tick() => asynchronous(&worterbuch, &config).await?,
-            _ = subsys.shutdown_requested() => break,
-        }
+    while interval
+        .tick()
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        .is_some()
+    {
+        asynchronous(&worterbuch, &config).await?;
     }
 
     debug!("persistence subsystem completed.");

@@ -25,8 +25,9 @@ use crate::{
     worterbuch::Worterbuch,
 };
 use serde_json::json;
-use tokio::{select, sync::mpsc};
+use tokio::sync::mpsc;
 use tosub::Subsystem;
+use totils::CancelOn;
 use tracing::info;
 use worterbuch_common::{
     INTERNAL_CLIENT_ID,
@@ -54,12 +55,16 @@ pub async fn run(
         .await?;
 
     loop {
-        select! {
-            recv = api_rx.recv() => match recv {
-                Some(function) => process_api_call(&mut worterbuch, function).await,
-                None => break,
-            },
-            _ = subsys.shutdown_requested() => break,
+        let Some(recv) = api_rx
+            .recv()
+            .or_cancel_on(subsys.shutdown_requested())
+            .await
+        else {
+            break;
+        };
+        match recv {
+            Some(function) => process_api_call(&mut worterbuch, function).await,
+            None => break,
         }
     }
 

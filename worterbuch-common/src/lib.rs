@@ -670,7 +670,7 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn write_line_and_flush<F, Fut>(
+pub async fn write_line_and_flush<F, Fut, T>(
     mut shutdown_request: F,
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
@@ -679,7 +679,7 @@ pub async fn write_line_and_flush<F, Fut>(
 ) -> ConnectionResult<()>
 where
     F: FnMut() -> Fut,
-    Fut: IntoFuture<Output = ()>,
+    Fut: IntoFuture<Output = T>,
 {
     let mut json = serde_json::to_string(&msg)?;
     if json.contains('\n') {
@@ -727,13 +727,13 @@ where
     Ok(())
 }
 
-async fn do_without_timeout<F, Fut, T>(
+async fn do_without_timeout<F, Fut, T, FutT>(
     shutdown_request: &mut F,
     task: impl Future<Output = io::Result<T>>,
 ) -> ConnectionResult<io::Result<T>>
 where
     F: FnMut() -> Fut,
-    Fut: IntoFuture<Output = ()>,
+    Fut: IntoFuture<Output = FutT>,
 {
     select! {
         biased;
@@ -744,7 +744,7 @@ where
     }
 }
 
-async fn do_with_timeout<F, Fut, T>(
+async fn do_with_timeout<F, Fut, T, FutT>(
     shutdown_request: &mut F,
     remote: &impl Display,
     task: impl Future<Output = io::Result<T>>,
@@ -752,7 +752,7 @@ async fn do_with_timeout<F, Fut, T>(
 ) -> ConnectionResult<io::Result<T>>
 where
     F: FnMut() -> Fut,
-    Fut: IntoFuture<Output = ()>,
+    Fut: IntoFuture<Output = FutT>,
 {
     let res = select! {
         biased;

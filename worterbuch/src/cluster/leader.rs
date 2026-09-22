@@ -49,7 +49,7 @@ use tokio::{
         TcpSocket, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
-    select, spawn,
+    spawn,
     sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
@@ -510,16 +510,16 @@ async fn send_initial_state(
     config: &Config,
     state: StateSync,
 ) -> miette::Result<()> {
-    select! {
-        biased;
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before initial sync completed.");
-            bail!("shut down before initial sync")
-        },
-        res = write_line_and_flush(|| subsys.shutdown_requested(), LeaderMessage::Init(state), tcp_stream, config.send_timeout, follower) => {
-            res.into_diagnostic().wrap_err("could not send current state to follower/proxy")
-        }
-    }
+    write_line_and_flush(
+        || subsys.shutdown_requested(),
+        LeaderMessage::Init(state),
+        tcp_stream,
+        config.send_timeout,
+        follower,
+    )
+    .await
+    .into_diagnostic()
+    .wrap_err("could not send current state to follower/proxy")
 }
 
 async fn forward_change_to_follower(

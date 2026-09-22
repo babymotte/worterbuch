@@ -21,26 +21,57 @@ use crate::{cluster::protocol::ProxyMessage, persistence::error::PersistenceErro
 use miette::Diagnostic;
 use std::io;
 use tokio::sync::{mpsc, oneshot};
+use tosub::RootSystemError;
 use worterbuch_common::error::{ConfigError, WorterbuchError};
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
 pub enum WorterbuchAppError {
-    #[error("Persistence error: {0}")]
-    PersistenceError(#[from] PersistenceError),
-    #[error("Worterbuch error: {0}")]
-    WorterbuchError(#[from] WorterbuchError),
-    #[error("Config error: {0}")]
-    ConfigError(ConfigError),
+    #[error("Persistence error")]
+    PersistenceError(
+        #[source]
+        #[from]
+        PersistenceError,
+    ),
+    #[error("Worterbuch error")]
+    WorterbuchError(
+        #[source]
+        #[from]
+        WorterbuchError,
+    ),
+    #[error("Config error")]
+    ConfigError(
+        #[source]
+        #[from]
+        ConfigError,
+    ),
     #[error("Cluster error: {0}")]
     ClusterError(String),
-    #[error("I/O error: {0}")]
-    IoError(#[from] io::Error),
-    #[error("Channel error: {0}")]
-    ChannelError(#[from] oneshot::error::RecvError),
-    #[error("Proxy send error: {0}")]
-    ProxySendError(#[from] mpsc::error::SendError<ProxyMessage>),
+    #[error("I/O error")]
+    IoError(
+        #[source]
+        #[from]
+        io::Error,
+    ),
+    #[error("Channel error")]
+    ChannelError(
+        #[source]
+        #[from]
+        oneshot::error::RecvError,
+    ),
+    #[error("Proxy send error")]
+    ProxySendError(
+        #[source]
+        #[from]
+        mpsc::error::SendError<ProxyMessage>,
+    ),
     #[error("No license for feature {0}")]
     NoLicense(String),
+    #[error("A critical subsystem terminated with an error")]
+    RootSystemError(
+        #[source]
+        #[from]
+        RootSystemError,
+    ),
 }
 
 pub type WorterbuchAppResult<T> = Result<T, WorterbuchAppError>;

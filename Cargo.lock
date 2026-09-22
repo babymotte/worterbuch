@@ -5499,9 +5499,9 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "2.2.1"
+version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a839962b4491ba6ffae954ba2331c3966d734ff4cad9b98452069a9b8a8e54ce"
+checksum = "b7c9e9b351c9b76e075c810f53762152824fd27b11b6ecfec710d16b3cccd456"
 dependencies = [
  "miette",
  "serde",
@@ -5514,9 +5514,9 @@ dependencies = [
 
 [[package]]
 name = "totils"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a27fe1b299669d445d477148327a59782534194e5adfcac8da0ad0205efc3ad4"
+checksum = "5143224dcce05a6412edc432b0c3e4e8911e7e739b0e6f2a2a94692c5530b08c"
 dependencies = [
  "tokio",
 ]

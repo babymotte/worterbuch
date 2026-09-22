@@ -38,7 +38,6 @@ use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, File, remove_file},
     io::{AsyncReadExt, AsyncWriteExt},
-    select,
 };
 use tosub::Subsystem;
 use tracing::{debug, info, instrument, warn};

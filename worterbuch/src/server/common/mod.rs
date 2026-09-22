@@ -21,7 +21,7 @@ pub mod protocol;
 
 use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::Locks, stats::VERSION};
 use hashbrown::HashMap;
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
     fmt,
@@ -1023,8 +1023,9 @@ impl WbApi for CloneableWbApi {
 }
 
 pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Result<TcpListener> {
-    let addr = format!("{bind_addr}:{port}");
-    let addr: SocketAddr = addr.parse().into_diagnostic()?;
+    trace!(%bind_addr, %port);
+    let addr: SocketAddr = SocketAddr::new(bind_addr, port);
+    trace!(%addr);
 
     let mut tcp_keepalive = TcpKeepalive::new();
     if let Some(keepalive) = config.keepalive_time {
@@ -1037,20 +1038,49 @@ pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Resul
         tcp_keepalive = tcp_keepalive.with_retries(retries);
     }
 
-    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?;
+    let socket = match addr {
+        SocketAddr::V4(_) => {
+            Socket::new(Domain::IPV4, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?
+        }
+        SocketAddr::V6(_) => {
+            Socket::new(Domain::IPV6, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?
+        }
+    };
 
     #[cfg(not(target_os = "windows"))]
-    socket.set_reuse_address(true).into_diagnostic()?;
-    socket.set_nonblocking(true).into_diagnostic()?;
-    socket.set_keepalive(true).into_diagnostic()?;
-    socket.set_tcp_keepalive(&tcp_keepalive).into_diagnostic()?;
+    socket
+        .set_reuse_address(true)
+        .into_diagnostic()
+        .wrap_err("failed to set SO_REUSEADDR option")?;
+    socket
+        .set_nonblocking(true)
+        .into_diagnostic()
+        .wrap_err("failed to set nonblocking option")?;
+    socket
+        .set_keepalive(true)
+        .into_diagnostic()
+        .wrap_err("failed to set SO_KEEPALIVE option")?;
+    socket
+        .set_tcp_keepalive(&tcp_keepalive)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP keepallive option")?;
     #[cfg(target_os = "linux")]
     socket
         .set_tcp_user_timeout(config.send_timeout)
-        .into_diagnostic()?;
-    socket.set_tcp_nodelay(true).into_diagnostic()?;
-    socket.bind(&SockAddr::from(addr)).into_diagnostic()?;
-    socket.listen(1024).into_diagnostic()?;
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_USER_TIMEOUT option")?;
+    socket
+        .set_tcp_nodelay(true)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_NODELAY option")?;
+    socket
+        .bind(&SockAddr::from(addr))
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to bind socket to address {addr}"))?;
+    socket
+        .listen(1024)
+        .into_diagnostic()
+        .wrap_err("creating client listener failed")?;
     let listener = socket.into();
 
     Ok(listener)

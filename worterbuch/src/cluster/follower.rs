@@ -36,10 +36,9 @@ use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{TcpStream, tcp::OwnedWriteHalf},
-    select,
     sync::mpsc,
 };
-use tosub::Subsystem;
+use tosub::{CancelOnShutdown, Subsystem};
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
@@ -91,34 +90,41 @@ pub(crate) async fn run(
 
     info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
 
-    let welcome = select! {
-        biased;
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before receiving leader welcome message.");
-            return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
-        },
-        recv = receive_msg(&mut lines, timeout) => {
-            debug!("Received leader message");
-            match recv {
-                Ok(Some(msg)) => {
-                    if let LeaderMessage::Welcome(welcome) = msg {
-                        debug!("Received welcome message from leader: {welcome:?}");
-                        welcome
-                    } else {
-                        warn!("Expected welcome message from leader, but got: {msg:?}");
-                        return Err(WorterbuchAppError::ClusterError(format!("Expected welcome message from leader, but got: {msg:?}")));
-                    }
-                },
-                Ok(None) => {
-                    warn!("Leader closed connection before sending welcome message.");
-                    return Err(WorterbuchAppError::ClusterError("Leader closed connection before sending welcome message.".to_owned()));
-                },
-                Err(e) => {
-                    warn!("Error receiving welcome message from leader: {e}");
-                    return Err(WorterbuchAppError::ClusterError(format!("Error receiving welcome message from leader: {e}")));
-                }
+    let Some(recv) = receive_msg(&mut lines, timeout)
+        .or_cancel_on_shutdown(&subsys)
+        .await
+    else {
+        warn!("Shutdown requested before receiving leader welcome message.");
+        return Err(WorterbuchAppError::ClusterError(
+            "shut down before receiving leader welcome message".to_owned(),
+        ));
+    };
+
+    debug!("Received leader message");
+    let welcome = match recv {
+        Ok(Some(msg)) => {
+            if let LeaderMessage::Welcome(welcome) = msg {
+                debug!("Received welcome message from leader: {welcome:?}");
+                welcome
+            } else {
+                warn!("Expected welcome message from leader, but got: {msg:?}");
+                return Err(WorterbuchAppError::ClusterError(format!(
+                    "Expected welcome message from leader, but got: {msg:?}"
+                )));
             }
-        },
+        }
+        Ok(None) => {
+            warn!("Leader closed connection before sending welcome message.");
+            return Err(WorterbuchAppError::ClusterError(
+                "Leader closed connection before sending welcome message.".to_owned(),
+            ));
+        }
+        Err(e) => {
+            warn!("Error receiving welcome message from leader: {e}");
+            return Err(WorterbuchAppError::ClusterError(format!(
+                "Error receiving welcome message from leader: {e}"
+            )));
+        }
     };
 
     // TODO check version
@@ -126,31 +132,40 @@ pub(crate) async fn run(
 
     info!("Handshake complete. Waiting for initial sync message …");
 
-    select! {
-        biased;
-        _ = subsys.shutdown_requested() => {
-            warn!("Shutdown requested before initial sync completed.");
-            return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
-        },
-        recv = receive_msg(&mut lines, timeout) => {
-            debug!("Received leader message");
-            match recv {
-                Ok(Some(msg)) => {
-                    if let LeaderMessage::Init(state) = msg {
-                        debug!("Received initial sync message from leader: {state:?}");
-                        initial_sync(state, &mut worterbuch).await?;
-                        persistence_interval.reset();
-                        worterbuch.flush().await?;
-                    } else {
-                        return Err(WorterbuchAppError::ClusterError(format!("Expected initial sync, but it got: {msg:?}")));
-                    }
-                },
-                Ok(None) => return Err(WorterbuchAppError::ClusterError("connection to leader closed before initial sync".to_owned())),
-                Err(e) => {
-                    return Err(WorterbuchAppError::ClusterError(format!("error receiving initial sync message from leader: {e}")));
-                }
+    let Some(recv) = receive_msg(&mut lines, timeout)
+        .or_cancel_on_shutdown(subsys)
+        .await
+    else {
+        warn!("Shutdown requested before initial sync completed.");
+        return Err(WorterbuchAppError::ClusterError(
+            "shut down before initial sync".to_owned(),
+        ));
+    };
+
+    debug!("Received leader message");
+    match recv {
+        Ok(Some(msg)) => {
+            if let LeaderMessage::Init(state) = msg {
+                debug!("Received initial sync message from leader: {state:?}");
+                initial_sync(state, &mut worterbuch).await?;
+                persistence_interval.reset();
+                worterbuch.flush().await?;
+            } else {
+                return Err(WorterbuchAppError::ClusterError(format!(
+                    "Expected initial sync, but it got: {msg:?}"
+                )));
             }
-        },
+        }
+        Ok(None) => {
+            return Err(WorterbuchAppError::ClusterError(
+                "connection to leader closed before initial sync".to_owned(),
+            ));
+        }
+        Err(e) => {
+            return Err(WorterbuchAppError::ClusterError(format!(
+                "error receiving initial sync message from leader: {e}"
+            )));
+        }
     }
     info!("Successfully synced with leader.");
 
