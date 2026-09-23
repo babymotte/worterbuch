@@ -810,7 +810,6 @@ impl<'a> LeaderConnection<'a> {
         );
 
         while_select! {
-            biased;
             _ = self.subsys.shutdown_requested() => break,
             recv = read_stdin(self.stdin, self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => self.update_leader_address(recv),
             recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,

@@ -346,7 +346,6 @@ async fn follower_serve_loop(
     send_initial_state(&subsys, &mut socket_tx, follower, &config, state).await?;
 
     while_select! {
-        biased;
         _ = proxy_server.subsys.shutdown_requested() => break,
         recv = commands.recv() => forward_change_to_follower(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
         recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,

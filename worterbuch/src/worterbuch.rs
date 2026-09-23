@@ -131,8 +131,8 @@ impl PStateAggregatorState {
 
         while_select! {
             biased;
-            event = aggregate_rx.recv() => self.try_aggregate(event, &send_trigger_tx, client_id).await,
             tick = send_trigger_rx.recv() => self.try_send_current_state(tick, client_id).await,
+            event = aggregate_rx.recv() => self.try_aggregate(event, &send_trigger_tx, client_id).await,
         }
     }
 
