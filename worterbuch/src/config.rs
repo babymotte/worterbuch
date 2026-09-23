@@ -427,6 +427,7 @@ impl Config {
             #[cfg(target_family = "unix")]
             unix_endpoint: None,
             quic_endpoint: None,
+            #[cfg(feature = "tokio-console")]
             tokio_console_port: None,
             use_persistence: false,
             persistence_interval: Duration::from_secs(30),
