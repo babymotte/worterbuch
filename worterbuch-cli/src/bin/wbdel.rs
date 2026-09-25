@@ -25,7 +25,7 @@ use tosub::Subsystem;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
-use worterbuch_client::{AuthToken, config::Config, connect, parse_addresses};
+use worterbuch_client::{AuthToken, config::Config, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Delete values for keys from a Wörterbuch.", long_about = None)]
@@ -78,8 +78,8 @@ async fn run(subsys: Subsystem) -> Result<()> {
     if args.ssl {
         config.proto = "wss".to_owned();
     }
-    if let Ok(servers) = parse_addresses(&args.addr) {
-        config.servers = servers;
+    if !args.addr.is_empty() {
+        config.servers = args.addr.into_boxed_slice();
     }
     let json = args.json;
     let raw = args.raw;

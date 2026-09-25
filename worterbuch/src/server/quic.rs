@@ -62,6 +62,7 @@ use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
     protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    socket::create_udp_server_socket,
     write_line_and_flush,
 };
 
@@ -417,8 +418,8 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = quic_send_rx.recv() => if let Some(msg) = recv {
-            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut quic_tx, send_timeout, client_id).await {
-                error!("Error sending QUIC message '{msg:?}': {e}");
+            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut quic_tx, send_timeout).await {
+                error!("Error sending QUIC message '{msg:?}' to client {client_id}: {e}");
                 break;
             }
             ControlFlow::Continue(())
@@ -502,34 +503,15 @@ impl<'a> ServeLoop<'a> {
 /// handshake attempt that can never get a response, before falling back to
 /// an address that actually works.
 fn bind_endpoint(server_config: quinn::ServerConfig, addr: SocketAddr) -> Result<Endpoint> {
-    let domain = if addr.is_ipv6() {
-        socket2::Domain::IPV6
-    } else {
-        socket2::Domain::IPV4
-    };
-    let socket = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))
-        .into_diagnostic()
-        .context("failed to create QUIC UDP socket")?;
-    if addr.ip().is_unspecified() && domain == socket2::Domain::IPV6 {
-        // Best-effort: platforms without dual-stack support (or where this
-        // isn't permitted) still get a working, IPv6-only QUIC endpoint.
-        socket.set_only_v6(false).ok();
-    }
-    socket
-        .bind(&addr.into())
-        .into_diagnostic()
-        .with_context(|| format!("failed to bind QUIC UDP socket to {addr}"))?;
-    socket
-        .set_nonblocking(true)
-        .into_diagnostic()
-        .context("failed to configure QUIC UDP socket")?;
+    let socket = create_udp_server_socket(addr.ip(), addr.port())
+        .wrap_err("failed to create UDP server socket for QUIC endpoint")?;
 
     let runtime = quinn::default_runtime()
         .ok_or_else(|| miette::miette!("no async runtime found for QUIC endpoint"))?;
     Endpoint::new(
         quinn::EndpointConfig::default(),
         Some(server_config),
-        socket.into(),
+        socket,
         runtime,
     )
     .into_diagnostic()

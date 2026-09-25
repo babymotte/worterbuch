@@ -21,13 +21,7 @@ pub mod protocol;
 
 use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::Locks, stats::VERSION};
 use hashbrown::HashMap;
-use miette::{Context, IntoDiagnostic, Result};
-use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
-use std::{
-    fmt,
-    net::{IpAddr, SocketAddr, TcpListener},
-    time::Duration,
-};
+use std::{fmt, net::SocketAddr, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, debug, instrument, trace};
 use worterbuch_common::{
@@ -39,6 +33,7 @@ use worterbuch_common::{
         ProtocolMajorVersion, ProtocolVersion, ProtocolVersionSegment, RequestPattern,
         SendTracesFlag, TransactionId, UniqueFlag, Value,
     },
+    socket::TcpSocketConfig,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1022,66 +1017,13 @@ impl WbApi for CloneableWbApi {
     }
 }
 
-pub fn init_server_socket(bind_addr: IpAddr, port: u16, config: Config) -> Result<TcpListener> {
-    trace!(%bind_addr, %port);
-    let addr: SocketAddr = SocketAddr::new(bind_addr, port);
-    trace!(%addr);
-
-    let mut tcp_keepalive = TcpKeepalive::new();
-    if let Some(keepalive) = config.keepalive_time {
-        tcp_keepalive = tcp_keepalive.with_time(keepalive);
-    }
-    if let Some(keepalive) = config.keepalive_interval {
-        tcp_keepalive = tcp_keepalive.with_interval(keepalive);
-    }
-    if let Some(retries) = config.keepalive_retries {
-        tcp_keepalive = tcp_keepalive.with_retries(retries);
-    }
-
-    let socket = match addr {
-        SocketAddr::V4(_) => {
-            Socket::new(Domain::IPV4, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?
+impl From<&Config> for TcpSocketConfig {
+    fn from(config: &Config) -> Self {
+        Self {
+            keepalive_time: config.keepalive_time,
+            keepalive_interval: config.keepalive_interval,
+            keepalive_retries: config.keepalive_retries,
+            send_timeout: config.send_timeout,
         }
-        SocketAddr::V6(_) => {
-            Socket::new(Domain::IPV6, Type::STREAM, Some(SockProto::TCP)).into_diagnostic()?
-        }
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    socket
-        .set_reuse_address(true)
-        .into_diagnostic()
-        .wrap_err("failed to set SO_REUSEADDR option")?;
-    socket
-        .set_nonblocking(true)
-        .into_diagnostic()
-        .wrap_err("failed to set nonblocking option")?;
-    socket
-        .set_keepalive(true)
-        .into_diagnostic()
-        .wrap_err("failed to set SO_KEEPALIVE option")?;
-    socket
-        .set_tcp_keepalive(&tcp_keepalive)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP keepallive option")?;
-    #[cfg(target_os = "linux")]
-    socket
-        .set_tcp_user_timeout(config.send_timeout)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP_USER_TIMEOUT option")?;
-    socket
-        .set_tcp_nodelay(true)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP_NODELAY option")?;
-    socket
-        .bind(&SockAddr::from(addr))
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to bind socket to address {addr}"))?;
-    socket
-        .listen(1024)
-        .into_diagnostic()
-        .wrap_err("creating client listener failed")?;
-    let listener = socket.into();
-
-    Ok(listener)
+    }
 }

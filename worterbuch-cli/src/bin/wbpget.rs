@@ -80,8 +80,8 @@ async fn run(subsys: Subsystem) -> Result<()> {
     if args.ssl {
         config.proto = "wss".to_owned();
     }
-    if let Ok(servers) = parse_addresses(&args.addr) {
-        config.servers = servers;
+    if !args.addr.is_empty() {
+        config.servers = args.addr.into_boxed_slice();
     }
     let json = args.json;
     let raw = args.raw;

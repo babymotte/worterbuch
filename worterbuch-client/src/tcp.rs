@@ -33,8 +33,6 @@ use worterbuch_common::{
 
 use crate::CancellationToken;
 
-const SERVER_ID: &str = "worterbuch server";
-
 pub struct TcpClientSocket {
     tx: mpsc::Sender<ClientMessage>,
     rx: Lines<BufReader<OwnedReadHalf>>,
@@ -100,7 +98,6 @@ async fn forward_tcp_messages(
             msg,
             &mut tx,
             timeout,
-            SERVER_ID,
         )
         .await
         {

@@ -19,14 +19,10 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    Config,
-    auth::JwtClaims,
-    print_endpoint,
-    server::{common::CloneableWbApi, common::init_server_socket},
-    stats::VERSION,
+    Config, auth::JwtClaims, print_endpoint, server::common::CloneableWbApi, stats::VERSION,
 };
 use hashbrown::HashMap;
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use std::{
     io,
     net::{IpAddr, SocketAddr},
@@ -48,6 +44,7 @@ use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
     protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    socket::create_tcp_server_socket,
     write_line_and_flush,
 };
 
@@ -68,13 +65,16 @@ pub async fn start(
 
     info!("Serving TCP endpoint at {addr}");
 
-    let listener = init_server_socket(bind_addr, port, config.clone())?;
+    let listener = create_tcp_server_socket(bind_addr, port, (&config).into())
+        .wrap_err("failed to initialize tcp server socket")?;
 
     if config.print_endpoints {
         print_endpoint(&listener, true)?;
     }
 
-    let listener = TcpListener::from_std(listener).into_diagnostic()?;
+    let listener = TcpListener::from_std(listener)
+        .into_diagnostic()
+        .wrap_err("Could not create async socket from regular socket")?;
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
@@ -296,8 +296,8 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = tcp_send_rx.recv() => if let Some(msg) = recv {
-            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout, client_id).await {
-                error!("Error sending TCP message '{msg:?}': {e}");
+            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout).await {
+                error!("Error sending TCP message '{msg:?}' to client {client_id}: {e}");
                 break;
             }
             ControlFlow::Continue(())

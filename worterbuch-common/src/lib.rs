@@ -22,6 +22,7 @@ pub mod benchmark;
 
 pub mod error;
 pub mod protocol;
+pub mod socket;
 
 use crate::{
     error::{ConnectionError, ConnectionResult},
@@ -675,7 +676,6 @@ pub async fn write_line_and_flush<F, Fut, T>(
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
     send_timeout: Option<Duration>,
-    remote: impl Display,
 ) -> ConnectionResult<()>
 where
     F: FnMut() -> Fut,
@@ -698,14 +698,20 @@ where
     json.push('\n');
     let bytes = json.as_bytes();
 
-    debug!("Sending message with timeout {send_timeout:?}: {json}");
+    trace!(?send_timeout, json, "Sending message with timeout");
     trace!("Writing line …");
     for chunk in bytes.chunks(1024) {
         let mut written = 0;
         while written < chunk.len() {
             let do_write = tx.write(&chunk[written..]);
             let additionally_written = if let Some(send_timeout) = send_timeout {
-                do_with_timeout(&mut shutdown_request, &remote, do_write, send_timeout).await??
+                do_with_timeout(
+                    &mut shutdown_request,
+                    "writing data to I/O channel",
+                    do_write,
+                    send_timeout,
+                )
+                .await??
             } else {
                 do_without_timeout(&mut shutdown_request, do_write).await??
             };
@@ -718,7 +724,13 @@ where
     let do_flush = tx.flush();
 
     if let Some(send_timeout) = send_timeout {
-        do_with_timeout(&mut shutdown_request, &remote, do_flush, send_timeout).await??;
+        do_with_timeout(
+            &mut shutdown_request,
+            "flushing I/O channel",
+            do_flush,
+            send_timeout,
+        )
+        .await??;
     } else {
         do_without_timeout(&mut shutdown_request, do_flush).await??;
     }
@@ -746,7 +758,7 @@ where
 
 async fn do_with_timeout<F, Fut, T, FutT>(
     shutdown_request: &mut F,
-    remote: &impl Display,
+    msg: impl Display,
     task: impl Future<Output = io::Result<T>>,
     send_timeout: Duration,
 ) -> ConnectionResult<io::Result<T>>
@@ -762,11 +774,7 @@ where
         res = timeout(send_timeout, task) => res,
     };
 
-    res.map_err(|_| {
-        ConnectionError::Timeout(Box::new(format!(
-            "timeout while sending tcp message to {remote}"
-        )))
-    })
+    res.map_err(|_| ConnectionError::Timeout(Box::new(format!("timeout while {msg}"))))
 }
 
 pub fn is_grave_goods_topic(key: &str) -> bool {

@@ -382,11 +382,15 @@ async fn send_welcome(
         }),
         tcp_stream,
         config.send_timeout,
-        follower,
     )
     .await
     .into_diagnostic()
-    .wrap_err("could not send current state to follower/proxy")
+    .wrap_err_with(|| {
+        format!(
+            "could not send current state to follower/proxy {}",
+            follower
+        )
+    })
 }
 
 async fn receive_handshake(
@@ -514,11 +518,15 @@ async fn send_initial_state(
         LeaderMessage::Init(state),
         tcp_stream,
         config.send_timeout,
-        follower,
     )
     .await
     .into_diagnostic()
-    .wrap_err("could not send current state to follower/proxy")
+    .wrap_err_with(|| {
+        format!(
+            "could not send current state to follower/proxy {}",
+            follower
+        )
+    })
 }
 
 async fn forward_change_to_follower(
@@ -535,10 +543,9 @@ async fn forward_change_to_follower(
                 LeaderMessage::Mut(change),
                 socket_tx,
                 config.send_timeout,
-                follower,
             )
             .await
-            .wrap_err("could not write command to follower/proxy")?;
+            .wrap_err_with(|| format!("could not write command to follower/proxy {}", follower))?;
         }
         None => return Ok(ControlFlow::Break(())),
     }
@@ -560,10 +567,9 @@ async fn forward_response_to_proxy(
                 LeaderMessage::ClientResponse(client_id, server_message),
                 socket_tx,
                 config.send_timeout,
-                follower,
             )
             .await
-            .wrap_err("could not write command to follower/proxy")?;
+            .wrap_err_with(|| format!("could not write command to follower/proxy {}", follower))?;
         }
         Some(VirtualServerMessage::Disconnect(client_id)) => {
             write_line_and_flush(
@@ -571,10 +577,9 @@ async fn forward_response_to_proxy(
                 LeaderMessage::EjectClient(client_id),
                 socket_tx,
                 config.send_timeout,
-                follower,
             )
             .await
-            .wrap_err("could not write command to follower/proxy")?;
+            .wrap_err_with(|| format!("could not write command to follower/proxy {}", follower))?;
         }
         None => return Ok(ControlFlow::Break(())),
     }

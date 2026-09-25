@@ -32,8 +32,6 @@ use worterbuch_common::{
 
 use crate::CancellationToken;
 
-const SERVER_ID: &str = "worterbuch server";
-
 pub struct UnixClientSocket {
     tx: mpsc::Sender<ClientMessage>,
     rx: Lines<BufReader<OwnedReadHalf>>,
@@ -105,7 +103,6 @@ where
             msg,
             &mut tx,
             None,
-            SERVER_ID,
         )
         .await
         {

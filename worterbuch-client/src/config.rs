@@ -19,18 +19,13 @@
 
 #[cfg(any(target_family = "unix", feature = "quic"))]
 use std::path::PathBuf;
-use std::{
-    env,
-    net::{SocketAddr, ToSocketAddrs},
-    ops::Deref,
-    time::Duration,
-};
+use std::{env, ops::Deref, time::Duration};
 use tracing::{debug, error, instrument};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
-    pub servers: Box<[SocketAddr]>,
+    pub servers: Box<[String]>,
     pub send_timeout: Option<Duration>,
     pub connection_timeout: Duration,
     pub auth_token: Option<String>,
@@ -55,12 +50,7 @@ impl Config {
         }
 
         if let Ok(val) = env::var("WORTERBUCH_SERVERS") {
-            self.servers = val
-                .split(',')
-                .map(str::trim)
-                .filter_map(|s| s.to_socket_addrs().ok())
-                .flatten()
-                .collect();
+            self.servers = val.split(',').map(str::trim).map(str::to_owned).collect();
         } else if let Ok(val) = env::var("WORTERBUCH_HOST_ADDRESS") {
             let default_port = match self.proto.to_lowercase().deref() {
                 "ws" | "wss" | "http" | "https" => 8080,
@@ -76,9 +66,8 @@ impl Config {
             } else {
                 default_port
             };
-            if let Ok(addr) = format!("{val}:{port}").to_socket_addrs() {
-                self.servers = addr.collect();
-            }
+            let addr = format!("{val}:{port}");
+            self.servers = Box::new([addr]);
         }
 
         if let Ok(val) = env::var("WORTERBUCH_SEND_TIMEOUT") {
@@ -137,7 +126,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         let proto = "tcp".to_owned();
-        let servers = Box::new([([127, 0, 0, 1], 8081).into()]);
+        let servers = Box::new(["127.0.0.1:8081".to_owned()]);
         let send_timeout = None;
         let connection_timeout = Duration::from_secs(5);
         let channel_buffer_size = 1;
@@ -175,15 +164,11 @@ impl Config {
 
     pub fn with_servers(
         proto: String,
-        servers: impl IntoIterator<Item = impl ToSocketAddrs>,
+        servers: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         let mut config = Config::new();
         config.proto = proto;
-        config.servers = servers
-            .into_iter()
-            .flat_map(|it| it.to_socket_addrs())
-            .flatten()
-            .collect();
+        config.servers = servers.into_iter().map(Into::into).collect();
         config
     }
 }

@@ -6545,7 +6545,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
- "socket2",
  "strum 0.28.0",
  "supports-color",
  "thiserror 2.0.20",
@@ -6662,6 +6661,7 @@ dependencies = [
  "serde_repr",
  "serde_yaml",
  "sha2 0.11.0",
+ "socket2",
  "thiserror 2.0.20",
  "tikv-jemallocator",
  "tokio",
@@ -6692,6 +6692,25 @@ dependencies = [
  "tracing-subscriber",
  "worterbuch-client",
  "worterbuch-common",
+]
+
+[[package]]
+name = "worterbuch-speedtest2"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dotenvy",
+ "miette",
+ "random_word",
+ "serde_json",
+ "supports-color",
+ "tokio",
+ "tosub",
+ "totils",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "worterbuch-client",
 ]
 
 [[package]]

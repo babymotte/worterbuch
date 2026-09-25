@@ -120,9 +120,10 @@ impl KeyValuePair {
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, JsonSchema,
 )]
-pub struct ProtocolVersion(ProtocolVersionSegment, ProtocolVersionSegment);
+pub struct ProtocolVersion(pub ProtocolVersionSegment, pub ProtocolVersionSegment);
 
 impl ProtocolVersion {
+    #[deprecated(note = "Use the tuple struct constructor ProtocolVersion(major, minor) instead")]
     pub const fn new(major: ProtocolVersionSegment, minor: ProtocolVersionSegment) -> Self {
         Self(major, minor)
     }
@@ -276,23 +277,23 @@ mod test {
 
     #[test]
     fn protocol_versions_are_sorted_correctly() {
-        assert!(ProtocolVersion::new(1, 2) < ProtocolVersion::new(3, 2));
-        assert!(ProtocolVersion::new(1, 2) == ProtocolVersion::new(1, 2));
-        assert!(ProtocolVersion::new(2, 1) > ProtocolVersion::new(1, 9));
+        assert!(ProtocolVersion(1, 2) < ProtocolVersion(3, 2));
+        assert!(ProtocolVersion(1, 2) == ProtocolVersion(1, 2));
+        assert!(ProtocolVersion(2, 1) > ProtocolVersion(1, 9));
 
         let mut versions = vec![
-            ProtocolVersion::new(1, 2),
-            ProtocolVersion::new(0, 456),
-            ProtocolVersion::new(9, 0),
-            ProtocolVersion::new(3, 15),
+            ProtocolVersion(1, 2),
+            ProtocolVersion(0, 456),
+            ProtocolVersion(9, 0),
+            ProtocolVersion(3, 15),
         ];
         versions.sort();
         assert_eq!(
             vec![
-                ProtocolVersion::new(0, 456),
-                ProtocolVersion::new(1, 2),
-                ProtocolVersion::new(3, 15),
-                ProtocolVersion::new(9, 0)
+                ProtocolVersion(0, 456),
+                ProtocolVersion(1, 2),
+                ProtocolVersion(3, 15),
+                ProtocolVersion(9, 0)
             ],
             versions
         );
@@ -316,21 +317,21 @@ mod test {
 
     #[test]
     fn protocol_version_get_serialized_correctly() {
-        assert_eq!(&json!(ProtocolVersion::new(2, 1)).to_string(), "[2,1]")
+        assert_eq!(&json!(ProtocolVersion(2, 1)).to_string(), "[2,1]")
     }
 
     #[test]
     fn protocol_version_get_formatted_correctly() {
-        assert_eq!(&ProtocolVersion::new(2, 1).to_string(), "2.1")
+        assert_eq!(&ProtocolVersion(2, 1).to_string(), "2.1")
     }
 
     #[test]
     fn compatible_version_is_selected_correctly() {
-        let client_version = ProtocolVersion::new(1, 2);
+        let client_version = ProtocolVersion(1, 2);
         let server_versions = [
-            ProtocolVersion::new(0, 11),
-            ProtocolVersion::new(1, 6),
-            ProtocolVersion::new(2, 0),
+            ProtocolVersion(0, 11),
+            ProtocolVersion(1, 6),
+            ProtocolVersion(2, 0),
         ];
         let compatible_version = server_versions
             .iter()

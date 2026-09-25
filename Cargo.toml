@@ -6,7 +6,7 @@ members = [
     "worterbuch-cluster-orchestrator",
     "worterbuch-cli",
     "worterbuch-speedtest",
-    "worterbuch-tui",
+    "worterbuch-tui", "worterbuch-speedtest2",
 ]
 resolver = "3"
 

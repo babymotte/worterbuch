@@ -60,7 +60,7 @@ impl Handshake {
 #[serde(rename_all = "camelCase")]
 pub struct FollowerHandshake {
     pub version: WorterbuchVersion,
-    // #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
 }
 
@@ -68,22 +68,22 @@ pub struct FollowerHandshake {
 #[serde(rename_all = "camelCase")]
 pub struct ProxyHandshake {
     pub version: WorterbuchVersion,
-    // #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
-    // #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub connected_clients: Vec<Connected>,
-    // #[serde(skip_serializing_if = "Locks::is_empty", default)]
+    #[serde(skip_serializing_if = "Locks::is_empty", default)]
     pub locks: Locks,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Locks {
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub held: HashMap<ClientId, HashSet<TransactionId>>,
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub requested: HashMap<ClientId, HashSet<TransactionId>>,
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
 }
 

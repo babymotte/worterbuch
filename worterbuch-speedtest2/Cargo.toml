@@ -1,0 +1,31 @@
+[package]
+name = "worterbuch-speedtest2"
+version = "0.1.0"
+edition = "2024"
+default-run = "worterbuch-speedtest"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+dotenvy.workspace = true
+miette = { workspace = true, features = ["fancy"] }
+random_word.workspace = true
+serde_json.workspace = true
+supports-color.workspace = true
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "rt-multi-thread",
+] }
+tosub.workspace = true
+totils = { workspace = true, features = ["while_select"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true, features = ["v4"] }
+worterbuch-client.workspace = true
+
+[features]
+trace = []
+default = ["trace"]

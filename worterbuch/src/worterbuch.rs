@@ -2340,10 +2340,18 @@ mod test {
         )
         .await
         .unwrap();
+        wb.set(
+            "$SYS/clients/17e679d9-a1d5-48ed-a8ec-aee155b90557/graveGoods".to_owned(),
+            json!(["this/should/be/exported"]),
+            false,
+            TraceData::new(INTERNAL_CLIENT_ID, Interface::Protocol(Protocol::HTTP), 321),
+        )
+        .await
+        .unwrap();
 
         let export = wb.export();
         assert_eq!(
-            r#"[{"t":{"hello":{"t":{"world":{"v":"test"}}}}},[],[]]"#,
+            r#"[{"t":{"hello":{"t":{"world":{"v":"test"}}}}},{"17e679d9-a1d5-48ed-a8ec-aee155b90557":["this/should/be/exported"]},{}]"#,
             &serde_json::to_string(&export).unwrap()
         );
     }

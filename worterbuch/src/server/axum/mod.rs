@@ -21,10 +21,7 @@ mod auth;
 mod websocket;
 
 use crate::{
-    auth::JwtClaims,
-    error::WorterbuchAppResult,
-    print_endpoint,
-    server::common::{CloneableWbApi, init_server_socket},
+    auth::JwtClaims, error::WorterbuchAppResult, print_endpoint, server::common::CloneableWbApi,
     stats::VERSION,
 };
 use axum::{
@@ -85,6 +82,7 @@ use worterbuch_common::{
     AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
     protocol::v1::{Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
+    socket::create_tcp_server_socket,
 };
 
 async fn ws(
@@ -829,7 +827,7 @@ pub(crate) async fn start(
 
     let handle = Handle::new();
 
-    let listener = init_server_socket(bind_addr, port, config.clone())
+    let listener = create_tcp_server_socket(bind_addr, port, (&config).into())
         .wrap_err("failed to initialize web server socket")?;
 
     if config.print_endpoints {

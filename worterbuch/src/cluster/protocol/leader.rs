@@ -49,9 +49,9 @@ pub struct LeaderWelcome {
 #[serde(rename_all = "camelCase")]
 pub struct StateSync {
     pub store: StoreNode,
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub grave_goods: HashMap<ClientId, GraveGoods>,
-    // #[serde(skip_serializing_if = "HashMap::is_empty", default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub last_wills: HashMap<ClientId, LastWill>,
 }
 

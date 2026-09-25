@@ -45,7 +45,7 @@ use std::{
     fmt::{Debug, Display},
     future::Future,
     io,
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     ops::{ControlFlow, Deref},
     sync::Arc,
     time::Duration,
@@ -83,7 +83,7 @@ use ws::WsClientSocket;
 pub use worterbuch_common::protocol::v1::*;
 pub use worterbuch_common::*;
 
-const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(2, 0);
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion(2, 0);
 
 #[derive(Clone)]
 pub(crate) struct CancellationToken {
@@ -1327,9 +1327,10 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
         info!("Successfully connected to unix socket");
         return Ok(con);
     } else {
-        for addr in &config.servers {
+        let addrs = to_socket_addrs(&config.servers);
+        for addr in addrs {
             info!("Trying to connect to server {addr} …");
-            match try_connect(cancellation_token.clone(), config.clone(), Some(*addr)).await {
+            match try_connect(cancellation_token.clone(), config.clone(), Some(addr)).await {
                 Ok(con) => {
                     info!("Successfully connected to server {addr}");
                     return Ok(con);
@@ -1346,6 +1347,14 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
     } else {
         Err(ConnectionError::NoServerAddressesConfigured)
     }
+}
+
+fn to_socket_addrs(addrs: &[String]) -> Box<[SocketAddr]> {
+    addrs
+        .iter()
+        .filter_map(|s| s.to_socket_addrs().ok())
+        .flatten()
+        .collect()
 }
 
 pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbuch {

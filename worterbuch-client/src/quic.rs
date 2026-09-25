@@ -41,8 +41,6 @@ use worterbuch_common::{
 
 use crate::{CancellationToken, config::Config};
 
-const SERVER_ID: &str = "worterbuch server";
-
 /// Must match `ALPN_PROTOCOL` in worterbuch's server, see
 /// `worterbuch/src/server/quic.rs`.
 const ALPN_PROTOCOL: &[u8] = b"worterbuch";
@@ -118,7 +116,6 @@ async fn forward_quic_messages(
             msg,
             &mut tx,
             timeout,
-            SERVER_ID,
         )
         .await
         {

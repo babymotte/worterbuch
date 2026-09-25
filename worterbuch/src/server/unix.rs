@@ -274,8 +274,8 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = unix_send_rx.recv() => if let Some(msg) = recv {
-            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut unix_tx, send_timeout, client_id).await {
-                error!("Error sending UNIX message '{msg:?}': {e}");
+            if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut unix_tx, send_timeout).await {
+                error!("Error sending UNIX message '{msg:?}' to client {client_id}: {e}");
                 break;
             }
             ControlFlow::Continue(())

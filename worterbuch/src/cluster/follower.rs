@@ -279,14 +279,8 @@ async fn forward_client_request(
 
     debug!("Forwarding client request to leader: {request:?}");
 
-    if let Err(e) = write_line_and_flush(
-        || subsys.shutdown_requested(),
-        request,
-        leader_tx,
-        timeout,
-        leader_addr,
-    )
-    .await
+    if let Err(e) =
+        write_line_and_flush(|| subsys.shutdown_requested(), request, leader_tx, timeout).await
     {
         error!(
             "Failed to forward client request to leader {}: {e}",
