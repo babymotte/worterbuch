@@ -21,10 +21,13 @@ mod v0;
 mod v1;
 mod v2;
 
+use std::sync::Arc;
+
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
 use serde_json::json;
 use tokio::sync::{
+    Semaphore,
     mpsc::{self, error::SendError},
     oneshot,
 };
@@ -81,6 +84,7 @@ impl Proto {
         config: Config,
         worterbuch: CloneableWbApi,
     ) -> Self {
+        let semaphore = Arc::new(Semaphore::new(config.channel_buffer_size));
         let latest = V2::new(V1::new(V0 {
             subsys,
             auth_required,
@@ -88,6 +92,7 @@ impl Proto {
             config,
             tx,
             worterbuch,
+            semaphore,
         }));
         Self {
             handler: ProtocolHandler::V2(latest.clone()),

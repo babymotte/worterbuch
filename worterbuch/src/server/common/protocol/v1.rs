@@ -20,13 +20,16 @@
 use super::v0::V0;
 use crate::{
     auth::JwtClaims,
-    server::common::protocol::{LazyBroadcaster, forward_lock_acquired, forward_lock_lost},
+    server::common::protocol::{
+        LazyBroadcaster, forward_lock_acquired, forward_lock_lost,
+        v0::{handle_store_error, handle_store_error_lazy},
+    },
 };
-use tokio::spawn;
+use tokio::{spawn, sync::oneshot};
 use tracing::{Level, instrument, trace};
 use worterbuch_common::{
     Privilege, WbApi,
-    error::{Context, WorterbuchResult},
+    error::WorterbuchResult,
     protocol::v1::{Ack, CSet, CState, CStateEvent, ClientMessage, Get, Lock, ServerMessage},
 };
 
@@ -54,7 +57,7 @@ impl V1 {
                     .await?
                 {
                     trace!("Getting CAS value for client {} …", self.v0.client_id);
-                    self.cget(msg).await?;
+                    self.cget(msg).await;
                     trace!("Getting CAS value for client {} done.", self.v0.client_id);
                 }
             }
@@ -65,7 +68,7 @@ impl V1 {
                     .await?
                 {
                     trace!("Setting cas value for client {} …", self.v0.client_id);
-                    self.cset(msg).await?;
+                    self.cset(msg).await;
                     trace!("Setting cas value for client {} done.", self.v0.client_id);
                 }
             }
@@ -76,7 +79,7 @@ impl V1 {
                     .await?
                 {
                     trace!("Locking key for client {} …", self.v0.client_id);
-                    self.lock(msg).await?;
+                    self.lock(msg).await;
                     trace!("Locking key for client {} done.", self.v0.client_id);
                 }
             }
@@ -87,7 +90,7 @@ impl V1 {
                     .await?
                 {
                     trace!("Locking key for client {} …", self.v0.client_id);
-                    self.acquire_lock(msg).await?;
+                    self.acquire_lock(msg).await;
                     trace!("Locking key for client {} done.", self.v0.client_id);
                 }
             }
@@ -98,7 +101,7 @@ impl V1 {
                     .await?
                 {
                     trace!("Unlocking key for client {} …", self.v0.client_id);
-                    self.release_lock(msg).await?;
+                    self.release_lock(msg).await;
                     trace!("Unlocking key for client {} done.", self.v0.client_id);
                 }
             }
@@ -109,69 +112,71 @@ impl V1 {
         Ok(())
     }
 
-    pub async fn cget(&self, msg: Get) -> WorterbuchResult<()> {
-        let (value, version) = match self.v0.worterbuch.cget(msg.key).await {
-            Ok(it) => it,
-            Err(e) => {
-                self.v0.handle_store_error(e, msg.transaction_id).await?;
-                return Ok(());
-            }
-        };
+    pub async fn cget(&self, msg: Get) {
+        let (tx, rx) = oneshot::channel();
+        let wb = self.v0.worterbuch.clone();
+        let permit = self.v0.acquire_permit().await;
+        let client_id = self.v0.client_id;
 
-        let response = CState {
-            transaction_id: msg.transaction_id,
-            event: CStateEvent { value, version },
-        };
+        tokio::spawn(async move {
+            let (value, version) = match wb.cget(msg.key).await {
+                Ok(it) => it,
+                Err(e) => {
+                    handle_store_error(tx, e, msg.transaction_id).await;
+                    return;
+                }
+            };
 
-        self.v0
-            .tx
-            .lazy_send(ServerMessage::CState(response))
-            .await
-            .context(|| {
-                format!(
-                    "Error sending CSTATE message for transaction ID {}",
-                    msg.transaction_id
+            let response = CState {
+                transaction_id: msg.transaction_id,
+                event: CStateEvent { value, version },
+            };
+
+            let msg = ServerMessage::CState(response);
+            tx.send(msg).ok();
+
+            drop(permit);
+        });
+
+        self.v0.tx.send(rx).await.ok();
+    }
+
+    pub async fn cset(&self, msg: CSet) {
+        let (tx, rx) = oneshot::channel();
+        let wb = self.v0.worterbuch.clone();
+        let permit = self.v0.acquire_permit().await;
+        let client_id = self.v0.client_id;
+
+        tokio::spawn(async move {
+            if let Err(e) = wb
+                .cset(
+                    msg.transaction_id,
+                    msg.key,
+                    msg.value,
+                    msg.version,
+                    client_id,
                 )
-            })?;
+                .await
+            {
+                handle_store_error(tx, e, msg.transaction_id).await;
+                return;
+            }
 
-        Ok(())
+            let response = Ack {
+                transaction_id: msg.transaction_id,
+            };
+
+            trace!("Value set, queuing Ack …");
+            tx.send(ServerMessage::Ack(response)).ok();
+            trace!("Value set, queuing Ack done.");
+
+            drop(permit);
+        });
+
+        self.v0.tx.send(rx).await.ok();
     }
 
-    pub async fn cset(&self, msg: CSet) -> WorterbuchResult<()> {
-        if let Err(e) = self
-            .v0
-            .worterbuch
-            .cset(
-                msg.transaction_id,
-                msg.key,
-                msg.value,
-                msg.version,
-                self.v0.client_id,
-            )
-            .await
-        {
-            self.v0.handle_store_error(e, msg.transaction_id).await?;
-            return Ok(());
-        }
-
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
-
-        trace!("Value set, queuing Ack …");
-        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
-        trace!("Value set, queuing Ack done.");
-        res.context(|| {
-            format!(
-                "Error sending ACK message for transaction ID {}",
-                msg.transaction_id
-            )
-        })?;
-
-        Ok(())
-    }
-
-    pub async fn lock(&self, msg: Lock) -> WorterbuchResult<()> {
+    pub async fn lock(&self, msg: Lock) {
         let lost_rx = match self
             .v0
             .worterbuch
@@ -180,8 +185,8 @@ impl V1 {
         {
             Ok(it) => it,
             Err(e) => {
-                self.v0.handle_store_error(e, msg.transaction_id).await?;
-                return Ok(());
+                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                return;
             }
         };
 
@@ -190,23 +195,19 @@ impl V1 {
         };
 
         trace!("Key locked, queuing Ack …");
-        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        self.v0
+            .tx
+            .lazy_send(ServerMessage::Ack(response))
+            .await
+            .ok();
         trace!("Key locked, queuing Ack done.");
-        res.context(|| {
-            format!(
-                "Error sending ACK message for transaction ID {}",
-                msg.transaction_id
-            )
-        })?;
 
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
         spawn(forward_lock_lost(client, transaction_id, lost_rx));
-
-        Ok(())
     }
 
-    pub async fn acquire_lock(&self, msg: Lock) -> WorterbuchResult<()> {
+    pub async fn acquire_lock(&self, msg: Lock) {
         let (acquired_rx, lost_rx) = match self
             .v0
             .worterbuch
@@ -214,8 +215,8 @@ impl V1 {
             .await
         {
             Err(e) => {
-                self.v0.handle_store_error(e, msg.transaction_id).await?;
-                return Ok(());
+                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                return;
             }
             Ok(rx) => rx,
         };
@@ -229,19 +230,17 @@ impl V1 {
             acquired_rx,
             lost_rx,
         ));
-
-        Ok(())
     }
 
-    pub async fn release_lock(&self, msg: Lock) -> WorterbuchResult<()> {
+    pub async fn release_lock(&self, msg: Lock) {
         if let Err(e) = self
             .v0
             .worterbuch
             .release_lock(msg.transaction_id, msg.key, self.v0.client_id)
             .await
         {
-            self.v0.handle_store_error(e, msg.transaction_id).await?;
-            return Ok(());
+            handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+            return;
         }
 
         let response = Ack {
@@ -249,15 +248,11 @@ impl V1 {
         };
 
         trace!("Key unlocked, queuing Ack …");
-        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        self.v0
+            .tx
+            .lazy_send(ServerMessage::Ack(response))
+            .await
+            .ok();
         trace!("Key unlocked, queuing Ack done.");
-        res.context(|| {
-            format!(
-                "Error sending ACK message for transaction ID {}",
-                msg.transaction_id
-            )
-        })?;
-
-        Ok(())
     }
 }

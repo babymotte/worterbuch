@@ -1705,7 +1705,5 @@ async fn forward_client_request(
 
     trace!("Client request forwarded to leader.");
 
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
     ControlFlow::Continue(())
 }
