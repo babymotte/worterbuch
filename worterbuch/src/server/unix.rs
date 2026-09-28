@@ -18,7 +18,11 @@
  */
 
 use super::common::protocol::Proto;
-use crate::{auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION};
+use crate::{
+    auth::JwtClaims,
+    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
+    stats::VERSION,
+};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
@@ -28,7 +32,7 @@ use tokio::{
         unix::{OwnedReadHalf, OwnedWriteHalf, SocketAddr},
     },
     select,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
 use totils::while_select;
@@ -229,17 +233,15 @@ async fn serve_loop(
     let unix_rx = BufReader::new(unix_rx);
     let unix_rx = unix_rx.lines();
     let supported_protocol_versions = worterbuch.supported_protocol_versions();
-    unix_send_tx
-        .send(ServerMessage::Welcome(Welcome {
-            client_id,
-            info: ServerInfo::new(
-                VERSION.to_owned(),
-                supported_protocol_versions,
-                authorization_required,
-            ),
-        }))
-        .await
-        .into_diagnostic()?;
+    let welcome = ServerMessage::Welcome(Welcome {
+        client_id,
+        info: ServerInfo::new(
+            VERSION.to_owned(),
+            supported_protocol_versions,
+            authorization_required,
+        ),
+    });
+    unix_send_tx.lazy_send(welcome).await.into_diagnostic()?;
 
     let proto = Proto::new(
         subsys.clone(),
@@ -265,7 +267,7 @@ async fn serve_loop(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut unix_send_rx: mpsc::Receiver<ServerMessage>,
+    mut unix_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     mut unix_tx: OwnedWriteHalf,
     client_id: ClientId,
     send_timeout: Option<Duration>,
@@ -274,6 +276,7 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = unix_send_rx.recv() => if let Some(msg) = recv {
+            let Ok(msg) = msg.await else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut unix_tx, send_timeout).await {
                 error!("Error sending UNIX message '{msg:?}' to client {client_id}: {e}");
                 break;

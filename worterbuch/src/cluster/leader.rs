@@ -31,7 +31,7 @@ use crate::{
     error::WorterbuchAppResult,
     server::common::{
         self, CloneableWbApi, WbFunction,
-        protocol::{self, Proto, ServerMessageBroadcaster},
+        protocol::{self, LazyBroadcaster, Proto, ServerMessageLazyBroadcaster},
     },
     worterbuch_version,
 };
@@ -451,13 +451,12 @@ async fn process_handshake(
                 continue;
             };
             for (tid, _) in keys {
-                tx.send(ServerMessage::Err(Err {
+                let msg = ServerMessage::Err(Err {
                     transaction_id: *tid,
                     error_code: ErrorCode::LockLost,
                     metadata: json!("lock lost").to_string(),
-                }))
-                .await
-                .ok();
+                });
+                tx.lazy_send(msg).await.ok();
             }
         }
 
@@ -690,7 +689,7 @@ impl VirtualProxyServer {
         protocol: Protocol,
         config: Config,
         worterbuch: CloneableWbApi,
-    ) -> miette::Result<ServerMessageBroadcaster> {
+    ) -> miette::Result<ServerMessageLazyBroadcaster> {
         let auth_required = config.auth_token_key.is_some();
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
 
@@ -790,7 +789,7 @@ impl VirtualProxyServer {
     async fn register_clients(
         &mut self,
         connected_clients: &[Connected],
-    ) -> miette::Result<HashMap<ClientId, ServerMessageBroadcaster>> {
+    ) -> miette::Result<HashMap<ClientId, ServerMessageLazyBroadcaster>> {
         let mut client_txs = HashMap::new();
 
         for Connected {
@@ -892,7 +891,7 @@ impl VirtualProxyServer {
 
 async fn response_forwarder_loop(
     subsys: Subsystem,
-    mut send_client_rx: mpsc::Receiver<ServerMessage>,
+    mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: uuid::Uuid,
     worterbuch: CloneableWbApi,
@@ -919,18 +918,19 @@ async fn response_forwarder_loop(
 }
 
 async fn forward_leader_response(
-    recv: Option<ServerMessage>,
+    recv: Option<oneshot::Receiver<ServerMessage>>,
     send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
 ) -> miette::Result<ControlFlow<()>> {
     match recv {
-        Some(msg) => {
-            send_tx
+        Some(msg) => match msg.await {
+            Ok(msg) => send_tx
                 .send(VirtualServerMessage::ServerMessage((client_id, msg)))
                 .await
                 .into_diagnostic()
-                .wrap_err("could not forward response to proxy")?;
-        }
+                .wrap_err("could not forward response to proxy")?,
+            Err(_) => return Ok(ControlFlow::Break(())),
+        },
         None => return Ok(ControlFlow::Break(())),
     }
 

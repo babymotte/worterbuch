@@ -19,7 +19,11 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    Config, auth::JwtClaims, print_endpoint, server::common::CloneableWbApi, stats::VERSION,
+    Config,
+    auth::JwtClaims,
+    print_endpoint,
+    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
+    stats::VERSION,
 };
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
@@ -36,7 +40,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     select,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
 use totils::while_select;
@@ -251,17 +255,15 @@ async fn serve_loop<'a>(
     let tcp_rx = BufReader::new(tcp_rx);
     let tcp_rx = tcp_rx.lines();
 
-    tcp_send_tx
-        .send(ServerMessage::Welcome(Welcome {
-            client_id,
-            info: ServerInfo::new(
-                VERSION.to_owned(),
-                supported_protocol_versions,
-                authorization_required,
-            ),
-        }))
-        .await
-        .into_diagnostic()?;
+    let welcome = ServerMessage::Welcome(Welcome {
+        client_id,
+        info: ServerInfo::new(
+            VERSION.to_owned(),
+            supported_protocol_versions,
+            authorization_required,
+        ),
+    });
+    tcp_send_tx.lazy_send(welcome).await.into_diagnostic()?;
 
     let proto = Proto::new(
         subsys.clone(),
@@ -287,7 +289,7 @@ async fn serve_loop<'a>(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
+    mut tcp_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: ClientId,
     send_timeout: Option<Duration>,
@@ -296,6 +298,7 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = tcp_send_rx.recv() => if let Some(msg) = recv {
+            let Ok(msg) = msg.await else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout).await {
                 error!("Error sending TCP message '{msg:?}' to client {client_id}: {e}");
                 break;

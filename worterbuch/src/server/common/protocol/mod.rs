@@ -24,7 +24,10 @@ mod v2;
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::{
+    mpsc::{self, error::SendError},
+    oneshot,
+};
 use tosub::Subsystem;
 use tracing::{Instrument, Level, debug, instrument, trace, trace_span, warn};
 use v0::V0;
@@ -38,6 +41,25 @@ use worterbuch_common::{
 };
 
 pub type ServerMessageBroadcaster = mpsc::Sender<ServerMessage>;
+pub type ServerMessageLazyBroadcaster = mpsc::Sender<oneshot::Receiver<ServerMessage>>;
+
+pub(crate) trait LazyBroadcaster<T> {
+    fn lazy_send(
+        &self,
+        msg: T,
+    ) -> impl Future<Output = Result<(), SendError<oneshot::Receiver<T>>>>;
+}
+
+impl LazyBroadcaster<ServerMessage> for ServerMessageLazyBroadcaster {
+    async fn lazy_send(
+        &self,
+        msg: ServerMessage,
+    ) -> Result<(), SendError<oneshot::Receiver<ServerMessage>>> {
+        let (tx, rx) = oneshot::channel();
+        tx.send(msg).ok();
+        self.send(rx).await
+    }
+}
 
 enum ProtocolHandler {
     V0(V0),
@@ -54,7 +76,7 @@ impl Proto {
     pub fn new(
         subsys: Subsystem,
         client_id: ClientId,
-        tx: ServerMessageBroadcaster,
+        tx: ServerMessageLazyBroadcaster,
         auth_required: bool,
         config: Config,
         worterbuch: CloneableWbApi,
@@ -145,7 +167,7 @@ impl Proto {
                     .await?;
                 let response = Ack { transaction_id: 0 };
                 trace!("Protocol switched, queuing Ack …");
-                let res = self.tx().send(ServerMessage::Ack(response)).await;
+                let res = self.tx().lazy_send(ServerMessage::Ack(response)).await;
                 trace!("Protocol switched, queuing Ack done.");
                 res.context(|| "Error sending ACK message for transaction ID 0".to_owned())?;
             } else {
@@ -175,13 +197,13 @@ impl Proto {
         self.latest.v1.v0.client_id
     }
 
-    fn tx(&self) -> &mpsc::Sender<ServerMessage> {
+    fn tx(&self) -> &ServerMessageLazyBroadcaster {
         &self.latest.v1.v0.tx
     }
 }
 
 pub async fn forward_lock_acquired(
-    client: ServerMessageBroadcaster,
+    client: ServerMessageLazyBroadcaster,
     transaction_id: TransactionId,
     acquired_rx: LockAcquiredReceiver,
     lost_rx: LockLostReceiver,
@@ -194,7 +216,7 @@ pub async fn forward_lock_acquired(
 
     debug!("Lock confirmation for transaction {transaction_id:?} received.");
     if client
-        .send(ServerMessage::Ack(Ack { transaction_id }))
+        .lazy_send(ServerMessage::Ack(Ack { transaction_id }))
         .await
         .is_err()
     {
@@ -206,7 +228,7 @@ pub async fn forward_lock_acquired(
 }
 
 async fn forward_lock_lost(
-    client: ServerMessageBroadcaster,
+    client: ServerMessageLazyBroadcaster,
     transaction_id: TransactionId,
     lost_rx: LockLostReceiver,
 ) {
@@ -219,11 +241,10 @@ async fn forward_lock_lost(
     }
 
     debug!("Lock lost message for transaction {transaction_id:?} received.");
-    let _ = client
-        .send(ServerMessage::Err(Err {
-            transaction_id,
-            error_code: ErrorCode::LockLost,
-            metadata: json!("Lock lost").to_string(),
-        }))
-        .await;
+    let msg = ServerMessage::Err(Err {
+        transaction_id,
+        error_code: ErrorCode::LockLost,
+        metadata: json!("Lock lost").to_string(),
+    });
+    client.lazy_send(msg).await.ok();
 }

@@ -20,7 +20,7 @@
 use super::v0::V0;
 use crate::{
     auth::JwtClaims,
-    server::common::protocol::{forward_lock_acquired, forward_lock_lost},
+    server::common::protocol::{LazyBroadcaster, forward_lock_acquired, forward_lock_lost},
 };
 use tokio::spawn;
 use tracing::{Level, instrument, trace};
@@ -125,7 +125,7 @@ impl V1 {
 
         self.v0
             .tx
-            .send(ServerMessage::CState(response))
+            .lazy_send(ServerMessage::CState(response))
             .await
             .context(|| {
                 format!(
@@ -159,7 +159,7 @@ impl V1 {
         };
 
         trace!("Value set, queuing Ack …");
-        let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
@@ -190,7 +190,7 @@ impl V1 {
         };
 
         trace!("Key locked, queuing Ack …");
-        let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Key locked, queuing Ack done.");
         res.context(|| {
             format!(
@@ -249,7 +249,7 @@ impl V1 {
         };
 
         trace!("Key unlocked, queuing Ack …");
-        let res = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Key unlocked, queuing Ack done.");
         res.context(|| {
             format!(

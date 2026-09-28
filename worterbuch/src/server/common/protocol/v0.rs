@@ -20,12 +20,14 @@
 use crate::{
     Config,
     auth::{JwtClaims, get_claims},
-    server::common::{CloneableWbApi, SubscriptionInfo, protocol::ServerMessageBroadcaster},
+    server::common::{
+        CloneableWbApi, SubscriptionInfo,
+        protocol::{LazyBroadcaster, ServerMessageLazyBroadcaster},
+    },
     worterbuch::PStateAggregator,
 };
 use serde_json::json;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tosub::Subsystem;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
@@ -43,7 +45,7 @@ use worterbuch_common::{
 pub struct V0 {
     pub subsys: Subsystem,
     pub client_id: ClientId,
-    pub tx: ServerMessageBroadcaster,
+    pub tx: ServerMessageLazyBroadcaster,
     pub auth_required: bool,
     pub config: Config,
     pub worterbuch: CloneableWbApi,
@@ -294,7 +296,7 @@ impl V0 {
         trace!("Error in store, queuing error message for client …");
         let res = self
             .tx
-            .send(ServerMessage::Err(err))
+            .lazy_send(ServerMessage::Err(err))
             .await
             .context(|| "Error sending ERR message to client".to_owned());
         trace!("Error in store, queuing error message for client done");
@@ -305,7 +307,7 @@ impl V0 {
         match get_claims(Some(&msg.auth_token), &self.config) {
             Ok(claims) => {
                 self.tx
-                    .send(ServerMessage::Authorized(Ack { transaction_id: 0 }))
+                    .lazy_send(ServerMessage::Authorized(Ack { transaction_id: 0 }))
                     .await
                     .context(|| "Error sending HANDSHAKE message".to_owned())?;
                 Ok(claims)
@@ -334,7 +336,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::State(response))
+            .lazy_send(ServerMessage::State(response))
             .await
             .context(|| {
                 format!(
@@ -363,7 +365,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::PState(response))
+            .lazy_send(ServerMessage::PState(response))
             .await
             .context(|| {
                 format!(
@@ -391,7 +393,7 @@ impl V0 {
         };
 
         trace!("Value set, queuing Ack …");
-        let res = self.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
@@ -418,7 +420,7 @@ impl V0 {
         };
 
         trace!("Value set, queuing Ack …");
-        let res = self.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
@@ -445,7 +447,7 @@ impl V0 {
         };
 
         trace!("Value set, queuing Ack …");
-        let res = self.tx.send(ServerMessage::Ack(response)).await;
+        let res = self.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Value set, queuing Ack done.");
         res.context(|| {
             format!(
@@ -472,7 +474,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -509,7 +511,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -533,7 +535,7 @@ impl V0 {
                         event,
                         trace,
                     };
-                    if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
+                    if let Err(e) = client_sub.lazy_send(ServerMessage::State(state)).await {
                         debug!("Error sending STATE message to client: {e}");
                         break;
                     };
@@ -580,7 +582,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -662,7 +664,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -694,7 +696,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::State(response))
+            .lazy_send(ServerMessage::State(response))
             .await
             .context(|| {
                 format!(
@@ -736,7 +738,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::PState(response))
+            .lazy_send(ServerMessage::PState(response))
             .await
             .context(|| {
                 format!(
@@ -764,7 +766,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::LsState(response))
+            .lazy_send(ServerMessage::LsState(response))
             .await
             .context(|| {
                 format!(
@@ -792,7 +794,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::LsState(response))
+            .lazy_send(ServerMessage::LsState(response))
             .await
             .context(|| {
                 format!(
@@ -827,7 +829,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -852,7 +854,7 @@ impl V0 {
                         children,
                         trace,
                     };
-                    if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
+                    if let Err(e) = client_sub.lazy_send(ServerMessage::LsState(state)).await {
                         debug!("Error sending LSSTATE message to client: {e}");
                         break;
                     };
@@ -887,7 +889,7 @@ impl V0 {
         };
 
         self.tx
-            .send(ServerMessage::Ack(response))
+            .lazy_send(ServerMessage::Ack(response))
             .await
             .context(|| {
                 format!(
@@ -905,7 +907,7 @@ async fn forward_loop(
     transaction_id: TransactionId,
     request_pattern: String,
     subscription: SubscriptionId,
-    client_sub: mpsc::Sender<ServerMessage>,
+    client_sub: ServerMessageLazyBroadcaster,
 ) {
     debug!("Receiving events for subscription {subscription:?} …");
     while let Some((event, trace)) = rx.recv().await {
@@ -915,7 +917,7 @@ async fn forward_loop(
             event,
             trace,
         };
-        if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
+        if let Err(e) = client_sub.lazy_send(ServerMessage::PState(event)).await {
             debug!("Error sending PSTATE message to client: {e}");
             break;
         }
@@ -925,7 +927,7 @@ async fn forward_loop(
 async fn aggregate_loop(
     mut rx: PSubscriptionReceiver,
     subscription: SubscriptionInfo,
-    client_sub: mpsc::Sender<ServerMessage>,
+    client_sub: ServerMessageLazyBroadcaster,
     client_id: ClientId,
 ) {
     if !subscription.live_only {
@@ -939,7 +941,7 @@ async fn aggregate_loop(
                 trace,
             };
 
-            if let Err(e) = client_sub.send(ServerMessage::PState(event)).await {
+            if let Err(e) = client_sub.lazy_send(ServerMessage::PState(event)).await {
                 debug!("Error sending PSTATE message to client: {e}");
                 return;
             }

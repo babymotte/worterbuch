@@ -619,7 +619,7 @@ impl Proxy {
             ))
         })?;
 
-        trace!(enter = "initial_sync");
+        trace!(exit = "initial_sync");
         Ok(())
     }
 }
@@ -809,18 +809,33 @@ impl<'a> LeaderConnection<'a> {
             self.response_interests
         );
 
-        while_select! {
-            _ = self.subsys.shutdown_requested() => break,
-            recv = read_stdin(self.stdin, self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => self.update_leader_address(recv),
-            recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
-            recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
+        loop {
+            trace!("Entering select loop for leader connection");
+            let control_flow = select! {
+                _ = self.subsys.shutdown_requested() => break,
+                recv = read_stdin(self.stdin, self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => self.update_leader_address(recv),
+                recv = receive_msg(&mut self.lines, None) => self.try_process_leader_message(recv).await?,
+                recv = self.api_rx.recv() => self.try_process_api_call(recv).await?,
+            };
+            match control_flow {
+                ControlFlow::Continue(()) => {
+                    trace!("Continuing select loop for leader connection");
+                    continue;
+                }
+                ControlFlow::Break(()) => {
+                    trace!("Breaking select loop for leader connection");
+                    break;
+                }
+            }
         }
+
         let leader_addresses_updated = self.leader_addresses_updated;
 
         Ok(leader_addresses_updated)
     }
 
     fn update_leader_address(&mut self, recv: Option<String>) -> ControlFlow<()> {
+        trace!(enter = "update_leader_address");
         if *self.read_leader_addresses_from_stdin
             && update_leader_addresses(
                 recv,
@@ -830,15 +845,18 @@ impl<'a> LeaderConnection<'a> {
         {
             self.leader_addresses_updated = true;
             if self.leader_addresses.contains(&self.leader_address) {
+                trace!(exit = "update_leader_address");
                 ControlFlow::Continue(())
             } else {
                 warn!(
                     "Current leader address {} is no longer in the list of known leader addresses {:?}",
                     self.leader_address, self.leader_addresses
                 );
+                trace!(exit = "update_leader_address");
                 ControlFlow::Break(())
             }
         } else {
+            trace!(exit = "update_leader_address");
             ControlFlow::Continue(())
         }
     }
@@ -847,29 +865,38 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         recv: ConnectionResult<Option<LeaderMessage>>,
     ) -> WorterbuchAppResult<ControlFlow<()>> {
+        trace!(enter = "try_process_leader_message");
         match recv {
             Ok(Some(msg)) => {
                 self.process_leader_message(msg).await?;
+                trace!(exit = "try_process_leader_message");
                 Ok(ControlFlow::Continue(()))
             }
-            Ok(None) => Ok(ControlFlow::Break(())),
+            Ok(None) => {
+                trace!(exit = "try_process_leader_message");
+                Ok(ControlFlow::Break(()))
+            }
             Err(e) => {
                 error!("Error receiving update from leader: {e}");
+                trace!(exit = "try_process_leader_message");
                 Ok(ControlFlow::Break(()))
             }
         }
     }
 
     async fn process_leader_message(&mut self, msg: LeaderMessage) -> WorterbuchAppResult<()> {
+        trace!(enter = "process_leader_message");
         debug!("Processing leader sync message: {msg:?}");
 
         let res = match msg {
             LeaderMessage::Welcome(_) => {
+                trace!(exit = "process_leader_message");
                 return Err(crate::error::WorterbuchAppError::ClusterError(
                     "already received welcome message".to_owned(),
                 ));
             }
             LeaderMessage::Init(_) => {
+                trace!(exit = "process_leader_message");
                 return Err(crate::error::WorterbuchAppError::ClusterError(
                     "already synced".to_owned(),
                 ));
@@ -943,6 +970,8 @@ impl<'a> LeaderConnection<'a> {
             error!("Error applying leader sync message: {e}");
         }
 
+        trace!(exit = "process_leader_message");
+
         Ok(())
     }
 
@@ -950,16 +979,22 @@ impl<'a> LeaderConnection<'a> {
         &mut self,
         recv: Option<WbFunction>,
     ) -> WorterbuchAppResult<ControlFlow<()>> {
+        trace!(enter = "try_process_api_call");
         match recv {
             Some(function) => {
                 self.process_api_call(function).await?;
+                trace!(exit = "try_process_api_call");
                 Ok(ControlFlow::Continue(()))
             }
-            None => Ok(ControlFlow::Break(())),
+            None => {
+                trace!(exit = "try_process_api_call");
+                Ok(ControlFlow::Break(()))
+            }
         }
     }
 
     async fn process_api_call(&mut self, function: WbFunction) -> WorterbuchAppResult<()> {
+        trace!(enter = "process_api_call");
         debug!("Processing API call: {function:?}");
         match function {
             WbFunction::Connected(client_id, addr, protocol, eject, tx) => {
@@ -967,7 +1002,7 @@ impl<'a> LeaderConnection<'a> {
                     client_id,
                     protocol: protocol.clone(),
                 });
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
                     WbFunction::Connected(client_id, addr, protocol, eject, tx),
@@ -990,7 +1025,7 @@ impl<'a> LeaderConnection<'a> {
                     grave_goods,
                     last_will,
                 });
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
                     WbFunction::Disconnected(client_id, protocol, socket_addr),
@@ -1010,7 +1045,7 @@ impl<'a> LeaderConnection<'a> {
                 let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
                 spawn(ack_rx);
                 self.register_ack_interest(client_id, 0, client_message, ack_tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
                     WbFunction::ProtocolSwitched(client_id, interface, version),
@@ -1038,7 +1073,7 @@ impl<'a> LeaderConnection<'a> {
                         interface,
                     });
                     self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                    self.proxy_request_tx.send(request).await?;
+                    self.queue_leader_request(request).await?;
                 }
             }
             WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
@@ -1054,7 +1089,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
                 let client_message = ClientMessage::SPubInit(SPubInit {
@@ -1067,7 +1102,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
                 let client_message = ClientMessage::SPub(SPub {
@@ -1080,7 +1115,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
                 let client_message = ClientMessage::Publish(Publish {
@@ -1094,7 +1129,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
                 let client_message = ClientMessage::Delete(Delete {
@@ -1107,7 +1142,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_state_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::PDelete(
                 transaction_id,
@@ -1128,7 +1163,7 @@ impl<'a> LeaderConnection<'a> {
                     interface,
                 });
                 self.register_pstate_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
                 let client_message = ClientMessage::Lock(Lock {
@@ -1171,7 +1206,7 @@ impl<'a> LeaderConnection<'a> {
                     lost_tx,
                     false,
                 );
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
                 let client_message = ClientMessage::AcquireLock(Lock {
@@ -1200,7 +1235,7 @@ impl<'a> LeaderConnection<'a> {
                     lost_tx,
                     true,
                 );
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
                 tx.send(Ok((acked_rx, lost_rx))).ok();
             }
             WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
@@ -1217,7 +1252,7 @@ impl<'a> LeaderConnection<'a> {
                 let _ = self.get_lock_acquired_interest(client_id, transaction_id);
                 let _ = self.get_lock_lost_interest(client_id, transaction_id);
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.proxy_request_tx.send(request).await?;
+                self.queue_leader_request(request).await?;
             }
             WbFunction::Import(_, _, _, _, _) => {
                 warn!("Import not yet implemented");
@@ -1227,6 +1262,18 @@ impl<'a> LeaderConnection<'a> {
             function => cluster::process_api_call(self.worterbuch, function).await,
         };
 
+        trace!(exit = "process_leader_message");
+
+        Ok(())
+    }
+
+    async fn queue_leader_request(
+        &mut self,
+        request: ProxyMessage,
+    ) -> Result<(), WorterbuchAppError> {
+        trace!(enter = "queue_leader_request");
+        self.proxy_request_tx.send(request).await?;
+        trace!(exit = "queue_leader_request");
         Ok(())
     }
 
@@ -1657,6 +1704,8 @@ async fn forward_client_request(
     }
 
     trace!("Client request forwarded to leader.");
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
 
     ControlFlow::Continue(())
 }

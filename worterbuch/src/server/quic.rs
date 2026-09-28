@@ -36,7 +36,12 @@
 //! receive it.
 
 use super::common::protocol::Proto;
-use crate::{auth::JwtClaims, print_quic_endpoint, server::common::CloneableWbApi, stats::VERSION};
+use crate::{
+    auth::JwtClaims,
+    print_quic_endpoint,
+    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
+    stats::VERSION,
+};
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
 use quinn::{
@@ -54,7 +59,7 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     select,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
 use totils::while_select;
@@ -373,17 +378,15 @@ async fn serve_loop(
     let quic_rx = BufReader::new(quic_rx);
     let quic_rx = quic_rx.lines();
 
-    quic_send_tx
-        .send(ServerMessage::Welcome(Welcome {
-            client_id,
-            info: ServerInfo::new(
-                VERSION.to_owned(),
-                supported_protocol_versions,
-                authorization_required,
-            ),
-        }))
-        .await
-        .into_diagnostic()?;
+    let welcome = ServerMessage::Welcome(Welcome {
+        client_id,
+        info: ServerInfo::new(
+            VERSION.to_owned(),
+            supported_protocol_versions,
+            authorization_required,
+        ),
+    });
+    quic_send_tx.lazy_send(welcome).await.into_diagnostic()?;
 
     let proto = Proto::new(
         subsys.clone(),
@@ -409,7 +412,7 @@ async fn serve_loop(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut quic_send_rx: mpsc::Receiver<ServerMessage>,
+    mut quic_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     mut quic_tx: SendStream,
     client_id: ClientId,
     send_timeout: Option<Duration>,
@@ -418,6 +421,7 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = quic_send_rx.recv() => if let Some(msg) = recv {
+            let Ok(msg) = msg.await else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut quic_tx, send_timeout).await {
                 error!("Error sending QUIC message '{msg:?}' to client {client_id}: {e}");
                 break;

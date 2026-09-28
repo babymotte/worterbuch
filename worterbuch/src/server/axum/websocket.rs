@@ -19,7 +19,10 @@
 
 use crate::{
     auth::JwtClaims,
-    server::common::{CloneableWbApi, protocol::Proto},
+    server::common::{
+        CloneableWbApi,
+        protocol::{LazyBroadcaster, Proto},
+    },
     stats::VERSION,
 };
 use axum::extract::ws::{Message, WebSocket};
@@ -29,7 +32,11 @@ use futures::{
 };
 use miette::{IntoDiagnostic, Result, bail};
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
-use tokio::{select, sync::mpsc, time::timeout};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+    time::timeout,
+};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace};
@@ -108,17 +115,15 @@ async fn serve_loop(
         send_loop(s, client_id, send_timeout, ws_tx, ws_send_rx)
     });
 
-    ws_send_tx
-        .send(ServerMessage::Welcome(Welcome {
-            client_id,
-            info: ServerInfo::new(
-                VERSION.to_owned(),
-                supported_protocol_versions,
-                authorization_required,
-            ),
-        }))
-        .await
-        .into_diagnostic()?;
+    let welcome = ServerMessage::Welcome(Welcome {
+        client_id,
+        info: ServerInfo::new(
+            VERSION.to_owned(),
+            supported_protocol_versions,
+            authorization_required,
+        ),
+    });
+    ws_send_tx.lazy_send(welcome).await.into_diagnostic()?;
 
     let mut proto = Proto::new(
         subsys.clone(),
@@ -178,12 +183,13 @@ async fn send_loop(
     client_id: ClientId,
     send_timeout: Option<Duration>,
     mut ws_tx: SplitSink<WebSocket, Message>,
-    mut ws_send_rx: mpsc::Receiver<ServerMessage>,
+    mut ws_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
 ) -> miette::Result<()> {
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = ws_send_rx.recv() => if let Some(msg) = recv {
+            let Ok(msg) = msg.await else { break; };
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,

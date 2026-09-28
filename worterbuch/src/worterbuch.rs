@@ -24,7 +24,10 @@ use crate::{
     cluster::protocol::{ClientWriteCommand, ClusterStateChange, Locks},
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
-    server::common::UpdatedLocks,
+    server::common::{
+        UpdatedLocks,
+        protocol::{LazyBroadcaster, ServerMessageLazyBroadcaster},
+    },
     store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
@@ -117,7 +120,7 @@ struct PStateAggregatorState {
     request_pattern: RequestPattern,
     set_buffer: Map<Key, Value>,
     deleted_buffer: Map<Key, Value>,
-    client_sub: mpsc::Sender<ServerMessage>,
+    client_sub: ServerMessageLazyBroadcaster,
     send_is_scheduled: bool,
 }
 
@@ -240,7 +243,9 @@ impl PStateAggregatorState {
             event,
             trace: None,
         };
-        self.client_sub.send(ServerMessage::PState(pstate)).await?;
+        self.client_sub
+            .lazy_send(ServerMessage::PState(pstate))
+            .await?;
         Ok(())
     }
 
@@ -274,7 +279,7 @@ pub struct PStateAggregator {
 
 impl PStateAggregator {
     pub fn new(
-        client_sub: mpsc::Sender<ServerMessage>,
+        client_sub: ServerMessageLazyBroadcaster,
         request_pattern: RequestPattern,
         aggregate_duration: Duration,
         transaction_id: TransactionId,
