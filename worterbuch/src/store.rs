@@ -867,6 +867,7 @@ impl Store {
         value: ValueEntry,
         force: bool,
     ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
+        trace!(?path, ?value, force, "inserting value");
         let mut ls_subscribers: Option<Vec<(Vec<LsSubscriber>, &[String])>> = None;
         let mut current_node = &mut self.data;
         let mut current_subscribers = Some(&self.subscribers);
@@ -887,52 +888,63 @@ impl Store {
             current_subscribers = current_subscribers.and_then(|node| node.tree.get(elem));
         }
 
-        let (value_existed, value_changed, value) = match (current_node.value(), value, force) {
+        let current_value = current_node.value();
+        let (value_existed, value_changed, value) = match (current_value, value, force) {
             (None, ValueEntry::Plain(v), _) => {
-                // no value present, we can always insert plain value
+                trace!("no value present, we can always insert plain value");
                 (false, true, ValueEntry::Plain(v))
             }
             (None, ValueEntry::Cas(value, 0), _) | (None, ValueEntry::Cas(value, _), true) => {
-                // no value present, we can insert cas value if version is 0 or insertion is forced
+                trace!(
+                    "no value present, we can insert cas value if version is 0 or insertion is forced"
+                );
                 (false, true, ValueEntry::Cas(value, 1))
             }
             (None, ValueEntry::Cas(_, _), false) => {
-                // no value present, we cannot insert cas value if version != 0 and insertion is not forced
+                trace!(
+                    "no value present, we cannot insert cas value if version != 0 and insertion is not forced"
+                );
                 return Err(StoreError::CasVersionMismatch);
             }
             (Some(ValueEntry::Plain(current)), ValueEntry::Plain(val), _) => {
-                // plain value present, we can always insert plain value
+                trace!("plain value present, we can always insert plain value");
                 (true, current != &val, ValueEntry::Plain(val))
             }
             (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, 0), _)
             | (Some(ValueEntry::Plain(current)), ValueEntry::Cas(val, _), true) => {
-                // plain value present, we can insert cas value if version is 0 or insertion is forced
+                trace!(
+                    "plain value present, we can insert cas value if version is 0 or insertion is forced"
+                );
                 (true, current != &val, ValueEntry::Cas(val, 1))
             }
             (Some(ValueEntry::Plain(_)), ValueEntry::Cas(_, _), false) => {
-                // plain value present, we cannot insert cas value if version != 0 and insertion is not forced
+                trace!(
+                    "plain value present, we cannot insert cas value if version != 0 and insertion is not forced"
+                );
                 return Err(StoreError::CasVersionMismatch);
             }
             (Some(ValueEntry::Cas(current, _)), ValueEntry::Plain(val), true) => {
-                // cas value present, we can insert plain value if insertion is forced
+                trace!("cas value present, we can insert plain value if insertion is forced");
                 (true, current != &val, ValueEntry::Plain(val))
             }
             (Some(ValueEntry::Cas(_, _)), ValueEntry::Plain(_), false) => {
-                // cas value present, we cannot insert plain value
+                trace!("cas value present, we cannot insert plain value");
                 return Err(StoreError::Cas);
             }
             (Some(ValueEntry::Cas(current, _)), ValueEntry::Cas(val, v), true) => {
-                // cas value present, we can insert new cas value if insertion is forced
+                trace!("cas value present, we can insert new cas value if insertion is forced");
                 (true, current != &val, ValueEntry::Cas(val, v + 1))
             }
             (Some(ValueEntry::Cas(current, v_curr)), ValueEntry::Cas(val, v), false)
                 if v_curr == &v =>
             {
-                // cas value present, we can insert new cas value if the version matches
+                trace!("cas value present, we can insert new cas value if the version matches");
                 (true, current != &val, ValueEntry::Cas(val, v + 1))
             }
             (Some(ValueEntry::Cas(_, _)), ValueEntry::Cas(_, _), false) => {
-                // cas value present, we cannot insert cas value if versions do not match and insertion is not forced
+                trace!(
+                    "cas value present, we cannot insert cas value if versions do not match and insertion is not forced"
+                );
                 return Err(StoreError::CasVersionMismatch);
             }
         };
