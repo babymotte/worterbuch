@@ -320,8 +320,8 @@ struct Follower {
 impl Follower {
     fn is_interested(&self, msg: &ClusterStateChange) -> bool {
         match &msg.command {
-            ClientWriteCommand::Set(_, _, _)
-            | ClientWriteCommand::CSet(_, _, _, _)
+            ClientWriteCommand::Set(_, _)
+            | ClientWriteCommand::CSet(_, _, _)
             | ClientWriteCommand::Delete(_)
             | ClientWriteCommand::PDelete(_)
             | ClientWriteCommand::Import(_) => true,
@@ -462,7 +462,7 @@ impl Worterbuch {
 
         self.notify_followers(
             client_id,
-            ClientWriteCommand::Set(key.clone(), value.clone(), force),
+            ClientWriteCommand::Set(key.clone(), value.clone()),
             cause.clone(),
             false,
         )
@@ -525,7 +525,7 @@ impl Worterbuch {
 
         self.notify_followers(
             client_id,
-            ClientWriteCommand::CSet(key.clone(), value.clone(), version, force),
+            ClientWriteCommand::CSet(key.clone(), value.clone(), version),
             cause.clone(),
             false,
         )

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CasVersion, ForceSet, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_ROOT_PREFIX,
+        CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_ROOT_PREFIX,
         ServerMessage, Trace, Value,
     },
 };
@@ -66,8 +66,8 @@ pub struct ClusterStateChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientWriteCommand {
-    Set(Key, Value, ForceSet),
-    CSet(Key, Value, CasVersion, ForceSet),
+    Set(Key, Value),
+    CSet(Key, Value, CasVersion),
     Publish(Key, Value),
     Delete(Key),
     PDelete(RequestPattern),
@@ -77,7 +77,7 @@ pub enum ClientWriteCommand {
 impl ClientWriteCommand {
     pub fn is_grave_goods_or_last_will(&self) -> bool {
         match self {
-            ClientWriteCommand::Set(key, _, _) | ClientWriteCommand::CSet(key, _, _, _) => {
+            ClientWriteCommand::Set(key, _) | ClientWriteCommand::CSet(key, _, _) => {
                 is_grave_goods_topic(key) || is_last_will_topic(key)
             }
             _ => false,
@@ -93,8 +93,8 @@ impl ClientWriteCommand {
 
     fn key(&self) -> Option<&Key> {
         match self {
-            ClientWriteCommand::Set(key, _, _) => Some(key),
-            ClientWriteCommand::CSet(key, _, _, _) => Some(key),
+            ClientWriteCommand::Set(key, _) => Some(key),
+            ClientWriteCommand::CSet(key, _, _) => Some(key),
             ClientWriteCommand::Publish(key, _) => Some(key),
             ClientWriteCommand::Delete(key) => Some(key),
             ClientWriteCommand::PDelete(pattern) => Some(pattern),

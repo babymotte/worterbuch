@@ -902,18 +902,18 @@ impl<'a> LeaderConnection<'a> {
                 ));
             }
             LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
-                ClientWriteCommand::Set(key, value, force) => {
+                ClientWriteCommand::Set(key, value) => {
                     self.worterbuch
                         .internal_set(
                             key,
                             value,
                             trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
                             trace,
-                            force,
+                            true,
                         )
                         .await
                 }
-                ClientWriteCommand::CSet(key, value, versions, force) => {
+                ClientWriteCommand::CSet(key, value, versions) => {
                     self.worterbuch
                         .internal_cset(
                             key,
@@ -921,7 +921,7 @@ impl<'a> LeaderConnection<'a> {
                             versions,
                             trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
                             trace,
-                            force,
+                            true,
                         )
                         .await
                 }

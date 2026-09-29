@@ -369,7 +369,7 @@ async fn process_leader_message(
             ));
         }
         LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
-            ClientWriteCommand::Set(key, value, _) => {
+            ClientWriteCommand::Set(key, value) => {
                 worterbuch
                     .internal_set(
                         key,
@@ -380,7 +380,7 @@ async fn process_leader_message(
                     )
                     .await
             }
-            ClientWriteCommand::CSet(key, value, versions, _) => {
+            ClientWriteCommand::CSet(key, value, versions) => {
                 worterbuch
                     .internal_cset(
                         key,
