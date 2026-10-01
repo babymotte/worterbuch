@@ -396,7 +396,7 @@ async fn receive_handshake(
             match msg {
                 ProxyMessage::Handshake(handshake) => Ok(handshake),
                 msg => bail!(
-                    "expected handshake message from follower/proxy {}, but got:\n{:?}",
+                    "expected handshake message from follower/proxy {}, but got:\n{:#?}",
                     follower,
                     msg
                 ),
