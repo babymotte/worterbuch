@@ -293,7 +293,7 @@ async fn shutdown(
 ) -> WorterbuchAppResult<()> {
     info!("Shutdown sequence triggered");
 
-    subsys.request_global_shutdown();
+    subsys.request_global_shutdown_because("Shutdown requested");
 
     shutdown_servers(servers).await;
 
@@ -313,25 +313,25 @@ async fn shutdown(
 async fn shutdown_servers(servers: Servers) {
     if let Some(it) = servers.web_server {
         info!("Shutting down web server …");
-        it.request_local_shutdown();
+        it.request_local_shutdown_because("shutting down servers");
         it.join().await.ok();
     }
 
     if let Some(it) = servers.tcp_server {
         info!("Shutting down tcp server …");
-        it.request_local_shutdown();
+        it.request_local_shutdown_because("shutting down servers");
         it.join().await.ok();
     }
 
     if let Some(it) = servers.unix_socket {
         info!("Shutting down unix socket …");
-        it.request_local_shutdown();
+        it.request_local_shutdown_because("shutting down servers");
         it.join().await.ok();
     }
 
     if let Some(it) = servers.quic_server {
         info!("Shutting down QUIC server …");
-        it.request_local_shutdown();
+        it.request_local_shutdown_because("shutting down servers");
         it.join().await.ok();
     }
 }

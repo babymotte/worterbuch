@@ -360,7 +360,7 @@ async fn follower_serve_loop(
         .into_diagnostic()
         .wrap_err("failed to forward follower disconnected event")?;
 
-    subsys.request_local_shutdown();
+    subsys.request_local_shutdown_because("TCP connection to follower/proxy closed");
 
     Ok(())
 }

@@ -105,7 +105,7 @@ async fn run(subsys: Subsystem) -> Result<()> {
             _ = subsys.shutdown_requested() => break,
             _ = &mut on_disconnect => {
                 warn!("Connection to server lost.");
-                subsys.request_global_shutdown();
+                subsys.request_global_shutdown_because("disconnected from server");
             }
             msg = responses.recv() => if let Some(msg) = msg {
                 print_message(&msg, json, true);

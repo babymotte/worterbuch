@@ -79,7 +79,7 @@ pub async fn run(
     };
 
     // However the TUI ends, the whole application should shut down with it.
-    subsys.request_global_shutdown();
+    subsys.request_global_shutdown_because("tui was closed");
 
     result
 }

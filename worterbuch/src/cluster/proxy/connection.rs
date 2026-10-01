@@ -642,7 +642,7 @@ impl<'a> LeaderConnection<'a> {
                 }
             },
             ServerMessage::Err(e) => {
-                warn!("Received error message from leader for client {client_id}: {e:?}");
+                debug!("Received error message from leader for client {client_id}: {e:?}");
                 let transaction_id = e.transaction_id;
                 let code = e.error_code;
 

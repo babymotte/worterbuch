@@ -35,7 +35,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
-use totils::while_select;
+use totils::{CancelOn, while_select};
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -131,7 +131,9 @@ pub async fn start(
     }
 
     for (cid, subsys) in clients {
-        subsys.request_local_shutdown();
+        subsys.request_local_shutdown_because(
+            "server shutting down, closing remaining client connections",
+        );
         debug!("Waiting for connection to client {cid} to close …");
         subsys.join().await.ok();
     }
@@ -276,19 +278,20 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = unix_send_rx.recv() => if let Some(msg) = recv {
-            let Ok(msg) = msg.await else { break; };
+            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut unix_tx, send_timeout).await {
-                error!("Error sending UNIX message '{msg:?}' to client {client_id}: {e}");
+                error!("Error sending UNIX message to client {client_id}: {e}");
+                trace!(?msg);
+                subsys.request_local_shutdown_because("UNIX connection to client closed");
                 break;
             }
             ControlFlow::Continue(())
         } else {
             debug!("Message forwarding to client {client_id} stopped: channel closed.");
+    subsys.request_local_shutdown_because("message forwarding channel to client closed");
             break;
         }
     }
-
-    subsys.request_local_shutdown();
 
     Ok(())
 }
@@ -304,7 +307,8 @@ impl<'a> ServeLoop<'a> {
             recv = self.unix_rx.next_line() => self.process_next_line(recv).await?,
         }
 
-        self.subsys.request_local_shutdown();
+        self.subsys
+            .request_local_shutdown_because("serve loop stopped");
 
         Ok(())
     }

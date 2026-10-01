@@ -1037,7 +1037,9 @@ async fn run_ws_server(
     }
 
     for (cid, subsys) in clients {
-        subsys.request_local_shutdown();
+        subsys.request_local_shutdown_because(
+            "server shutting down, closing remaining client connections",
+        );
         debug!("Waiting for connection to client {cid} to close …");
         subsys.join().await.ok();
     }

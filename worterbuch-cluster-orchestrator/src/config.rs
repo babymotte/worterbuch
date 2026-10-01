@@ -469,7 +469,9 @@ async fn reload_config(
             .collect();
         let Some(me) = me else {
             error!("This node is no longer part of the cluster config, shutting down …");
-            subsys.request_global_shutdown();
+            subsys.request_global_shutdown_because(
+                "this node is no longer part of the cluster config",
+            );
             bail!("Node '{}' is not defined in the cluster config.", node_id);
         };
 

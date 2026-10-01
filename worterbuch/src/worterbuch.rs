@@ -1176,10 +1176,7 @@ impl Worterbuch {
             trace,
             command,
         };
-        trace!(
-            "Forwarding state change to {} followers/proxies: {:?} …",
-            len, msg
-        );
+        trace!(?msg, "Forwarding state change to {} followers/proxies", len);
         let mut dead: Option<Vec<SocketAddr>> = None;
         for follower in &self.followers {
             let read_only = system_key && !grave_goods_or_last_will;
@@ -1189,8 +1186,8 @@ impl Worterbuch {
             }
 
             if follower.is_interested(&msg) {
-                if let Err(e) = follower.tx.send(msg.clone()).await {
-                    error!("Error forwarding state change to follower/proxy: {e}");
+                if follower.tx.send(msg.clone()).await.is_err() {
+                    error!("Error forwarding state change to follower/proxy");
                     match dead.take() {
                         Some(mut the_dead) => {
                             the_dead.push(follower.addr);

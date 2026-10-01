@@ -38,7 +38,7 @@ use tokio::{
     time::timeout,
 };
 use tosub::Subsystem;
-use totils::while_select;
+use totils::{CancelOn, while_select};
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -143,7 +143,7 @@ async fn serve_loop(
         recv = ws_rx.next() => process_next_message(recv, client_id, remote_addr, &mut proto, &mut authorized).await?,
     }
 
-    subsys.request_local_shutdown();
+    subsys.request_local_shutdown_because("serve loop stopped");
 
     Ok(())
 }
@@ -189,24 +189,26 @@ async fn send_loop(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = ws_send_rx.recv() => if let Some(msg) = recv {
-            let Ok(msg) = msg.await else { break; };
+            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,
                 res = send_with_timeout(&msg, &mut ws_tx, send_timeout, client_id) => {
                     if let Err(e) = res {
-                        error!("Error sending WS message '{msg:?}': {e}");
+                        error!("Error sending WS message to client {client_id}: {e}");
+                        trace!(?msg);
+                        subsys.request_local_shutdown_because("WS connection to client closed");
                         break;
                     }
                 }
             }
             ControlFlow::Continue(())
         } else {
+            debug!("Message forwarding to client {client_id} stopped: channel closed.");
+            subsys.request_local_shutdown_because("message forwarding channel to client closed");
             break;
         },
     }
-
-    subsys.request_local_shutdown();
 
     Ok(())
 }

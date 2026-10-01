@@ -77,7 +77,8 @@ pub struct ChildProcessManager {
 
 impl Drop for ChildProcessManager {
     fn drop(&mut self) {
-        self.subsys.request_local_shutdown();
+        self.subsys
+            .request_local_shutdown_because("Child process manager dropped");
     }
 }
 
@@ -113,7 +114,9 @@ impl ChildProcessManagerActor {
 
         if !self.restart && self.started {
             info!("Automatic restart disabled, shutting down …");
-            self.subsys.request_global_shutdown();
+            self.subsys.request_global_shutdown_because(
+                "child process stopped and automatic restart is disabled",
+            );
         }
     }
 
@@ -294,7 +297,8 @@ impl ChildProcessManager {
 
     #[instrument(skip(self), err)]
     pub async fn stop(&mut self) -> Result<()> {
-        self.subsys.request_local_shutdown();
+        self.subsys
+            .request_local_shutdown_because("Child process manager stop requested");
         self.subsys.join().await.ok();
         Ok(())
     }
