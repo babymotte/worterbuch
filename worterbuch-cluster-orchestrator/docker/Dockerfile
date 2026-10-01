@@ -29,7 +29,7 @@ FROM wbco-chef AS wbco-builder
 COPY --from=wbco-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release
+RUN cargo build -p worterbuch-cluster-orchestrator --release
 
 FROM babymotte/worterbuch:${WORTERBUCH_VERSION}
 WORKDIR /app
