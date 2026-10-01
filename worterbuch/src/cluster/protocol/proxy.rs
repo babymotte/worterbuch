@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::worterbuch::Worterbuch;
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, trace};
@@ -113,13 +114,21 @@ impl Locks {
         trace!("Locks: {:?}", self);
     }
 
-    pub fn acquired(&mut self, client_id: ClientId, transaction_id: TransactionId) {
+    pub fn acquired(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        wb: &Worterbuch,
+    ) {
         let Some(key) = self
             .keys
             .get(&client_id)
             .and_then(|tids| tids.get(&transaction_id))
         else {
-            error!("No key found for transaction_id {transaction_id} for client {client_id}");
+            error!(
+                "Client {} acquired lock for transaction ID {transaction_id} but was not actually waiting for a lock acquisition.",
+                self.client(client_id, wb)
+            );
             return;
         };
         debug!("Client {client_id} acquired lock for key {key:?}");
@@ -136,13 +145,21 @@ impl Locks {
         trace!("Locks: {:?}", self);
     }
 
-    pub fn acquisition_failed(&mut self, client_id: ClientId, transaction_id: TransactionId) {
+    pub fn acquisition_failed(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        wb: &Worterbuch,
+    ) {
         let Some(key) = self
             .keys
             .get(&client_id)
             .and_then(|tids| tids.get(&transaction_id))
         else {
-            error!("No key found for transaction_id {transaction_id} for client {client_id}");
+            error!(
+                "Client {} failed to acquire lock for transaction ID {transaction_id} but was not actually waiting for a lock acquisition.",
+                self.client(client_id, wb)
+            );
             return;
         };
         debug!("Client {client_id} failed to acquire lock for key {key:?}");
@@ -161,13 +178,21 @@ impl Locks {
         trace!("Locks: {:?}", self);
     }
 
-    pub fn released(&mut self, client_id: ClientId, transaction_id: TransactionId) {
+    pub fn released(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        wb: &Worterbuch,
+    ) {
         let Some(key) = self
             .keys
             .get(&client_id)
             .and_then(|tids| tids.get(&transaction_id))
         else {
-            error!("No key found for transaction_id {transaction_id} for client {client_id}");
+            error!(
+                "Client {} released lock for transaction ID {transaction_id} but was not actually holding a lock.",
+                self.client(client_id, wb)
+            );
             return;
         };
         debug!("Client {client_id} released lock on key {key:?}");
@@ -186,13 +211,21 @@ impl Locks {
         trace!("Locks: {:#?}", self);
     }
 
-    pub fn release_failed(&mut self, client_id: ClientId, transaction_id: TransactionId) {
+    pub fn release_failed(
+        &mut self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+        wb: &Worterbuch,
+    ) {
         let Some(key) = self
             .keys
             .get(&client_id)
             .and_then(|tids| tids.get(&transaction_id))
         else {
-            error!("No key found for transaction_id {transaction_id} for client {client_id}");
+            error!(
+                "Client {} failed to release lock for transaction ID {transaction_id} but was not actually holding a lock.",
+                self.client(client_id, wb)
+            );
             return;
         };
         debug!("Client {client_id} failed to release lock for key {key:?}");
@@ -211,13 +244,16 @@ impl Locks {
         trace!("Locks: {:#?}", self);
     }
 
-    pub fn lost(&mut self, client_id: ClientId, transaction_id: TransactionId) {
+    pub fn lost(&mut self, client_id: ClientId, transaction_id: TransactionId, wb: &Worterbuch) {
         let Some(key) = self
             .keys
             .get(&client_id)
             .and_then(|tids| tids.get(&transaction_id))
         else {
-            error!("No key found for transaction_id {transaction_id} for client {client_id}");
+            error!(
+                "Client {} lost lock for transaction ID {transaction_id} but was not actually holding a lock.",
+                self.client(client_id, wb)
+            );
             return;
         };
         debug!("Client {client_id} lost lock on key {key:?}");
@@ -242,6 +278,14 @@ impl Locks {
         self.held.remove(&client_id);
         self.keys.remove(&client_id);
         trace!("Locks: {:#?}", self);
+    }
+
+    fn client(&self, client_id: ClientId, wb: &Worterbuch) -> String {
+        if let Some(name) = wb.client_name(client_id) {
+            format!("{} ({})", client_id, name)
+        } else {
+            client_id.to_string()
+        }
     }
 }
 

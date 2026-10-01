@@ -1248,7 +1248,8 @@ impl<'a> LeaderConnection<'a> {
                     msg: client_message.clone(),
                     interface,
                 });
-                self.locks.released(client_id, transaction_id);
+                self.locks
+                    .released(client_id, transaction_id, &self.worterbuch);
                 let _ = self.get_lock_acquired_interest(client_id, transaction_id);
                 let _ = self.get_lock_lost_interest(client_id, transaction_id);
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
@@ -1305,7 +1306,8 @@ impl<'a> LeaderConnection<'a> {
                 } else if let Some((tx, lost_tx)) =
                     self.get_lock_acquired_interest(client_id, ack.transaction_id)
                 {
-                    self.locks.acquired(client_id, ack.transaction_id);
+                    self.locks
+                        .acquired(client_id, ack.transaction_id, &self.worterbuch);
                     self.register_lock_lost_interest(client_id, ack.transaction_id, lost_tx);
                     tx.send(Ok(())).ok();
                 } else {
@@ -1370,7 +1372,8 @@ impl<'a> LeaderConnection<'a> {
                 }
 
                 if let Some((tx, _)) = self.get_lock_acquired_interest(client_id, transaction_id) {
-                    self.locks.acquisition_failed(client_id, transaction_id);
+                    self.locks
+                        .acquisition_failed(client_id, transaction_id, &self.worterbuch);
                     let e = e.take();
                     debug_assert!(e.is_some(), "multiple interests registered for same error");
                     if let Some(e) = e {

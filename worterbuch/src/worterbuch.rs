@@ -2202,7 +2202,7 @@ impl Worterbuch {
                     .get(&client_id)
                     .and_then(|keys| keys.get(&transaction_id))
                 else {
-                    error!("No key found for client {client_id} and transaction {transaction_id}");
+                    error!("No lock held for client {client_id} and transaction {transaction_id}");
                     continue;
                 };
                 match self
@@ -2235,7 +2235,9 @@ impl Worterbuch {
                     .get(&client_id)
                     .and_then(|keys| keys.get(&transaction_id))
                 else {
-                    error!("No key found for client {client_id} and transaction {transaction_id}");
+                    error!(
+                        "No lock requested for client {client_id} and transaction {transaction_id}"
+                    );
                     continue;
                 };
                 match self
@@ -2269,6 +2271,21 @@ impl Worterbuch {
             client.eject().await
         } else {
             false
+        }
+    }
+
+    pub(crate) fn client_name(&self, client_id: ClientId) -> Option<String> {
+        let key = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_CLIENT_NAME
+        );
+        let res = self.get(&key).ok()?;
+        if let Value::String(name) = res {
+            Some(name)
+        } else {
+            Some(res.to_string())
         }
     }
 }
