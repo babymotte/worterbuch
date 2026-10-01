@@ -88,7 +88,9 @@ pub struct Connected {
 pub struct Disconnected {
     pub client_id: ClientId,
     pub protocol: Protocol,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub grave_goods: GraveGoods,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub last_will: LastWill,
 }
 
