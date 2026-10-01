@@ -284,10 +284,26 @@ impl Proxy {
             )
             .await?;
 
-        let stream = match TcpStream::connect(leader_address.clone()).await {
-            Ok(it) => it,
-            Err(e) => {
+        // TODO should this be configurable?
+        let timeout_duration = Duration::from_secs(1);
+
+        let stream = match tokio::time::timeout(
+            timeout_duration,
+            TcpStream::connect(leader_address.clone()),
+        )
+        .await
+        {
+            Ok(Ok(it)) => it,
+            Ok(Err(e)) => {
                 warn!("Failed to connect to leader {}: {}", leader_address, e);
+                trace!(exit = "run_with_leader", leader_address);
+                return Ok(RunResult {
+                    leader_addresses_updated: false,
+                    initial_connection_successful: false,
+                });
+            }
+            Err(_) => {
+                warn!("Connection attempt to leader {} timed out.", leader_address);
                 trace!(exit = "run_with_leader", leader_address);
                 return Ok(RunResult {
                     leader_addresses_updated: false,

@@ -72,6 +72,12 @@ pub enum WorterbuchAppError {
         #[from]
         RootSystemError,
     ),
+    #[error("Operation timed out")]
+    Timeout(
+        #[source]
+        #[from]
+        tokio::time::error::Elapsed,
+    ),
     #[error("{0}")]
     Wrapped(String, #[source] Box<WorterbuchAppError>),
 }

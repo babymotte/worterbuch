@@ -80,10 +80,15 @@ pub(crate) async fn run(
 
     let mut persistence_interval = config.persistence_interval();
 
-    let stream = TcpStream::connect(&leader_address)
+    // TODO should this be configurable?
+    let timeout_duration = Duration::from_secs(1);
+
+    let stream = tokio::time::timeout(timeout_duration, TcpStream::connect(&leader_address))
         .await
         .into_wb_app_result()
-        .wrap_with(|| format!("failed to connect to leader at {}", leader_address))?;
+        .wrap_with(|| format!("connection attempt to leader {} timed out", leader_address))?
+        .into_wb_app_result()
+        .wrap_with(|| format!("failed to connect to leader {}", leader_address))?;
     let leader_address = stream
         .peer_addr()
         .into_wb_app_result()
