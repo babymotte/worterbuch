@@ -18,6 +18,7 @@
  */
 
 mod leader;
+pub mod locks;
 mod proxy;
 
 pub use leader::*;

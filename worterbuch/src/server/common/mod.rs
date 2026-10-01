@@ -19,7 +19,7 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::Locks, stats::VERSION};
+use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::locks::Locks, stats::VERSION};
 use hashbrown::HashMap;
 use std::{fmt, net::SocketAddr, time::Duration};
 use tokio::sync::{mpsc, oneshot};

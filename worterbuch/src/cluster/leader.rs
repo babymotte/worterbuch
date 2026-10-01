@@ -24,7 +24,7 @@ use crate::{
         ClusterStateChangeReceiver, ClusterStateChangeSender, Mode, Servers, process_api_call,
         protocol::{
             ClusterStateChange, Connected, Disconnected, Handshake, LeaderMessage, LeaderWelcome,
-            Locks, ProxyMessage, Request, StateSync,
+            ProxyMessage, Request, StateSync, locks::Locks,
         },
         shutdown,
     },
@@ -431,8 +431,8 @@ async fn process_handshake(
     config: &Config,
     proxy_server: &mut VirtualProxyServer,
 ) -> miette::Result<bool> {
-    check_version(handshake.version(), config)
-        .wrap_err("could not check version of follower/proxy")?;
+    check_version(handshake.version())
+        .wrap_err("version mismatch between leader and follower/proxy")?;
 
     authenticate(handshake.auth_token(), config)
         .wrap_err("could not authenticate follower/proxy")?;
@@ -483,7 +483,7 @@ async fn process_handshake(
     }
 }
 
-fn check_version(version: &WorterbuchVersion, config: &Config) -> miette::Result<()> {
+fn check_version(version: &WorterbuchVersion) -> miette::Result<()> {
     ensure!(
         version == &worterbuch_version(),
         "follower/proxy version mismatch: expected {}, got {}",
@@ -500,7 +500,7 @@ fn authenticate(auth_token: Option<&str>, config: &Config) -> miette::Result<()>
     }
 }
 
-fn authenticate_against_key(auth_token: Option<&str>, key: &str) -> miette::Result<()> {
+fn authenticate_against_key(_auth_token: Option<&str>, _key: &str) -> miette::Result<()> {
     // TODO
     Ok(())
 }

@@ -21,7 +21,7 @@
 use crate::mem_tools;
 use crate::{
     INTERNAL_CLIENT_ID,
-    cluster::protocol::{ClientWriteCommand, ClusterStateChange, Locks},
+    cluster::protocol::{ClientWriteCommand, ClusterStateChange, locks::Locks},
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
     server::common::{
