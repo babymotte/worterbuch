@@ -117,13 +117,15 @@ pub(crate) async fn run(
     let welcome = match recv {
         Ok(Some(msg)) => {
             if let LeaderMessage::Welcome(welcome) = msg {
-                debug!("Received welcome message from leader: {welcome:?}");
+                debug!("Received welcome message from leader");
+                trace!(?welcome);
                 welcome
             } else {
-                warn!("Expected welcome message from leader, but got: {msg:?}");
-                return Err(WorterbuchAppError::ClusterError(format!(
-                    "Expected welcome message from leader, but got: {msg:?}"
-                )));
+                warn!("Expected welcome message from leader, but got something different");
+                trace!(?msg);
+                return Err(WorterbuchAppError::ClusterError(
+                    "Expected welcome message from leader, but got something different".to_owned(),
+                ));
             }
         }
         Ok(None) => {
@@ -134,6 +136,7 @@ pub(crate) async fn run(
         }
         Err(e) => {
             warn!("Error receiving welcome message from leader: {e}");
+            trace!(err=?e);
             return Err(WorterbuchAppError::ClusterError(format!(
                 "Error receiving welcome message from leader: {e}"
             )));

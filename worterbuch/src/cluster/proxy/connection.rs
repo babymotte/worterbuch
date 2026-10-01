@@ -587,14 +587,17 @@ impl<'a> LeaderConnection<'a> {
     ) -> WorterbuchResult<()> {
         match server_message {
             ServerMessage::Welcome(welcome) => {
-                warn!("Received unexpected welcome message from leader: {welcome:?}");
+                warn!("Received unexpected welcome message from leader");
+                trace!(msg = ?welcome);
             }
             ServerMessage::CState(cstate) => {
-                warn!("Received unexpected CState message from leader: {cstate:?}");
+                warn!("Received unexpected CState message from leader");
+                trace!(msg = ?cstate);
             }
 
             ServerMessage::LsState(ls_state) => {
-                warn!("Received unexpected LsState message from leader: {ls_state:?}");
+                warn!("Received unexpected LsState message from leader");
+                trace!(msg = ?ls_state);
             }
             ServerMessage::Authorized(ack) => {
                 // TODO handle this correctly
@@ -620,7 +623,8 @@ impl<'a> LeaderConnection<'a> {
             }
             ServerMessage::State(state) => match state.event {
                 StateEvent::Value(value) => {
-                    warn!("Received unexpected StateEvent::Value message from leader: {value:?}");
+                    warn!("Received unexpected StateEvent::Value message from leader");
+                    trace!(msg = ?value);
                 }
                 StateEvent::Deleted(value) => {
                     if let Some(tx) =
@@ -632,9 +636,8 @@ impl<'a> LeaderConnection<'a> {
             },
             ServerMessage::PState(pstate) => match pstate.event {
                 PStateEvent::KeyValuePairs(kvps) => {
-                    warn!(
-                        "Received unexpected PState::KeyValuePairs message from leader: {kvps:?}"
-                    );
+                    warn!("Received unexpected PState::KeyValuePairs message from leader");
+                    trace!(msg = ?kvps);
                 }
                 PStateEvent::Deleted(kvps) => {
                     if let Some(tx) =

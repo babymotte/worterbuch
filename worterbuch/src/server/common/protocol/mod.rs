@@ -149,7 +149,8 @@ impl Proto {
                 Ok(false)
             }
             Err(e) => {
-                warn!(%msg, err = %e, "Error decoding message");
+                warn!("Error decoding message: {e}");
+                trace!(%msg, err = ?e);
                 Ok(false)
             }
         }

@@ -23,7 +23,7 @@ use tokio::{
     spawn,
     sync::{mpsc, oneshot},
 };
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 use worterbuch_common::{
     error::ConnectionResult,
     protocol::v1::{ClientMessage, ServerMessage},
@@ -73,7 +73,8 @@ impl UnixClientSocket {
                 debug!("Received message: {json}");
                 let sm = serde_json::from_str(&json);
                 if let Err(e) = &sm {
-                    error!("Error deserializing message '{json}': {e}")
+                    error!("Error deserializing message: {e}");
+                    trace!(err = ?e, json);
                 }
                 Ok(sm?)
             }

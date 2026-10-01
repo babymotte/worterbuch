@@ -657,10 +657,12 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
             Ok(None)
         }
         Ok(Ok(Some(json))) => {
-            debug!("Received message: {json}");
+            debug!("Received message");
+            trace!(json);
             let sm = serde_json::from_str(&json);
             if let Err(e) = &sm {
-                error!("Error deserializing message '{json}': {e}")
+                error!("Error deserializing message: {e}");
+                trace!(err=?e, json);
             }
             Ok(sm?)
         }

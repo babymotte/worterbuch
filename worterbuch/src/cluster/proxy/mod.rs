@@ -461,10 +461,12 @@ impl Proxy {
                     match recv {
                         Ok(Some(msg)) => {
                             if let LeaderMessage::Welcome(welcome) = msg {
-                                debug!("Received welcome message from leader: {welcome:?}");
+                                debug!("Received welcome message from leader");
+                                trace!(msg = ?welcome);
                                 break welcome;
                             } else {
-                                warn!("Expected welcome message from leader, but got: {msg:?}");
+                                warn!("Expected welcome message from leader, but got something different");
+                                trace!(?msg);
                                 trace!(exit = "receive_welcome_message");
                                 return Ok(Err(RunResult {
                                     leader_addresses_updated: false,
@@ -574,13 +576,15 @@ impl Proxy {
                     match recv {
                         Ok(Some(msg)) => {
                             if let LeaderMessage::Init(state) = msg {
-                                debug!("Received initial sync message from leader: {state:?}");
+                                debug!("Received initial sync message from leader");
+                                trace!(?state);
                                 self.initial_sync(state.store).await?;
                                 persistence_interval.reset();
                                 self.worterbuch.flush().await?;
                                 break;
                             } else {
-                                warn!("Expected initial sync message from leader, but got: {msg:?}");
+                                warn!("Expected initial sync message from leader, but got something different");
+                                trace!(?msg);
                                 trace!(exit = "sync_with_leader");
                                 return Ok(Err(RunResult {
                                     leader_addresses_updated: false,

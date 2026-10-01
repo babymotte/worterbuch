@@ -44,6 +44,8 @@ pub enum WorterbuchAppError {
         #[from]
         ConfigError,
     ),
+    #[error("Cluster error: {0}")]
+    ClusterError(String),
     #[error("I/O error")]
     IoError(
         #[source]
