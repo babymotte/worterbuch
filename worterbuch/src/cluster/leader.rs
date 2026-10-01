@@ -286,20 +286,15 @@ async fn serve(
     info!("Follower {} connected.", client.1);
 
     subsys.spawn(client.1.to_string(), async move |s| {
-        if let Err(e) = follower_serve_loop(
-            s,
-            client.0,
-            client.1,
-            on_follower_connected,
-            on_follower_disconnected,
-            config,
-            wb,
-        )
-        .await
+        let follower_addr = client.1;
+        if let Err(e) =
+            follower_serve_loop(s, client.0, client.1, on_follower_connected, config, wb).await
         {
             error!("Error in follower serve loop: {e}");
             eprintln!("{e:?}");
         }
+
+        on_follower_disconnected.send(follower_addr).await.ok();
     });
 }
 
@@ -312,7 +307,6 @@ async fn follower_serve_loop(
         SocketAddr,
         bool,
     )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
     config: Config,
     worterbuch: CloneableWbApi,
 ) -> miette::Result<()> {
@@ -353,12 +347,6 @@ async fn follower_serve_loop(
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
-
-    on_follower_disconnected
-        .send(follower)
-        .await
-        .into_diagnostic()
-        .wrap_err("failed to forward follower disconnected event")?;
 
     subsys.request_local_shutdown_because("TCP connection to follower/proxy closed");
 
