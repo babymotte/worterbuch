@@ -25,7 +25,7 @@ use crate::{
     utils::{listen, send_heartbeat_requests},
 };
 use hashbrown::HashMap;
-use miette::Result;
+use miette::{Context, Result};
 use std::{ops::ControlFlow, time::Instant};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::interval};
 use tosub::Subsystem;
@@ -65,15 +65,21 @@ pub async fn lead(
         };
         if update_quorum {
             peers_changed = None;
-            config.update_quorum(peers)?;
-            config.update_priority(me)?;
-            config.update_suicide_on_split_brain(me)?;
+            config
+                .update_quorum(peers)
+                .wrap_err("leader failed to update quorum")?;
+            config
+                .update_priority(me)
+                .wrap_err("leader failed to update priority")?;
+            config
+                .update_suicide_on_split_brain(me)
+                .wrap_err("leader failed to update suicide on split brain")?;
         }
 
         select! {
             _ = heartbeat_interval.tick() => {
                 trace!("Sending heartbeat …");
-                send_heartbeat_requests(config, socket, peers).await?;
+                send_heartbeat_requests(config, socket, peers).await.wrap_err("leader failed to send heartbeat requests")?;
                 if !check_heartbeat_responses(&heartbeat_responses, config, peers) {
                     break;
                 }
@@ -94,14 +100,17 @@ pub async fn lead(
                 msg,
                 config,
                 &mut heartbeat_responses
-            )) => if let ControlFlow::Break(_) = flow? {
+            )) => if let ControlFlow::Break(_) = flow.wrap_err("leader encountered an error while listening for peer messages")? {
                 break;
             },
             _ = subsys.shutdown_requested() => break,
         }
     }
 
-    proc_manager.stop().await?;
+    proc_manager
+        .stop()
+        .await
+        .wrap_err("leader failed to stop process manager")?;
 
     Ok(())
 }
@@ -139,6 +148,7 @@ async fn process_peer_message(
             heartbeat_responses.insert(heartbeat.node_id, Instant::now());
         }
     }
+
     Ok(ControlFlow::Continue(()))
 }
 

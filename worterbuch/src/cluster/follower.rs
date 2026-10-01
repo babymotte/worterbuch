@@ -27,7 +27,7 @@ use crate::{
         },
         shutdown,
     },
-    error::{WorterbuchAppError, WorterbuchAppResult},
+    error::{IntoWbAppResult, WorterbuchAppError, WorterbuchAppResult, WrappedResult},
     persistence::unlock_persistence,
     worterbuch_version,
 };
@@ -74,12 +74,20 @@ pub(crate) async fn run(
             Trace::InternalAction(InternalAction::Startup),
             true,
         )
-        .await?;
+        .await
+        .into_wb_app_result()
+        .wrap("failed to set internal mode entry")?;
 
     let mut persistence_interval = config.persistence_interval();
 
-    let stream = TcpStream::connect(&leader_address).await?;
-    let leader_address = stream.peer_addr()?;
+    let stream = TcpStream::connect(&leader_address)
+        .await
+        .into_wb_app_result()
+        .wrap_with(|| format!("failed to connect to leader at {}", leader_address))?;
+    let leader_address = stream
+        .peer_addr()
+        .into_wb_app_result()
+        .wrap("failed to get leader address")?;
 
     let (leader_rx, leader_tx) = stream.into_split();
     let mut lines = BufReader::new(leader_rx).lines();
@@ -128,7 +136,7 @@ pub(crate) async fn run(
     };
 
     // TODO check version
-    send_handshake(welcome, &worterbuch, &config, &follower_request_tx).await?;
+    send_handshake(welcome, &worterbuch, &config, &follower_request_tx).await;
 
     info!("Handshake complete. Waiting for initial sync message …");
 
@@ -147,9 +155,16 @@ pub(crate) async fn run(
         Ok(Some(msg)) => {
             if let LeaderMessage::Init(state) = msg {
                 debug!("Received initial sync message from leader: {state:?}");
-                initial_sync(state, &mut worterbuch).await?;
+                initial_sync(state, &mut worterbuch)
+                    .await
+                    .into_wb_app_result()
+                    .wrap("failed to perform initial sync")?;
                 persistence_interval.reset();
-                worterbuch.flush().await?;
+                worterbuch
+                    .flush()
+                    .await
+                    .into_wb_app_result()
+                    .wrap("failed to flush worterbuch")?;
             } else {
                 return Err(WorterbuchAppError::ClusterError(format!(
                     "Expected initial sync, but it got: {msg:?}"
@@ -195,7 +210,7 @@ async fn send_handshake(
     worterbuch: &Worterbuch,
     config: &Config,
     follower_request_tx: &mpsc::Sender<ProxyMessage>,
-) -> WorterbuchAppResult<()> {
+) {
     let version = worterbuch_version();
     let auth_token = if welcome.authentication_required {
         // TODO
@@ -209,9 +224,7 @@ async fn send_handshake(
         auth_token,
     }));
 
-    follower_request_tx.send(handshake).await?;
-
-    Ok(())
+    follower_request_tx.send(handshake).await.ok();
 }
 
 async fn try_process_leader_message(
@@ -220,7 +233,9 @@ async fn try_process_leader_message(
 ) -> WorterbuchAppResult<ControlFlow<()>> {
     match recv {
         Ok(Some(msg)) => {
-            process_leader_message(msg, worterbuch).await?;
+            process_leader_message(msg, worterbuch)
+                .await
+                .wrap("failed to process leader message")?;
             Ok(ControlFlow::Continue(()))
         }
         Ok(None) => Ok(ControlFlow::Break(())),
@@ -233,7 +248,11 @@ async fn try_process_leader_message(
 
 async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFlow<()>> {
     debug!("Follower persistence interval triggered");
-    worterbuch.flush().await?;
+    worterbuch
+        .flush()
+        .await
+        .into_wb_app_result()
+        .wrap("failed to flush worterbuch")?;
     Ok(ControlFlow::Continue(()))
 }
 
@@ -298,7 +317,11 @@ async fn initial_sync(
     state_sync: StateSync,
     worterbuch: &mut Worterbuch,
 ) -> WorterbuchAppResult<()> {
-    worterbuch.reset_store(state_sync.store).await?;
+    worterbuch
+        .reset_store(state_sync.store)
+        .await
+        .into_wb_app_result()
+        .wrap("failed to reset worterbuch store")?;
 
     for (client, grave_goods) in state_sync.grave_goods {
         worterbuch
@@ -314,7 +337,9 @@ async fn initial_sync(
                 Trace::InternalAction(InternalAction::LeaderSync),
                 true,
             )
-            .await?;
+            .await
+            .into_wb_app_result()
+            .wrap("failed to set grave goods in worterbuch")?;
     }
     for (client, last_will) in state_sync.last_wills {
         worterbuch
@@ -330,7 +355,9 @@ async fn initial_sync(
                 Trace::InternalAction(InternalAction::LeaderSync),
                 true,
             )
-            .await?;
+            .await
+            .into_wb_app_result()
+            .wrap("failed to set last will in worterbuch")?;
     }
 
     worterbuch
@@ -341,13 +368,17 @@ async fn initial_sync(
             Trace::InternalAction(InternalAction::LeaderSync),
             true,
         )
-        .await?;
+        .await
+        .into_wb_app_result()
+        .wrap("failed to set mode in worterbuch")?;
 
     unlock_persistence();
 
-    worterbuch.flush().await.map_err(|e| {
-        WorterbuchAppError::ClusterError(format!("Failed to flush storage after initial sync: {e}"))
-    })?;
+    worterbuch
+        .flush()
+        .await
+        .into_wb_app_result()
+        .wrap("failed to flush worterbuch after initial sync")?;
     Ok(())
 }
 

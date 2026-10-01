@@ -24,7 +24,8 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::{ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, select, sync::mpsc, time::sleep};
 use tosub::Subsystem;
-use tracing::{Instrument, Level, debug, info, instrument, span, warn};
+use totils::CancelOn;
+use tracing::{Instrument, Level, debug, info, instrument, span, trace, warn};
 
 enum ElectionRoundEvent {
     Timeout,
@@ -69,12 +70,19 @@ impl<'a> Election<'a> {
 
     // #[instrument(skip(self, buf), level = "trace", err)]
     async fn recv_peer_msg(&self, buf: &mut [u8]) -> Result<Option<PeerMessage>> {
-        let received = self
+        let Some(received) = self
             .socket
             .recv(buf)
+            .or_cancel_on(self.subsys.shutdown_requested())
             .await
+        else {
+            return Ok(None);
+        };
+
+        let received = received
             .into_diagnostic()
             .wrap_err("error receiving peer message")?;
+
         if received == 0 {
             return Ok(None);
         }
@@ -96,10 +104,18 @@ impl<'a> Election<'a> {
     ) -> Result<ElectionOutcome> {
         let mut buf = [0u8; 65507];
 
+        let mut counter: u64 = 0;
+
         loop {
-            if let ControlFlow::Break(outcome) = self.election_round(peers_rx, &mut buf).await? {
+            trace!(counter, "starting election round");
+            if let ControlFlow::Break(outcome) = self
+                .election_round(peers_rx, &mut buf)
+                .await
+                .wrap_err_with(|| format!("error in election round {}", counter))?
+            {
                 return Ok(outcome);
             }
+            counter += 1;
         }
     }
 
@@ -111,7 +127,9 @@ impl<'a> Election<'a> {
     ) -> Result<ControlFlow<ElectionOutcome>> {
         if let Ok((peers, _, _)) = peers_rx.try_recv() {
             *self.peers = peers;
-            self.config.update_quorum(self.peers)?;
+            self.config
+                .update_quorum(self.peers)
+                .wrap_err("failed to update quorum")?;
             info!("Config changed, restarting election round.");
             return Ok(ControlFlow::Continue(()));
         }
@@ -120,12 +138,13 @@ impl<'a> Election<'a> {
         let timeout = sleep(self.config.election_timeout());
 
         select! {
-            outcome = self.support_other_candidates() => if let Some(outcome) = outcome? {
+            _ = self.subsys.shutdown_requested() => return Ok(ControlFlow::Break(ElectionOutcome::Cancelled)),
+            outcome = self.support_other_candidates() => if let Some(outcome) = outcome.wrap_err("error while trying to support other candidates")? {
                 return Ok(ControlFlow::Break(outcome));
             },
             recv = peers_rx.recv() => if let Some((peers, _, _)) = recv {
                 *self.peers = peers;
-                self.config.update_quorum(self.peers)?;
+                self.config.update_quorum(self.peers).wrap_err("failed to update quorum")?;
                 info!("Config changed, restarting election round.");
                 return Ok(ControlFlow::Continue(()));
             } else {
@@ -136,7 +155,9 @@ impl<'a> Election<'a> {
 
         if let Ok((peers, _, _)) = peers_rx.try_recv() {
             *self.peers = peers;
-            self.config.update_quorum(self.peers)?;
+            self.config
+                .update_quorum(self.peers)
+                .wrap_err("failed to update quorum")?;
             info!("Config changed, restarting election round.");
             return Ok(ControlFlow::Continue(()));
         }
@@ -158,7 +179,9 @@ impl<'a> Election<'a> {
             return Ok(ControlFlow::Break(ElectionOutcome::Leader));
         }
 
-        self.request_votes().await?;
+        self.request_votes()
+            .await
+            .wrap_err("error while requesting votes from other peers")?;
 
         let sleep_span = span!(Level::INFO, "wait_for_votes");
         let mut timeout = pin!(sleep(self.config.heartbeat_timeout()).instrument(sleep_span));
@@ -186,7 +209,9 @@ impl<'a> Election<'a> {
                 ElectionRoundEvent::PeersChanged(peers) => {
                     if let Some((peers, _, _)) = peers {
                         *self.peers = peers;
-                        self.config.update_quorum(self.peers)?;
+                        self.config
+                            .update_quorum(self.peers)
+                            .wrap_err("failed to update quorum")?;
                         info!("Config changed, restarting election round.");
                         return Ok(ControlFlow::Continue(()));
                     } else {
@@ -194,7 +219,11 @@ impl<'a> Election<'a> {
                     }
                 }
                 ElectionRoundEvent::PeerMessageReceived(msg) => {
-                    if let Some(res) = self.process_peer_election_message(msg, &mut peers).await? {
+                    if let Some(res) = self
+                        .process_peer_election_message(msg, &mut peers)
+                        .await
+                        .wrap_err("error while processing peer election message")?
+                    {
                         return Ok(res);
                     }
                 }
@@ -215,12 +244,16 @@ impl<'a> Election<'a> {
         if let Some(msg) = msg {
             match msg {
                 PeerMessage::Vote(Vote::Response(vote)) => {
-                    if let Some(res) = self.process_vote_response(vote, peers).await? {
+                    if let Some(res) = self.process_vote_response(vote, peers).await {
                         return Ok(Some(res));
                     }
                 }
                 PeerMessage::Vote(Vote::Request(vote)) => {
-                    if let Some(res) = self.process_vote_request(vote).await? {
+                    if let Some(res) = self
+                        .process_vote_request(vote)
+                        .await
+                        .wrap_err("error processing vote request")?
+                    {
                         return Ok(Some(res));
                     }
                 }
@@ -241,18 +274,22 @@ impl<'a> Election<'a> {
         Ok(None)
     }
 
-    #[instrument(skip(self), err)]
+    #[instrument(skip(self))]
     async fn process_vote_response(
         &mut self,
         vote: VoteResponse,
         peers: &mut Vec<String>,
-    ) -> Result<Option<ControlFlow<ElectionOutcome>>> {
-        // making sure we don't count votes from any node twice
+    ) -> Option<ControlFlow<ElectionOutcome>> {
+        // ignoring votes from nodes that are not part of the current cluster configuration
         if !peers.contains(&vote.node_id) {
-            return Ok(None);
+            return None;
         }
+
+        // making sure we don't count votes from any node twice
         peers.retain(|it| it != &vote.node_id);
+
         self.votes_in_my_favor += 1;
+
         info!(
             "Node '{}' voted for me ({}/{}, quorum: {}/{})",
             vote.node_id,
@@ -261,11 +298,13 @@ impl<'a> Election<'a> {
             self.config.quorum,
             self.peers.peer_nodes().len() + 1
         );
+
         if self.votes_in_my_favor >= self.config.quorum {
             info!("This instance is now the leader.");
-            return Ok(Some(ControlFlow::Break(ElectionOutcome::Leader)));
+            return Some(ControlFlow::Break(ElectionOutcome::Leader));
         }
-        Ok(None)
+
+        None
     }
 
     #[instrument(skip(self), err)]
@@ -279,8 +318,19 @@ impl<'a> Election<'a> {
                 vote.node_id, vote.priority, self.prio
             );
             self.votes_in_my_favor = self.votes_in_my_favor.saturating_sub(1);
-            support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
-            if let Some(result) = self.wait_for_heartbeat(&vote).await? {
+            support_vote(vote.clone(), self.config, self.socket, self.peers)
+                .await
+                .wrap_err_with(|| {
+                    format!(
+                        "error while trying to support vote request of peer {}",
+                        vote.node_id
+                    )
+                })?;
+            if let Some(result) = self
+                .wait_for_heartbeat(&vote)
+                .await
+                .wrap_err("error while waiting for heartbeat")?
+            {
                 return Ok(Some(ControlFlow::Break(result)));
             } else {
                 return Ok(Some(ControlFlow::Continue(())));
@@ -291,44 +341,75 @@ impl<'a> Election<'a> {
                 vote.node_id, vote.priority, self.prio
             );
         }
+
         Ok(None)
     }
 
     #[instrument(skip(self), err)]
     async fn support_other_candidates(&self) -> Result<Option<ElectionOutcome>> {
         let mut buf = [0u8; 65507];
-        loop {
-            select! {
-                msg = self.recv_peer_msg(&mut buf) => if let Some(msg) = msg? {
-                    match msg {
-                        PeerMessage::Vote(Vote::Response(vote)) => {
-                            info!("Node '{}' is voting for me, but I haven't requested any votes yet. Weird.", vote.node_id);
-                        },
-                        PeerMessage::Vote(Vote::Request(vote)) => {
-                            if vote.priority >= self.prio {
-                                info!("Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.", vote.node_id, vote.priority, self.prio);
-                                support_vote(vote.clone(), self.config, self.socket, self.peers).await?;
-                                return self.wait_for_heartbeat(&vote).await;
-                            } else {
-                                info!("Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.", vote.node_id, vote.priority, self.prio);
-                            }
-                        },
-                        PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
-                            if self.is_part_of_cluster(&heartbeat.node_id) {
-                                info!("Node '{}' seems to be leader. Let's follow it.", heartbeat.node_id);
-                                return Ok(Some(ElectionOutcome::Follower(heartbeat)));
-                            } else {
-                                warn!("Node '{}' claims to be leader, but is not part of the cluster. Ignoring it.", heartbeat.node_id);
-                            }
-                        },
-                        PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
-                            warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
-                        },
+
+        while let Some(msg) = self
+            .recv_peer_msg(&mut buf)
+            .await
+            .wrap_err("error receiving peer message")?
+        {
+            match msg {
+                PeerMessage::Vote(Vote::Response(vote)) => {
+                    info!(
+                        "Node '{}' is voting for me, but I haven't requested any votes yet. Weird.",
+                        vote.node_id
+                    );
+                }
+                PeerMessage::Vote(Vote::Request(vote)) => {
+                    if vote.priority >= self.prio {
+                        info!(
+                            "Looks like node '{}' is trying to become leader and has priority {:?} (>= {:?}). Let's support it.",
+                            vote.node_id, vote.priority, self.prio
+                        );
+                        support_vote(vote.clone(), self.config, self.socket, self.peers)
+                            .await
+                            .wrap_err_with(|| {
+                                format!(
+                                    "error while trying to support vote request of peer {}",
+                                    vote.node_id
+                                )
+                            })?;
+                        return self
+                            .wait_for_heartbeat(&vote)
+                            .await
+                            .wrap_err("error while waiting for heartbeat");
+                    } else {
+                        info!(
+                            "Looks like node '{}' is trying to become leader, but its priority is too low ({:?} < {:?}). Not supporting it.",
+                            vote.node_id, vote.priority, self.prio
+                        );
                     }
-                },
-                _ = self.subsys.shutdown_requested() => return Ok(None),
+                }
+                PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
+                    if self.is_part_of_cluster(&heartbeat.node_id) {
+                        info!(
+                            "Node '{}' seems to be leader. Let's follow it.",
+                            heartbeat.node_id
+                        );
+                        return Ok(Some(ElectionOutcome::Follower(heartbeat)));
+                    } else {
+                        warn!(
+                            "Node '{}' claims to be leader, but is not part of the cluster. Ignoring it.",
+                            heartbeat.node_id
+                        );
+                    }
+                }
+                PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
+                    warn!(
+                        "Node '{}' just sent a heartbeat response. That doesn't make any sense.",
+                        heartbeat.node_id
+                    );
+                }
             }
         }
+
+        Ok(None)
     }
 
     fn is_part_of_cluster(&self, node_id: &str) -> bool {

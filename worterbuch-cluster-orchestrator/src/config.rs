@@ -26,8 +26,9 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::{fs, select, sync::mpsc, time::interval};
+use tokio::{fs, sync::mpsc, time::interval};
 use tosub::Subsystem;
+use totils::while_select;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -300,7 +301,8 @@ impl Config {
     // #[instrument(skip(self))]
     pub fn update_quorum(&mut self, peers: &Peers) -> Result<()> {
         let (quorum, quorum_too_low) =
-            quorum_sanity_check(self.quorum_configured, peers.peer_nodes())?;
+            quorum_sanity_check(self.quorum_configured, peers.peer_nodes())
+                .wrap_err("quorum sanity check failed")?;
 
         self.quorum = quorum;
         self.quorum_too_low = quorum_too_low;
@@ -334,11 +336,17 @@ pub async fn instrument_and_load_config(
     subsys: &Subsystem,
 ) -> Result<(Config, mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>)> {
     let args: Args = Args::parse();
-    let config_file = load_config_file(&args.config_path).await?;
+    let config_file = load_config_file(&args.config_path)
+        .await
+        .wrap_err("failed to load config file")?;
 
-    telemetry::init(config_file.telemetry.as_ref(), args.node_id.clone()).await?;
+    telemetry::init(config_file.telemetry.as_ref(), args.node_id.clone())
+        .await
+        .wrap_err("initializing telemetry failed")?;
 
-    load_config(subsys, args, config_file).await
+    load_config(subsys, args, config_file)
+        .await
+        .wrap_err("failed to load config")
 }
 
 // #[instrument(skip(subsys), err)]
@@ -354,7 +362,8 @@ async fn load_config(
         .nodes
         .iter()
         .map(PeerInfo::try_from)
-        .collect::<Result<Vec<PeerInfo>>>()?;
+        .collect::<Result<Vec<PeerInfo>>>()
+        .wrap_err("failed to parse peer info from config file")?;
     let mut me = None;
     let peers: Vec<PeerInfo> = nodes
         .iter()
@@ -377,7 +386,8 @@ async fn load_config(
     debug!("Configured nodes: {nodes:?}");
     debug!("Configured peers: {peers:?}");
     let data_dir = args.data_dir;
-    let (quorum, quorum_too_low) = quorum_sanity_check(config_file.quorum, &peers)?;
+    let (quorum, quorum_too_low) =
+        quorum_sanity_check(config_file.quorum, &peers).wrap_err("quorum sanity check failed")?;
     let peers = Peers(peers);
     let config = Config {
         node_id: args.node_id.clone(),
@@ -418,11 +428,10 @@ async fn watch_config_file(
 
     let mut config_file = config_file;
 
-    loop {
-        select! {
-            _ = interval.tick() => config_file = reload_config(&subsys, &path, config_file, &node_id, &tx).await?,
-            _ = subsys.shutdown_requested() => break,
-        }
+    while_select! {
+        biased;
+        _ = subsys.shutdown_requested() => break,
+        _ = interval.tick() => config_file = reload_config(&subsys, &path, config_file, &node_id, &tx).await.wrap_err("realoading config failed")?,
     }
 
     Ok(())
@@ -435,13 +444,16 @@ async fn reload_config(
     node_id: &str,
     tx: &mpsc::Sender<(Peers, PeerInfo, Option<usize>)>,
 ) -> Result<ConfigFile> {
-    let cf = load_config_file(&path).await?;
+    let cf = load_config_file(&path)
+        .await
+        .wrap_err("failed to load config file")?;
     if cf != config_file {
         let nodes = cf
             .nodes
             .iter()
             .map(PeerInfo::try_from)
-            .collect::<Result<Vec<PeerInfo>>>()?;
+            .collect::<Result<Vec<PeerInfo>>>()
+            .wrap_err("failed to parse peer info from config file")?;
 
         let mut me = None;
         let peers = nodes

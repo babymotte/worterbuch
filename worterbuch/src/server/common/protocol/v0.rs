@@ -28,7 +28,7 @@ use crate::{
 };
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tosub::Subsystem;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{

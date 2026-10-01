@@ -25,10 +25,11 @@ use crate::{
     config::Peers,
     utils::{listen, send_heartbeat_response},
 };
-use miette::Result;
+use miette::{Context, Result};
 use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
-use tokio::{net::UdpSocket, select, time::sleep};
+use tokio::{net::UdpSocket, time::sleep};
 use tosub::Subsystem;
+use totils::while_select;
 use tracing::{Level, info, instrument, warn};
 
 pub async fn follow(
@@ -51,26 +52,26 @@ pub async fn follow(
     'outer: loop {
         let mut timeout = pin!(sleep(config.heartbeat_timeout()));
 
-        'inner: loop {
-            select! {
-                _ = &mut timeout => {
-                    info!("Leader heartbeat timed out. Leaving follower mode …");
-                    break 'outer;
-                },
-                flow = listen(socket, &mut buf, |msg| process_peer_message(
-                    msg,
-                    &leader_heartbeat,
-                    config, peers,
-                    socket
-                )) => if let ControlFlow::Break(_) = flow? {
-                    break 'inner;
-                },
-                _ = subsys.shutdown_requested() => break 'outer,
-            }
+        while_select! {
+            biased;
+            _ = subsys.shutdown_requested() => break 'outer,
+            _ = &mut timeout => {
+                info!("Leader heartbeat timed out. Leaving follower mode …");
+                break 'outer;
+            },
+            it = listen(socket, &mut buf, |msg| process_peer_message(
+                msg,
+                &leader_heartbeat,
+                config, peers,
+                socket
+            )) => it.wrap_err("follower encountered an error while listening for leader heartbeats")?,
         }
     }
 
-    proc_manager.stop().await?;
+    proc_manager
+        .stop()
+        .await
+        .wrap_err("follower encountered an error stopping process manager")?;
 
     info!("Worterbuch server follower instance stopped.");
 
@@ -100,7 +101,9 @@ async fn process_peer_message(
         }
         PeerMessage::Heartbeat(Heartbeat::Request(heartbeat)) => {
             if &heartbeat == leader_heartbeat {
-                send_heartbeat_response(&heartbeat, config, peers, socket).await?;
+                send_heartbeat_response(&heartbeat, config, peers, socket)
+                    .await
+                    .wrap_err("follower encountered an error while sending heartbeat response")?;
                 return Ok(ControlFlow::Break(()));
             } else {
                 info!(
@@ -116,7 +119,7 @@ async fn process_peer_message(
             );
         }
     }
-    Ok(ControlFlow::Continue::<()>(()))
+    Ok(ControlFlow::Continue(()))
 }
 
 fn cmd(leader: SocketAddr, config: &Config) -> CommandDefinition {

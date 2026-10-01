@@ -72,6 +72,40 @@ pub enum WorterbuchAppError {
         #[from]
         RootSystemError,
     ),
+    #[error("{0}")]
+    Wrapped(String, #[source] Box<WorterbuchAppError>),
+}
+
+pub trait IntoWbAppResult<T> {
+    fn into_wb_app_result(self) -> WorterbuchAppResult<T>;
+}
+
+impl<T, E: Into<WorterbuchAppError>> IntoWbAppResult<T> for Result<T, E> {
+    fn into_wb_app_result(self) -> WorterbuchAppResult<T> {
+        self.map_err(Into::into)
+    }
+}
+
+pub trait WrappedResult {
+    type Result;
+    type Output;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result;
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result;
 }
 
 pub type WorterbuchAppResult<T> = Result<T, WorterbuchAppError>;
+
+impl<T> WrappedResult for WorterbuchAppResult<T> {
+    type Result = WorterbuchAppResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| WorterbuchAppError::Wrapped(msg.into(), Box::new(e)))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| WorterbuchAppError::Wrapped(f(), Box::new(e)))
+    }
+}

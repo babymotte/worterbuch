@@ -145,6 +145,7 @@ pub enum WorterbuchError {
     FeatureDisabled(MetaData),
     ClientIdCollision(ClientId),
     EmptyKey,
+    Wrapped(String, #[source] Box<WorterbuchError>),
 }
 
 impl From<Err> for WorterbuchError {
@@ -233,6 +234,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::EmptyKey => {
                 write!(f, "Key cannot be empty")
             }
+            Self::Wrapped(msg, _) => msg.fmt(f),
         }
     }
 }
@@ -271,7 +273,7 @@ impl From<oneshot::error::RecvError> for WorterbuchError {
 
 pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 
-#[derive(Debug, Diagnostic)]
+#[derive(Debug, Diagnostic, Error)]
 pub enum ConnectionError {
     IoError(Box<io::Error>),
     SendError(Box<dyn std::error::Error + Send + Sync>),
@@ -296,9 +298,8 @@ pub enum ConnectionError {
     InvalidHeaderValue(Box<InvalidHeaderValue>),
     LockLost(LockLost),
     ShutdownRequested,
+    Wrapped(String, #[source] Box<ConnectionError>),
 }
-
-impl std::error::Error for ConnectionError {}
 
 impl fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -332,11 +333,22 @@ impl fmt::Display for ConnectionError {
                 lock.key, lock.transaction_id
             ),
             Self::ShutdownRequested => "shutdown requested".fmt(f),
+            Self::Wrapped(msg, _) => msg.fmt(f),
         }
     }
 }
 
 pub type ConnectionResult<T> = std::result::Result<T, ConnectionError>;
+
+pub trait IntoConnectionResult<T> {
+    fn into_connection_result(self) -> ConnectionResult<T>;
+}
+
+impl<T, E: Into<ConnectionError>> IntoConnectionResult<T> for Result<T, E> {
+    fn into_connection_result(self) -> ConnectionResult<T> {
+        self.map_err(Into::into)
+    }
+}
 
 impl From<Err> for ConnectionError {
     fn from(value: Err) -> Self {
@@ -449,13 +461,20 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::ClientIdCollision(_) => ErrorCode::ClientIDCollision,
             WorterbuchError::EmptyKey => ErrorCode::EmptyKey,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
+            WorterbuchError::Wrapped(_, source) => ErrorCode::from(&**source),
         }
     }
 }
 
 impl From<WorterbuchError> for (StatusCode, String) {
     fn from(e: WorterbuchError) -> Self {
-        match &e {
+        (&e).into()
+    }
+}
+
+impl From<&WorterbuchError> for (StatusCode, String) {
+    fn from(e: &WorterbuchError) -> Self {
+        match e {
             WorterbuchError::IllegalMultiWildcard(_)
             | WorterbuchError::IllegalWildcard(_)
             | WorterbuchError::MultiWildcardAtIllegalPosition(_)
@@ -494,6 +513,10 @@ impl From<WorterbuchError> for (StatusCode, String) {
             }
 
             WorterbuchError::NotLeader => (StatusCode::NO_CONTENT, e.to_string()),
+            WorterbuchError::Wrapped(msg, source) => {
+                let (status_code, _) = (&**source).into();
+                (status_code, msg.to_owned())
+            }
         }
     }
 }
@@ -516,5 +539,50 @@ pub mod axum {
             let err: WorterbuchError = self.into();
             err.into_response()
         }
+    }
+}
+
+pub trait IntoWbResult<T> {
+    fn into_wb_result(self) -> WorterbuchResult<T>;
+}
+
+impl<T, E: Into<WorterbuchError>> IntoWbResult<T> for Result<T, E> {
+    fn into_wb_result(self) -> WorterbuchResult<T> {
+        self.map_err(Into::into)
+    }
+}
+
+pub trait WrappedResult {
+    type Result;
+    type Output;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result;
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result;
+}
+
+impl<T> WrappedResult for WorterbuchResult<T> {
+    type Result = WorterbuchResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| WorterbuchError::Wrapped(msg.into(), Box::new(e)))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| WorterbuchError::Wrapped(f(), Box::new(e)))
+    }
+}
+
+impl<T> WrappedResult for ConnectionResult<T> {
+    type Result = ConnectionResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| ConnectionError::Wrapped(msg.into(), Box::new(e)))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| ConnectionError::Wrapped(f(), Box::new(e)))
     }
 }

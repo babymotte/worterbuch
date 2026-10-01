@@ -116,7 +116,6 @@ impl V1 {
         let (tx, rx) = oneshot::channel();
         let wb = self.v0.worterbuch.clone();
         let permit = self.v0.acquire_permit().await;
-        let client_id = self.v0.client_id;
 
         tokio::spawn(async move {
             let (value, version) = match wb.cget(msg.key).await {

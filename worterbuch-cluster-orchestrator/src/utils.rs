@@ -135,8 +135,8 @@ where
     match serde_json::from_slice(&buf[..received]) {
         Ok(msg) => op(msg).await,
         Err(e) => {
-            error!(error = ?e, "Could not parse peer message: {e}");
-            debug!("Message: {}", String::from_utf8_lossy(&buf[..received]));
+            let msg = String::from_utf8_lossy(&buf[..received]).to_string();
+            error!(msg, error = ?e, "Could not parse peer message");
             Ok(ControlFlow::Continue(()))
         }
     }

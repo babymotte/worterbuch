@@ -30,7 +30,7 @@ use config::instrument_and_load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
 use leader::lead;
-use miette::{Result, miette};
+use miette::{Context, Result, miette};
 use serde::{Deserialize, Serialize};
 use socket::init_socket;
 use stats::start_stats_endpoint;
@@ -39,9 +39,12 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::Path,
 };
-use tokio::{fs::File, select};
+use tokio::{fs::File, sync::mpsc};
 use tosub::Subsystem;
+use totils::CancelOn;
 use tracing::{debug, instrument};
+
+use crate::config::Peers;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,46 +130,76 @@ impl PeerInfo {
 }
 
 pub async fn instrument_and_run_main(subsys: Subsystem) -> Result<()> {
-    let (config, peers_rx) = instrument_and_load_config(&subsys).await?;
+    let (config, peers_rx) = instrument_and_load_config(&subsys)
+        .await
+        .wrap_err("failed to init telemetry and config")?;
     run_main(subsys, config, peers_rx).await
 }
 
 async fn run_main(
     subsys: Subsystem,
     mut config: config::Config,
-    mut peers_rx: tokio::sync::mpsc::Receiver<(config::Peers, PeerInfo, Option<usize>)>,
-) -> std::result::Result<(), miette::Error> {
+    mut peers_rx: mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>,
+) -> Result<()> {
     let (mut peers, mut me, _) = peers_rx
         .recv()
         .await
         .ok_or_else(|| miette!("peers sender dropped"))?;
 
-    let mut socket = init_socket(&config).await?;
+    let mut socket = init_socket(&config)
+        .await
+        .wrap_err("failed to create raft UDP socket")?;
 
-    let stats = start_stats_endpoint(&subsys, config.stats_port).await?;
+    let stats = start_stats_endpoint(&subsys, config.stats_port)
+        .await
+        .wrap_err("failed to create stats endpoint")?;
 
     while !subsys.is_shut_down() {
         let prio = config.priority().await;
 
         stats.candidate().await;
-        let outcome = select! {
-            res = elect_leader(&subsys, &mut socket, &mut config, &mut peers, &mut peers_rx, prio) => res?,
-            _ = subsys.shutdown_requested() => break,
+
+        let outcome = match elect_leader(
+            &subsys,
+            &mut socket,
+            &mut config,
+            &mut peers,
+            &mut peers_rx,
+            prio,
+        )
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        {
+            Some(it) => it.wrap_err("leader election failed")?,
+            None => break,
         };
 
         match outcome {
             ElectionOutcome::Leader => {
                 stats.leader().await;
-                select! {
-                    it = lead(&subsys, &mut socket, &mut config, &mut me, &mut peers, &mut peers_rx) => it?,
-                    _ = subsys.shutdown_requested() => break,
+                match lead(
+                    &subsys,
+                    &mut socket,
+                    &mut config,
+                    &mut me,
+                    &mut peers,
+                    &mut peers_rx,
+                )
+                .or_cancel_on(subsys.shutdown_requested())
+                .await
+                {
+                    Some(it) => it.wrap_err("error while running as leader")?,
+                    None => break,
                 }
             }
             ElectionOutcome::Follower(heartbeat) => {
                 stats.follower().await;
-                select! {
-                    it = follow(&subsys, &mut socket,  &config, &peers, heartbeat) => it?,
-                    _ = subsys.shutdown_requested() => break,
+                match follow(&subsys, &mut socket, &config, &peers, heartbeat)
+                    .or_cancel_on(subsys.shutdown_requested())
+                    .await
+                {
+                    Some(it) => it.wrap_err("error while running as follower")?,
+                    None => break,
                 }
             }
             ElectionOutcome::Cancelled => break,

@@ -25,6 +25,7 @@ use tokio::{
 };
 use tokio_process_terminate::TerminateExt;
 use tosub::Subsystem;
+use totils::{CancelOn, ReceiveOrCancelOn};
 use tracing::{info, instrument, warn};
 
 #[derive(Debug, Clone)]
@@ -94,7 +95,8 @@ impl ChildProcessManagerActor {
         while !self.stopped {
             if let ControlFlow::Break(()) = self
                 .run_child_process(&mut crash_counter, &mut interval, &mut wait)
-                .await?
+                .await
+                .wrap_err("error running child process")?
             {
                 break;
             }
@@ -127,32 +129,34 @@ impl ChildProcessManagerActor {
                     .monitor_process(proc, cmd, crash_counter, wait, interval)
                     .await;
             } else {
-                self.trigger_restart(command)?;
+                self.trigger_restart(command)
+                    .wrap_err("failed to trigger child process restart")?;
             }
         } else {
-            select! {
-                recv = self.api_rx.recv() => if let Some(msg) = recv {
-                    self.process_msg(msg).await?;
-                },
-                _ = self.subsys.shutdown_requested() => self.stop().await?,
-            }
+            if let Some(msg) = self
+                .api_rx
+                .recv_or_cancel_on(self.subsys.shutdown_requested())
+                .await
+            {
+                self.process_msg(msg)
+                    .await
+                    .wrap_err("failed to process child process message")?;
+            } else {
+                self.stop().await.wrap_err("failed to stop child process")?;
+            };
         }
 
         if let Some(millis) = wait.take() {
-            self.wait(millis).await?;
+            if sleep(Duration::from_millis(millis))
+                .or_cancel_on(self.subsys.shutdown_requested())
+                .await
+                .is_none()
+            {
+                self.stop().await.wrap_err("failed to stop child process")?;
+            }
         }
 
         Ok(ControlFlow::Continue(()))
-    }
-
-    #[instrument(skip(self), fields())]
-    async fn wait(&mut self, millis: u64) -> Result<()> {
-        select! {
-            _ = sleep(Duration::from_millis(millis)) => (),
-            _ = self.subsys.shutdown_requested() => self.stop().await?,
-        }
-
-        Ok(())
     }
 
     #[instrument(
@@ -223,7 +227,10 @@ impl ChildProcessManagerActor {
     #[instrument(skip(self), err)]
     async fn process_msg(&mut self, msg: ChildProcessMessage) -> Result<()> {
         match msg {
-            ChildProcessMessage::Restart(command) => self.restart(command).await?,
+            ChildProcessMessage::Restart(command) => self
+                .restart(command)
+                .await
+                .wrap_err("failed to restart child process")?,
         }
         Ok(())
     }
@@ -232,7 +239,9 @@ impl ChildProcessManagerActor {
     async fn restart(&mut self, command: CommandDefinition) -> Result<()> {
         self.command = Some(command);
         if let Some((mut proc, cmd)) = self.process.take() {
-            terminate(&mut proc, &cmd).await?;
+            terminate(&mut proc, &cmd)
+                .await
+                .wrap_err("failed to terminate child process")?;
         }
         Ok(())
     }

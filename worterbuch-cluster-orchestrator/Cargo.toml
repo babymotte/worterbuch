@@ -1,6 +1,6 @@
 [package]
 name = "worterbuch-cluster-orchestrator"
-version = "1.7.0-alpha.11"
+version = "1.7.0-alpha.12"
 edition = "2024"
 authors = ["Michael Bachmann <mbachmann@bbmsoft.net>"]
 description = "An orchestrator for running Wörterbuch as a distributed cluster."
@@ -48,6 +48,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 worterbuch-common = { workspace = true }
+totils = { workspace = true, features = ["while_select"] }
 
 [lints.rust]
 # unsafe_code = "forbid"
