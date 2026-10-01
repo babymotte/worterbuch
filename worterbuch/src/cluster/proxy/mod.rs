@@ -350,7 +350,13 @@ impl Proxy {
             &mut self.read_leader_addresses_from_stdin,
         );
 
-        let leader_addresses_updated = leader_connection.run().await?;
+        let leader_addresses_updated = match leader_connection.run().await {
+            Ok(updated) => updated,
+            Err(e) => {
+                error!("Leader connection broke with an error: {:?}", e);
+                false
+            }
+        };
 
         info!(
             "Proxy loop for leader {} stopped, closing connection.",
