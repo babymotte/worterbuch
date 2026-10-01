@@ -510,12 +510,12 @@ impl Config {
         match self.role {
             ClusterRole::Standalone | ClusterRole::Leader { .. } | ClusterRole::Follower { .. } => {
                 Box::new([
-                    ProtocolVersion::new(0, 11),
-                    ProtocolVersion::new(1, 1),
-                    ProtocolVersion::new(2, 0),
+                    ProtocolVersion(0, 11),
+                    ProtocolVersion(1, 1),
+                    ProtocolVersion(2, 0),
                 ])
             }
-            ClusterRole::Proxy { .. } => Box::new([ProtocolVersion::new(2, 0)]),
+            ClusterRole::Proxy { .. } => Box::new([ProtocolVersion(2, 0)]),
         }
     }
 }

@@ -28,7 +28,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_message, provide_key_value_pairs};
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, parse_addresses};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Publish a stream of values read from stdin to a single Wörterbuch key.", long_about = None)]

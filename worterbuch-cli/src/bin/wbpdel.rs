@@ -28,7 +28,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, parse_addresses};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Delete values for keys from a Wörterbuch.", long_about = None)]

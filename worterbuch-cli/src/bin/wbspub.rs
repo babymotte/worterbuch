@@ -28,7 +28,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_message, provide_values};
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, parse_addresses};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Publish a stream of values on a Wörterbuch.", long_about = None)]

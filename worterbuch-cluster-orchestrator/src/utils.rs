@@ -20,7 +20,7 @@ use crate::config::Peers;
 use miette::{Context, IntoDiagnostic, Result};
 use std::{future::Future, ops::ControlFlow};
 use tokio::net::UdpSocket;
-use tracing::{Level, debug, error, instrument, warn};
+use tracing::{Level, error, instrument, warn};
 
 // #[instrument(skip(config, socket), level = "trace", err)]
 pub async fn send_heartbeat_requests(

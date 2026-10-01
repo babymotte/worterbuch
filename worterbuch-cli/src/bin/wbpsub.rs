@@ -28,7 +28,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::{next_item, print_message, provide_keys};
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, parse_addresses};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "Subscribe to values matching Wörterbuch patterns.", long_about = None)]

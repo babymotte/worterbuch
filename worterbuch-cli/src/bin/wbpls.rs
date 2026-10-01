@@ -27,7 +27,7 @@ use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use worterbuch_cli::print_message;
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, parse_addresses};
+use worterbuch_client::{AuthToken, connect};
 
 #[derive(Parser)]
 #[command(author, version, about = "List matching child keys on a Wörterbuch server.", long_about = None)]
