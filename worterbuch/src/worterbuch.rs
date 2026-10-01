@@ -366,7 +366,7 @@ impl Worterbuch {
         &self.clients
     }
 
-    #[instrument(skip(store, config))]
+    #[instrument(level = Level::DEBUG,skip(store, config))]
     pub fn from_persistence(store: PersistedStore, config: Config) -> Worterbuch {
         let store: Store = store.into();
         debug!("Loaded persisted store with {} entries.", store.len());
@@ -383,7 +383,7 @@ impl Worterbuch {
         }
     }
 
-    #[instrument(skip(store, config))]
+    #[instrument(level = Level::DEBUG, skip(store, config))]
     #[cfg(any(feature = "redb", feature = "sqlite", feature = "turso"))]
     pub fn with_store(store: Store, config: Config) -> Worterbuch {
         debug!("Loaded persisted store with {} entries.", store.len());
@@ -876,7 +876,7 @@ impl Worterbuch {
         Ok((rx, subscription))
     }
 
-    #[instrument(level=Level::DEBUG, skip(self))]
+    #[instrument(level=Level::TRACE, skip(self))]
     pub fn export(
         &mut self,
     ) -> (
@@ -891,7 +891,7 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
-    #[instrument(level=Level::DEBUG, skip(self, tx))]
+    #[instrument(level=Level::TRACE, skip(self, tx))]
     pub fn export_for_persistence(
         &mut self,
         tx: oneshot::Sender<(
@@ -1160,7 +1160,7 @@ impl Worterbuch {
         trace: Trace,
         ignore_sys_checks: bool,
     ) {
-        debug!("Notifying followers of state change: {:?}", command);
+        debug!("Notifying followers of state change");
 
         let len = self.followers.len();
         if len == 0 {
@@ -1998,7 +1998,7 @@ impl Worterbuch {
         .await;
     }
 
-    #[instrument(level=Level::DEBUG, skip(self))]
+    #[instrument(level=Level::TRACE, skip(self))]
     fn grave_goods(&self) -> HashMap<ClientId, GraveGoods> {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
@@ -2028,7 +2028,7 @@ impl Worterbuch {
         ggs
     }
 
-    #[instrument(level=Level::DEBUG, skip(self))]
+    #[instrument(level=Level::TRACE, skip(self))]
     fn last_wills(&self) -> HashMap<ClientId, LastWill> {
         let pattern = topic!(
             SYSTEM_TOPIC_ROOT,
@@ -2058,7 +2058,7 @@ impl Worterbuch {
         lws
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level=Level::TRACE, skip(self))]
     pub(crate) async fn apply_grave_goods(
         &mut self,
         grave_goods: GraveGoods,
@@ -2101,7 +2101,7 @@ impl Worterbuch {
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level=Level::TRACE,skip(self))]
     pub(crate) async fn apply_last_wills(
         &mut self,
         last_wills: LastWill,
@@ -2118,13 +2118,12 @@ impl Worterbuch {
 
         for last_will in last_wills {
             debug!(
-                "Setting last will of client {} ({}): {} = {}",
+                "Setting last will of client {} ({}): {}",
                 cause.client_id().unwrap_or(INTERNAL_CLIENT_ID),
                 remote_addr
                     .map(|it| it.to_string())
                     .unwrap_or_else(|| "<unknown>".to_owned()),
-                last_will.key,
-                last_will.value
+                last_will.key
             );
             if let Err(e) = self
                 .internal_set(
