@@ -26,11 +26,11 @@ use crate::{
         },
         proxy::{ClientResponseInterests, read_stdin, update_leader_addresses},
     },
-    error::{WorterbuchAppError, WorterbuchAppResult},
     server::common::WbFunction,
     worterbuch::Worterbuch,
 };
 use hashbrown::HashMap;
+use miette::{Context, IntoDiagnostic, bail};
 use std::ops::ControlFlow;
 use tokio::{
     io::{BufReader, Lines},
@@ -97,7 +97,7 @@ impl<'a> LeaderConnection<'a> {
         }
     }
 
-    pub async fn run(mut self) -> WorterbuchAppResult<bool> {
+    pub async fn run(mut self) -> miette::Result<bool> {
         debug!(
             "Starting new leder session with inherited response interests: {:#?}",
             self.response_interests
@@ -158,11 +158,13 @@ impl<'a> LeaderConnection<'a> {
     async fn try_process_leader_message(
         &mut self,
         recv: ConnectionResult<Option<LeaderMessage>>,
-    ) -> WorterbuchAppResult<ControlFlow<()>> {
+    ) -> miette::Result<ControlFlow<()>> {
         trace!(enter = "try_process_leader_message");
         match recv {
             Ok(Some(msg)) => {
-                self.process_leader_message(msg).await?;
+                self.process_leader_message(msg)
+                    .await
+                    .wrap_err("failed to process leader message")?;
                 trace!(exit = "try_process_leader_message");
                 Ok(ControlFlow::Continue(()))
             }
@@ -178,22 +180,18 @@ impl<'a> LeaderConnection<'a> {
         }
     }
 
-    async fn process_leader_message(&mut self, msg: LeaderMessage) -> WorterbuchAppResult<()> {
+    async fn process_leader_message(&mut self, msg: LeaderMessage) -> miette::Result<()> {
         trace!(enter = "process_leader_message");
         debug!("Processing leader sync message: {msg:?}");
 
         let res = match msg {
             LeaderMessage::Welcome(_) => {
                 trace!(exit = "process_leader_message");
-                return Err(crate::error::WorterbuchAppError::ClusterError(
-                    "already received welcome message".to_owned(),
-                ));
+                bail!("already received welcome message");
             }
             LeaderMessage::Init(_) => {
                 trace!(exit = "process_leader_message");
-                return Err(crate::error::WorterbuchAppError::ClusterError(
-                    "already synced".to_owned(),
-                ));
+                bail!("already synced");
             }
             LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
                 ClientWriteCommand::Set(key, value) => {
@@ -272,11 +270,13 @@ impl<'a> LeaderConnection<'a> {
     async fn try_process_api_call(
         &mut self,
         recv: Option<WbFunction>,
-    ) -> WorterbuchAppResult<ControlFlow<()>> {
+    ) -> miette::Result<ControlFlow<()>> {
         trace!(enter = "try_process_api_call");
         match recv {
             Some(function) => {
-                self.process_api_call(function).await?;
+                self.process_api_call(function)
+                    .await
+                    .wrap_err("failed to process api call")?;
                 trace!(exit = "try_process_api_call");
                 Ok(ControlFlow::Continue(()))
             }
@@ -287,7 +287,7 @@ impl<'a> LeaderConnection<'a> {
         }
     }
 
-    async fn process_api_call(&mut self, function: WbFunction) -> WorterbuchAppResult<()> {
+    async fn process_api_call(&mut self, function: WbFunction) -> miette::Result<()> {
         trace!(enter = "process_api_call");
         debug!("Processing API call: {function:?}");
         match function {
@@ -552,7 +552,9 @@ impl<'a> LeaderConnection<'a> {
                 }
 
                 self.register_ack_interest(client_id, transaction_id, client_message, tx);
-                self.queue_leader_request(request).await?;
+                self.queue_leader_request(request)
+                    .await
+                    .wrap_err("failed to queue leader request")?;
             }
             WbFunction::Import(_, _, _, _, _) => {
                 warn!("Import not yet implemented");
@@ -567,12 +569,13 @@ impl<'a> LeaderConnection<'a> {
         Ok(())
     }
 
-    async fn queue_leader_request(
-        &mut self,
-        request: ProxyMessage,
-    ) -> Result<(), WorterbuchAppError> {
+    async fn queue_leader_request(&mut self, request: ProxyMessage) -> miette::Result<()> {
         trace!(enter = "queue_leader_request");
-        self.proxy_request_tx.send(request).await?;
+        self.proxy_request_tx
+            .send(request)
+            .await
+            .into_diagnostic()
+            .wrap_err("failed to send request")?;
         trace!(exit = "queue_leader_request");
         Ok(())
     }
