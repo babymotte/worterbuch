@@ -212,8 +212,8 @@ pub(crate) async fn run(
 
 async fn send_handshake(
     welcome: LeaderWelcome,
-    worterbuch: &Worterbuch,
-    config: &Config,
+    _worterbuch: &Worterbuch,
+    _config: &Config,
     follower_request_tx: &mpsc::Sender<ProxyMessage>,
 ) {
     let version = worterbuch_version();

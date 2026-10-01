@@ -33,7 +33,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tosub::Subsystem;
-use tracing::{Instrument, info};
+use tracing::{Instrument, info, trace};
 use worterbuch_common::protocol::v1::{InternalAction, Trace, TraceData};
 
 pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
@@ -59,6 +59,7 @@ pub enum LeaderState {
 }
 
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
+    trace!(enter = "process_api_call");
     match function {
         WbFunction::Get(key, tx) => {
             tx.send(worterbuch.get(&key)).ok();
@@ -219,6 +220,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             .ok();
         }
         WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
+            trace!(%client_id, key, "lock");
             tx.send(
                 worterbuch
                     .lock(key, client_id, transaction_id, interface)
@@ -227,6 +229,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             .ok();
         }
         WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
+            trace!(%client_id, key, "acquire_lock");
             tx.send(
                 worterbuch
                     .acquire_lock(key, client_id, transaction_id, interface)
@@ -235,6 +238,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             .ok();
         }
         WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
+            trace!(%client_id, key, "release_lock");
             tx.send(
                 worterbuch
                     .release_lock(key, client_id, transaction_id, interface)
@@ -243,17 +247,20 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             .ok();
         }
         WbFunction::Connected(client_id, remote_addr, protocol, eject, tx) => {
+            trace!(%client_id, "connected");
             let res = worterbuch
                 .connected(client_id, remote_addr, protocol, eject)
                 .await;
             tx.send(res).ok();
         }
         WbFunction::ProtocolSwitched(client_id, interface, protocol) => {
+            trace!(%client_id, protocol, "protocol_switched");
             worterbuch
                 .protocol_switched(client_id, interface, protocol)
                 .await;
         }
         WbFunction::Disconnected(client_id, protocol, remote_addr) => {
+            trace!(%client_id, "disconnected");
             worterbuch
                 .disconnected(client_id, protocol, remote_addr)
                 .await
@@ -283,6 +290,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             tx.send(worterbuch.re_grant_locks(locks).await).ok();
         }
     }
+    trace!(exit = "process_api_call");
 }
 
 async fn shutdown(
