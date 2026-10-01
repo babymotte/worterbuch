@@ -696,6 +696,7 @@ impl VirtualProxyServer {
         let send_tx = self.send_tx.clone();
         let p = protocol.clone();
         let wb = worterbuch.named(client_id);
+        let proxy_addr = self.proxy_address;
         self.subsys.spawn("leader-response-forwarder", move |s| {
             response_forwarder_loop(
                 s,
@@ -704,6 +705,7 @@ impl VirtualProxyServer {
                 client_id,
                 wb,
                 Protocol::Proxied(Box::new(p)),
+                proxy_addr,
             )
         });
 
@@ -896,6 +898,7 @@ async fn response_forwarder_loop(
     client_id: uuid::Uuid,
     worterbuch: CloneableWbApi,
     protocol: Protocol,
+    proxy_addr: SocketAddr,
 ) -> miette::Result<()> {
     worterbuch
         .connected(client_id, None, protocol.clone())
@@ -905,7 +908,7 @@ async fn response_forwarder_loop(
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        recv = send_client_rx.recv() => forward_leader_response(recv, &send_tx, client_id).await?,
+        recv = send_client_rx.recv() => forward_leader_response(recv, &send_tx, client_id, proxy_addr).await,
     }
 
     info!("Client {client_id} disconnected.");
@@ -921,18 +924,25 @@ async fn forward_leader_response(
     recv: Option<oneshot::Receiver<ServerMessage>>,
     send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
-) -> miette::Result<ControlFlow<()>> {
+    remote_addr: SocketAddr,
+) -> ControlFlow<()> {
     match recv {
         Some(msg) => match msg.await {
-            Ok(msg) => send_tx
+            Ok(msg) => match send_tx
                 .send(VirtualServerMessage::ServerMessage((client_id, msg)))
                 .await
                 .into_diagnostic()
-                .wrap_err("could not forward response to proxy")?,
-            Err(_) => return Ok(ControlFlow::Break(())),
+                .wrap_err("could not forward response to proxy")
+            {
+                Ok(_) => ControlFlow::Continue(()),
+                Err(e) => {
+                    error!("Failed to forward response to proxy: {:?}", e);
+                    error!("Closing connection to proxy {}", remote_addr);
+                    ControlFlow::Break(())
+                }
+            },
+            Err(_) => ControlFlow::Break(()),
         },
-        None => return Ok(ControlFlow::Break(())),
+        None => ControlFlow::Break(()),
     }
-
-    Ok(ControlFlow::Continue(()))
 }
