@@ -25,7 +25,7 @@ FROM worterbuch-chef AS worterbuch-planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM worterbuch-chef AS worterbuch-builder 
+FROM worterbuch-chef AS worterbuch-builder
 COPY --from=worterbuch-planner /app/recipe.json recipe.json
 RUN cargo chef cook -p worterbuch --release --recipe-path recipe.json
 COPY . .
