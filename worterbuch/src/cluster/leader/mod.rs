@@ -42,13 +42,13 @@ use miette::{Context, IntoDiagnostic, Result, bail, ensure};
 use serde_json::json;
 use std::{
     io::{self},
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     ops::ControlFlow,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
     net::{
-        TcpSocket, TcpStream,
+        TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     spawn,
@@ -62,6 +62,7 @@ use worterbuch_common::{
     protocol::v1::{
         Err, ErrorCode, InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, ServerMessage, Trace,
     },
+    socket::{TcpSocketConfig, create_tcp_server_socket},
     topic, write_line_and_flush,
 };
 
@@ -226,26 +227,20 @@ async fn run_cluster_sync_port(
 
     info!("Starting cluster sync endpoint at {}:{} …", ip, port);
 
-    let socket = match ip {
-        IpAddr::V4(_) => TcpSocket::new_v4().into_diagnostic()?,
-        IpAddr::V6(_) => TcpSocket::new_v6().into_diagnostic()?,
-    };
-
-    // TODO set TCP timeout
-    socket.set_reuseaddr(true).into_diagnostic()?;
-    #[cfg(target_family = "unix")]
-    socket.set_reuseport(true).into_diagnostic()?;
-    socket.bind(SocketAddr::new(ip, port)).into_diagnostic()?;
-
-    let listener = socket.listen(1024).into_diagnostic()?;
+    let socket_config = TcpSocketConfig::from(&config);
+    let std_socket =
+        create_tcp_server_socket(ip, port, socket_config).wrap_err("failed to create sync port")?;
+    let socket = TcpListener::from_std(std_socket)
+        .into_diagnostic()
+        .wrap_err("failed to convert std socket to tokio socket")?;
 
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        client = listener.accept() => accecpt_client(client, &subsys, &config, &wb, on_follower_connected.clone(), on_follower_disconnected.clone()).await,
+        client = socket.accept() => accecpt_client(client, &subsys, &config, &wb, on_follower_connected.clone(), on_follower_disconnected.clone()).await,
     }
 
-    drop(listener);
+    drop(socket);
 
     info!("Cluster sync port closed.");
 
@@ -303,18 +298,20 @@ async fn serve(
     subsys.spawn(client.1.to_string(), async move |s| {
         let follower_addr = client.1;
         if let Err(e) =
-            follower_serve_loop(s, client.0, client.1, on_follower_connected, config, wb).await
+            follower_serve_loop(&s, client.0, client.1, on_follower_connected, config, wb).await
         {
             error!("Error in follower serve loop: {e}");
             eprintln!("{e:?}");
         }
 
         on_follower_disconnected.send(follower_addr).await.ok();
+
+        s.request_local_shutdown_because("TCP connection to follower/proxy closed");
     });
 }
 
 async fn follower_serve_loop(
-    subsys: Subsystem,
+    subsys: &Subsystem,
     tcp_stream: TcpStream,
     follower: SocketAddr,
     on_follower_connected: mpsc::Sender<(
@@ -362,8 +359,6 @@ async fn follower_serve_loop(
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
-
-    subsys.request_local_shutdown_because("TCP connection to follower/proxy closed");
 
     Ok(())
 }
