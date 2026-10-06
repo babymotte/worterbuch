@@ -144,17 +144,33 @@ impl VirtualProxyServer {
         let p = protocol.clone();
         let wb = worterbuch.named(client_id);
         let proxy_addr = self.proxy_address;
-        self.subsys.spawn("leader-response-forwarder", move |s| {
-            response_forwarder_loop(
-                s,
-                send_client_rx,
-                send_tx,
-                client_id,
-                wb,
-                Protocol::Proxied(Box::new(p)),
-                proxy_addr,
-            )
-        });
+        let parent_subsys = self.subsys.clone();
+        self.subsys
+            .spawn("leader-response-forwarder", move |s| async move {
+                let proto = Protocol::Proxied(Box::new(p.clone()));
+                if let Err(e) = response_forwarder_loop(
+                    s,
+                    send_client_rx,
+                    send_tx,
+                    client_id,
+                    &wb,
+                    proto.clone(),
+                    proxy_addr,
+                )
+                .await
+                {
+                    error!(
+                        "Error in leader response forwarder loop error of client {client_id}: {e}"
+                    );
+                    parent_subsys
+                        .request_local_shutdown_because("response forwarder stopped with an error");
+                }
+
+                info!("Client {client_id} disconnected.");
+                wb.disconnected(client_id, proto, None)
+                    .await
+                    .wrap_err("could not notify core system about client disconnect")
+            });
 
         let proto = Proto::new(
             self.subsys.clone(),
@@ -352,7 +368,7 @@ async fn response_forwarder_loop(
     mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: uuid::Uuid,
-    worterbuch: CloneableWbApi,
+    worterbuch: &CloneableWbApi,
     protocol: Protocol,
     proxy_addr: SocketAddr,
 ) -> miette::Result<()> {
@@ -367,12 +383,6 @@ async fn response_forwarder_loop(
         _ = subsys.shutdown_requested() => break,
         recv = send_client_rx.recv() => forward_leader_response(recv, &send_tx, client_id, proxy_addr).await,
     }
-
-    info!("Client {client_id} disconnected.");
-    worterbuch
-        .disconnected(client_id, protocol, None)
-        .await
-        .wrap_err("could not notify core system about client disconnect")?;
 
     trace!(exit = "response_forwarder_loop");
     Ok(())
