@@ -14,12 +14,11 @@ use std::{
     io::{self},
     net::SocketAddr,
     ops::ControlFlow,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    spawn,
+    sync::{mpsc, oneshot},
+};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{Level, debug, enabled, error, info, trace, warn};
@@ -35,7 +34,7 @@ use worterbuch_common::{
 pub struct VirtualProxyClientHandler {
     authorized: Option<JwtClaims>,
     proto: Proto,
-    disconnect_handled: Arc<AtomicBool>,
+    protocol: Protocol,
 }
 
 pub enum VirtualServerMessage {
@@ -50,6 +49,32 @@ pub struct VirtualProxyServer {
     pub config: Config,
     pub proxy_address: SocketAddr,
     pub send_tx: mpsc::Sender<VirtualServerMessage>,
+}
+
+impl Drop for VirtualProxyServer {
+    fn drop(&mut self) {
+        if self.clients.is_empty() {
+            return;
+        }
+
+        // this should only happen if the connection's task was aborted before it could call disconnect_all
+        warn!(
+            "Virtual proxy server for {} dropped with {} client(s) still registered, disconnecting them …",
+            self.proxy_address,
+            self.clients.len()
+        );
+        let clients: Vec<_> = self
+            .clients
+            .drain()
+            .map(|(client_id, client)| (client_id, client.protocol))
+            .collect();
+        let wb = self.worterbuch.clone();
+        spawn(async move {
+            for (client_id, protocol) in clients {
+                wb.disconnected(client_id, protocol, None).await.ok();
+            }
+        });
+    }
 }
 
 impl VirtualProxyServer {
@@ -160,26 +185,14 @@ impl VirtualProxyServer {
 
         let auth_required = config.auth_token_key.is_some();
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
-        let disconnect_handled = Arc::new(AtomicBool::new(false));
 
+        // the forwarder does not notify the core system about the client's disconnect, that is done either by
+        // stop_virtual_client or by disconnect_all once the connection to the proxy is closed
         let send_tx = self.send_tx.clone();
-        let wb = worterbuch.named(client_id);
         let proxy_addr = self.proxy_address;
-        let dh = disconnect_handled.clone();
-        self.subsys
-            .spawn("leader-response-forwarder", move |s| async move {
-                response_forwarder_loop(s, send_client_rx, send_tx, client_id, proxy_addr).await;
-
-                if dh.swap(true, Ordering::AcqRel) {
-                    debug!("Disconnect of client {client_id} has already been handled.");
-                    return Ok(());
-                }
-
-                info!("Client {client_id} disconnected.");
-                wb.disconnected(client_id, proxied_protocol, None)
-                    .await
-                    .wrap_err("could not notify core system about client disconnect")
-            });
+        self.subsys.spawn("leader-response-forwarder", move |s| {
+            response_forwarder_loop(s, send_client_rx, send_tx, client_id, proxy_addr)
+        });
 
         let proto = Proto::new(
             self.subsys.clone(),
@@ -193,7 +206,7 @@ impl VirtualProxyServer {
         let client = VirtualProxyClientHandler {
             authorized: None,
             proto,
-            disconnect_handled,
+            protocol: proxied_protocol,
         };
 
         self.clients.insert(client_id, client);
@@ -223,22 +236,12 @@ impl VirtualProxyServer {
             return Ok(());
         };
 
-        if client.disconnect_handled.swap(true, Ordering::AcqRel) {
-            debug!("Disconnect of virtual client {client_id} has already been handled.");
-            trace!(exit = "stop_virtual_client");
-            return Ok(());
-        }
-
         debug!(
             "Virtual client {client_id} removed from local register, triggering client disconnect callback …"
         );
 
         self.worterbuch
-            .disconnected(
-                client_id,
-                Protocol::Proxied(Box::new(protocol.clone())),
-                None,
-            )
+            .disconnected(client_id, client.protocol, None)
             .await?;
 
         info!(
@@ -248,6 +251,28 @@ impl VirtualProxyServer {
 
         trace!(exit = "stop_virtual_client");
         Ok(())
+    }
+
+    /// Notifies the core system about the disconnect of all clients that are still registered via this proxy
+    /// connection. Must be called before the connection's task ends, since a new connection of the same proxy
+    /// waits for that task to end and relies on all disconnects having been queued by then.
+    pub async fn disconnect_all(&mut self) {
+        trace!(enter = "disconnect_all");
+        for (client_id, client) in self.clients.drain() {
+            if let Err(e) = self
+                .worterbuch
+                .disconnected(client_id, client.protocol, None)
+                .await
+            {
+                error!("Could not notify core system about disconnect of client {client_id}: {e}");
+                continue;
+            }
+            info!(
+                "Proxied client disconnected because connection to proxy {} was closed: {}",
+                self.proxy_address, client_id
+            );
+        }
+        trace!(exit = "disconnect_all");
     }
 
     async fn process_client_request(
@@ -387,7 +412,7 @@ async fn response_forwarder_loop(
     subsys: Subsystem,
     mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
-    client_id: uuid::Uuid,
+    client_id: ClientId,
     proxy_addr: SocketAddr,
 ) {
     trace!(enter = "response_forwarder_loop", %client_id);

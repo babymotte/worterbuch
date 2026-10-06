@@ -17,13 +17,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::cluster::protocol::locks::Locks;
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, Protocol, WorterbuchVersion,
     protocol::v1::{ClientMessage, GraveGoods, Interface, LastWill},
 };
 
-use crate::cluster::protocol::locks::Locks;
+pub type ProxyId = uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +75,8 @@ pub struct ProxyHandshake {
     pub connected_clients: Vec<Connected>,
     #[serde(skip_serializing_if = "Locks::is_empty", default)]
     pub locks: Locks,
+    /// Unique ID of the proxy instance, stays the same across re-connects of the same proxy process
+    pub proxy_id: ProxyId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

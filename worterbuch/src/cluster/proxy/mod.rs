@@ -24,8 +24,8 @@ use crate::{
     cluster::{
         LeaderState, Mode,
         protocol::{
-            Connected, Handshake, LeaderMessage, LeaderWelcome, ProxyHandshake, ProxyMessage,
-            locks::Locks,
+            Connected, Handshake, LeaderMessage, LeaderWelcome, ProxyHandshake, ProxyId,
+            ProxyMessage, locks::Locks,
         },
         proxy::connection::LeaderConnection,
         shutdown,
@@ -80,6 +80,7 @@ struct Proxy {
     locks: Locks,
     response_interests: HashMap<ClientId, ClientResponseInterests>,
     read_leader_addresses_from_stdin: bool,
+    proxy_id: ProxyId,
 }
 
 impl Proxy {
@@ -104,6 +105,7 @@ impl Proxy {
         let counter = 0;
         let locks = Locks::default();
         let response_interests = HashMap::new();
+        let proxy_id = ProxyId::new_v4();
 
         Ok(Proxy {
             subsys,
@@ -119,13 +121,14 @@ impl Proxy {
             response_interests,
             // TODO get from config
             read_leader_addresses_from_stdin: true,
+            proxy_id,
         })
     }
 
     async fn run(mut self) -> WorterbuchAppResult<()> {
         info!(
-            "Running in PROXY mode. Leaders: {:?}",
-            self.leader_addresses
+            "Running in PROXY mode. Proxy ID: {}, leaders: {:?}",
+            self.proxy_id, self.leader_addresses
         );
 
         self.worterbuch
@@ -521,6 +524,7 @@ impl Proxy {
             auth_token,
             locks: self.locks.clone(),
             connected_clients,
+            proxy_id: self.proxy_id,
         }));
 
         proxy_request_tx.send(handshake).await?;
