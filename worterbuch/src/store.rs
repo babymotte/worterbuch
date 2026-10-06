@@ -1203,7 +1203,7 @@ impl Store {
             }
             Ok((new_holder, lost_txs))
         } else {
-            warn!("Node {path:?} is not locked.");
+            debug!("Node {path:?} is not locked.");
             Err(WorterbuchError::KeyIsNotLocked(path.join("/")))
         }
     }

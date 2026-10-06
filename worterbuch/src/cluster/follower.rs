@@ -272,7 +272,7 @@ fn init_request_sender(
 ) -> mpsc::Sender<ProxyMessage> {
     let (tx, rx) = mpsc::channel(config.channel_buffer_size);
     let send_timeout = config.send_timeout;
-    subsys.spawn("proxy_request_sender", move |s| {
+    subsys.spawn("follower_request_sender", move |s| {
         request_sender_loop(s, leader_tx, rx, send_timeout, leader_addr)
     });
     tx
