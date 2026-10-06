@@ -319,7 +319,10 @@ impl<'a> LeaderConnection<'a> {
                     grave_goods,
                     last_will,
                 });
-                self.queue_leader_request(request).await?;
+                let res = self
+                    .queue_leader_request(request)
+                    .await
+                    .wrap_err("failed to forward client disconnect to leader");
                 cluster::process_api_call(
                     self.worterbuch,
                     WbFunction::Disconnected(client_id, protocol, socket_addr),
@@ -327,6 +330,7 @@ impl<'a> LeaderConnection<'a> {
                 .await;
                 self.locks.client_disconnected(client_id);
                 self.drop_response_interests(client_id);
+                res?;
             }
             WbFunction::ProtocolSwitched(client_id, interface, version) => {
                 let client_message =
