@@ -14,6 +14,10 @@ use std::{
     io::{self},
     net::SocketAddr,
     ops::ControlFlow,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::sync::{mpsc, oneshot};
 use tosub::Subsystem;
@@ -31,6 +35,7 @@ use worterbuch_common::{
 pub struct VirtualProxyClientHandler {
     authorized: Option<JwtClaims>,
     proto: Proto,
+    disconnect_handled: Arc<AtomicBool>,
 }
 
 pub enum VirtualServerMessage {
@@ -137,37 +142,41 @@ impl VirtualProxyServer {
         worterbuch: CloneableWbApi,
     ) -> miette::Result<ServerMessageLazyBroadcaster> {
         trace!(enter = "spawn_virtual_client", %client_id);
+        let proxied_protocol = Protocol::Proxied(Box::new(protocol.clone()));
+
+        // register the client before anything else so that the registration is guaranteed to be processed
+        // before any request or disconnect of this client; on error (e.g. a client ID collision with a stale
+        // connection of the same proxy) nothing has been spawned yet, so the existing registration is left untouched
+        worterbuch
+            .connected(client_id, None, proxied_protocol.clone())
+            .await
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "could not register proxied client {client_id} ({}/{:?})",
+                    self.proxy_address, protocol
+                )
+            })?;
+
         let auth_required = config.auth_token_key.is_some();
         let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
+        let disconnect_handled = Arc::new(AtomicBool::new(false));
 
         let send_tx = self.send_tx.clone();
-        let p = protocol.clone();
         let wb = worterbuch.named(client_id);
         let proxy_addr = self.proxy_address;
-        let parent_subsys = self.subsys.clone();
+        let dh = disconnect_handled.clone();
         self.subsys
             .spawn("leader-response-forwarder", move |s| async move {
-                let proto = Protocol::Proxied(Box::new(p.clone()));
-                if let Err(e) = response_forwarder_loop(
-                    s,
-                    send_client_rx,
-                    send_tx,
-                    client_id,
-                    &wb,
-                    proto.clone(),
-                    proxy_addr,
-                )
-                .await
-                {
-                    error!(
-                        "Error in leader response forwarder loop error of client {client_id}: {e}"
-                    );
-                    parent_subsys
-                        .request_local_shutdown_because("response forwarder stopped with an error");
+                response_forwarder_loop(s, send_client_rx, send_tx, client_id, proxy_addr).await;
+
+                if dh.swap(true, Ordering::AcqRel) {
+                    debug!("Disconnect of client {client_id} has already been handled.");
+                    return Ok(());
                 }
 
                 info!("Client {client_id} disconnected.");
-                wb.disconnected(client_id, proto, None)
+                wb.disconnected(client_id, proxied_protocol, None)
                     .await
                     .wrap_err("could not notify core system about client disconnect")
             });
@@ -184,6 +193,7 @@ impl VirtualProxyServer {
         let client = VirtualProxyClientHandler {
             authorized: None,
             proto,
+            disconnect_handled,
         };
 
         self.clients.insert(client_id, client);
@@ -204,11 +214,17 @@ impl VirtualProxyServer {
     ) -> miette::Result<()> {
         trace!(enter = "stop_virtual_client", %client_id);
         debug!("Stopping virtual client {client_id} …");
-        if self.clients.remove(&client_id).is_none() {
+        let Some(client) = self.clients.remove(&client_id) else {
             warn!(
                 "Received disconnect for unknown client {client_id} ({}/{:?})",
                 self.proxy_address, protocol
             );
+            trace!(exit = "stop_virtual_client");
+            return Ok(());
+        };
+
+        if client.disconnect_handled.swap(true, Ordering::AcqRel) {
+            debug!("Disconnect of virtual client {client_id} has already been handled.");
             trace!(exit = "stop_virtual_client");
             return Ok(());
         }
@@ -218,7 +234,11 @@ impl VirtualProxyServer {
         );
 
         self.worterbuch
-            .disconnected(client_id, protocol.clone(), None)
+            .disconnected(
+                client_id,
+                Protocol::Proxied(Box::new(protocol.clone())),
+                None,
+            )
             .await?;
 
         info!(
@@ -368,15 +388,9 @@ async fn response_forwarder_loop(
     mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: uuid::Uuid,
-    worterbuch: &CloneableWbApi,
-    protocol: Protocol,
     proxy_addr: SocketAddr,
-) -> miette::Result<()> {
+) {
     trace!(enter = "response_forwarder_loop", %client_id);
-    worterbuch
-        .connected(client_id, None, protocol.clone())
-        .await
-        .into_diagnostic()?;
 
     while_select! {
         biased;
@@ -385,7 +399,6 @@ async fn response_forwarder_loop(
     }
 
     trace!(exit = "response_forwarder_loop");
-    Ok(())
 }
 
 async fn forward_leader_response(
