@@ -30,7 +30,6 @@ mod cluster;
 mod config;
 pub mod error;
 pub(crate) mod license;
-pub mod logging;
 #[cfg(not(feature = "jemalloc"))]
 mod mem_tools;
 mod persistence;

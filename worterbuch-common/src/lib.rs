@@ -21,6 +21,7 @@
 pub mod benchmark;
 
 pub mod error;
+pub mod logging;
 pub mod protocol;
 pub mod socket;
 

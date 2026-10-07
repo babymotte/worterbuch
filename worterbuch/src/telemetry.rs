@@ -30,9 +30,10 @@ use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use worterbuch_common::error::ConfigResult;
-
-use crate::logging::{self, ReloadableTargets};
+use worterbuch_common::{
+    error::ConfigResult,
+    logging::{self, ReloadableTargets},
+};
 
 pub struct TelemetryDropGuard {
     logger_provider: SdkLoggerProvider,

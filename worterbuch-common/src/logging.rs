@@ -17,13 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::error::ConfigResult;
+use std::time::Duration;
 use std::{env, io};
+use tosub::Subsystem;
+use totils::while_select;
 use tracing::level_filters::LevelFilter;
 use tracing::{debug, info};
 use tracing_subscriber::{
     Layer, Registry, filter::Targets, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt,
 };
-use worterbuch_common::error::ConfigResult;
 
 pub fn init() -> ConfigResult<reload::Handle<impl Layer<Registry>, Registry>> {
     let (log_layer, log_handle) = console_log_layer();
@@ -60,43 +63,12 @@ where
     (stderr_layer, targets_reload_handler)
 }
 
-fn read_targets(env: String) -> Option<Targets> {
-    let targets_str = std::fs::read_to_string(&env)
-        .ok()
-        .and_then(|c| extract_targets_str(&c));
-
-    let targets_str = targets_str.unwrap_or(env);
-
-    eprintln!("Log targets {:?}", &targets_str);
-
-    targets_str.parse().ok()
-}
-
-async fn read_targets_async(env: String) -> Option<Targets> {
-    let targets_str = tokio::fs::read_to_string(&env)
-        .await
-        .ok()
-        .and_then(|c| extract_targets_str(&c));
-
-    let targets_str = targets_str.unwrap_or(env);
-
-    debug!("Updated log targets {:?}", &targets_str);
-
-    targets_str.parse().ok()
-}
-
-fn extract_targets_str(file_content: &str) -> Option<String> {
-    file_content
-        .lines()
-        .find(|l| !l.starts_with("#"))
-        .map(|l| l.trim().to_owned())
-}
-
-pub async fn reload_log_targets<S>(handle: &ReloadableTargets<S>) -> ConfigResult<()>
+pub async fn reload_log_targets_from_env<S>(handle: &ReloadableTargets<S>) -> ConfigResult<()>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
     let targets = env::var("WORTERBUCH_LOG").ok();
+
     let targets = if let Some(t) = targets {
         read_targets_async(t)
             .await
@@ -107,5 +79,72 @@ where
 
     handle.modify(|filter| *filter = targets)?;
 
+    Ok(())
+}
+
+pub fn reload_log_targets<S>(
+    handle: &ReloadableTargets<S>,
+    targets: Option<String>,
+) -> ConfigResult<()>
+where
+    S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
+{
+    let targets = read_targets_from_string(targets, "info")
+        .unwrap_or_else(|| Targets::new().with_default(LevelFilter::INFO));
+    handle.modify(|filter| *filter = targets)?;
+
+    Ok(())
+}
+
+fn read_targets(env: String) -> Option<Targets> {
+    read_targets_from_string(std::fs::read_to_string(&env).ok(), env)
+}
+
+async fn read_targets_async(env: String) -> Option<Targets> {
+    read_targets_from_string(tokio::fs::read_to_string(&env).await.ok(), env)
+}
+
+fn read_targets_from_string(
+    targets: Option<String>,
+    default: impl Into<String>,
+) -> Option<Targets> {
+    let targets_str = targets.and_then(|c| extract_targets_str(&c));
+
+    let targets_str = targets_str.unwrap_or_else(|| default.into());
+
+    debug!("Updated log targets {:?}", &targets_str);
+
+    targets_str.parse().ok()
+}
+
+fn extract_targets_str(targets_str: &str) -> Option<String> {
+    targets_str
+        .lines()
+        .find(|l| !l.starts_with("#"))
+        .map(|l| l.trim().to_owned())
+}
+
+pub fn start_log_targets_reload_loop(
+    subsys: &Subsystem,
+    log_reload_handle: ReloadableTargets<Registry>,
+    reload_interval: Duration,
+) {
+    subsys.spawn("log-targets-scan", move |s| {
+        scan_log_targets(s, log_reload_handle, reload_interval)
+    });
+}
+
+async fn scan_log_targets(
+    subsys: Subsystem,
+    log_reload_handle: ReloadableTargets<Registry>,
+    reload_interval: Duration,
+) -> miette::Result<()> {
+    while_select! {
+        _ = subsys.shutdown_requested() => break,
+        _ = tokio::time::sleep(reload_interval) => if let Err(e) = reload_log_targets_from_env(&log_reload_handle).await {
+            eprintln!("Failed to reload log targets: {e}");
+            break;
+        },
+    }
     Ok(())
 }

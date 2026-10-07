@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::config::TelemetryConfig;
 use crate::{config::EndpointConfig, error::WorterbuchClusterOrchestratorResult};
 use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
@@ -22,28 +23,19 @@ use opentelemetry_resource_detectors::{
     HostResourceDetector, OsResourceDetector, ProcessResourceDetector,
 };
 use opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace::SdkTracerProvider};
-use std::io;
-use supports_color::Stream;
 use tracing::{info, level_filters::LevelFilter};
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-
-use crate::config::TelemetryConfig;
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt,
+};
+use worterbuch_common::logging::{self, ReloadableTargets};
 
 pub async fn init(
     config: Option<&TelemetryConfig>,
     node_id: String,
-) -> WorterbuchClusterOrchestratorResult<()> {
-    let subscriber = tracing_subscriber::registry().with(
-        fmt::Layer::new()
-            .with_ansi(supports_color::on(Stream::Stderr).is_some())
-            .with_writer(io::stderr)
-            .with_filter(
-                EnvFilter::builder()
-                    .with_default_directive(LevelFilter::INFO.into())
-                    .with_env_var("WORTERBUCH_LOG")
-                    .from_env_lossy(),
-            ),
-    );
+) -> WorterbuchClusterOrchestratorResult<ReloadableTargets<Registry>> {
+    let (log_layer, log_handle) = logging::console_log_layer();
+
+    let subscriber = tracing_subscriber::registry().with(log_layer);
 
     if let Some(config) = config {
         global::set_text_map_propagator(TraceContextPropagator::new());
@@ -96,5 +88,5 @@ pub async fn init(
         info!("Telemetry disabled.");
     }
 
-    Ok(())
+    Ok(log_handle)
 }

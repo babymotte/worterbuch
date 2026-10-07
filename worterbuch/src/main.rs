@@ -21,7 +21,8 @@ use clap::Parser;
 use miette::{Context, IntoDiagnostic};
 use std::env;
 use tokio::sync::mpsc;
-use worterbuch::{Args, Config, logging::reload_log_targets, run_worterbuch};
+use worterbuch::{Args, Config, run_worterbuch};
+use worterbuch_common::logging::start_log_targets_reload_loop;
 
 fn main() -> miette::Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -98,17 +99,6 @@ async fn start() -> miette::Result<()> {
         logging::init()?
     };
 
-    if let Some(reload_interval) = reload_interval {
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(reload_interval).await;
-                if let Err(e) = reload_log_targets(&log_reload_handle).await {
-                    eprintln!("Failed to reload log targets: {e}");
-                }
-            }
-        });
-    }
-
     let cfg = config.clone();
 
     let (stdin_tx, stdin_rx) = mpsc::channel(cfg.channel_buffer_size);
@@ -130,7 +120,12 @@ async fn start() -> miette::Result<()> {
     }
 
     root_builder
-        .start(async |s| run_worterbuch(s, config, Some(stdin_rx)).await)
+        .start(move |s| async move {
+            if let Some(reload_interval) = reload_interval {
+                start_log_targets_reload_loop(&s, log_reload_handle, reload_interval);
+            }
+            run_worterbuch(s, config, Some(stdin_rx)).await
+        })
         .await?;
 
     Ok(())
