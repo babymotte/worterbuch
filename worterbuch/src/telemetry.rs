@@ -27,10 +27,12 @@ use opentelemetry_sdk::{
 };
 use std::env;
 use tracing::{info, level_filters::LevelFilter};
-use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt,
+};
 use worterbuch_common::error::ConfigResult;
 
-use crate::logging;
+use crate::logging::{self, ReloadableTargets};
 
 pub struct TelemetryDropGuard {
     logger_provider: SdkLoggerProvider,
@@ -52,8 +54,8 @@ pub async fn init(
     node_id: String,
     cluster_role: Option<String>,
     #[cfg(feature = "tokio-console")] tokio_console_port: Option<u16>,
-) -> ConfigResult<Option<TelemetryDropGuard>> {
-    let log_layer = logging::console_log_layer();
+) -> ConfigResult<(Option<TelemetryDropGuard>, ReloadableTargets<Registry>)> {
+    let (log_layer, log_handle) = logging::console_log_layer();
 
     let subscriber = tracing_subscriber::registry().with(log_layer);
 
@@ -135,5 +137,5 @@ pub async fn init(
         None
     };
 
-    Ok(drop_guard)
+    Ok((drop_guard, log_handle))
 }

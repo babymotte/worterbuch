@@ -44,40 +44,65 @@ pub enum ConfigError {
     InvalidWildcard(String),
     #[error("invalid multi-wildcard: {0}; multi-wildcard must be a single ASCII char")]
     InvalidMultiWildcard(String),
-    #[error("invalid port: {0}")]
-    InvalidPort(ParseIntError),
-    #[error("invalid interval: {0}")]
-    InvalidInterval(ParseIntError),
+    #[error("invalid port")]
+    InvalidPort(#[source] ParseIntError),
+    #[error("invalid interval")]
+    InvalidInterval(#[source] ParseIntError),
     #[error("license file could not be loaded: {0}")]
     InvalidLicense(String),
     #[error("{0}")]
     InsufficientLicense(String),
-    #[error("could not load config file: {0}")]
-    IoError(#[from] io::Error),
-    #[error("could not load config file: {0}")]
-    YamlError(#[from] serde_yaml::Error),
+    #[error("could not load config file")]
+    IoError(
+        #[from]
+        #[source]
+        io::Error,
+    ),
+    #[error("could not load config file")]
+    YamlError(
+        #[from]
+        #[source]
+        serde_yaml::Error,
+    ),
     #[cfg(feature = "telemetry")]
-    #[error("error setting up telemetry: {0}")]
-    ExporterBuildError(#[from] ExporterBuildError),
-    #[error("parse error: {0}")]
-    ParseError(#[from] serde_json::Error),
-    #[error("invalid leader address(es) {1:?}: {0}")]
-    InvalidLeaderAddress(io::Error, Vec<String>),
-    #[error("invalid TCP bind address: {addr}: {source}")]
+    #[error("error setting up telemetry")]
+    ExporterBuildError(
+        #[from]
+        #[source]
+        ExporterBuildError,
+    ),
+    #[error("parse error")]
+    ParseError(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
+    #[error("invalid leader address(es) {1:?}")]
+    InvalidLeaderAddress(#[source] io::Error, Vec<String>),
+    #[error("invalid TCP bind address: {addr}")]
     InvalidTcpBindAddress {
         addr: String,
+        #[source]
         source: std::net::AddrParseError,
     },
-    #[error("invalid WS bind address: {addr}: {source}")]
+    #[error("invalid WS bind address: {addr}")]
     InvalidWsBindAddress {
         addr: String,
+        #[source]
         source: std::net::AddrParseError,
     },
-    #[error("invalid QUIC bind address: {addr}: {source}")]
+    #[error("invalid QUIC bind address: {addr}")]
     InvalidQuicBindAddress {
         addr: String,
+        #[source]
         source: std::net::AddrParseError,
     },
+    #[error("could not reload log config")]
+    LogReloadError(
+        #[from]
+        #[source]
+        tracing_subscriber::reload::Error,
+    ),
 }
 
 pub trait ConfigIntContext<I> {

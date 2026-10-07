@@ -21,7 +21,7 @@ use clap::Parser;
 use miette::{Context, IntoDiagnostic};
 use std::env;
 use tokio::sync::mpsc;
-use worterbuch::{Args, Config, run_worterbuch};
+use worterbuch::{Args, Config, logging::reload_log_targets, run_worterbuch};
 
 fn main() -> miette::Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -63,8 +63,10 @@ async fn start() -> miette::Result<()> {
         .into_diagnostic()
         .wrap_err("Failed to create config")?;
 
+    let reload_interval = config.log_targets_reload_interval;
+
     #[cfg(feature = "telemetry")]
-    let _telemetry_drop_guard = {
+    let (_telemetry_drop_guard, log_reload_handle) = {
         use worterbuch::{Commands, telemetry};
 
         let hostname = hostname::get()
@@ -76,7 +78,7 @@ async fn start() -> miette::Result<()> {
             Some(Commands::Proxy { .. }) => Some("proxy".to_owned()),
             None => None,
         };
-        let drop_guard = telemetry::init(
+        let (drop_guard, reload_handle) = telemetry::init(
             args.instance_name
                 .clone()
                 .unwrap_or_else(|| hostname.to_string_lossy().into_owned()),
@@ -87,14 +89,25 @@ async fn start() -> miette::Result<()> {
         .await
         .into_diagnostic()
         .wrap_err("telemetry initialization failed")?;
-        drop_guard
+        (drop_guard, reload_handle)
     };
 
     #[cfg(not(feature = "telemetry"))]
-    {
+    let log_reload_handle = {
         use worterbuch::logging;
-        logging::init()?;
+        logging::init()?
     };
+
+    if let Some(reload_interval) = reload_interval {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(reload_interval).await;
+                if let Err(e) = reload_log_targets(&log_reload_handle).await {
+                    eprintln!("Failed to reload log targets: {e}");
+                }
+            }
+        });
+    }
 
     let cfg = config.clone();
 

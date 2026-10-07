@@ -1,6 +1,7 @@
 /target/*
 /data/*
 .env
+.log
 .dockerignore
 /.git/*
 /.github/*

@@ -55,6 +55,7 @@ tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "io-util", "time", "macros"] }
 tokio-tungstenite-wasm = { workspace = true, optional = true }
 tracing = { workspace = true }
+tracing-subscriber.workspace = true
 tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 

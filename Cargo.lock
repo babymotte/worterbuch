@@ -6680,6 +6680,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite-wasm",
  "tracing",
+ "tracing-subscriber",
  "tungstenite 0.30.0",
  "uuid",
 ]

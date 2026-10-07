@@ -177,6 +177,7 @@ pub struct Config {
     pub exit_on_stdin_close: bool,
     pub license_file: Option<PathBuf>,
     pub initial_sync_timeout: Duration,
+    pub log_targets_reload_interval: Option<Duration>,
 }
 
 impl Config {
@@ -403,6 +404,11 @@ impl Config {
             self.tokio_console_port = Some(port);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_LOG_TARGETS_RELOAD_INTERVAL") {
+            let secs = val.parse().to_interval()?;
+            self.log_targets_reload_interval = Some(Duration::from_secs(secs));
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -456,6 +462,7 @@ impl Config {
             exit_on_stdin_close: false,
             license_file: None,
             initial_sync_timeout: Duration::from_secs(10),
+            log_targets_reload_interval: None,
         };
         config.load_env()?;
         if let Some(args) = args {
