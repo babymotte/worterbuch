@@ -85,7 +85,7 @@ impl UnixClientSocket {
     pub async fn close(self) -> ConnectionResult<()> {
         drop(self.tx);
         drop(self.rx);
-        self.closed.await.ok();
+        let _ = self.closed.await;
         Ok(())
     }
 }
@@ -107,12 +107,12 @@ where
         )
         .await
         {
-            error!("Error sending TCP message: {e}");
+            error!("Error sending UNIX message: {e}");
             break;
         }
     }
 
     drop(tx);
 
-    closed_tx.send(()).ok();
+    let _ = closed_tx.send(());
 }

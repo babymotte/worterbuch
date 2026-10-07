@@ -114,10 +114,10 @@ impl PersistentRedbStore {
 
 impl PersistentStorage for PersistentRedbStore {
     async fn update_value(&self, key: &Key, value: &ValueEntry) -> PersistenceResult<()> {
-        self.tx
+        let _ = self
+            .tx
             .send(StoreAction::Update(key.clone(), value.clone()))
-            .await
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -126,10 +126,10 @@ impl PersistentStorage for PersistentRedbStore {
         client_id: ClientId,
         grave_goods: Option<GraveGoods>,
     ) -> PersistenceResult<()> {
-        self.tx
+        let _ = self
+            .tx
             .send(StoreAction::UpdateGraveGoods(client_id, grave_goods))
-            .await
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -138,37 +138,37 @@ impl PersistentStorage for PersistentRedbStore {
         client_id: ClientId,
         last_will: Option<LastWill>,
     ) -> PersistenceResult<()> {
-        self.tx
+        let _ = self
+            .tx
             .send(StoreAction::UpdateLastWill(client_id, last_will))
-            .await
-            .ok();
+            .await;
         Ok(())
     }
 
     async fn delete_value(&self, key: &Key) -> PersistenceResult<()> {
-        self.tx.send(StoreAction::Delete(key.clone())).await.ok();
+        let _ = self.tx.send(StoreAction::Delete(key.clone())).await;
         Ok(())
     }
 
     async fn flush(&mut self, _: &mut Worterbuch) -> PersistenceResult<()> {
         trace!("Triggering ReDB flush …");
         let (tx, rx) = oneshot::channel();
-        self.tx.send(StoreAction::Flush(tx)).await.ok();
+        let _ = self.tx.send(StoreAction::Flush(tx)).await;
         trace!("Flush requested.");
-        rx.await.ok();
+        rx.await?;
         trace!("ReDB flushed.");
         Ok(())
     }
 
     async fn load(&self, _: &Config) -> PersistenceResult<Worterbuch> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(StoreAction::Load(tx)).await.ok();
+        let _ = self.tx.send(StoreAction::Load(tx)).await;
 
         Ok(rx.await?)
     }
 
     async fn clear(&self) -> PersistenceResult<()> {
-        self.tx.send(StoreAction::Clear).await.ok();
+        let _ = self.tx.send(StoreAction::Clear).await;
         Ok(())
     }
 }
@@ -340,7 +340,7 @@ fn flush(db: &mut Database, tx: oneshot::Sender<()>) -> PersistenceResult<()> {
     trace!("Compacting ReDB …");
     db.compact()?;
     trace!("ReDB compacted.");
-    tx.send(()).ok();
+    let _ = tx.send(());
     Ok(())
 }
 
@@ -364,8 +364,7 @@ fn load(
 
     store.count_entries();
     info!("Data load complete.");
-    tx.send(Worterbuch::with_store(store, config.to_owned()))
-        .ok();
+    let _ = tx.send(Worterbuch::with_store(store, config.to_owned()));
     Ok(())
 }
 

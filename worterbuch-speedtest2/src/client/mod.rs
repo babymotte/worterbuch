@@ -170,7 +170,7 @@ pub async fn create_tcp_client(
                 _ = s.shutdown_requested() => break,
                 line = lines.next_line() => {
                     if let Ok(Some(line)) = line {
-                        lines_tx.send(line).await.ok();
+                        let _ = lines_tx.send(line).await;
                     } else {
                         break;
                     }

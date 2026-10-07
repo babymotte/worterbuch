@@ -118,7 +118,7 @@ impl Lock {
             if let Some(candidate) = self.candidates.pop_front() {
                 self.holder = candidate.holder;
                 for tx in candidate.on_acquired {
-                    tx.send(()).ok();
+                    let _ = tx.send(());
                 }
                 (true, Some(self.holder.client_id), on_lost)
             } else {
@@ -1150,7 +1150,7 @@ impl Store {
             Some(lock) => {
                 if client_id == lock.holder.client_id {
                     debug!("Client {client_id} already holds the lock on {path:?}");
-                    lock_acquired_tx.send(()).ok();
+                    let _ = lock_acquired_tx.send(());
                     Some(client_id)
                 } else {
                     lock.queue(client_id, lock_acquired_tx, lock_lost_tx);
@@ -1159,7 +1159,7 @@ impl Store {
             }
             None => {
                 node.set_value(Lock::new(client_id, lock_lost_tx));
-                lock_acquired_tx.send(()).ok();
+                let _ = lock_acquired_tx.send(());
                 Some(client_id)
             }
         };

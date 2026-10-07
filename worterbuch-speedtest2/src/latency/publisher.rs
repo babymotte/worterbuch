@@ -38,22 +38,22 @@ pub struct PublisherApi {
 impl PublisherApi {
     pub fn prepare(&mut self) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
-        self.prepare_tx
+        let _ = self
+            .prepare_tx
             .take()
             .expect("prepare can only be called once")
-            .send(tx)
-            .ok();
+            .send(tx);
         debug!("Sent prepare signal to publisher {}", self.id);
         rx
     }
 
     pub fn run(&mut self) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
-        self.run_tx
+        let _ = self
+            .run_tx
             .take()
             .expect("run can only be called once")
-            .send(tx)
-            .ok();
+            .send(tx);
         debug!("Sent run signal to publisher {}", self.id);
         rx
     }
@@ -189,7 +189,7 @@ impl LatencyTestPublisher {
         );
 
         // send prepare done signal
-        prepared_tx.send(()).ok();
+        let _ = prepared_tx.send(());
 
         #[cfg(feature = "trace")]
         trace!(
@@ -247,7 +247,7 @@ impl LatencyTestPublisher {
         );
 
         // send run done signal
-        run_tx.send(()).ok();
+        let _ = run_tx.send(());
 
         #[cfg(feature = "trace")]
         trace!("Publisher {} sent run done signal. Test complete.", self.id);

@@ -60,7 +60,7 @@ impl LocalClientSocket {
     pub async fn close(self) -> ConnectionResult<()> {
         drop(self.tx);
         drop(self.rx);
-        self.closed.await.ok();
+        let _ = self.closed.await;
         Ok(())
     }
 
@@ -93,27 +93,25 @@ async fn forward_loop(
     while let Some(client_message) = crx.recv().await {
         match client_message {
             ClientMessage::ProtocolSwitchRequest(_) => {
-                stx.send(ServerMessage::Ack(Ack { transaction_id: 0 })).ok();
+                let _ = stx.send(ServerMessage::Ack(Ack { transaction_id: 0 }));
             }
             ClientMessage::AuthorizationRequest(_) => {
-                stx.send(ServerMessage::Err(Err {
+                let _ = stx.send(ServerMessage::Err(Err {
                     error_code: ErrorCode::AlreadyAuthorized,
                     metadata: "No authorization required".to_owned(),
                     transaction_id: 0,
-                }))
-                .ok();
+                }));
             }
             ClientMessage::Get(Get {
                 transaction_id,
                 key,
             }) => match api.get(key).await {
                 Ok(val) => {
-                    stx.send(ServerMessage::State(State {
+                    let _ = stx.send(ServerMessage::State(State {
                         event: StateEvent::Value(val),
                         transaction_id,
                         trace: None,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -122,14 +120,13 @@ async fn forward_loop(
                 key,
             }) => match api.cget(key).await {
                 Ok(val) => {
-                    stx.send(ServerMessage::CState(CState {
+                    let _ = stx.send(ServerMessage::CState(CState {
                         event: CStateEvent {
                             value: val.0,
                             version: val.1,
                         },
                         transaction_id,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -138,13 +135,12 @@ async fn forward_loop(
                 request_pattern,
             }) => match api.pget(request_pattern.clone()).await {
                 Ok(kvps) => {
-                    stx.send(ServerMessage::PState(PState {
+                    let _ = stx.send(ServerMessage::PState(PState {
                         event: PStateEvent::KeyValuePairs(kvps),
                         request_pattern,
                         transaction_id,
                         trace: None,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -157,7 +153,7 @@ async fn forward_loop(
                 .await
             {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -171,7 +167,7 @@ async fn forward_loop(
                 .await
             {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -180,7 +176,7 @@ async fn forward_loop(
                 key,
             }) => match api.spub_init(transaction_id, key, INTERNAL_CLIENT_ID).await {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -189,7 +185,7 @@ async fn forward_loop(
                 value,
             }) => match api.spub(transaction_id, value, INTERNAL_CLIENT_ID).await {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -202,7 +198,7 @@ async fn forward_loop(
                 .await
             {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -225,7 +221,7 @@ async fn forward_loop(
             {
                 Ok((sub_rx, _)) => {
                     spawn_forward_sub_events_loop(sub_rx, transaction_id, stx.clone());
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -254,14 +250,14 @@ async fn forward_loop(
                         request_pattern,
                         stx.clone(),
                     );
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
             ClientMessage::Unsubscribe(Unsubscribe { transaction_id }) => {
                 match api.unsubscribe(INTERNAL_CLIENT_ID, transaction_id).await {
                     Ok(_) => {
-                        stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                     }
                     Result::Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
@@ -271,12 +267,11 @@ async fn forward_loop(
                 key,
             }) => match api.delete(transaction_id, key, INTERNAL_CLIENT_ID).await {
                 Ok(val) => {
-                    stx.send(ServerMessage::State(State {
+                    let _ = stx.send(ServerMessage::State(State {
                         transaction_id,
                         event: StateEvent::Deleted(val),
                         trace: None,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -295,15 +290,14 @@ async fn forward_loop(
             {
                 Ok(kvps) => {
                     if quiet.unwrap_or(false) {
-                        stx.send(ServerMessage::PState(PState {
+                        let _ = stx.send(ServerMessage::PState(PState {
                             transaction_id,
                             request_pattern,
                             event: PStateEvent::Deleted(kvps),
                             trace: None,
-                        }))
-                        .ok();
+                        }));
                     } else {
-                        stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                     }
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
@@ -313,12 +307,11 @@ async fn forward_loop(
                 parent,
             }) => match api.ls(parent).await {
                 Ok(children) => {
-                    stx.send(ServerMessage::LsState(LsState {
+                    let _ = stx.send(ServerMessage::LsState(LsState {
                         transaction_id,
                         children,
                         trace: None,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -327,12 +320,11 @@ async fn forward_loop(
                 parent_pattern,
             }) => match api.pls(parent_pattern).await {
                 Ok(children) => {
-                    stx.send(ServerMessage::LsState(LsState {
+                    let _ = stx.send(ServerMessage::LsState(LsState {
                         transaction_id,
                         children,
                         trace: None,
-                    }))
-                    .ok();
+                    }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -351,14 +343,14 @@ async fn forward_loop(
             {
                 Ok((lssub_rx, _)) => {
                     spawn_forward_lssub_events_loop(lssub_rx, transaction_id, stx.clone());
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
             ClientMessage::UnsubscribeLs(UnsubscribeLs { transaction_id }) => {
                 match api.unsubscribe_ls(INTERNAL_CLIENT_ID, transaction_id).await {
                     Ok(_) => {
-                        stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                     }
                     Result::Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
@@ -368,7 +360,7 @@ async fn forward_loop(
                 key,
             }) => match api.lock(transaction_id, key, INTERNAL_CLIENT_ID).await {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -380,7 +372,7 @@ async fn forward_loop(
                 .await
             {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -392,7 +384,7 @@ async fn forward_loop(
                 .await
             {
                 Ok(_) => {
-                    stx.send(ServerMessage::Ack(Ack { transaction_id })).ok();
+                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
                 }
                 Result::Err(e) => handle_error(&stx, e, transaction_id).await,
             },
@@ -413,7 +405,7 @@ async fn handle_error(
         transaction_id,
         metadata: json!(err_msg).to_string(),
     };
-    tx.send(ServerMessage::Err(err)).ok();
+    let _ = tx.send(ServerMessage::Err(err));
 }
 
 fn spawn_forward_sub_events_loop(

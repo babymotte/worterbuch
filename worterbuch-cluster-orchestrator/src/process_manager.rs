@@ -289,17 +289,17 @@ impl ChildProcessManager {
 
     #[instrument(skip(self), fields())]
     pub async fn restart(&mut self, command: CommandDefinition) {
-        self.api_tx
+        let _ = self
+            .api_tx
             .send(ChildProcessMessage::Restart(command))
-            .await
-            .ok();
+            .await;
     }
 
     #[instrument(skip(self), err)]
     pub async fn stop(&mut self) -> Result<()> {
         self.subsys
             .request_local_shutdown_because("Child process manager stop requested");
-        self.subsys.join().await.ok();
+        let _ = self.subsys.join().await;
         Ok(())
     }
 }

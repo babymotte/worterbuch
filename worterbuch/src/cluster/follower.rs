@@ -232,7 +232,7 @@ async fn send_handshake(
         auth_token,
     }));
 
-    follower_request_tx.send(handshake).await.ok();
+    let _ = follower_request_tx.send(handshake).await;
 }
 
 async fn try_process_leader_message(

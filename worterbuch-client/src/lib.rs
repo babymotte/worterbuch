@@ -1378,7 +1378,7 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
         } else {
             debug!("Connection closed.");
         }
-        disco_tx.send(()).ok();
+        let _ = disco_tx.send(());
     });
 
     Worterbuch(Arc::new(WorterbuchConnection {
@@ -2287,7 +2287,7 @@ fn connected(
         } else {
             debug!("Connection closed.");
         }
-        on_disconnect.send(()).ok();
+        let _ = on_disconnect.send(());
     });
 
     Ok(Worterbuch(Arc::new(WorterbuchConnection::new(
@@ -2365,7 +2365,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SetAsync(key, value, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Set(Set {
                     transaction_id,
                     key,
@@ -2382,7 +2382,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::CSetAsync(key, value, version, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::CSet(CSet {
                     transaction_id,
                     key,
@@ -2398,7 +2398,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SPubInitAsync(key, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::SPubInit(SPubInit {
                     transaction_id,
                     key,
@@ -2412,7 +2412,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SPubAsync(transaction_id, value, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::SPub(SPub {
                     transaction_id,
                     value,
@@ -2427,7 +2427,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::PublishAsync(key, value, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Publish(Publish {
                     transaction_id,
                     key,
@@ -2442,7 +2442,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::GetAsync(key, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Get(Get {
                     transaction_id,
                     key,
@@ -2456,7 +2456,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::CGetAsync(key, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::CGet(Get {
                     transaction_id,
                     key,
@@ -2470,7 +2470,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::PGetAsync(request_pattern, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::PGet(PGet {
                     transaction_id,
                     request_pattern,
@@ -2484,7 +2484,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::DeleteAsync(key, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Delete(Delete {
                     transaction_id,
                     key,
@@ -2499,7 +2499,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::PDeleteAsync(request_pattern, quiet, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::PDelete(PDelete {
                     transaction_id,
                     request_pattern,
@@ -2514,7 +2514,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::LsAsync(parent, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Ls(Ls {
                     transaction_id,
                     parent,
@@ -2528,7 +2528,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::PLsAsync(parent_pattern, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::PLs(PLs {
                     transaction_id,
                     parent_pattern,
@@ -2553,7 +2553,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SubscribeAsync(key, unique, callback, live_only, send_traces) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Subscribe(Subscribe {
                     transaction_id,
                     key,
@@ -2590,7 +2590,7 @@ async fn process_incoming_command(
                 live_only,
                 send_traces,
             ) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::PSubscribe(PSubscribe {
                     transaction_id,
                     request_pattern,
@@ -2609,7 +2609,7 @@ async fn process_incoming_command(
             Command::UnsubscribeAsync(transaction_id, callback) => {
                 callbacks.sub.remove(&transaction_id);
                 callbacks.psub.remove(&transaction_id);
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
             Command::SubscribeLs(parent, tid_callback, send_traces, children_callback) => {
@@ -2622,7 +2622,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::SubscribeLsAsync(parent, callback, send_traces) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::SubscribeLs(SubscribeLs {
                     transaction_id,
                     parent,
@@ -2638,7 +2638,7 @@ async fn process_incoming_command(
             }
             Command::UnsubscribeLsAsync(transaction_id, callback) => {
                 callbacks.subls.remove(&transaction_id);
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 Some(ClientMessage::Unsubscribe(Unsubscribe { transaction_id }))
             }
             Command::Lock(key, callback, lost_callback) => {
@@ -2650,7 +2650,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::LockAsync(key, callback, lost_callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 callbacks.lock_lost.insert(transaction_id, lost_callback);
                 Some(ClientMessage::Lock(Lock {
                     transaction_id,
@@ -2674,7 +2674,7 @@ async fn process_incoming_command(
                 }))
             }
             Command::ReleaseLockAsync(key, callback) => {
-                callback.send(transaction_id).ok();
+                let _ = callback.send(transaction_id);
                 callbacks.lock_lost.remove(&transaction_id);
                 Some(ClientMessage::ReleaseLock(Lock {
                     transaction_id,
@@ -2738,7 +2738,7 @@ fn deliver_generic(msg: &ServerMessage, callbacks: &mut Callbacks) {
 #[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.state.remove(&state.transaction_id) {
-        cb.send(Ok(state.clone())).ok();
+        let _ = cb.send(Ok(state.clone()));
     }
 
     if let Some(cb) = callbacks.sub.get(&state.transaction_id) {
@@ -2754,7 +2754,7 @@ async fn deliver_state(state: State, callbacks: &mut Callbacks) -> ConnectionRes
 #[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.cstate.remove(&state.transaction_id) {
-        cb.send(Ok(state)).ok();
+        let _ = cb.send(Ok(state));
     }
     Ok(())
 }
@@ -2762,7 +2762,7 @@ async fn deliver_cstate(state: CState, callbacks: &mut Callbacks) -> ConnectionR
 #[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.pstate.remove(&pstate.transaction_id) {
-        cb.send(Ok(pstate.clone())).ok();
+        let _ = cb.send(Ok(pstate.clone()));
     }
 
     if let Some(cb) = callbacks.psub.get(&pstate.transaction_id) {
@@ -2774,7 +2774,7 @@ async fn deliver_pstate(pstate: PState, callbacks: &mut Callbacks) -> Connection
 #[instrument(skip(callbacks), level = "trace", err)]
 async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<()> {
     if let Some(cb) = callbacks.lsstate.remove(&ls.transaction_id) {
-        cb.send(Ok(ls.clone())).ok();
+        let _ = cb.send(Ok(ls.clone()));
     }
 
     if let Some(cb) = callbacks.subls.get(&ls.transaction_id) {
@@ -2787,33 +2787,33 @@ async fn deliver_ls(ls: LsState, callbacks: &mut Callbacks) -> ConnectionResult<
 #[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_ack(ack: Ack, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.ack.remove(&ack.transaction_id) {
-        cb.send(Ok(ack)).ok();
+        let _ = cb.send(Ok(ack));
     }
 }
 
 #[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_lock_lost(lock_lost: LockLost, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.lock_lost.remove(&lock_lost.transaction_id) {
-        cb.send(lock_lost).ok();
+        let _ = cb.send(lock_lost);
     }
 }
 
 #[instrument(skip(callbacks), level = "trace", ret)]
 async fn deliver_err(err: Err, callbacks: &mut Callbacks) {
     if let Some(cb) = callbacks.ack.remove(&err.transaction_id) {
-        cb.send(Err(err.clone())).ok();
+        let _ = cb.send(Err(err.clone()));
     }
     if let Some(cb) = callbacks.state.remove(&err.transaction_id) {
-        cb.send(Err(err.clone())).ok();
+        let _ = cb.send(Err(err.clone()));
     }
     if let Some(cb) = callbacks.cstate.remove(&err.transaction_id) {
-        cb.send(Err(err.clone())).ok();
+        let _ = cb.send(Err(err.clone()));
     }
     if let Some(cb) = callbacks.pstate.remove(&err.transaction_id) {
-        cb.send(Err(err.clone())).ok();
+        let _ = cb.send(Err(err.clone()));
     }
     if let Some(cb) = callbacks.lsstate.remove(&err.transaction_id) {
-        cb.send(Err(err.clone())).ok();
+        let _ = cb.send(Err(err.clone()));
     }
     callbacks.lock_lost.remove(&err.transaction_id);
 }

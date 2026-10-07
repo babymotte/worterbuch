@@ -74,7 +74,7 @@ struct Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
         .with_env_filter(EnvFilter::from_default_env())

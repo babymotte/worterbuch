@@ -134,11 +134,10 @@ async fn throughput_stats(
     let running = state.throughput_running.load(Ordering::Acquire);
     let rx = state.throughput_stats_tx.subscribe();
     if running {
-        state.throughput_stats_tx.send(throughput::UiApi::Running)
+        let _ = state.throughput_stats_tx.send(throughput::UiApi::Running);
     } else {
-        state.throughput_stats_tx.send(throughput::UiApi::Stopped)
-    }
-    .ok();
+        let _ = state.throughput_stats_tx.send(throughput::UiApi::Stopped);
+    };
     let stream = BroadcastStream::new(rx).filter_map(|stat| {
         stat.ok()
             .and_then(|s| serde_json::to_string(&s).ok())
@@ -174,11 +173,10 @@ async fn latency_events(
     let running = state.latency_running.load(Ordering::Acquire);
     let rx = state.latency_events_tx.subscribe();
     if running {
-        state.latency_events_tx.send(latency::UiApi::Running)
+        let _ = state.latency_events_tx.send(latency::UiApi::Running);
     } else {
-        state.latency_events_tx.send(latency::UiApi::Stopped)
+        let _ = state.latency_events_tx.send(latency::UiApi::Stopped);
     }
-    .ok();
     let stream = BroadcastStream::new(rx).filter_map(|stat| {
         stat.ok()
             .and_then(|s| serde_json::to_string(&s).ok())

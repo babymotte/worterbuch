@@ -120,7 +120,7 @@ impl SendBuffer {
     async fn do_set_value(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::Set(key, value, tx)).await?;
-        rx.await.ok();
+        let _ = rx.await;
         Ok(())
     }
 
@@ -137,7 +137,7 @@ impl SendBuffer {
     async fn do_publish_value(&self, key: Key, value: Value) -> ConnectionResult<()> {
         let (tx, rx) = oneshot::channel();
         self.commands.send(Command::Publish(key, value, tx)).await?;
-        rx.await.ok();
+        let _ = rx.await;
         Ok(())
     }
 }

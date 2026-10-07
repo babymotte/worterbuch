@@ -192,7 +192,7 @@ async fn bind_endpoints_and_run(
                         },
                         _ = s.shutdown_requested() => (),
                     }
-                    conn_closed_tx.send(id).await.ok();
+                    let _ = conn_closed_tx.send(id).await;
                 });
                 clients.insert(id, client);
                 debug!("Ready to accept new connections.");
@@ -211,7 +211,7 @@ async fn bind_endpoints_and_run(
             "server shutting down, closing remaining client connections",
         );
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await.ok();
+        let _ = subsys.join().await;
     }
     debug!("All clients disconnected.");
 

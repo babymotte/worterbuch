@@ -59,7 +59,7 @@ impl LazyBroadcaster<ServerMessage> for ServerMessageLazyBroadcaster {
         msg: ServerMessage,
     ) -> Result<(), SendError<oneshot::Receiver<ServerMessage>>> {
         let (tx, rx) = oneshot::channel();
-        tx.send(msg).ok();
+        let _ = tx.send(msg);
         self.send(rx).await
     }
 }
@@ -252,5 +252,5 @@ async fn forward_lock_lost(
         error_code: ErrorCode::LockLost,
         metadata: json!("Lock lost").to_string(),
     });
-    client.lazy_send(msg).await.ok();
+    let _ = client.lazy_send(msg).await;
 }

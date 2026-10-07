@@ -52,8 +52,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchRes
         json!(VERSION),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await
-    .ok();
+    .await?;
 
     wb.set(
         0,
@@ -61,8 +60,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchRes
         json!(LICENSE),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await
-    .ok();
+    .await?;
 
     #[cfg(feature = "commercial")]
     wb.set(
@@ -71,8 +69,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchRes
         json!(wb.config().license),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await
-    .ok();
+    .await?;
 
     #[cfg(not(feature = "commercial"))]
     wb.set(
@@ -81,8 +78,7 @@ pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchRes
         json!(format!("{REPO}/releases/tag/v{VERSION}")),
         INTERNAL_CLIENT_ID.to_owned(),
     )
-    .await
-    .ok();
+    .await?;
 
     let mut interval = interval(Duration::from_secs(1));
 

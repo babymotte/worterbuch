@@ -90,7 +90,7 @@ impl Drop for VirtualProxyServer {
         let wb = self.worterbuch.clone();
         spawn(async move {
             for (client_id, protocol) in clients {
-                wb.disconnected(client_id, protocol, None).await.ok();
+                let _ = wb.disconnected(client_id, protocol, None).await;
             }
         });
     }
@@ -165,10 +165,10 @@ impl VirtualProxyServer {
                     .process_client_request(client_id, msg, interface)
                     .await?;
                 if !processed {
-                    self.send_tx
+                    let _ = self
+                        .send_tx
                         .send(VirtualServerMessage::Disconnect(client_id))
-                        .await
-                        .ok();
+                        .await;
                 }
             }
         }

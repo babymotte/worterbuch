@@ -483,14 +483,14 @@ impl<'a> LeaderConnection<'a> {
                                     "Lock acquired for client {}, transaction {}",
                                     client_id, transaction_id
                                 );
-                                tx.send(Ok(lost_rx)).ok();
+                                let _ = tx.send(Ok(lost_rx));
                             }
                             Err(e) => {
                                 trace!(
                                     "Lock acquisition failed for client {}, transaction {}: {:?}",
                                     client_id, transaction_id, e
                                 );
-                                tx.send(Err(e)).ok();
+                                let _ = tx.send(Err(e));
                             }
                         }
                     }
@@ -521,7 +521,7 @@ impl<'a> LeaderConnection<'a> {
                 let (lost_tx, lost_rx) = oneshot::channel();
                 spawn(async move {
                     if ack_rx.await.is_ok() {
-                        acked_tx.send(()).ok();
+                        let _ = acked_tx.send(());
                     }
                 });
                 self.register_lock_acquired_interest(
@@ -534,7 +534,7 @@ impl<'a> LeaderConnection<'a> {
                     true,
                 );
                 self.queue_leader_request(request).await?;
-                tx.send(Ok((acked_rx, lost_rx))).ok();
+                let _ = tx.send(Ok((acked_rx, lost_rx)));
             }
             WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
                 let client_message = ClientMessage::ReleaseLock(Lock {
@@ -611,14 +611,14 @@ impl<'a> LeaderConnection<'a> {
             }
             ServerMessage::Ack(ack) => {
                 if let Some(tx) = self.get_ack_response_interest(client_id, ack.transaction_id) {
-                    tx.send(Ok(())).ok();
+                    let _ = tx.send(Ok(()));
                 } else if let Some((tx, lost_tx)) =
                     self.get_lock_acquired_interest(client_id, ack.transaction_id)
                 {
                     self.locks
                         .acquired(client_id, ack.transaction_id, &self.worterbuch);
                     self.register_lock_lost_interest(client_id, ack.transaction_id, lost_tx);
-                    tx.send(Ok(())).ok();
+                    let _ = tx.send(Ok(()));
                 } else {
                     warn!(
                         "Received Ack message from leader for client {client_id} but client did not register an interest: {ack:?}"
@@ -634,7 +634,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(tx) =
                         self.get_state_response_interest(client_id, state.transaction_id)
                     {
-                        tx.send(Ok(value)).ok();
+                        let _ = tx.send(Ok(value));
                     }
                 }
             },
@@ -647,7 +647,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(tx) =
                         self.get_pstate_response_interest(client_id, pstate.transaction_id)
                     {
-                        tx.send(Ok(kvps)).ok();
+                        let _ = tx.send(Ok(kvps));
                     }
                 }
             },
@@ -675,7 +675,7 @@ impl<'a> LeaderConnection<'a> {
                         let e = e.take();
                         debug_assert!(e.is_some(), "multiple interests registered for same error");
                         if e.is_some() {
-                            tx.send(()).ok();
+                            let _ = tx.send(());
                         }
                     }
                 }
@@ -688,7 +688,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(e) = e {
                         let e = Err(e.into());
                         trace!("{:#?}", e);
-                        tx.send(e).ok();
+                        let _ = tx.send(e);
                     }
                 }
 
@@ -698,7 +698,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(e) = e {
                         let e = Err(e.into());
                         trace!("{:#?}", e);
-                        tx.send(e).ok();
+                        let _ = tx.send(e);
                     }
                 }
 
@@ -708,7 +708,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(e) = e {
                         let e = Err(e.into());
                         trace!("{:#?}", e);
-                        tx.send(e).ok();
+                        let _ = tx.send(e);
                     }
                 }
 
@@ -718,7 +718,7 @@ impl<'a> LeaderConnection<'a> {
                     if let Some(e) = e {
                         let e = Err(e.into());
                         trace!("{:#?}", e);
-                        tx.send(e).ok();
+                        let _ = tx.send(e);
                     }
                 }
             }

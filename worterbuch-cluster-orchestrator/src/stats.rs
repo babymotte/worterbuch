@@ -40,24 +40,24 @@ pub struct StatsSender(mpsc::Sender<StatsEvent>);
 
 impl StatsSender {
     pub async fn candidate(&self) {
-        self.0
+        let _ = self
+            .0
             .send(StatsEvent::Election(ElectionState::Candidate))
-            .await
-            .ok();
+            .await;
     }
 
     pub async fn follower(&self) {
-        self.0
+        let _ = self
+            .0
             .send(StatsEvent::Election(ElectionState::Follower))
-            .await
-            .ok();
+            .await;
     }
 
     pub async fn leader(&self) {
-        self.0
+        let _ = self
+            .0
             .send(StatsEvent::Election(ElectionState::Leader))
-            .await
-            .ok();
+            .await;
     }
 }
 
@@ -87,11 +87,7 @@ impl Server {
     #[instrument(level=Level::TRACE, skip(server), ret)]
     async fn ready(State(server): State<Server>) -> impl IntoResponse {
         let (tx, rx) = oneshot::channel();
-        server
-            .api_tx
-            .send(StatsApiMessage::ElectionState(tx))
-            .await
-            .ok();
+        let _ = server.api_tx.send(StatsApiMessage::ElectionState(tx)).await;
         let state = if let Ok(it) = rx.await {
             it
         } else {
@@ -326,7 +322,7 @@ impl StatsActor {
     fn api_request(&mut self, e: StatsApiMessage) {
         match e {
             StatsApiMessage::ElectionState(sender) => {
-                sender.send(self.election_state.clone()).ok();
+                let _ = sender.send(self.election_state.clone());
             }
         }
     }

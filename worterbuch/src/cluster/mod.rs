@@ -62,13 +62,13 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     trace!(enter = "process_api_call");
     match function {
         WbFunction::Get(key, tx) => {
-            tx.send(worterbuch.get(&key)).ok();
+            let _ = tx.send(worterbuch.get(&key));
         }
         WbFunction::CGet(key, tx) => {
-            tx.send(worterbuch.cget(&key)).ok();
+            let _ = tx.send(worterbuch.cget(&key));
         }
         WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .set(
                         key,
@@ -78,11 +78,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                     )
                     .instrument(span)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .cset(
                         key,
@@ -92,19 +91,17 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .spub_init(key, TraceData::new(client_id, interface, transaction_id))
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .spub(
                         value,
@@ -112,11 +109,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .publish(
                         key,
@@ -125,17 +121,16 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Ls(parent, tx) => {
-            tx.send(worterbuch.ls(&parent)).ok();
+            let _ = tx.send(worterbuch.ls(&parent));
         }
         WbFunction::PLs(parent, tx) => {
-            tx.send(worterbuch.pls(&parent)).ok();
+            let _ = tx.send(worterbuch.pls(&parent));
         }
         WbFunction::PGet(pattern, tx) => {
-            tx.send(worterbuch.pget(&pattern)).ok();
+            let _ = tx.send(worterbuch.pget(&pattern));
         }
         WbFunction::Subscribe(
             client_id,
@@ -147,7 +142,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             send_traces,
             tx,
         ) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .subscribe(
                         key,
@@ -155,8 +150,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::PSubscribe(
             client_id,
@@ -168,7 +162,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             send_traces,
             tx,
         ) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .psubscribe(
                         pattern,
@@ -176,11 +170,10 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::SubscribeLs(client_id, transaction_id, interface, parent, send_traces, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .subscribe_ls(
                         parent,
@@ -188,86 +181,78 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
                         TraceData::new(client_id, interface, transaction_id),
                     )
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Unsubscribe(client_id, transaction_id, interface, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .unsubscribe(TraceData::new(client_id, interface, transaction_id))
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
-            tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id))
-                .ok();
+            let _ = tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id));
         }
         WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .delete(key, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::PDelete(transaction_id, interface, pattern, _, client_id, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .pdelete(pattern, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
             trace!(%client_id, key, "lock");
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .lock(key, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
             trace!(%client_id, key, "acquire_lock");
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .acquire_lock(key, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
             trace!(%client_id, key, "release_lock");
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .release_lock(key, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Connected(client_id, remote_addr, protocol, eject, tx) => {
             trace!(%client_id, "connected");
-            let res = worterbuch
-                .connected(client_id, remote_addr, protocol, eject)
-                .await;
-            tx.send(res).ok();
+            let _ = tx.send(
+                worterbuch
+                    .connected(client_id, remote_addr, protocol, eject)
+                    .await,
+            );
         }
         WbFunction::ProtocolSwitched(client_id, interface, protocol) => {
             trace!(%client_id, protocol, "protocol_switched");
-            worterbuch
+            let _ = worterbuch
                 .protocol_switched(client_id, interface, protocol)
                 .await;
         }
         WbFunction::Disconnected(client_id, protocol, remote_addr) => {
             trace!(%client_id, "disconnected");
-            worterbuch
+            let _ = worterbuch
                 .disconnected(client_id, protocol, remote_addr)
-                .await
-                .ok();
+                .await;
         }
         WbFunction::Config(tx) => {
-            tx.send(worterbuch.config().clone()).ok();
+            let _ = tx.send(worterbuch.config().clone());
         }
         WbFunction::Export(tx, span) => {
             let g = span.enter();
@@ -276,18 +261,17 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             drop(span);
         }
         WbFunction::Import(transaction_id, client_id, interface, json, tx) => {
-            tx.send(
+            let _ = tx.send(
                 worterbuch
                     .import(&json, client_id, transaction_id, interface)
                     .await,
-            )
-            .ok();
+            );
         }
         WbFunction::Len(tx) => {
-            tx.send(worterbuch.len()).ok();
+            let _ = tx.send(worterbuch.len());
         }
         WbFunction::ReGrantLocks(locks, tx) => {
-            tx.send(worterbuch.re_grant_locks(locks).await).ok();
+            let _ = tx.send(worterbuch.re_grant_locks(locks).await);
         }
     }
     trace!(exit = "process_api_call");
@@ -322,24 +306,24 @@ async fn shutdown_servers(servers: Servers) {
     if let Some(it) = servers.web_server {
         info!("Shutting down web server …");
         it.request_local_shutdown_because("shutting down servers");
-        it.join().await.ok();
+        let _ = it.join().await;
     }
 
     if let Some(it) = servers.tcp_server {
         info!("Shutting down tcp server …");
         it.request_local_shutdown_because("shutting down servers");
-        it.join().await.ok();
+        let _ = it.join().await;
     }
 
     if let Some(it) = servers.unix_socket {
         info!("Shutting down unix socket …");
         it.request_local_shutdown_because("shutting down servers");
-        it.join().await.ok();
+        let _ = it.join().await;
     }
 
     if let Some(it) = servers.quic_server {
         info!("Shutting down QUIC server …");
         it.request_local_shutdown_because("shutting down servers");
-        it.join().await.ok();
+        let _ = it.join().await;
     }
 }

@@ -322,7 +322,7 @@ async fn serve(
             eprintln!("{e:?}");
         }
 
-        on_follower_disconnected.send(follower_addr).await.ok();
+        let _ = on_follower_disconnected.send(follower_addr).await;
 
         s.request_local_shutdown_because("TCP connection to follower/proxy closed");
     });
@@ -521,7 +521,7 @@ async fn process_handshake(
                     error_code: ErrorCode::LockLost,
                     metadata: json!("lock lost").to_string(),
                 });
-                tx.lazy_send(msg).await.ok();
+                let _ = tx.lazy_send(msg).await;
             }
         }
 

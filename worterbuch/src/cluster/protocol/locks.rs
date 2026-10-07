@@ -409,7 +409,7 @@ mod test {
     }
 
     async fn worterbuch() -> Worterbuch {
-        dotenvy::dotenv().ok();
+        let _ = dotenvy::dotenv();
         Worterbuch::with_config(Config::new(None).await.unwrap())
     }
 

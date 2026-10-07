@@ -132,12 +132,12 @@ impl V1 {
             };
 
             let msg = ServerMessage::CState(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.v0.tx.send(rx).await.ok();
+        let _ = self.v0.tx.send(rx).await;
     }
 
     pub async fn cset(&self, msg: CSet) {
@@ -166,13 +166,13 @@ impl V1 {
             };
 
             trace!("Value set, queuing Ack …");
-            tx.send(ServerMessage::Ack(response)).ok();
+            let _ = tx.send(ServerMessage::Ack(response));
             trace!("Value set, queuing Ack done.");
 
             drop(permit);
         });
 
-        self.v0.tx.send(rx).await.ok();
+        let _ = self.v0.tx.send(rx).await;
     }
 
     pub async fn lock(&self, msg: Lock) {
@@ -194,11 +194,7 @@ impl V1 {
         };
 
         trace!("Key locked, queuing Ack …");
-        self.v0
-            .tx
-            .lazy_send(ServerMessage::Ack(response))
-            .await
-            .ok();
+        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Key locked, queuing Ack done.");
 
         let client = self.v0.tx.clone();
@@ -247,11 +243,7 @@ impl V1 {
         };
 
         trace!("Key unlocked, queuing Ack …");
-        self.v0
-            .tx
-            .lazy_send(ServerMessage::Ack(response))
-            .await
-            .ok();
+        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
         trace!("Key unlocked, queuing Ack done.");
     }
 }

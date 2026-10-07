@@ -405,7 +405,7 @@ async fn client(
 
     let mut stopped = true;
 
-    on_connected.send(()).ok();
+    let _ = on_connected.send(());
 
     loop {
         select! {

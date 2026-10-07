@@ -904,7 +904,7 @@ impl Worterbuch {
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
         spawn(async move {
-            tx.send((json!(store), grave_goods, last_will)).ok();
+            let _ = tx.send((json!(store), grave_goods, last_will));
         });
     }
 
@@ -2340,7 +2340,7 @@ mod test {
 
     #[tokio::test]
     async fn export_removes_system_keys() {
-        dotenvy::dotenv().ok();
+        let _ = dotenvy::dotenv();
         let mut wb = Worterbuch::with_config(Config::new(None).await.unwrap());
         wb.set(
             "hello/world".to_owned(),

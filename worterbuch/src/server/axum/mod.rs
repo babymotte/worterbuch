@@ -93,7 +93,7 @@ async fn ws(
     debug!("Client connected");
 
     let callback = move |socket| async move {
-        ws_tx.send((socket, remote)).await.ok();
+        let _ = ws_tx.send((socket, remote)).await;
     };
 
     let res = ws.protocols(vec!["worterbuch"]).on_upgrade(callback);
@@ -140,7 +140,7 @@ async fn export(
     thread::spawn(move || {
         let g = compress_span.enter();
         let res = compress(json.as_bytes(), base64);
-        tx.send(res).ok();
+        let _ = tx.send(res);
         drop(g);
         drop(compress_span);
     });
@@ -204,7 +204,7 @@ async fn import(
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
         let res = decompress(&data, base64);
-        tx.send(res).ok();
+        let _ = tx.send(res);
     });
 
     let json = match rx.await {
@@ -1024,7 +1024,7 @@ async fn run_ws_server(
                             },
                             _ = s.shutdown_requested() => (),
                         }
-                        conn_closed_tx.send(id).await.ok();
+                        let _ = conn_closed_tx.send(id).await;
                     });
                     clients.insert(id, client);
                 } else {
@@ -1041,7 +1041,7 @@ async fn run_ws_server(
             "server shutting down, closing remaining client connections",
         );
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await.ok();
+        let _ = subsys.join().await;
     }
     debug!("All clients disconnected.");
 

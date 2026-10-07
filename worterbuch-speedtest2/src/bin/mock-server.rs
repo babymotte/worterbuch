@@ -41,7 +41,7 @@ use worterbuch_client::{
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
     logging::init()?;
 
     tosub::build_default_root("worterbuch-speedtest")

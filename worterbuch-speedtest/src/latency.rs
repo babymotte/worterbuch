@@ -95,7 +95,7 @@ async fn process_msg(
         }
         Api::Stop => {
             if let Some(tx) = current_stop_tx {
-                tx.send(()).ok();
+                let _ = tx.send(());
             }
             Ok(None)
         }
@@ -131,7 +131,7 @@ async fn run_latency_test(
     }
 
     for tx in stop_txs {
-        tx.send(()).ok();
+        let _ = tx.send(());
     }
 
     let duration = start.elapsed();

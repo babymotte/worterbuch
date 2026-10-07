@@ -54,7 +54,7 @@ fn run_multi_threaded() -> miette::Result<()> {
 }
 
 async fn start() -> miette::Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
 
     let args = Args::parse();
 
@@ -109,7 +109,7 @@ async fn start() -> miette::Result<()> {
     let mut root_builder = tosub::build_default_root(root_name)
         .with_timeout(cfg.shutdown_timeout)
         .with_stdin_consumer(move |line| {
-            stdin_tx.blocking_send(line).ok();
+            let _ = stdin_tx.blocking_send(line);
         });
 
     if cfg.role.is_orchestrated() || cfg.exit_on_stdin_close {

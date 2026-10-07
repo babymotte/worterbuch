@@ -323,12 +323,12 @@ impl V0 {
 
             let msg = ServerMessage::State(response);
 
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn pget(&self, msg: PGet) {
@@ -354,12 +354,12 @@ impl V0 {
 
             let msg = ServerMessage::PState(response);
 
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     #[instrument(level = Level::TRACE, skip(self), fields(client_id=%self.client_id))]
@@ -384,13 +384,13 @@ impl V0 {
 
             trace!("Value set, queuing Ack …");
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
             trace!("Value set, queuing Ack done.");
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn spub_init(&self, msg: SPubInit) {
@@ -411,13 +411,13 @@ impl V0 {
 
             trace!("Value set, queuing Ack …");
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
             trace!("Value set, queuing Ack done.");
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn spub(&self, msg: SPub) {
@@ -438,13 +438,13 @@ impl V0 {
 
             trace!("Value set, queuing Ack …");
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
             trace!("Value set, queuing Ack done.");
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn publish(&self, msg: Publish) {
@@ -467,12 +467,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn subscribe(&self, msg: Subscribe) -> bool {
@@ -500,7 +500,7 @@ impl V0 {
         };
 
         let smsg = ServerMessage::Ack(response);
-        self.tx.lazy_send(smsg).await.ok();
+        let _ = self.tx.lazy_send(smsg).await;
 
         let transaction_id = msg.transaction_id;
 
@@ -564,7 +564,7 @@ impl V0 {
         };
 
         let smsg = ServerMessage::Ack(response);
-        self.tx.lazy_send(smsg).await.ok();
+        let _ = self.tx.lazy_send(smsg).await;
 
         let transaction_id = msg.transaction_id;
         let request_pattern = msg.request_pattern;
@@ -641,12 +641,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn delete(&self, msg: Delete) {
@@ -671,12 +671,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::State(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn pdelete(&self, msg: PDelete) {
@@ -714,12 +714,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::PState(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn ls(&self, msg: Ls) {
@@ -743,12 +743,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::LsState(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn pls(&self, msg: PLs) {
@@ -772,12 +772,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::LsState(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub async fn subscribe_ls(&self, msg: SubscribeLs) -> bool {
@@ -803,7 +803,7 @@ impl V0 {
         };
 
         let smsg = ServerMessage::Ack(response);
-        self.tx.lazy_send(smsg).await.ok();
+        let _ = self.tx.lazy_send(smsg).await;
 
         let transaction_id = msg.transaction_id;
 
@@ -858,12 +858,12 @@ impl V0 {
             };
 
             let msg = ServerMessage::Ack(response);
-            tx.send(msg).ok();
+            let _ = tx.send(msg);
 
             drop(permit);
         });
 
-        self.tx.send(rx).await.ok();
+        let _ = self.tx.send(rx).await;
     }
 
     pub(crate) async fn acquire_permit(&self) -> OwnedSemaphorePermit {
@@ -882,7 +882,7 @@ pub async fn handle_store_error(
 ) {
     let msg = err_msg(e, transaction_id);
     trace!("Error in store, queuing error message for client …");
-    tx.send(msg).ok();
+    let _ = tx.send(msg);
     trace!("Error in store, queuing error message for client done");
 }
 
@@ -893,7 +893,7 @@ pub async fn handle_store_error_lazy(
 ) {
     let msg = err_msg(e, transaction_id);
     trace!("Error in store, queuing error message for client …");
-    tx.lazy_send(msg).await.ok();
+    let _ = tx.lazy_send(msg).await;
     trace!("Error in store, queuing error message for client done");
 }
 

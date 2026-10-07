@@ -21,7 +21,7 @@ use worterbuch_cluster_orchestrator::instrument_and_run_main;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
 
     tosub::build_root("cluster-orchestrator")
         .catch_signals()

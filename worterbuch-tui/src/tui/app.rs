@@ -226,7 +226,7 @@ impl App {
     }
 
     fn send(&self, action: UserAction) {
-        self.actions.try_send(action).ok();
+        let _ = self.actions.try_send(action);
     }
 
     fn toast(&mut self, kind: ToastKind, text: impl Into<String>) {

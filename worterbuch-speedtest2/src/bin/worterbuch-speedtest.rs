@@ -76,7 +76,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
     logging::init()?;
 
     let args = Args::parse();

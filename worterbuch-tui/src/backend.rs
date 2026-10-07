@@ -128,7 +128,7 @@ impl BackendActor {
         });
 
         if let Some(name) = name.clone() {
-            client.set_client_name(name).await.ok();
+            let _ = client.set_client_name(name).await;
         }
 
         self.clients.insert(
@@ -175,7 +175,7 @@ impl BackendActor {
         };
 
         if let Some(name) = name.clone() {
-            client.set_client_name(name).await.ok();
+            let _ = client.set_client_name(name).await;
         }
 
         let new_client_id = client.client_id();

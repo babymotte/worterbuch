@@ -45,7 +45,7 @@ fn init_logging() {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> miette::Result<()> {
-    dotenvy::dotenv().ok();
+    let _ = dotenvy::dotenv();
 
     init_logging();
 

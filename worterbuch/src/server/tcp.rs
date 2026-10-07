@@ -126,7 +126,7 @@ pub async fn start(
                                 },
                                 _ = s.shutdown_requested() => (),
                             }
-                        conn_closed_tx.send(id).await.ok();
+                        let _ = conn_closed_tx.send(id).await;
                         Ok::<(),miette::Error>(())
                     });
                             clients.insert(id, client);
@@ -152,7 +152,7 @@ pub async fn start(
             "server shutting down, closing remaining client connections",
         );
         debug!("Waiting for connection to client {cid} to close …");
-        subsys.join().await.ok();
+        let _ = subsys.join().await;
     }
     debug!("All clients disconnected.");
 

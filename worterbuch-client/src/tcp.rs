@@ -80,7 +80,7 @@ impl TcpClientSocket {
     pub async fn close(self) -> ConnectionResult<()> {
         drop(self.tx);
         drop(self.rx);
-        self.closed.await.ok();
+        let _ = self.closed.await;
         Ok(())
     }
 }
@@ -108,5 +108,5 @@ async fn forward_tcp_messages(
 
     drop(tx);
 
-    closed_tx.send(()).ok();
+    let _ = closed_tx.send(());
 }

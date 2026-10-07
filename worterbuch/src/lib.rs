@@ -219,7 +219,7 @@ fn wb_api_created(
     name: impl fmt::Display,
 ) {
     if let Some(tx) = tx {
-        tx.send(api.named(name)).ok();
+        let _ = tx.send(api.named(name));
     }
 }
 

@@ -115,7 +115,7 @@ impl TuiApi {
     }
 
     async fn send(&self, msg: TuiMessage) {
-        self.tx.send(msg).await.ok();
+        let _ = self.tx.send(msg).await;
     }
 
     pub async fn connection_failed(&self, protocol: Protocol, address: String, error: String) {

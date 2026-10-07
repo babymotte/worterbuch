@@ -488,19 +488,19 @@ impl WbApi for CloneableWbApi {
 
     async fn get(&self, key: Key) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Get(key, tx)).await.ok();
+        let _ = self.tx.send(WbFunction::Get(key, tx)).await;
         rx.await?
     }
 
     async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::CGet(key, tx)).await.ok();
+        let _ = self.tx.send(WbFunction::CGet(key, tx)).await;
         rx.await?
     }
 
     async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::PGet(pattern, tx)).await.ok();
+        let _ = self.tx.send(WbFunction::PGet(pattern, tx)).await;
         rx.await?
     }
 
@@ -515,7 +515,8 @@ impl WbApi for CloneableWbApi {
         let (tx, rx) = oneshot::channel();
 
         trace!("Sending set request to core system …");
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Set(
                 transaction_id,
                 self.interface.clone(),
@@ -525,8 +526,7 @@ impl WbApi for CloneableWbApi {
                 tx,
                 Span::current(),
             ))
-            .await
-            .ok();
+            .await;
         trace!("Sending set request to core system done.");
         trace!("Waiting for response to set request …");
         let res = rx.await;
@@ -547,7 +547,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending cSet request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::CSet(
                 transaction_id,
                 self.interface.clone(),
@@ -557,8 +558,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending cSet request to core system done.");
         }
@@ -583,7 +583,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending lock request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Lock(
                 transaction_id,
                 self.interface.clone(),
@@ -591,8 +592,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending lock request to core system done.");
         }
@@ -617,7 +617,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending acquire lock request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::AcquireLock(
                 transaction_id,
                 self.interface.clone(),
@@ -625,8 +626,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending acquire lock request to core system done.");
         }
@@ -651,7 +651,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending release lock request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::ReleaseLock(
                 transaction_id,
                 self.interface.clone(),
@@ -659,8 +660,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending release lock request to core system done.");
         }
@@ -685,7 +685,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending spub init request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::SPubInit(
                 transaction_id,
                 self.interface.clone(),
@@ -693,8 +694,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending spub init request to core system done.");
         }
@@ -719,7 +719,8 @@ impl WbApi for CloneableWbApi {
         if trace {
             trace!("Sending spub request to core system …");
         }
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::SPub(
                 transaction_id,
                 self.interface.clone(),
@@ -727,8 +728,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         if trace {
             trace!("Sending spub request to core system done.");
         }
@@ -750,7 +750,8 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Publish(
                 transaction_id,
                 self.interface.clone(),
@@ -759,8 +760,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -775,7 +775,7 @@ impl WbApi for CloneableWbApi {
         parent: Option<RequestPattern>,
     ) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::PLs(parent, tx)).await.ok();
+        let _ = self.tx.send(WbFunction::PLs(parent, tx)).await;
         rx.await?
     }
 
@@ -789,7 +789,8 @@ impl WbApi for CloneableWbApi {
         send_traces: SendTracesFlag,
     ) -> WorterbuchResult<Subscription> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Subscribe(
                 client_id,
                 transaction_id,
@@ -800,8 +801,7 @@ impl WbApi for CloneableWbApi {
                 send_traces,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -815,7 +815,8 @@ impl WbApi for CloneableWbApi {
         send_traces: SendTracesFlag,
     ) -> WorterbuchResult<PSubscription> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::PSubscribe(
                 client_id,
                 transaction_id,
@@ -826,8 +827,7 @@ impl WbApi for CloneableWbApi {
                 send_traces,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -839,7 +839,8 @@ impl WbApi for CloneableWbApi {
         send_traces: SendTracesFlag,
     ) -> WorterbuchResult<LsSubscription> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::SubscribeLs(
                 client_id,
                 transaction_id,
@@ -848,8 +849,7 @@ impl WbApi for CloneableWbApi {
                 send_traces,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -859,15 +859,15 @@ impl WbApi for CloneableWbApi {
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Unsubscribe(
                 client_id,
                 transaction_id,
                 self.interface.clone(),
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -877,10 +877,10 @@ impl WbApi for CloneableWbApi {
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::UnsubscribeLs(client_id, transaction_id, tx))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -891,7 +891,8 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
     ) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Delete(
                 transaction_id,
                 self.interface.clone(),
@@ -899,8 +900,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -912,7 +912,8 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
     ) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::PDelete(
                 transaction_id,
                 self.interface.clone(),
@@ -921,8 +922,7 @@ impl WbApi for CloneableWbApi {
                 client_id,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
@@ -934,7 +934,8 @@ impl WbApi for CloneableWbApi {
     ) -> WorterbuchResult<mpsc::Receiver<()>> {
         let (tx, rx) = oneshot::channel();
         let (eject, eject_rx) = mpsc::channel(1);
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Connected(
                 client_id,
                 remote_addr,
@@ -942,8 +943,7 @@ impl WbApi for CloneableWbApi {
                 eject,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await??;
         Ok(eject_rx)
     }
@@ -953,14 +953,14 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
         protocol: ProtocolMajorVersion,
     ) -> WorterbuchResult<()> {
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::ProtocolSwitched(
                 client_id,
                 self.interface.clone(),
                 protocol,
             ))
-            .await
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -970,10 +970,10 @@ impl WbApi for CloneableWbApi {
         protocol: Protocol,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Disconnected(client_id, protocol, remote_addr))
-            .await
-            .ok();
+            .await;
         Ok(())
     }
 
@@ -986,7 +986,7 @@ impl WbApi for CloneableWbApi {
         HashMap<ClientId, LastWill>,
     )> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Export(tx, span)).await.ok();
+        let _ = self.tx.send(WbFunction::Export(tx, span)).await;
         Ok(rx.await?)
     }
 
@@ -997,7 +997,8 @@ impl WbApi for CloneableWbApi {
         json: String,
     ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         let (tx, rx) = oneshot::channel();
-        self.tx
+        let _ = self
+            .tx
             .send(WbFunction::Import(
                 transaction_id,
                 client_id,
@@ -1005,14 +1006,13 @@ impl WbApi for CloneableWbApi {
                 json,
                 tx,
             ))
-            .await
-            .ok();
+            .await;
         rx.await?
     }
 
     async fn entries(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(WbFunction::Len(tx)).await.ok();
+        let _ = self.tx.send(WbFunction::Len(tx)).await;
         Ok(rx.await?)
     }
 }

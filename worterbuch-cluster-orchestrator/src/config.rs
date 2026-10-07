@@ -405,7 +405,7 @@ async fn load_config(
         quorum_configured: config_file.quorum,
         config_scan_interval: args.config_scan_interval,
     };
-    tx.send((peers, me, config_file.quorum)).await.ok();
+    let _ = tx.send((peers, me, config_file.quorum)).await;
     let config_path = args.config_path.into();
     let scan_interval = Duration::from_secs(args.config_scan_interval);
     let node_id = args.node_id;
