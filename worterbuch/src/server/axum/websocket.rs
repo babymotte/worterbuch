@@ -21,7 +21,7 @@ use crate::{
     auth::JwtClaims,
     server::common::{
         CloneableWbApi,
-        protocol::{LazyBroadcaster, Proto},
+        protocol::{LazyBroadcaster, Proto, ServerMessageReceiver, server_message_channel},
     },
     stats::VERSION,
 };
@@ -32,13 +32,9 @@ use futures::{
 };
 use miette::{IntoDiagnostic, Result, bail};
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-    time::timeout,
-};
+use tokio::{select, sync::mpsc, time::timeout};
 use tosub::Subsystem;
-use totils::{CancelOn, while_select};
+use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -108,7 +104,7 @@ async fn serve_loop(
     let mut authorized = None;
 
     let (ws_tx, mut ws_rx) = websocket.split();
-    let (ws_send_tx, ws_send_rx) = mpsc::channel(config.channel_buffer_size);
+    let (ws_send_tx, ws_send_rx) = server_message_channel(config.channel_buffer_size);
 
     // websocket send loop
     subsys.spawn("send-loop", move |s| {
@@ -183,13 +179,13 @@ async fn send_loop(
     client_id: ClientId,
     send_timeout: Duration,
     mut ws_tx: SplitSink<WebSocket, Message>,
-    mut ws_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
+    mut ws_send_rx: ServerMessageReceiver,
 ) -> miette::Result<()> {
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = ws_send_rx.recv() => if let Some(msg) = recv {
-            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
+            let Ok(msg) = msg else { break; };
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,

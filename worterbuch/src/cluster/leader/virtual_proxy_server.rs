@@ -23,7 +23,10 @@ use crate::{
     cluster::protocol::{Connected, Disconnected, ProxyMessage, Request, locks::Locks},
     server::common::{
         self, CloneableWbApi,
-        protocol::{Proto, ServerMessageLazyBroadcaster},
+        protocol::{
+            Proto, ResponseDropped, ServerMessageLazyBroadcaster, ServerMessageReceiver,
+            server_message_channel,
+        },
     },
 };
 use hashbrown::HashMap;
@@ -34,10 +37,7 @@ use std::{
     net::SocketAddr,
     ops::ControlFlow,
 };
-use tokio::{
-    spawn,
-    sync::{mpsc, oneshot},
-};
+use tokio::{spawn, sync::mpsc};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{Level, debug, enabled, error, info, instrument, trace, warn};
@@ -206,7 +206,7 @@ impl VirtualProxyServer {
             })?;
 
         let auth_required = config.auth_token_key.is_some();
-        let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
+        let (send_client_tx, send_client_rx) = server_message_channel(config.channel_buffer_size);
 
         // the forwarder does not notify the core system about the client's disconnect, that is done either by
         // stop_virtual_client or by disconnect_all once the connection to the proxy is closed
@@ -435,7 +435,7 @@ impl VirtualProxyServer {
 
 async fn response_forwarder_loop(
     subsys: Subsystem,
-    mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
+    mut send_client_rx: ServerMessageReceiver,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     proxy_addr: SocketAddr,
@@ -452,14 +452,14 @@ async fn response_forwarder_loop(
 }
 
 async fn forward_leader_response(
-    recv: Option<oneshot::Receiver<ServerMessage>>,
+    recv: Option<Result<ServerMessage, ResponseDropped>>,
     send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     remote_addr: SocketAddr,
 ) -> ControlFlow<()> {
     trace!(enter = "forward_leader_response", %client_id);
     match recv {
-        Some(msg) => match msg.await {
+        Some(msg) => match msg {
             Ok(msg) => match send_tx
                 .send(VirtualServerMessage::ServerMessage((client_id, msg)))
                 .await

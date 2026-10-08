@@ -21,14 +21,21 @@ mod v0;
 mod v1;
 mod v2;
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use super::CloneableWbApi;
 use crate::{Config, auth::JwtClaims, server::common::protocol::v2::V2};
 use serde_json::json;
+use tokio::select;
 use tokio::sync::{
     Semaphore,
-    mpsc::{self, error::SendError},
+    mpsc::{
+        self,
+        error::{SendError, TryRecvError},
+    },
     oneshot,
 };
 use tosub::Subsystem;
@@ -45,27 +52,177 @@ use worterbuch_common::{
 };
 
 pub type ServerMessageBroadcaster = mpsc::Sender<ServerMessage>;
-pub type ServerMessageLazyBroadcaster = mpsc::Sender<oneshot::Receiver<ServerMessage>>;
+/// Creates the queue through which all messages for a single client are passed to the task writing to the client's
+/// socket.
+///
+/// Messages that are already available ([`LazyBroadcaster::lazy_send`]) and responses that are still being processed
+/// by the core system ([`ServerMessageLazyBroadcaster::send`]) are queued separately. The receiving end delivers them
+/// in the order they were queued wherever possible, but an already available message is never held back by a response
+/// that is still pending. Otherwise the socket writer would wait for the core system while the core system waits for
+/// the socket writer to drain this client's subscription events, which deadlocks the whole server.
+pub fn server_message_channel(
+    buffer_size: usize,
+) -> (ServerMessageLazyBroadcaster, ServerMessageReceiver) {
+    let (pending_tx, pending_rx) = mpsc::channel(buffer_size);
+    let (ready_tx, ready_rx) = mpsc::channel(buffer_size);
+    let tx = ServerMessageLazyBroadcaster {
+        seq: Arc::new(AtomicU64::new(0)),
+        pending: pending_tx,
+        ready: ready_tx,
+    };
+    let rx = ServerMessageReceiver {
+        pending: pending_rx,
+        ready: ready_rx,
+        pending_closed: false,
+        ready_closed: false,
+        head: None,
+        resolved_head: None,
+        next_ready: None,
+    };
+    (tx, rx)
+}
+
+#[derive(Clone)]
+pub struct ServerMessageLazyBroadcaster {
+    seq: Arc<AtomicU64>,
+    pending: mpsc::Sender<(u64, oneshot::Receiver<ServerMessage>)>,
+    ready: mpsc::Sender<(u64, ServerMessage)>,
+}
+
+impl ServerMessageLazyBroadcaster {
+    /// Queues a response that will be delivered to the client once it has been resolved. Pending responses are
+    /// delivered in the order they were queued.
+    pub async fn send(
+        &self,
+        rx: oneshot::Receiver<ServerMessage>,
+    ) -> Result<(), SendError<oneshot::Receiver<ServerMessage>>> {
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        self.pending
+            .send((seq, rx))
+            .await
+            .map_err(|SendError((_, rx))| SendError(rx))
+    }
+}
 
 pub(crate) trait LazyBroadcaster<T> {
-    fn lazy_send(
-        &self,
-        msg: T,
-    ) -> impl Future<Output = Result<(), SendError<oneshot::Receiver<T>>>>;
+    fn lazy_send(&self, msg: T) -> impl Future<Output = Result<(), SendError<T>>>;
 }
 
 impl LazyBroadcaster<ServerMessage> for ServerMessageLazyBroadcaster {
     #[instrument(level = Level::TRACE, skip_all, err)]
-    async fn lazy_send(
-        &self,
-        msg: ServerMessage,
-    ) -> Result<(), SendError<oneshot::Receiver<ServerMessage>>> {
+    async fn lazy_send(&self, msg: ServerMessage) -> Result<(), SendError<ServerMessage>> {
         trace!(enter = "lazy_send");
-        let (tx, rx) = oneshot::channel();
-        let _ = tx.send(msg);
-        let res = self.send(rx).await;
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        let res = self
+            .ready
+            .send((seq, msg))
+            .await
+            .map_err(|SendError((_, msg))| SendError(msg));
         trace!(exit = "lazy_send");
         res
+    }
+}
+
+pub struct ServerMessageReceiver {
+    pending: mpsc::Receiver<(u64, oneshot::Receiver<ServerMessage>)>,
+    ready: mpsc::Receiver<(u64, ServerMessage)>,
+    pending_closed: bool,
+    ready_closed: bool,
+    head: Option<(u64, oneshot::Receiver<ServerMessage>)>,
+    resolved_head: Option<(u64, Result<ServerMessage, ResponseDropped>)>,
+    next_ready: Option<(u64, ServerMessage)>,
+}
+
+/// A pending response was dropped before it was resolved.
+#[derive(Debug)]
+pub struct ResponseDropped;
+
+enum QueueUpdate {
+    Resolved(Result<ServerMessage, ResponseDropped>),
+    Ready(Option<(u64, ServerMessage)>),
+    Pending(Option<(u64, oneshot::Receiver<ServerMessage>)>),
+}
+
+impl ServerMessageReceiver {
+    /// Returns the next message to be sent to the client, an error if a pending response was dropped without being
+    /// resolved, or `None` once all senders have been dropped and all queued messages have been delivered.
+    ///
+    /// This method is cancel safe.
+    pub async fn recv(&mut self) -> Option<Result<ServerMessage, ResponseDropped>> {
+        loop {
+            self.fill_buffers();
+
+            match (&self.resolved_head, &self.next_ready) {
+                (Some((head_seq, _)), Some((ready_seq, _))) if ready_seq < head_seq => {
+                    return self.next_ready.take().map(|(_, msg)| Ok(msg));
+                }
+                (Some(_), _) => return self.resolved_head.take().map(|(_, res)| res),
+                // the head is either still pending or there is none, so there is nothing to wait for
+                (None, Some(_)) => return self.next_ready.take().map(|(_, msg)| Ok(msg)),
+                (None, None) => {}
+            }
+
+            if self.head.is_none() && self.pending_closed && self.ready_closed {
+                return None;
+            }
+
+            let ready_closed = self.ready_closed;
+            let pending_closed = self.pending_closed;
+            let update = if let Some((_, rx)) = &mut self.head {
+                select! {
+                    res = rx => QueueUpdate::Resolved(res.map_err(|_| ResponseDropped)),
+                    msg = self.ready.recv(), if !ready_closed => QueueUpdate::Ready(msg),
+                }
+            } else {
+                select! {
+                    msg = self.ready.recv(), if !ready_closed => QueueUpdate::Ready(msg),
+                    rx = self.pending.recv(), if !pending_closed => QueueUpdate::Pending(rx),
+                }
+            };
+
+            match update {
+                QueueUpdate::Resolved(res) => {
+                    if let Some((seq, _)) = self.head.take() {
+                        self.resolved_head = Some((seq, res));
+                    }
+                }
+                QueueUpdate::Ready(Some(msg)) => self.next_ready = Some(msg),
+                QueueUpdate::Ready(None) => self.ready_closed = true,
+                QueueUpdate::Pending(Some(rx)) => self.head = Some(rx),
+                QueueUpdate::Pending(None) => self.pending_closed = true,
+            }
+        }
+    }
+
+    fn fill_buffers(&mut self) {
+        if self.head.is_none() && self.resolved_head.is_none() && !self.pending_closed {
+            match self.pending.try_recv() {
+                Ok(rx) => self.head = Some(rx),
+                Err(TryRecvError::Disconnected) => self.pending_closed = true,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        if let Some((seq, rx)) = &mut self.head {
+            match rx.try_recv() {
+                Ok(msg) => self.resolved_head = Some((*seq, Ok(msg))),
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    self.resolved_head = Some((*seq, Err(ResponseDropped)))
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+            if self.resolved_head.is_some() {
+                self.head = None;
+            }
+        }
+
+        if self.next_ready.is_none() && !self.ready_closed {
+            match self.ready.try_recv() {
+                Ok(msg) => self.next_ready = Some(msg),
+                Err(TryRecvError::Disconnected) => self.ready_closed = true,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
     }
 }
 
@@ -269,4 +426,87 @@ async fn forward_lock_lost(
         metadata: json!("Lock lost").to_string(),
     });
     let _ = client.lazy_send(msg).await;
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    fn ack(transaction_id: TransactionId) -> ServerMessage {
+        ServerMessage::Ack(Ack { transaction_id })
+    }
+
+    async fn next(rx: &mut ServerMessageReceiver) -> ServerMessage {
+        timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("receiver blocked")
+            .expect("channel closed")
+            .expect("response dropped")
+    }
+
+    #[tokio::test]
+    async fn ready_message_overtakes_pending_response() {
+        let (tx, mut rx) = server_message_channel(4);
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(resp_rx).await.unwrap();
+        tx.lazy_send(ack(2)).await.unwrap();
+
+        assert_eq!(next(&mut rx).await, ack(2));
+
+        resp_tx.send(ack(1)).unwrap();
+        assert_eq!(next(&mut rx).await, ack(1));
+    }
+
+    #[tokio::test]
+    async fn queue_order_is_kept_when_nothing_is_pending() {
+        let (tx, mut rx) = server_message_channel(4);
+
+        tx.lazy_send(ack(0)).await.unwrap();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(resp_rx).await.unwrap();
+        resp_tx.send(ack(1)).unwrap();
+        tx.lazy_send(ack(2)).await.unwrap();
+
+        assert_eq!(next(&mut rx).await, ack(0));
+        assert_eq!(next(&mut rx).await, ack(1));
+        assert_eq!(next(&mut rx).await, ack(2));
+    }
+
+    #[tokio::test]
+    async fn pending_responses_keep_their_order() {
+        let (tx, mut rx) = server_message_channel(4);
+
+        let (resp_tx_1, resp_rx_1) = oneshot::channel();
+        let (resp_tx_2, resp_rx_2) = oneshot::channel();
+        tx.send(resp_rx_1).await.unwrap();
+        tx.send(resp_rx_2).await.unwrap();
+        resp_tx_2.send(ack(2)).unwrap();
+
+        assert!(
+            timeout(Duration::from_millis(50), rx.recv()).await.is_err(),
+            "second response must not overtake the first"
+        );
+
+        resp_tx_1.send(ack(1)).unwrap();
+        assert_eq!(next(&mut rx).await, ack(1));
+        assert_eq!(next(&mut rx).await, ack(2));
+    }
+
+    #[tokio::test]
+    async fn dropped_response_and_closed_channel_are_reported() {
+        let (tx, mut rx) = server_message_channel(4);
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        tx.send(resp_rx).await.unwrap();
+        tx.lazy_send(ack(1)).await.unwrap();
+        drop(resp_tx);
+        drop(tx);
+
+        assert!(matches!(rx.recv().await, Some(Err(ResponseDropped))));
+        assert_eq!(rx.recv().await.unwrap().unwrap(), ack(1));
+        assert!(rx.recv().await.is_none());
+    }
 }
