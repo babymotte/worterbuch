@@ -30,7 +30,7 @@ pub struct TcpSocketConfig {
     pub keepalive_time: Option<Duration>,
     pub keepalive_interval: Option<Duration>,
     pub keepalive_retries: Option<u32>,
-    pub send_timeout: Option<Duration>,
+    pub send_timeout: Duration,
 }
 
 impl Default for TcpSocketConfig {
@@ -39,7 +39,7 @@ impl Default for TcpSocketConfig {
             keepalive_time: Some(Duration::from_secs(1)),
             keepalive_interval: Some(Duration::from_secs(1)),
             keepalive_retries: Some(5),
-            send_timeout: Some(Duration::from_secs(5)),
+            send_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -87,7 +87,7 @@ pub fn create_tcp_server_socket(
         .wrap_err("failed to set TCP keepallive option")?;
     #[cfg(target_os = "linux")]
     socket
-        .set_tcp_user_timeout(config.send_timeout)
+        .set_tcp_user_timeout(Some(config.send_timeout))
         .into_diagnostic()
         .wrap_err("failed to set TCP_USER_TIMEOUT option")?;
     socket

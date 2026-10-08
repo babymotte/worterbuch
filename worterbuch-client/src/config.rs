@@ -26,7 +26,7 @@ use tracing::{debug, error, instrument};
 pub struct Config {
     pub proto: String,
     pub servers: Box<[String]>,
-    pub send_timeout: Option<Duration>,
+    pub send_timeout: Duration,
     pub connection_timeout: Duration,
     pub auth_token: Option<String>,
     pub use_backpressure: bool,
@@ -72,7 +72,7 @@ impl Config {
 
         if let Ok(val) = env::var("WORTERBUCH_SEND_TIMEOUT") {
             if let Ok(secs) = val.parse() {
-                self.send_timeout = Some(Duration::from_secs(secs));
+                self.send_timeout = Duration::from_secs(secs);
             } else {
                 error!("invalid timeout: {val}");
             }
@@ -127,7 +127,7 @@ impl Default for Config {
     fn default() -> Self {
         let proto = "tcp".to_owned();
         let servers = Box::new(["127.0.0.1:8081".to_owned()]);
-        let send_timeout = None;
+        let send_timeout = Duration::from_secs(60);
         let connection_timeout = Duration::from_secs(5);
         let channel_buffer_size = 1;
         let use_backpressure = true;

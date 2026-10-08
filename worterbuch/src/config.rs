@@ -159,8 +159,9 @@ pub struct Config {
     pub keepalive_time: Option<Duration>,
     pub keepalive_interval: Option<Duration>,
     pub keepalive_retries: Option<u32>,
-    pub send_timeout: Option<Duration>,
+    pub send_timeout: Duration,
     pub channel_buffer_size: usize,
+    pub channel_buffer_timeout: Duration,
     pub extended_monitoring: bool,
     pub auth_token_key: Option<AuthTokenKey>,
     pub license: License,
@@ -321,12 +322,17 @@ impl Config {
 
         if let Ok(val) = env::var(prefix.to_owned() + "_SEND_TIMEOUT") {
             let secs = val.parse().to_interval()?;
-            self.send_timeout = Some(Duration::from_secs(secs));
+            self.send_timeout = Duration::from_secs(secs);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_SIZE") {
             let size = val.parse::<usize>().to_interval()?.max(1);
             self.channel_buffer_size = size;
+        }
+
+        if let Ok(val) = env::var(prefix.to_owned() + "_CHANNEL_BUFFER_TIMEOUT") {
+            let secs = val.parse().to_interval()?;
+            self.channel_buffer_timeout = Duration::from_secs(secs);
         }
 
         if let Ok(val) = env::var(prefix.to_owned() + "_EXTENDED_MONITORING") {
@@ -444,8 +450,9 @@ impl Config {
             keepalive_time: None,
             keepalive_interval: None,
             keepalive_retries: None,
-            send_timeout: None,
+            send_timeout: Duration::from_secs(60),
             channel_buffer_size: 1_000,
+            channel_buffer_timeout: Duration::from_secs(10),
             extended_monitoring: true,
             auth_token_key: None,
             license: License::default(),

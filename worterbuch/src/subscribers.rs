@@ -67,7 +67,7 @@ impl Subscriber {
             tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
-            bail!("Tried to send a PStateEvent to a StateEvent subscriber")
+            bail!("Tried to send a PStateEvent to a StateEvent subscriber");
         }
     }
 
@@ -77,7 +77,7 @@ impl Subscriber {
             tx.send((event, trace)).await.into_diagnostic()?;
             Ok(())
         } else {
-            bail!("Tried to send a StateEvent to a PStateEvent subscriber")
+            bail!("Tried to send a StateEvent to a PStateEvent subscriber");
         }
     }
 

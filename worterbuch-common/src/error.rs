@@ -171,6 +171,7 @@ pub enum WorterbuchError {
     ClientIdCollision(ClientId),
     EmptyKey,
     Wrapped(String, #[source] Box<WorterbuchError>),
+    InternalChannelTimeout(String),
 }
 
 impl From<Err> for WorterbuchError {
@@ -259,6 +260,7 @@ impl fmt::Display for WorterbuchError {
             WorterbuchError::EmptyKey => {
                 write!(f, "Key cannot be empty")
             }
+            Self::InternalChannelTimeout(msg) => msg.fmt(f),
             Self::Wrapped(msg, _) => msg.fmt(f),
         }
     }
@@ -482,9 +484,10 @@ impl From<&WorterbuchError> for ErrorCode {
             WorterbuchError::NotImplemented => ErrorCode::NotImplemented,
             WorterbuchError::KeyIsLocked(_) => ErrorCode::KeyIsLocked,
             WorterbuchError::KeyIsNotLocked(_) => ErrorCode::KeyIsNotLocked,
-            WorterbuchError::FeatureDisabled(_) => ErrorCode::KeyIsNotLocked,
+            WorterbuchError::FeatureDisabled(_) => ErrorCode::FeatureDisabled,
             WorterbuchError::ClientIdCollision(_) => ErrorCode::ClientIDCollision,
             WorterbuchError::EmptyKey => ErrorCode::EmptyKey,
+            WorterbuchError::InternalChannelTimeout(_) => ErrorCode::InternalTimeout,
             WorterbuchError::Other(_, _) | WorterbuchError::ServerResponse(_) => ErrorCode::Other,
             WorterbuchError::Wrapped(_, source) => ErrorCode::from(&**source),
         }
@@ -533,7 +536,8 @@ impl From<&WorterbuchError> for (StatusCode, String) {
             | WorterbuchError::Other(_, _)
             | WorterbuchError::ServerResponse(_)
             | WorterbuchError::ProtocolNegotiationFailed(_)
-            | WorterbuchError::ClientIdCollision(_) => {
+            | WorterbuchError::ClientIdCollision(_)
+            | WorterbuchError::InternalChannelTimeout(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
 

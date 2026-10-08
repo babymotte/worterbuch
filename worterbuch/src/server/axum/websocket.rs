@@ -181,7 +181,7 @@ async fn process_next_message(
 async fn send_loop(
     subsys: Subsystem,
     client_id: ClientId,
-    send_timeout: Option<Duration>,
+    send_timeout: Duration,
     mut ws_tx: SplitSink<WebSocket, Message>,
     mut ws_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
 ) -> miette::Result<()> {
@@ -216,26 +216,19 @@ async fn send_loop(
 async fn send_with_timeout(
     msg: &ServerMessage,
     websocket: &mut WebSocketSender,
-    send_timeout: Option<Duration>,
+    send_timeout: Duration,
     client_id: ClientId,
 ) -> Result<()> {
     let json = serde_json::to_string(msg).into_diagnostic()?;
     let msg = Message::Text(json.into());
-
-    if let Some(send_timeout) = send_timeout {
-        trace!("Sending with timeout {}s …", send_timeout.as_secs());
-        match timeout(send_timeout, websocket.send(msg)).await {
-            Ok(r) => r.into_diagnostic()?,
-            Err(_) => {
-                error!("Send timeout for client {client_id}");
-                bail!("Send timeout for client {client_id}");
-            }
+    trace!("Sending with timeout {:?} …", send_timeout);
+    match timeout(send_timeout, websocket.send(msg)).await {
+        Ok(r) => r.into_diagnostic()?,
+        Err(_) => {
+            error!("Send timeout for client {client_id}");
+            bail!("Send timeout for client {client_id}");
         }
-    } else {
-        trace!("Sending without timeout …");
-        websocket.send(msg).await.into_diagnostic()?;
     }
-
     trace!("Sending done.");
 
     Ok(())

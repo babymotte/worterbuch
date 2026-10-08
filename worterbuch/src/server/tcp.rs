@@ -294,7 +294,7 @@ async fn forward_messages_to_socket(
     mut tcp_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     mut tcp_tx: OwnedWriteHalf,
     client_id: ClientId,
-    send_timeout: Option<Duration>,
+    send_timeout: Duration,
 ) -> Result<()> {
     while_select! {
         biased;

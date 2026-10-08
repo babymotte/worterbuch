@@ -84,7 +84,7 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,
-                res = write_line_and_flush(|| subsys.shutdown_requested(), msg, &mut self.writer, None) => {
+                res = write_line_and_flush(|| subsys.shutdown_requested(), msg, &mut self.writer, Duration::from_secs(60)) => {
                     res?;
                     #[cfg(feature = "trace")]
                     trace!(self.id, transaction_id, ?self.pending_acks, "sent set command");
@@ -266,7 +266,7 @@ async fn send_auth<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
         || subsys.shutdown_requested(),
         msg,
         writer,
-        Some(Duration::from_secs(5)),
+        Duration::from_secs(5),
     )
     .await
     .wrap_err("error sending auth request")?;
@@ -332,7 +332,7 @@ async fn switch_proto<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
         || subsys.shutdown_requested(),
         msg,
         writer,
-        Some(Duration::from_secs(5)),
+        Duration::from_secs(5),
     )
     .await
     .wrap_err("error switching protocol")?;

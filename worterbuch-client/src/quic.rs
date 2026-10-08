@@ -61,7 +61,7 @@ impl QuicClientSocket {
         connection: Connection,
         tx: SendStream,
         rx: Lines<BufReader<RecvStream>>,
-        send_timeout: Option<Duration>,
+        send_timeout: Duration,
         buffer_size: usize,
     ) -> Self {
         let (send_tx, send_rx) = mpsc::channel(buffer_size);
@@ -107,7 +107,7 @@ async fn forward_quic_messages(
     cancellation_token: CancellationToken,
     mut tx: SendStream,
     mut send_rx: mpsc::Receiver<ClientMessage>,
-    timeout: Option<Duration>,
+    timeout: Duration,
     closed_tx: oneshot::Sender<()>,
 ) {
     while let Some(msg) = send_rx.recv().await {

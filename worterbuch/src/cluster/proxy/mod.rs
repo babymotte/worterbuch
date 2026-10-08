@@ -816,7 +816,7 @@ async fn request_sender_loop(
     subsys: Subsystem,
     mut leader_tx: OwnedWriteHalf,
     mut rx: mpsc::Receiver<ProxyMessage>,
-    timeout: Option<Duration>,
+    timeout: Duration,
     leader_addr: String,
 ) -> miette::Result<()> {
     trace!("Request sender loop running, waiting for messages to write to socket …");
@@ -832,7 +832,7 @@ async fn forward_client_request(
     subsys: &Subsystem,
     recv: Option<ProxyMessage>,
     leader_tx: &mut OwnedWriteHalf,
-    timeout: Option<Duration>,
+    timeout: Duration,
     leader_addr: String,
 ) -> ControlFlow<()> {
     let Some(request) = recv else {

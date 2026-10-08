@@ -417,7 +417,7 @@ async fn forward_messages_to_socket(
     mut quic_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
     mut quic_tx: SendStream,
     client_id: ClientId,
-    send_timeout: Option<Duration>,
+    send_timeout: Duration,
 ) -> Result<()> {
     while_select! {
         biased;

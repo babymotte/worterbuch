@@ -678,7 +678,7 @@ pub async fn write_line_and_flush<F, Fut, T>(
     mut shutdown_request: F,
     msg: impl Serialize,
     mut tx: impl AsyncWriteExt + Unpin,
-    send_timeout: Option<Duration>,
+    send_timeout: Duration,
 ) -> ConnectionResult<()>
 where
     F: FnMut() -> Fut,
@@ -707,17 +707,13 @@ where
         let mut written = 0;
         while written < chunk.len() {
             let do_write = tx.write(&chunk[written..]);
-            let additionally_written = if let Some(send_timeout) = send_timeout {
-                do_with_timeout(
-                    &mut shutdown_request,
-                    "writing data to I/O channel",
-                    do_write,
-                    send_timeout,
-                )
-                .await??
-            } else {
-                do_without_timeout(&mut shutdown_request, do_write).await??
-            };
+            let additionally_written = do_with_timeout(
+                &mut shutdown_request,
+                "writing data to I/O channel",
+                do_write,
+                send_timeout,
+            )
+            .await??;
             written += additionally_written;
         }
     }
@@ -726,37 +722,16 @@ where
 
     let do_flush = tx.flush();
 
-    if let Some(send_timeout) = send_timeout {
-        do_with_timeout(
-            &mut shutdown_request,
-            "flushing I/O channel",
-            do_flush,
-            send_timeout,
-        )
-        .await??;
-    } else {
-        do_without_timeout(&mut shutdown_request, do_flush).await??;
-    }
+    do_with_timeout(
+        &mut shutdown_request,
+        "flushing I/O channel",
+        do_flush,
+        send_timeout,
+    )
+    .await??;
     trace!("Flushing channel done.");
 
     Ok(())
-}
-
-async fn do_without_timeout<F, Fut, T, FutT>(
-    shutdown_request: &mut F,
-    task: impl Future<Output = io::Result<T>>,
-) -> ConnectionResult<io::Result<T>>
-where
-    F: FnMut() -> Fut,
-    Fut: IntoFuture<Output = FutT>,
-{
-    select! {
-        biased;
-        _ = shutdown_request() => {
-            Err(ConnectionError::ShutdownRequested)
-        },
-        res = task => Ok(res),
-    }
 }
 
 async fn do_with_timeout<F, Fut, T, FutT>(

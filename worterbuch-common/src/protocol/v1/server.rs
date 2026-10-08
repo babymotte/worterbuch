@@ -329,6 +329,7 @@ pub enum ErrorCode {
     ClientIDCollision = 24,
     EmptyKey = 25,
     LockLost = 26,
+    InternalTimeout = 27,
     Other = u8::MAX,
 }
 

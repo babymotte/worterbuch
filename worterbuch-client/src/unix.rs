@@ -17,6 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use std::time::Duration;
+
 use tokio::{
     io::{BufReader, Lines},
     net::unix::{OwnedReadHalf, OwnedWriteHalf},
@@ -103,7 +105,7 @@ where
             || cancellation_token.clone().cancelled_owned(),
             msg,
             &mut tx,
-            None,
+            Duration::from_secs(u64::MAX),
         )
         .await
         {
