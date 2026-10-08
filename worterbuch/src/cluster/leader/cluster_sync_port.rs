@@ -48,7 +48,6 @@ use tokio::{
         TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
-    spawn,
     sync::{mpsc, oneshot},
 };
 use tosub::Subsystem;
@@ -291,8 +290,15 @@ async fn follower_session(
     send_welcome(subsys, &mut socket_tx, follower, &config).await?;
     let handshake = receive_handshake(&mut proxy_messages, follower).await?;
 
-    let is_proxy =
-        process_handshake(handshake, &config, proxy_server, proxy_sessions, proxy_id).await?;
+    let is_proxy = process_handshake(
+        subsys,
+        handshake,
+        &config,
+        proxy_server,
+        proxy_sessions,
+        proxy_id,
+    )
+    .await?;
 
     let (sync_tx, sync_rx) = oneshot::channel();
     on_follower_connected
@@ -394,6 +400,7 @@ async fn receive_handshake(
 }
 
 async fn process_handshake(
+    subsys: &Subsystem,
     handshake: Handshake,
     config: &Config,
     proxy_server: &mut VirtualProxyServer,
@@ -442,12 +449,10 @@ async fn process_handshake(
                 continue;
             };
             for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
-                spawn(protocol::forward_lock_acquired(
-                    client.to_owned(),
-                    transaction_id,
-                    acquired_rx,
-                    lost_rx,
-                ));
+                let client = client.to_owned();
+                subsys.spawn("forward_lock_acquired", move |s| {
+                    protocol::forward_lock_acquired(s, client, transaction_id, acquired_rx, lost_rx)
+                });
             }
         }
 

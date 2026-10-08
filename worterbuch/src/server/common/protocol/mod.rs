@@ -32,6 +32,7 @@ use tokio::sync::{
     oneshot,
 };
 use tosub::Subsystem;
+use totils::CancelOn;
 use tracing::{Instrument, Level, debug, instrument, trace, trace_span, warn};
 use v0::V0;
 use v1::V1;
@@ -213,6 +214,7 @@ impl Proto {
 }
 
 pub async fn forward_lock_acquired(
+    subsys: Subsystem,
     client: ServerMessageLazyBroadcaster,
     transaction_id: TransactionId,
     acquired_rx: LockAcquiredReceiver,
@@ -234,23 +236,33 @@ pub async fn forward_lock_acquired(
         return;
     }
 
-    forward_lock_lost(client, transaction_id, lost_rx).await;
+    forward_lock_lost(subsys, client, transaction_id, lost_rx).await;
 }
 
 async fn forward_lock_lost(
+    subsys: Subsystem,
     client: ServerMessageLazyBroadcaster,
     transaction_id: TransactionId,
     lost_rx: LockLostReceiver,
 ) {
     debug!("Receiving lock lost message for transaction {transaction_id:?} …");
-    if !lost_rx.await.is_ok() {
-        debug!(
-            "Did not receive a lock lost message for transaction id {transaction_id:?} before lock was released."
-        );
-        return;
+
+    match lost_rx.or_cancel_on(subsys.shutdown_requested()).await {
+        Some(Err(_)) => {
+            debug!(
+                "Did not receive a lock lost message for transaction id {transaction_id:?} before lock was released."
+            );
+            return;
+        }
+        None => {
+            debug!(
+                "Did not receive a lock lost message for transaction id {transaction_id:?} before system was shut down."
+            );
+            return;
+        }
+        Some(Ok(_)) => debug!("Lock lost message for transaction {transaction_id:?} received."),
     }
 
-    debug!("Lock lost message for transaction {transaction_id:?} received.");
     let msg = ServerMessage::Err(Err {
         transaction_id,
         error_code: ErrorCode::LockLost,

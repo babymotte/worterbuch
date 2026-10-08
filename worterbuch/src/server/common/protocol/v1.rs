@@ -25,7 +25,7 @@ use crate::{
         v0::{handle_store_error, handle_store_error_lazy},
     },
 };
-use tokio::{spawn, sync::oneshot};
+use tokio::sync::oneshot;
 use tracing::{Level, instrument, trace};
 use worterbuch_common::{
     Privilege, WbApi,
@@ -176,6 +176,7 @@ impl V1 {
     }
 
     pub async fn lock(&self, msg: Lock) {
+        let lock_lost_forwarder_name = format!("forward_lock_lost/{}", msg.key);
         let lost_rx = match self
             .v0
             .worterbuch
@@ -199,10 +200,15 @@ impl V1 {
 
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
-        spawn(forward_lock_lost(client, transaction_id, lost_rx));
+        self.v0
+            .subsys
+            .spawn(lock_lost_forwarder_name, move |s| async move {
+                forward_lock_lost(s, client, transaction_id, lost_rx).await
+            });
     }
 
     pub async fn acquire_lock(&self, msg: Lock) {
+        let lock_lost_forwarder_name = format!("forward_lock_lost/{}", msg.key);
         let (acquired_rx, lost_rx) = match self
             .v0
             .worterbuch
@@ -219,12 +225,11 @@ impl V1 {
         let client = self.v0.tx.clone();
         let transaction_id = msg.transaction_id;
 
-        spawn(forward_lock_acquired(
-            client,
-            transaction_id,
-            acquired_rx,
-            lost_rx,
-        ));
+        self.v0
+            .subsys
+            .spawn(lock_lost_forwarder_name, move |s| async move {
+                forward_lock_acquired(s, client, transaction_id, acquired_rx, lost_rx).await
+            });
     }
 
     pub async fn release_lock(&self, msg: Lock) {
