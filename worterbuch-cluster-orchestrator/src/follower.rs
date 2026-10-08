@@ -30,7 +30,7 @@ use std::{net::SocketAddr, ops::ControlFlow, pin::pin};
 use tokio::{net::UdpSocket, time::sleep};
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{Level, info, instrument, warn};
+use tracing::{Level, info, instrument, trace, warn};
 
 pub async fn follow(
     subsys: &Subsystem,
@@ -44,7 +44,11 @@ pub async fn follow(
     } else {
         return Ok(());
     };
-    let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-follower", true);
+    let Some(mut proc_manager) = ChildProcessManager::new(subsys, "wb-server-follower", true)
+    else {
+        trace!("shutdown requested, not spawning new child process manager");
+        return Ok(());
+    };
     proc_manager.restart(cmd(leader_addr, config)).await;
 
     let mut buf = [0u8; 65507];

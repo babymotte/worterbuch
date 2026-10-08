@@ -185,7 +185,7 @@ async fn bind_endpoints_and_run(
                 let supported_client_protocol_versions =
                     config.supported_client_protocol_versions();
 
-                let client = subsys.spawn(format!("client-{id}"), async move |s| {
+                let Some(client) = subsys.spawn(format!("client-{id}"), async move |s| {
                     select! {
                         s = accept_and_serve(&s, id, *incoming, worterbuch, supported_client_protocol_versions) => if let Err(e) = s {
                             error!("Connection to client {id} closed with error: {e}");
@@ -193,7 +193,10 @@ async fn bind_endpoints_and_run(
                         _ = s.shutdown_requested() => (),
                     }
                     let _ = conn_closed_tx.send(id).await;
-                });
+                }) else {
+                    trace!("shutdown requested, not spawning new client handler");
+                    break;
+                };
                 clients.insert(id, client);
                 debug!("Ready to accept new connections.");
             }

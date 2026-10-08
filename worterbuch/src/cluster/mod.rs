@@ -33,7 +33,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tosub::Subsystem;
-use tracing::{Instrument, info, trace};
+use tracing::{Instrument, Level, info, instrument, trace};
 use worterbuch_common::protocol::v1::{InternalAction, Trace, TraceData};
 
 pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
@@ -58,10 +58,12 @@ pub enum LeaderState {
     Synced(String),
 }
 
+#[instrument(level = Level::TRACE, skip_all)]
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     trace!(enter = "process_api_call");
     match function {
-        WbFunction::Get(key, tx) => {
+        WbFunction::Get(key, tx, span) => {
+            let _guard = span.enter();
             let _ = tx.send(worterbuch.get(&key));
         }
         WbFunction::CGet(key, tx) => {
@@ -277,6 +279,7 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     trace!(exit = "process_api_call");
 }
 
+#[instrument(level = Level::TRACE, skip_all)]
 async fn shutdown(
     subsys: &Subsystem,
     mut worterbuch: Worterbuch,
@@ -302,6 +305,7 @@ async fn shutdown(
     Ok(())
 }
 
+#[instrument(level = Level::TRACE, skip_all)]
 async fn shutdown_servers(servers: Servers) {
     if let Some(it) = servers.web_server {
         info!("Shutting down web server …");

@@ -35,7 +35,7 @@ use std::{net::SocketAddr, ops::ControlFlow};
 use tokio::sync::{mpsc, oneshot};
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{info, trace};
+use tracing::{Level, info, instrument, trace};
 use worterbuch_common::{
     protocol::v1::{InternalAction, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace},
     topic,
@@ -108,6 +108,7 @@ pub(crate) async fn run(
     shutdown(subsys, worterbuch, config, servers).await
 }
 
+#[instrument(level = Level::TRACE, skip_all, err)]
 async fn forward_api_call(
     recv: Option<WbFunction>,
     worterbuch: &mut Worterbuch,

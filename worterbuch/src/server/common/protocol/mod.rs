@@ -54,13 +54,17 @@ pub(crate) trait LazyBroadcaster<T> {
 }
 
 impl LazyBroadcaster<ServerMessage> for ServerMessageLazyBroadcaster {
+    #[instrument(level = Level::TRACE, skip_all, err)]
     async fn lazy_send(
         &self,
         msg: ServerMessage,
     ) -> Result<(), SendError<oneshot::Receiver<ServerMessage>>> {
+        trace!(enter = "lazy_send");
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(msg);
-        self.send(rx).await
+        let res = self.send(rx).await;
+        trace!(exit = "lazy_send");
+        res
     }
 }
 
@@ -138,7 +142,7 @@ impl Proto {
         msg: &str,
         authorized: &mut Option<JwtClaims>,
     ) -> WorterbuchResult<bool> {
-        debug!("Received message from client {}: {}", self.client_id(), msg);
+        trace!(client_id=%self.client_id(), "Received message from client");
         let deserialized = async { serde_json::from_str(msg) }
             .instrument(trace_span!("from_str"))
             .await;

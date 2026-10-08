@@ -21,7 +21,7 @@ use clap::Parser;
 use miette::IntoDiagnostic;
 use std::time::Duration;
 use tosub::{CancelOnShutdown, Subsystem};
-use tracing::info;
+use tracing::{info, trace};
 use worterbuch_client::{AuthToken, config::Config};
 use worterbuch_speedtest2::latency;
 
@@ -131,14 +131,17 @@ async fn latency_test(
     n_ary: usize,
     values_per_key: usize,
 ) -> Result<(), miette::Error> {
-    let test = latency::LatencyTest::new(
+    let Some(test) = latency::LatencyTest::new(
         &subsys,
         publishers,
         key_length,
         n_ary,
         values_per_key,
         client_config,
-    );
+    ) else {
+        trace!("shutdown requested, not spawning latency test");
+        return Ok(());
+    };
 
     let result = match test.join().or_cancel_on_shutdown(&subsys).await {
         Some(Ok(Some(result))) => result,

@@ -23,9 +23,19 @@ use std::{env, io};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::level_filters::LevelFilter;
-use tracing::{debug, info};
+use tracing::{Event, Level, Subscriber, debug, info};
 use tracing_subscriber::{
-    Layer, Registry, filter::Targets, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt,
+    Layer, Registry,
+    filter::Targets,
+    fmt::{
+        self, FmtContext, FormatEvent, FormatFields,
+        format::Writer,
+        time::{FormatTime, SystemTime},
+    },
+    layer::SubscriberExt,
+    registry::LookupSpan,
+    reload,
+    util::SubscriberInitExt,
 };
 
 pub fn init() -> ConfigResult<reload::Handle<impl Layer<Registry>, Registry>> {
@@ -58,9 +68,72 @@ where
     let stderr_layer = fmt::Layer::new()
         .with_ansi(color)
         .with_writer(writer)
+        .event_format(SpanNamesFormat)
         .with_filter(reloadable_targets);
 
     (stderr_layer, targets_reload_handler)
+}
+
+/// Like the default `Full` format, but only prints the names of the spans an
+/// event occurred in, not their fields.
+struct SpanNamesFormat;
+
+impl<S, N> FormatEvent<S, N> for SpanNamesFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        let ansi = writer.has_ansi_escapes();
+        let meta = event.metadata();
+
+        if ansi {
+            writer.write_str("\x1b[2m")?;
+        }
+        SystemTime.format_time(&mut writer)?;
+        if ansi {
+            writer.write_str("\x1b[0m")?;
+        }
+
+        let level = meta.level();
+        if ansi {
+            let color = match *level {
+                Level::TRACE => "35",
+                Level::DEBUG => "34",
+                Level::INFO => "32",
+                Level::WARN => "33",
+                Level::ERROR => "31",
+            };
+            write!(writer, " \x1b[{color}m{level:>5}\x1b[0m ")?;
+        } else {
+            write!(writer, " {level:>5} ")?;
+        }
+
+        if let Some(scope) = ctx.event_scope() {
+            for span in scope.from_root() {
+                if ansi {
+                    write!(writer, "\x1b[1m{}\x1b[0m:", span.name())?;
+                } else {
+                    write!(writer, "{}:", span.name())?;
+                }
+            }
+            writer.write_char(' ')?;
+        }
+
+        if ansi {
+            write!(writer, "\x1b[2m{}:\x1b[0m ", meta.target())?;
+        } else {
+            write!(writer, "{}: ", meta.target())?;
+        }
+
+        ctx.format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
 }
 
 pub async fn reload_log_targets_from_env<S>(handle: &ReloadableTargets<S>) -> ConfigResult<()>

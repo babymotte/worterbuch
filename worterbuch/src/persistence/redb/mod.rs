@@ -263,7 +263,7 @@ fn update_value(
     rx: &mut mpsc::Receiver<StoreAction>,
     next_action: &mut Option<StoreAction>,
 ) -> PersistenceResult<()> {
-    trace!("Updating value {key}={value:?}");
+    trace!(key, "Updating value …");
     let write_txn = db.begin_write()?;
 
     let mut table = write_txn.open_table(TABLE_V2)?;
@@ -376,7 +376,7 @@ fn restore_entries(db: &mut Database, store: &mut Store) -> PersistenceResult<()
                 let (k, v) = entry?;
                 let key = k.value();
                 let value = v.value();
-                trace!("Read entry {key}={value:?}");
+                trace!(key, ?value, "read entry");
                 let path = parse_segments(&key)?;
                 store.insert(&path, value, true)?;
             }

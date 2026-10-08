@@ -75,7 +75,7 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use tracing::{debug, debug_span, error, info, instrument, warn};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 use uuid::Uuid;
 use websocket::serve;
 use worterbuch_common::{
@@ -1017,7 +1017,7 @@ async fn run_ws_server(
                     let conn_closed_tx = conn_closed_tx.clone();
                     let supported_protocol_versions = worterbuch.supported_protocol_versions();
 
-                    let client = subsys.spawn(format!("client-{id}"), async move |s|  {
+                    let Some(client) = subsys.spawn(format!("client-{id}"), async move |s|  {
                         select! {
                             s = serve(&s, id, remote_addr, worterbuch, socket, supported_protocol_versions) => if let Err(e) = s {
                                 error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
@@ -1025,7 +1025,10 @@ async fn run_ws_server(
                             _ = s.shutdown_requested() => (),
                         }
                         let _ = conn_closed_tx.send(id).await;
-                    });
+                    }) else {
+                        trace!("shutdown requested, not spawning new client handler");
+                        break;
+                    };
                     clients.insert(id, client);
                 } else {
                     break;

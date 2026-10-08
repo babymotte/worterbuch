@@ -102,16 +102,19 @@ pub async fn start(
                             let worterbuch = worterbuch.named(format!("client/{id}"));
                             let conn_closed_tx = conn_closed_tx.clone();
 
-                            let client = subsys.spawn(format!("client-{id}"), async move |s| {
-                            select! {
-                                s = serve(&s, id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
-                                    error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
-                                },
-                                _ = s.shutdown_requested() => (),
-                            }
-                            let _ = conn_closed_tx.send(id).await;
-                            Ok::<(),miette::Error>(())
-                        });
+                            let Some(client) = subsys.spawn(format!("client-{id}"), async move |s| {
+                                select! {
+                                    s = serve(&s, id, &remote_addr, worterbuch, socket) => if let Err(e) = s {
+                                        error!("Connection to client {id} ({remote_addr:?}) closed with error: {e}");
+                                    },
+                                    _ = s.shutdown_requested() => (),
+                                }
+                                let _ = conn_closed_tx.send(id).await;
+                                Ok::<(),miette::Error>(())
+                            }) else {
+                                trace!("shutdown requested, not spawning new client handler");
+                                break;
+                            };
                             clients.insert(id, client);
                         }
                         Err(e) => {

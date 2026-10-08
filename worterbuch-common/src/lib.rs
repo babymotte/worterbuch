@@ -701,7 +701,7 @@ where
     json.push('\n');
     let bytes = json.as_bytes();
 
-    trace!(?send_timeout, json, "Sending message with timeout");
+    trace!(?send_timeout, "Sending message with timeout");
     trace!("Writing line …");
     for chunk in bytes.chunks(1024) {
         let mut written = 0;

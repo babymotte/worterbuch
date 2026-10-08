@@ -867,7 +867,7 @@ impl Store {
         value: ValueEntry,
         force: bool,
     ) -> StoreResult<(bool, Option<Vec<AffectedLsSubscribers>>)> {
-        trace!(?path, ?value, force, "inserting value");
+        trace!(?path, force, "inserting value");
         let mut ls_subscribers: Option<Vec<(Vec<LsSubscriber>, &[String])>> = None;
         let mut current_node = &mut self.data;
         let mut current_subscribers = Some(&self.subscribers);

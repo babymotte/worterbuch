@@ -53,7 +53,13 @@ socket2 = { workspace = true }
 supports-color = { workspace = true }
 thiserror = { workspace = true }
 tikv-jemallocator = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync", "io-util", "time", "macros"] }
+tokio = { workspace = true, features = [
+    "sync",
+    "io-util",
+    "time",
+    "macros",
+    "fs",
+] }
 tokio-tungstenite-wasm = { workspace = true, optional = true }
 tosub.workspace = true
 totils = { workspace = true, features = ["while_select"] }

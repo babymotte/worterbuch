@@ -662,23 +662,25 @@ pub(crate) async fn run(
     leader_addresses: Box<[String]>,
     stdin: mpsc::Receiver<String>,
 ) -> WorterbuchAppResult<()> {
-    subsys
-        .spawn("proxy", |s| async {
-            Proxy::new(
-                s,
-                worterbuch,
-                api_rx,
-                config,
-                servers,
-                leader_addresses,
-                stdin,
-            )?
-            .run()
-            .await?;
-            Ok::<(), WorterbuchAppError>(())
-        })
-        .join()
+    let Some(proxy) = subsys.spawn("proxy", |s| async {
+        Proxy::new(
+            s,
+            worterbuch,
+            api_rx,
+            config,
+            servers,
+            leader_addresses,
+            stdin,
+        )?
+        .run()
         .await?;
+        Ok::<(), WorterbuchAppError>(())
+    }) else {
+        trace!("Shutdown requested, no proxy spawned");
+        return Ok(());
+    };
+
+    proxy.join().await?;
 
     Ok(())
 }

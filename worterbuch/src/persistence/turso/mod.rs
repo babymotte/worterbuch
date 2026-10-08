@@ -251,7 +251,7 @@ async fn update_value(
     rx: &mut mpsc::Receiver<StoreAction>,
     next_action: &mut Option<StoreAction>,
 ) -> PersistenceResult<()> {
-    trace!("Updating value {key}={value:?}");
+    trace!(key, "Updating value …");
 
     db.begin_transaction().await?;
     let result = async {
@@ -347,7 +347,7 @@ async fn load(
 
 async fn restore_entries(db: &mut TursoTrie, store: &mut Store) -> PersistenceResult<()> {
     for (key, value) in db.load().await? {
-        trace!("Read entry {key}={value:?}");
+        trace!(key, ?value, "read entry");
         let path = parse_segments(&key)?;
         store.insert(&path, value, true)?;
     }

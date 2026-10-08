@@ -26,7 +26,7 @@ use tokio::{
 use tokio_process_terminate::TerminateExt;
 use tosub::Subsystem;
 use totils::{CancelOn, ReceiveOrCancelOn};
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument, trace, warn};
 
 #[derive(Debug, Clone)]
 pub struct CommandDefinition {
@@ -267,10 +267,10 @@ impl ChildProcessManagerActor {
 }
 
 impl ChildProcessManager {
-    pub fn new(subsys: &Subsystem, name: &str, restart: bool) -> Self {
+    pub fn new(subsys: &Subsystem, name: &str, restart: bool) -> Option<Self> {
         let (api_tx, api_rx) = mpsc::channel(1);
 
-        let subsys = subsys.spawn(name, async move |s| {
+        let Some(subsys) = subsys.spawn(name, async move |s| {
             let actor = ChildProcessManagerActor {
                 subsys: s,
                 api_rx,
@@ -282,9 +282,12 @@ impl ChildProcessManager {
                 restart,
             };
             actor.run_process_manager().await
-        });
+        }) else {
+            trace!("shutdown requested, not spawning new child process manager");
+            return None;
+        };
 
-        ChildProcessManager { api_tx, subsys }
+        Some(ChildProcessManager { api_tx, subsys })
     }
 
     #[instrument(skip(self), fields())]

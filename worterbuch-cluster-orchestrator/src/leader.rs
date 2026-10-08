@@ -39,7 +39,10 @@ pub async fn lead(
     peers: &mut Peers,
     peers_rx: &mut mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>,
 ) -> Result<()> {
-    let mut proc_manager = ChildProcessManager::new(subsys, "wb-server-leader", false);
+    let Some(mut proc_manager) = ChildProcessManager::new(subsys, "wb-server-leader", false) else {
+        trace!("shutdown requested, not spawning new child process manager");
+        return Ok(());
+    };
 
     info!("Starting worterbuch server in leader mode …");
 

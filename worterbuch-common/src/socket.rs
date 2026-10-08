@@ -23,7 +23,7 @@ use std::{
     net::{IpAddr, SocketAddr, TcpListener, UdpSocket},
     time::Duration,
 };
-use tracing::trace;
+use tracing::{instrument, trace};
 
 #[derive(Debug, Clone)]
 pub struct TcpSocketConfig {
@@ -44,6 +44,7 @@ impl Default for TcpSocketConfig {
     }
 }
 
+#[instrument]
 pub fn create_tcp_server_socket(
     bind_addr: IpAddr,
     port: u16,

@@ -404,15 +404,24 @@ impl Worterbuch {
         self.store.len()
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     pub fn get(&self, key: &Key) -> WorterbuchResult<Value> {
+        trace!(enter = "get");
         let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
         match self.store.get(&path) {
-            Some(value) => Ok(value.to_owned()),
-            None => Err(WorterbuchError::NoSuchValue(key.to_owned())),
+            Some(value) => {
+                trace!(exit = "get");
+                Ok(value.to_owned())
+            }
+            None => {
+                trace!(exit = "get");
+                Err(WorterbuchError::NoSuchValue(key.to_owned()))
+            }
         }
     }
 
+    #[instrument(level = Level::TRACE, skip(self,))]
     pub fn cget(&self, key: &Key) -> WorterbuchResult<(Value, CasVersion)> {
         let path: Vec<RegularKeySegment> = parse_segments(key)?;
 
@@ -422,7 +431,7 @@ impl Worterbuch {
         }
     }
 
-    #[instrument(level = Level::TRACE, skip(self))]
+    #[instrument(level = Level::TRACE, skip(self, value))]
     pub async fn set(
         &mut self,
         key: Key,
@@ -435,7 +444,7 @@ impl Worterbuch {
             .await
     }
 
-    #[instrument(level = Level::TRACE, skip(self))]
+    #[instrument(level = Level::TRACE, skip(self, value))]
     pub(crate) async fn internal_set(
         &mut self,
         key: Key,
@@ -444,6 +453,7 @@ impl Worterbuch {
         cause: Trace,
         force: bool,
     ) -> WorterbuchResult<()> {
+        trace!(enter = "internal_set");
         check_for_read_only_key(&key, client_id)?;
 
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
@@ -476,6 +486,7 @@ impl Worterbuch {
         self.notify_subscribers(&path, &key, &value, changed, false, cause)
             .await;
 
+        trace!(exit = "internal_set");
         Ok(())
     }
 
@@ -580,6 +591,7 @@ impl Worterbuch {
         client_id: ClientId,
         cause: Trace,
     ) -> Result<(), WorterbuchError> {
+        trace!(enter = "internal_publish");
         let path: Vec<RegularKeySegment> = parse_segments(&key)?;
         self.notify_followers(
             client_id,
@@ -591,6 +603,7 @@ impl Worterbuch {
         self.notify_subscribers(&path, &key, &value, true, false, cause)
             .await;
 
+        trace!(exit = "internal_publish");
         Ok(())
     }
 
@@ -1098,7 +1111,7 @@ impl Worterbuch {
             .collect();
 
         let len = filtered_subscribers.len();
-        trace!("Calling {} subscribers: {} = {:?} …", len, key, value);
+        trace!(key, "Calling {} subscribers …", len);
         for subscriber in filtered_subscribers {
             if subscriber.is_pstate_subscriber() {
                 let kvps = vec![KeyValuePair::of(key, value)];
@@ -1131,7 +1144,7 @@ impl Worterbuch {
             }
         }
 
-        trace!("Called {} subscribers: {} = {:?}", len, key, value);
+        trace!("Calling {} subscribers done.", len);
         trace!("Notifying subscribers done.");
     }
 
@@ -1153,6 +1166,7 @@ impl Worterbuch {
         trace!("Calling {} ls subscribers done.", len);
     }
 
+    #[instrument(level = Level::TRACE, skip_all)]
     async fn notify_followers(
         &mut self,
         client_id: ClientId,
@@ -1176,7 +1190,7 @@ impl Worterbuch {
             trace,
             command,
         };
-        trace!(?msg, "Forwarding state change to {} followers/proxies", len);
+        trace!("Forwarding state change to {} followers/proxies", len);
         let mut dead: Option<Vec<SocketAddr>> = None;
         for follower in &self.followers {
             let read_only = system_key && !grave_goods_or_last_will;
@@ -1351,6 +1365,7 @@ impl Worterbuch {
         Ok(deleted)
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     pub async fn lock(
         &mut self,
         key: Key,
@@ -1368,21 +1383,25 @@ impl Worterbuch {
         self.internal_lock(key, client_id, trace).await
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     async fn internal_lock(
         &mut self,
         key: Key,
         client_id: ClientId,
         trace: Trace,
     ) -> WorterbuchResult<LockLostReceiver> {
+        trace!(enter = "internal_lock");
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         let rx = self.store.lock(client_id, path)?;
 
         self.locked(Some(client_id), &key, trace).await;
 
+        trace!(exit = "internal_lock");
         Ok(rx)
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     pub async fn acquire_lock(
         &mut self,
         key: Key,
@@ -1400,18 +1419,21 @@ impl Worterbuch {
         self.internal_acquire_lock(key, client_id, trace).await
     }
 
+    #[instrument(level = Level::TRACE, skip(self))]
     async fn internal_acquire_lock(
         &mut self,
         key: Key,
         client_id: ClientId,
         trace: Trace,
     ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
+        trace!(enter = "internal_acquire_lock");
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         let (acquired_rx, lost_rx, client_id) = self.store.acquire_lock(client_id, path);
 
         self.locked(client_id, &key, trace).await;
 
+        trace!(exit = "internal_acquire_lock");
         Ok((acquired_rx, lost_rx))
     }
 

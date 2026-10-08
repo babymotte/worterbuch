@@ -40,7 +40,7 @@ use tokio::{
 };
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{Level, debug, enabled, error, info, trace, warn};
+use tracing::{Level, debug, enabled, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
     protocol::v1::{
@@ -97,6 +97,7 @@ impl Drop for VirtualProxyServer {
 }
 
 impl VirtualProxyServer {
+    #[instrument(level=Level::TRACE, skip_all)]
     pub async fn process_proxy_message(
         &mut self,
         recv: io::Result<Option<String>>,
@@ -124,6 +125,7 @@ impl VirtualProxyServer {
         }
     }
 
+    #[instrument(level=Level::TRACE, skip_all)]
     async fn process_line(&mut self, line: String) -> miette::Result<()> {
         trace!(enter = "process_line", line);
         let msg: ProxyMessage = serde_json::from_str(&line)
@@ -178,6 +180,7 @@ impl VirtualProxyServer {
         Ok(())
     }
 
+    #[instrument(level=Level::TRACE, skip_all)]
     pub async fn spawn_virtual_client(
         &mut self,
         client_id: ClientId,
@@ -239,6 +242,7 @@ impl VirtualProxyServer {
         Ok(send_client_tx)
     }
 
+    #[instrument(level=Level::TRACE, skip_all)]
     async fn stop_virtual_client(
         &mut self,
         client_id: ClientId,
@@ -275,6 +279,7 @@ impl VirtualProxyServer {
     /// Notifies the core system about the disconnect of all clients that are still registered via this proxy
     /// connection. Must be called before the connection's task ends, since a new connection of the same proxy
     /// waits for that task to end and relies on all disconnects having been queued by then.
+    #[instrument(level=Level::TRACE, skip_all)]
     pub async fn disconnect_all(&mut self) {
         trace!(enter = "disconnect_all");
         for (client_id, client) in self.clients.drain() {
@@ -294,6 +299,7 @@ impl VirtualProxyServer {
         trace!(exit = "disconnect_all");
     }
 
+    #[instrument(level=Level::TRACE, skip_all)]
     async fn process_client_request(
         &mut self,
         client_id: ClientId,

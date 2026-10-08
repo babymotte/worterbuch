@@ -255,9 +255,9 @@ fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         let ws_enabled = config.role.accept_client_connections() && !config.ws_disabled;
-        Some(subsys.spawn("webserver", async move |subsys| {
+        subsys.spawn("webserver", async move |subsys| {
             server::axum::start(sapi, tls, bind_addr, port, subsys, ws_enabled).await
-        }))
+        })
     } else {
         info!("Web server disabled.");
         None
@@ -277,9 +277,9 @@ fn tcp_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
         let sapi = api.for_interface("server/tcp", Interface::Protocol(Protocol::TCP));
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
-        Some(subsys.spawn("tcpserver", async move |subsys| {
+        subsys.spawn("tcpserver", async move |subsys| {
             server::tcp::start(sapi, cfg, bind_addr, port, subsys).await
-        }))
+        })
     } else {
         None
     }
@@ -293,9 +293,9 @@ fn unix_socket(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
     {
         let sapi = api.for_interface("server/unix", Interface::Protocol(Protocol::UNIX));
         let path = path.clone();
-        Some(subsys.spawn("unixsocket", async move |subsys| {
+        subsys.spawn("unixsocket", async move |subsys| {
             server::unix::start(sapi, path, subsys).await
-        }))
+        })
     } else {
         None
     }
@@ -319,9 +319,9 @@ fn quic_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
         let port = port.to_owned();
         let cert_path = cert_path.clone();
         let key_path = key_path.clone();
-        Some(subsys.spawn("quicserver", async move |subsys| {
+        subsys.spawn("quicserver", async move |subsys| {
             server::quic::start(sapi, bind_addr, port, cert_path, key_path, subsys).await
-        }))
+        })
     } else {
         None
     }

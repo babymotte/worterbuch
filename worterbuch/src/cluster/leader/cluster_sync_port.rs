@@ -53,7 +53,7 @@ use tokio::{
 };
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
     WorterbuchVersion,
     protocol::v1::{Err, ErrorCode, ServerMessage},
@@ -142,6 +142,7 @@ pub async fn run_cluster_sync_port(
     Ok(())
 }
 
+#[instrument(skip_all)]
 fn accecpt_client(
     client: io::Result<(TcpStream, SocketAddr)>,
     subsys: &Subsystem,
@@ -179,6 +180,7 @@ fn accecpt_client(
     };
 }
 
+#[instrument(skip_all, fields(client = %client.1))]
 fn serve(
     subsys: &Subsystem,
     client: (TcpStream, SocketAddr),

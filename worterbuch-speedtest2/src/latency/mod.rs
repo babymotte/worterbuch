@@ -48,7 +48,7 @@ impl LatencyTest {
         n_ary: usize,
         values_per_key: usize,
         client_config: Config,
-    ) -> Subsystem<Option<LatencyTestResult>> {
+    ) -> Option<Subsystem<Option<LatencyTestResult>>> {
         subsys.spawn("latency-test", move |subsys| {
             Self {
                 subsys,

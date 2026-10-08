@@ -19,7 +19,7 @@
 
 pub mod protocol;
 
-use crate::{Config, INTERNAL_CLIENT_ID, cluster::protocol::locks::Locks, stats::VERSION};
+use crate::{Config, cluster::protocol::locks::Locks, stats::VERSION};
 use hashbrown::HashMap;
 use std::{fmt, net::SocketAddr, time::Duration};
 use tokio::{
@@ -61,7 +61,7 @@ pub struct UpdatedLocks {
 }
 
 pub enum WbFunction {
-    Get(Key, oneshot::Sender<WorterbuchResult<Value>>),
+    Get(Key, oneshot::Sender<WorterbuchResult<Value>>, Span),
     CGet(Key, oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>),
     Set(
         TransactionId,
@@ -222,7 +222,7 @@ pub enum WbFunction {
 impl fmt::Debug for WbFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WbFunction::Get(key, _) => f.debug_tuple("Get").field(key).finish(),
+            WbFunction::Get(key, _, _) => f.debug_tuple("Get").field(key).finish(),
             WbFunction::CGet(key, _) => f.debug_tuple("CGet").field(key).finish(),
             WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => f
                 .debug_tuple("Set")
@@ -525,9 +525,10 @@ impl WbApi for CloneableWbApi {
         VERSION
     }
 
+    #[instrument(level = Level::TRACE, skip_all, err)]
     async fn get(&self, key: Key) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Get(key, tx);
+        let function = WbFunction::Get(key, tx, Span::current());
         self.request_with_timeout(function, "get", rx).await
     }
 
@@ -543,7 +544,7 @@ impl WbApi for CloneableWbApi {
         self.request_with_timeout(function, "pget", rx).await
     }
 
-    #[instrument(level=Level::TRACE, skip(self))]
+    #[instrument(level=Level::TRACE, skip(self), err)]
     async fn set(
         &self,
         transaction_id: TransactionId,
@@ -799,6 +800,7 @@ impl WbApi for CloneableWbApi {
         self.request_with_timeout(function, "pdelete", rx).await
     }
 
+    #[instrument(level=Level::TRACE, skip(self))]
     async fn connected(
         &self,
         client_id: ClientId,
@@ -812,6 +814,7 @@ impl WbApi for CloneableWbApi {
         Ok(eject_rx)
     }
 
+    #[instrument(level=Level::TRACE, skip(self))]
     async fn protocol_switched(
         &self,
         client_id: ClientId,
@@ -823,6 +826,7 @@ impl WbApi for CloneableWbApi {
         Ok(())
     }
 
+    #[instrument(level=Level::TRACE, skip(self))]
     async fn disconnected(
         &self,
         client_id: ClientId,
