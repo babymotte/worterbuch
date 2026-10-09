@@ -28,13 +28,14 @@ use tokio::{
     time::interval,
 };
 use tosub::Subsystem;
+use totils::{CancelOn, Untangle};
 #[cfg(feature = "trace")]
 use tracing::trace;
 use tracing::{debug, info, warn};
 use worterbuch_client::{
-    Ack, AuthToken, AuthorizationRequest, ClientMessage, Key, ProtocolMajorVersion,
-    ProtocolSwitchRequest, ServerMessage, Set, TransactionId, Value, Welcome, config::Config,
-    write_line_and_flush,
+    Ack, AuthToken, AuthorizationRequest, ClientMessage, Key, PState, PSubscribe,
+    ProtocolMajorVersion, ProtocolSwitchRequest, ServerMessage, Set, TransactionId, Value, Welcome,
+    config::Config, write_line_and_flush,
 };
 
 pub trait Writer: AsyncWrite {}
@@ -47,6 +48,7 @@ pub struct TestClient<W> {
     writer: BufWriter<W>,
     lines: mpsc::Receiver<String>,
     pending_acks: BTreeSet<TransactionId>,
+    subscription_tid: Option<TransactionId>,
 }
 
 impl<W: AsyncWrite + Unpin> TestClient<W> {
@@ -65,6 +67,19 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
             key,
             value,
         }))
+    }
+
+    async fn subscribe(&mut self, subsys: &Subsystem) -> miette::Result<()> {
+        let tid = self.next_tid();
+        self.subscription_tid = Some(tid);
+        subscribe(self.id, subsys, &mut self.writer, &mut self.lines, tid)
+            .await
+            .wrap_err("failed to subscribe")?;
+        info!(
+            "Publisher {} successfully subscribed to latency test topic",
+            self.id
+        );
+        Ok(())
     }
 
     fn next_tid(&mut self) -> u64 {
@@ -105,7 +120,7 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
                 biased;
                 _ = subsys.shutdown_requested() => break,
                 _ = interval.tick() => self.log_status(),
-                recv = self.lines.recv() => self.process_line(recv).await?,
+                recv = self.lines.recv() => self.process_line(recv).await.wrap_err("Failed to process next line")?,
             }
         }
         Ok(())
@@ -120,13 +135,34 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
             bail!("Received invalid data from server");
         };
 
-        let ServerMessage::Ack(Ack { transaction_id }) = msg else {
-            bail!("Received unexpected data from server");
-        };
+        trace!("received server message: {:#?}", msg);
 
-        if self.pending_acks.remove(&transaction_id) {
-            #[cfg(feature = "trace")]
-            trace!(self.id, transaction_id, ?self.pending_acks, "received ack");
+        match msg {
+            ServerMessage::Ack(Ack { transaction_id }) => {
+                if self.pending_acks.remove(&transaction_id) {
+                    #[cfg(feature = "trace")]
+                    trace!(self.id, transaction_id, ?self.pending_acks, "received ack");
+                } else {
+                    bail!(
+                        "Received ack for unexpected transaction id: {}",
+                        transaction_id
+                    );
+                }
+            }
+            ServerMessage::PState(PState { transaction_id, .. }) => {
+                if self.subscription_tid == Some(transaction_id) {
+                    #[cfg(feature = "trace")]
+                    trace!(self.id, transaction_id, "received subscription event");
+                } else {
+                    bail!(
+                        "Received subscription event for unexpected transaction id: {}",
+                        transaction_id
+                    );
+                }
+            }
+            _ => {
+                bail!("Received unexpected data from server");
+            }
         }
 
         Ok(())
@@ -145,14 +181,15 @@ pub async fn create_tcp_client(
     subsys: &Subsystem,
     id: usize,
     client_config: &Config,
+    subscribe: bool,
 ) -> miette::Result<TestClient<OwnedWriteHalf>> {
     let (mut writer, mut lines) = connect_tcp(id, &client_config).await?;
 
-    let welcome = receive_welcome_message(id, &mut lines).await?;
+    let welcome = receive_welcome_message(id, subsys, &mut lines).await?;
 
     if welcome.info.authorization_required {
         if let Some(auth_token) = &client_config.auth_token {
-            send_auth(id, subsys, auth_token.to_owned(), &mut writer, &mut lines).await?;
+            authenticate(id, subsys, auth_token.to_owned(), &mut writer, &mut lines).await?;
         } else {
             bail!("Authorization required but no auth token provided");
         }
@@ -179,14 +216,21 @@ pub async fn create_tcp_client(
         }
     });
 
-    Ok(TestClient {
+    let mut client = TestClient {
         id,
         next_tid: 1,
         set_commands: Vec::new(),
         writer,
         lines: lines_rx,
         pending_acks: Default::default(),
-    })
+        subscription_tid: None,
+    };
+
+    if subscribe {
+        client.subscribe(subsys).await?;
+    }
+
+    Ok(client)
 }
 
 async fn connect_tcp(
@@ -220,15 +264,19 @@ async fn connect_tcp(
 
 async fn receive_welcome_message<R: AsyncRead + Unpin>(
     id: usize,
+    subsys: &Subsystem,
     lines: &mut Lines<BufReader<R>>,
 ) -> miette::Result<Welcome> {
     debug!(id, "Receiving welcome message …");
 
     let Some(line) = lines
         .next_line()
+        .or_cancel_on(subsys.shutdown_requested())
         .await
+        .untangle()
         .into_diagnostic()
         .wrap_err("Error reading welcome message from TCP stream")?
+        .flatten()
     else {
         bail!("TCP stream closed before welcome message was received");
     };
@@ -251,13 +299,24 @@ async fn receive_welcome_message<R: AsyncRead + Unpin>(
     Ok(welcome)
 }
 
-async fn send_auth<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
+async fn authenticate<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     id: usize,
     subsys: &Subsystem,
     auth_token: AuthToken,
     writer: &mut BufWriter<W>,
     lines: &mut Lines<BufReader<R>>,
 ) -> miette::Result<()> {
+    send_auth_request(id, subsys, auth_token, writer).await?;
+    receive_auth_ack(id, subsys, lines).await?;
+    Ok(())
+}
+
+async fn send_auth_request<W: AsyncWrite + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    auth_token: String,
+    writer: &mut BufWriter<W>,
+) -> Result<(), miette::Error> {
     debug!(id, "Sending auth message …");
     let msg = ClientMessage::AuthorizationRequest(AuthorizationRequest { auth_token });
     #[cfg(feature = "trace")]
@@ -272,14 +331,24 @@ async fn send_auth<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     .wrap_err("error sending auth request")?;
     #[cfg(feature = "trace")]
     trace!(id, "auth request sent");
+    Ok(())
+}
 
+async fn receive_auth_ack<R: AsyncRead + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    lines: &mut Lines<BufReader<R>>,
+) -> Result<(), miette::Error> {
     #[cfg(feature = "trace")]
     trace!(id, "waiting for auth ack");
     let Some(line) = lines
         .next_line()
+        .or_cancel_on(subsys.shutdown_requested())
         .await
+        .untangle()
         .into_diagnostic()
         .wrap_err("Error reading auth ack from TCP stream")?
+        .flatten()
     else {
         bail!("TCP stream closed before auth ack was received");
     };
@@ -323,8 +392,18 @@ async fn switch_proto<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     writer: &mut BufWriter<W>,
     lines: &mut Lines<BufReader<R>>,
 ) -> miette::Result<()> {
-    debug!(id, ?proto, "Switching protocol …");
+    send_protocol_switch_request(id, subsys, proto, writer).await?;
+    receive_protocol_switch_ack(id, subsys, lines).await?;
+    Ok(())
+}
 
+async fn send_protocol_switch_request<W: AsyncWrite + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    proto: u32,
+    writer: &mut BufWriter<W>,
+) -> Result<(), miette::Error> {
+    debug!(id, ?proto, "Switching protocol …");
     let msg = ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest { version: proto });
     #[cfg(feature = "trace")]
     trace!(id, ?msg, "sending protocol switch request");
@@ -338,14 +417,24 @@ async fn switch_proto<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     .wrap_err("error switching protocol")?;
     #[cfg(feature = "trace")]
     trace!(id, "protocol switch request sent");
+    Ok(())
+}
 
+async fn receive_protocol_switch_ack<R: AsyncRead + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    lines: &mut Lines<BufReader<R>>,
+) -> Result<(), miette::Error> {
     #[cfg(feature = "trace")]
     trace!(id, "waiting for ack");
     let Some(line) = lines
         .next_line()
+        .or_cancel_on(subsys.shutdown_requested())
         .await
+        .untangle()
         .into_diagnostic()
         .wrap_err("Error reading protocol switch ack from TCP stream")?
+        .flatten()
     else {
         bail!("TCP stream closed before protocol switch ack was received");
     };
@@ -370,5 +459,89 @@ async fn switch_proto<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     }
 
     debug!(id, "Protocol switched.");
+    Ok(())
+}
+
+async fn subscribe<W: AsyncWrite + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    writer: &mut BufWriter<W>,
+    lines: &mut mpsc::Receiver<String>,
+    transaction_id: TransactionId,
+) -> miette::Result<()> {
+    send_subscribe_request(id, subsys, writer, transaction_id).await?;
+    receive_subscribe_ack(id, subsys, lines, transaction_id).await?;
+    Ok(())
+}
+
+async fn send_subscribe_request<W: AsyncWrite + Unpin>(
+    id: usize,
+    subsys: &Subsystem,
+    writer: &mut BufWriter<W>,
+    transaction_id: TransactionId,
+) -> miette::Result<()> {
+    debug!(id, "Sending subscribe request …");
+
+    let msg = ClientMessage::PSubscribe(PSubscribe {
+        transaction_id,
+        request_pattern: "speed-test/latency/#".to_owned(),
+        unique: Some(false),
+        live_only: Some(true),
+        send_traces: Some(false),
+        aggregate_events: None,
+    });
+    #[cfg(feature = "trace")]
+    trace!(id, ?msg, "sending subscribe request");
+    write_line_and_flush(
+        || subsys.shutdown_requested(),
+        msg,
+        writer,
+        Duration::from_secs(5),
+    )
+    .await
+    .wrap_err("error sending subscribe request")?;
+    #[cfg(feature = "trace")]
+    trace!(id, "subscribe request sent");
+
+    Ok(())
+}
+
+async fn receive_subscribe_ack(
+    id: usize,
+    subsys: &Subsystem,
+    lines: &mut mpsc::Receiver<String>,
+    transaction_id: TransactionId,
+) -> miette::Result<()> {
+    #[cfg(feature = "trace")]
+    trace!(id, "waiting for ack");
+    let Some(line) = lines
+        .recv()
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        .flatten()
+    else {
+        bail!("TCP stream closed before subscription ack was received");
+    };
+    #[cfg(feature = "trace")]
+    trace!(id, line, "data from server received");
+
+    let msg = serde_json::from_str::<ServerMessage>(&line)
+        .into_diagnostic()
+        .wrap_err("Error parsing server message")?;
+
+    let ServerMessage::Ack(ack) = msg else {
+        bail!("Expected subscription ack, got {:?}", msg);
+    };
+    #[cfg(feature = "trace")]
+    trace!(id, transaction_id = ack.transaction_id, "ack received");
+
+    if ack.transaction_id != transaction_id {
+        bail!(
+            "Subscription ack returned unexpected transaction ID: {}",
+            ack.transaction_id
+        );
+    }
+
+    debug!(id, "Subscription acknowledged.");
     Ok(())
 }

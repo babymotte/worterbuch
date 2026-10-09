@@ -36,20 +36,9 @@ struct Args {
     /// The addresses of the Wörterbuch servers in form <ip>:<port>[,<ip2>:<port2>,…]. When omitted, the value of the env var WORTERBUCH_SERVERS will be used. If that is not set, 127.0.0.1:8081 will be used.
     #[arg(short, long)]
     addr: Vec<String>,
-    /// Output data in JSON and expect input data to be JSON.
-    #[arg(short, long)]
-    json: bool,
-    /// Keys to be deleted from Wörterbuch in the form "KEY1 KEY2 KEY3  …". When omitted, keys will be read from stdin. When reading keys from stdin, one key is expected per line.
-    keys: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
     #[arg(long)]
     auth: Option<AuthToken>,
-    /// Print only the value of the deleted key/value pair
-    #[arg(short, long)]
-    raw: bool,
-    /// Set a client name on the server
-    #[arg(short, long)]
-    name: Option<String>,
 }
 
 #[derive(clap::Subcommand)]
@@ -70,6 +59,10 @@ enum Commands {
         /// Number of values each publisher sets per key
         #[arg(long, short, value_name = "NUMBER", default_value = "10")]
         values_per_key: usize,
+
+        /// Make every publisher also a subscriber
+        #[arg(long, short, default_value = "false")]
+        subscribe: bool,
     },
     // Throughput,
 }
@@ -109,6 +102,7 @@ async fn run(subsys: Subsystem, args: Args) -> miette::Result<()> {
             key_length,
             n_ary,
             values_per_key,
+            subscribe,
         } => {
             latency_test(
                 subsys,
@@ -117,6 +111,7 @@ async fn run(subsys: Subsystem, args: Args) -> miette::Result<()> {
                 key_length,
                 n_ary,
                 values_per_key,
+                subscribe,
             )
             .await
         }
@@ -130,6 +125,7 @@ async fn latency_test(
     key_length: usize,
     n_ary: usize,
     values_per_key: usize,
+    subscribe: bool,
 ) -> Result<(), miette::Error> {
     let Some(test) = latency::LatencyTest::new(
         &subsys,
@@ -138,6 +134,7 @@ async fn latency_test(
         n_ary,
         values_per_key,
         client_config,
+        subscribe,
     ) else {
         trace!("shutdown requested, not spawning latency test");
         return Ok(());

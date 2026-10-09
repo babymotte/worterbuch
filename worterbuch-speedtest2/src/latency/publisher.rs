@@ -17,11 +17,12 @@
 
 use std::collections::HashSet;
 
-use miette::IntoDiagnostic;
+use miette::{Context, IntoDiagnostic};
 use random_word::Lang;
 use serde_json::json;
 use tokio::sync::oneshot;
 use tosub::{CancelOnShutdown, Subsystem};
+use totils::Untangle;
 #[cfg(feature = "trace")]
 use tracing::trace;
 use tracing::{debug, info, warn};
@@ -68,6 +69,7 @@ pub struct LatencyTestPublisher {
     prepare_rx: Option<oneshot::Receiver<oneshot::Sender<()>>>,
     run_rx: Option<oneshot::Receiver<oneshot::Sender<()>>>,
     client_config: Config,
+    subscribe: bool,
 }
 
 impl LatencyTestPublisher {
@@ -78,6 +80,7 @@ impl LatencyTestPublisher {
         n_ary: usize,
         values_per_key: usize,
         client_config: Config,
+        subscribe: bool,
     ) -> PublisherApi {
         let (prepare_tx, prepare_rx) = oneshot::channel();
         let (run_tx, run_rx) = oneshot::channel();
@@ -92,6 +95,7 @@ impl LatencyTestPublisher {
                 prepare_rx: Some(prepare_rx),
                 run_rx: Some(run_rx),
                 client_config,
+                subscribe,
             }
             .run()
         });
@@ -127,9 +131,10 @@ impl LatencyTestPublisher {
         #[cfg(feature = "trace")]
         trace!("Publisher {} creating worterbuch client …", self.id);
 
-        let Some(client) = create_tcp_client(&self.subsys, self.id, &self.client_config)
-            .or_cancel_on_shutdown(&self.subsys)
-            .await
+        let Some(client) =
+            create_tcp_client(&self.subsys, self.id, &self.client_config, self.subscribe)
+                .or_cancel_on_shutdown(&self.subsys)
+                .await
         else {
             return Ok(());
         };
@@ -236,6 +241,8 @@ impl LatencyTestPublisher {
             .await_acks(&self.subsys)
             .or_cancel_on_shutdown(&self.subsys)
             .await
+            .untangle()
+            .wrap_err("Failed to await acks")?
             .is_none()
         {
             return Ok(());

@@ -38,6 +38,7 @@ pub struct LatencyTest {
     n_ary: usize,
     values_per_key: usize,
     client_config: Config,
+    subscribe: bool,
 }
 
 impl LatencyTest {
@@ -48,6 +49,7 @@ impl LatencyTest {
         n_ary: usize,
         values_per_key: usize,
         client_config: Config,
+        subscribe: bool,
     ) -> Option<Subsystem<Option<LatencyTestResult>>> {
         subsys.spawn("latency-test", move |subsys| {
             Self {
@@ -57,6 +59,7 @@ impl LatencyTest {
                 n_ary,
                 values_per_key,
                 client_config,
+                subscribe,
             }
             .run()
         })
@@ -80,6 +83,7 @@ impl LatencyTest {
                 self.n_ary,
                 self.values_per_key,
                 self.client_config.clone(),
+                self.subscribe,
             );
             publishers.push(publisher);
         }
