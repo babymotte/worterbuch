@@ -30,7 +30,6 @@ use tokio::{fs, sync::mpsc, time::interval};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, warn};
-use worterbuch_common::logging::start_log_targets_reload_loop;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -349,11 +348,8 @@ pub async fn instrument_and_load_config(
         .await
         .wrap_err("failed to load config")?;
 
-    start_log_targets_reload_loop(
-        &subsys,
-        log_reload_handle,
-        Duration::from_secs(config.config_scan_interval),
-    );
+    log_reload_handle
+        .start_log_targets_reload_loop(&subsys, Duration::from_secs(config.config_scan_interval));
 
     Ok((config, peer_rx))
 }

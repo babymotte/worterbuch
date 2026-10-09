@@ -28,7 +28,7 @@ use opentelemetry_sdk::{
 use std::env;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{
-    EnvFilter, Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt,
+    EnvFilter, Layer, Registry, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use worterbuch_common::{
     error::ConfigResult,

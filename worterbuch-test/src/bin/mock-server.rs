@@ -15,8 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod logging;
-
 use miette::{Context, IntoDiagnostic};
 use std::{
     io,
@@ -35,14 +33,14 @@ use tracing::trace;
 use tracing::{error, info};
 use uuid::Uuid;
 use worterbuch_client::{
-    Ack, ClientMessage, ProtocolVersion, ServerInfo, ServerMessage, Welcome,
+    Ack, ClientMessage, ProtocolVersion, ServerInfo, ServerMessage, Welcome, logging,
     socket::{TcpSocketConfig, create_tcp_server_socket},
 };
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     let _ = dotenvy::dotenv();
-    logging::init()?;
+    let _ = logging::init()?;
 
     tosub::build_default_root("worterbuch-speedtest")
         .with_timeout(Duration::from_secs(10))

@@ -22,7 +22,6 @@ use miette::{Context, IntoDiagnostic};
 use std::env;
 use tokio::sync::mpsc;
 use worterbuch::{Args, Config, run_worterbuch};
-use worterbuch_common::logging::start_log_targets_reload_loop;
 
 fn main() -> miette::Result<()> {
     if env::var("WORTERBUCH_SINGLE_THREADED")
@@ -122,7 +121,7 @@ async fn start() -> miette::Result<()> {
     root_builder
         .start(move |s| async move {
             if let Some(reload_interval) = reload_interval {
-                start_log_targets_reload_loop(&s, log_reload_handle, reload_interval);
+                log_reload_handle.start_log_targets_reload_loop(&s, reload_interval);
             }
             run_worterbuch(s, config, Some(stdin_rx)).await
         })

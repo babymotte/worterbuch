@@ -15,14 +15,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod logging;
-
 use clap::Parser;
 use miette::{IntoDiagnostic, bail};
 use std::time::Duration;
 use tosub::{CancelOnShutdown, Subsystem};
 use tracing::{info, trace};
-use worterbuch_client::{AuthToken, config::Config};
+use worterbuch_client::{AuthToken, config::Config, logging};
 use worterbuch_test::{sequence, speed};
 
 #[derive(Parser)]
@@ -93,7 +91,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     let _ = dotenvy::dotenv();
-    logging::init()?;
+    let _ = logging::init()?;
 
     let args = Args::parse();
 
