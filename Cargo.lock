@@ -6710,7 +6710,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "worterbuch-speedtest2"
+name = "worterbuch-test"
 version = "0.1.0"
 dependencies = [
  "clap",

@@ -1,8 +1,8 @@
 [package]
-name = "worterbuch-speedtest2"
+name = "worterbuch-test"
 version = "0.1.0"
 edition = "2024"
-default-run = "worterbuch-speedtest"
+default-run = "worterbuch-test"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }

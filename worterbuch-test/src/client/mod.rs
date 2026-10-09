@@ -183,7 +183,33 @@ pub async fn create_tcp_client(
     client_config: &Config,
     subscribe: bool,
 ) -> miette::Result<TestClient<OwnedWriteHalf>> {
-    let (mut writer, mut lines) = connect_tcp(id, &client_config).await?;
+    let (writer, lines) = connect_tcp_client(subsys, id, client_config).await?;
+
+    let mut client = TestClient {
+        id,
+        next_tid: 1,
+        set_commands: Vec::new(),
+        writer,
+        lines,
+        pending_acks: Default::default(),
+        subscription_tid: None,
+    };
+
+    if subscribe {
+        client.subscribe(subsys).await?;
+    }
+
+    Ok(client)
+}
+
+/// Connects to the server, performs the handshake (welcome, authorization, protocol switch) and spawns a task that
+/// forwards every line received from the server to the returned receiver.
+pub async fn connect_tcp_client(
+    subsys: &Subsystem,
+    id: usize,
+    client_config: &Config,
+) -> miette::Result<(BufWriter<OwnedWriteHalf>, mpsc::Receiver<String>)> {
+    let (mut writer, mut lines) = connect_tcp(id, client_config).await?;
 
     let welcome = receive_welcome_message(id, subsys, &mut lines).await?;
 
@@ -216,21 +242,7 @@ pub async fn create_tcp_client(
         }
     });
 
-    let mut client = TestClient {
-        id,
-        next_tid: 1,
-        set_commands: Vec::new(),
-        writer,
-        lines: lines_rx,
-        pending_acks: Default::default(),
-        subscription_tid: None,
-    };
-
-    if subscribe {
-        client.subscribe(subsys).await?;
-    }
-
-    Ok(client)
+    Ok((writer, lines_rx))
 }
 
 async fn connect_tcp(
