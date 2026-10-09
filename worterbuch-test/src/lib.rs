@@ -16,6 +16,5 @@
  */
 
 pub mod client;
-pub mod latency;
 pub mod sequence;
-pub mod throughput;
+pub mod speed;

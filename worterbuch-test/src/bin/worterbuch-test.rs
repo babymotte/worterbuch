@@ -23,7 +23,7 @@ use std::time::Duration;
 use tosub::{CancelOnShutdown, Subsystem};
 use tracing::{info, trace};
 use worterbuch_client::{AuthToken, config::Config};
-use worterbuch_test::{latency, sequence};
+use worterbuch_test::{sequence, speed};
 
 #[derive(Parser)]
 struct Args {
@@ -43,12 +43,12 @@ struct Args {
 
 #[derive(clap::Subcommand)]
 enum Commands {
-    Latency {
+    Speed {
         /// Number of publishing clients to use in parallel
         #[arg(long, short, value_name = "PUBLISHERS", default_value = "10")]
         publishers: usize,
 
-        /// Length of the keys to use in the latency test
+        /// Length of the keys to use in the speed test
         #[arg(long, short, value_name = "LENGTH", default_value = "5")]
         key_length: usize,
 
@@ -71,7 +71,7 @@ enum Commands {
         clients: usize,
 
         /// Number of SET requests each client sends without waiting for acks before waiting for all of them
-        #[arg(long, short, value_name = "NUMBER", default_value = "50")]
+        #[arg(long, short = 'n', value_name = "NUMBER", default_value = "50")]
         burst: u64,
 
         /// How long to run the test, in seconds
@@ -120,14 +120,14 @@ async fn run(subsys: Subsystem, args: Args) -> miette::Result<()> {
     }
 
     match args.command {
-        Commands::Latency {
+        Commands::Speed {
             publishers,
             key_length,
             n_ary,
             values_per_key,
             subscribe,
         } => {
-            latency_test(
+            speed_test(
                 subsys,
                 client_config,
                 publishers,
@@ -157,7 +157,7 @@ async fn run(subsys: Subsystem, args: Args) -> miette::Result<()> {
     }
 }
 
-async fn latency_test(
+async fn speed_test(
     subsys: Subsystem,
     client_config: Config,
     publishers: usize,
@@ -166,7 +166,7 @@ async fn latency_test(
     values_per_key: usize,
     subscribe: bool,
 ) -> Result<(), miette::Error> {
-    let Some(test) = latency::LatencyTest::new(
+    let Some(test) = speed::SpeedTest::new(
         &subsys,
         publishers,
         key_length,
@@ -175,7 +175,7 @@ async fn latency_test(
         client_config,
         subscribe,
     ) else {
-        trace!("shutdown requested, not spawning latency test");
+        trace!("shutdown requested, not spawning speed test");
         return Ok(());
     };
 
@@ -186,7 +186,7 @@ async fn latency_test(
     };
 
     info!(
-        "Latency test result: set {} values in {:?} ({} values/sec); preparation time: {:?}",
+        "Speed test result: set {} values in {:?} ({} values/sec); preparation time: {:?}",
         result.total_key_value_pairs,
         result.run_duration,
         (result.total_key_value_pairs as f64 / result.run_duration.as_secs_f64()).round() as u64,

@@ -17,7 +17,7 @@
 
 mod publisher;
 
-use crate::latency::publisher::LatencyTestPublisher;
+use crate::speed::publisher::LatencyTestPublisher;
 use miette::{Context, IntoDiagnostic};
 use std::time::{Duration, Instant};
 use tosub::{CancelOnShutdown, Subsystem};
@@ -31,7 +31,7 @@ pub struct LatencyTestResult {
     pub run_duration: Duration,
 }
 
-pub struct LatencyTest {
+pub struct SpeedTest {
     subsys: Subsystem<Option<LatencyTestResult>>,
     publishers: usize,
     key_length: usize,
@@ -41,7 +41,7 @@ pub struct LatencyTest {
     subscribe: bool,
 }
 
-impl LatencyTest {
+impl SpeedTest {
     pub fn new(
         subsys: &Subsystem,
         publishers: usize,

@@ -28,7 +28,7 @@ use tracing::trace;
 use tracing::{debug, info, warn};
 use worterbuch_client::config::Config;
 
-use crate::{client::create_tcp_client, latency::LatencyTestResult};
+use crate::{client::create_tcp_client, speed::LatencyTestResult};
 
 pub struct PublisherApi {
     id: usize,
