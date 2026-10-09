@@ -34,8 +34,8 @@ use tracing::trace;
 use tracing::{debug, info, warn};
 use worterbuch_client::{
     Ack, AuthToken, AuthorizationRequest, ClientMessage, Key, PState, PSubscribe,
-    ProtocolMajorVersion, ProtocolSwitchRequest, ServerMessage, Set, TransactionId, Value, Welcome,
-    config::Config, write_line_and_flush,
+    ProtocolMajorVersion, ProtocolSwitchRequest, ProtocolVersion, ServerMessage, Set,
+    TransactionId, Value, Welcome, config::Config, write_line_and_flush,
 };
 
 pub trait Writer: AsyncWrite {}
@@ -391,8 +391,14 @@ async fn receive_auth_ack<R: AsyncRead + Unpin>(
 
 fn find_proto(id: usize, welcome: &Welcome) -> miette::Result<ProtocolMajorVersion> {
     debug!(id, ?welcome, "Finding matching protocol …");
-    // TODO compare supported server versions with own supported version and match
-    let proto_version = 2;
+
+    let proto_version = welcome
+        .info
+        .supported_protocol_versions
+        .iter()
+        .map(|ProtocolVersion(maj, _)| *maj)
+        .max()
+        .unwrap_or(2);
     debug!(id, "Matching protocol found.");
     Ok(proto_version)
 }
