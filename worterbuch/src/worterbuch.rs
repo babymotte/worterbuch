@@ -54,7 +54,7 @@ use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
     Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
-    error::{WorterbuchError, WorterbuchResult},
+    error::{WorterbuchError, WorterbuchResult, WrappedResult},
     is_client_sys_wildcard_topic, parse_segments,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
@@ -148,6 +148,7 @@ impl PStateAggregatorState {
         if let Some(event) = event {
             if let Err(e) = self.do_aggregate(event, &send_trigger_tx, client_id).await {
                 error!("Error aggregating PState event for client {client_id}: {e}");
+                eprintln!("{e:?}");
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -199,6 +200,7 @@ impl PStateAggregatorState {
         if tick.is_some() {
             if let Err(e) = self.send_current_state().await {
                 error!("Error sending PState event to client {client_id}: {e}");
+                eprintln!("{e:?}");
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -212,11 +214,15 @@ impl PStateAggregatorState {
         self.send_is_scheduled = false;
 
         if !self.set_buffer.is_empty() {
-            self.send_set_event().await?;
+            self.send_set_event()
+                .await
+                .wrap("failed to send current state")?;
         }
 
         if !self.deleted_buffer.is_empty() {
-            self.send_deleted_event().await?;
+            self.send_deleted_event()
+                .await
+                .wrap("failed to send current state")?;
         }
 
         Ok(())

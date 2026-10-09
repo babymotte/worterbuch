@@ -468,7 +468,8 @@ async fn forward_leader_response(
             {
                 Ok(_) => ControlFlow::Continue(()),
                 Err(e) => {
-                    error!("Failed to forward response to proxy: {:?}", e);
+                    error!("Failed to forward response to proxy: {}", e);
+                    eprintln!("{e:?}");
                     error!("Closing connection to proxy {}", remote_addr);
                     trace!(exit = "forward_leader_response");
                     ControlFlow::Break(())

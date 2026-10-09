@@ -21,7 +21,7 @@ use crate::{
     Config,
     auth::{JwtClaims, get_claims},
     server::common::{
-        CloneableWbApi, SubscriptionInfo,
+        CloneableWbApi, PendingResponse, SubscriptionInfo,
         protocol::{LazyBroadcaster, ServerMessageLazyBroadcaster},
     },
     worterbuch::PStateAggregator,
@@ -302,177 +302,82 @@ impl V0 {
     }
 
     pub async fn get(&self, msg: Get) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-
-        tokio::spawn(async move {
-            let value = match wb.get(msg.key).await {
-                Ok(it) => it,
-                Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = State {
-                transaction_id: msg.transaction_id,
-                event: StateEvent::Value(value),
-                trace: None,
-            };
-
-            let msg = ServerMessage::State(response);
-
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch.get_deferred(msg.key),
+            move |value| {
+                ServerMessage::State(State {
+                    transaction_id,
+                    event: StateEvent::Value(value),
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     pub async fn pget(&self, msg: PGet) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-
-        tokio::spawn(async move {
-            let values = match wb.pget(msg.request_pattern.clone()).await {
-                Ok(values) => values.into_iter().collect(),
-                Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = PState {
-                transaction_id: msg.transaction_id,
-                request_pattern: msg.request_pattern,
-                event: PStateEvent::KeyValuePairs(values),
-                trace: None,
-            };
-
-            let msg = ServerMessage::PState(response);
-
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        let request_pattern = msg.request_pattern.clone();
+        self.respond(
+            transaction_id,
+            self.worterbuch.pget_deferred(msg.request_pattern),
+            move |values| {
+                ServerMessage::PState(PState {
+                    transaction_id,
+                    request_pattern,
+                    event: PStateEvent::KeyValuePairs(values.into_iter().collect()),
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     #[instrument(level = Level::TRACE, skip(self), fields(client_id=%self.client_id))]
     pub async fn set(&self, msg: Set) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb
-                .set(msg.transaction_id, msg.key, msg.value, client_id)
-                .await
-            {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            trace!("Value set, queuing Ack …");
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-            trace!("Value set, queuing Ack done.");
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .set_deferred(transaction_id, msg.key, msg.value, self.client_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub async fn spub_init(&self, msg: SPubInit) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb.spub_init(msg.transaction_id, msg.key, client_id).await {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            trace!("Value set, queuing Ack …");
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-            trace!("Value set, queuing Ack done.");
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .spub_init_deferred(transaction_id, msg.key, self.client_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub async fn spub(&self, msg: SPub) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb.spub(msg.transaction_id, msg.value, client_id).await {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            trace!("Value set, queuing Ack …");
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-            trace!("Value set, queuing Ack done.");
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .spub_deferred(transaction_id, msg.value, self.client_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub async fn publish(&self, msg: Publish) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb
-                .publish(msg.transaction_id, msg.key, msg.value, client_id)
-                .await
-            {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .publish_deferred(transaction_id, msg.key, msg.value, self.client_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub async fn subscribe(&self, msg: Subscribe) -> bool {
@@ -626,158 +531,87 @@ impl V0 {
     }
 
     pub async fn unsubscribe(&self, msg: Unsubscribe) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb.unsubscribe(client_id, msg.transaction_id).await {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            };
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .unsubscribe_deferred(self.client_id, transaction_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub async fn delete(&self, msg: Delete) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            let value = match wb.delete(msg.transaction_id, msg.key, client_id).await {
-                Ok(it) => it,
-                Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = State {
-                transaction_id: msg.transaction_id,
-                event: StateEvent::Deleted(value),
-                trace: None,
-            };
-
-            let msg = ServerMessage::State(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .delete_deferred(transaction_id, msg.key, self.client_id),
+            move |value| {
+                ServerMessage::State(State {
+                    transaction_id,
+                    event: StateEvent::Deleted(value),
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     pub async fn pdelete(&self, msg: PDelete) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            let deleted = match wb
-                .pdelete(
-                    msg.transaction_id,
-                    msg.request_pattern.clone(),
-                    msg.quiet,
-                    client_id,
-                )
-                .await
-            {
-                Ok(it) => it,
-                Result::Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = PState {
-                transaction_id: msg.transaction_id,
-                request_pattern: msg.request_pattern,
-                event: PStateEvent::Deleted(if msg.quiet.unwrap_or(false) {
-                    vec![]
-                } else {
-                    deleted
-                }),
-                trace: None,
-            };
-
-            let msg = ServerMessage::PState(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        let request_pattern = msg.request_pattern.clone();
+        let quiet = msg.quiet.unwrap_or(false);
+        self.respond(
+            transaction_id,
+            self.worterbuch.pdelete_deferred(
+                transaction_id,
+                msg.request_pattern,
+                msg.quiet,
+                self.client_id,
+            ),
+            move |deleted| {
+                ServerMessage::PState(PState {
+                    transaction_id,
+                    request_pattern,
+                    event: PStateEvent::Deleted(if quiet { vec![] } else { deleted }),
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     pub async fn ls(&self, msg: Ls) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-
-        tokio::spawn(async move {
-            let children = match wb.ls(msg.parent).await {
-                Ok(it) => it,
-                Result::Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = LsState {
-                transaction_id: msg.transaction_id,
-                children,
-                trace: None,
-            };
-
-            let msg = ServerMessage::LsState(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch.ls_deferred(msg.parent),
+            move |children| {
+                ServerMessage::LsState(LsState {
+                    transaction_id,
+                    children,
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     pub async fn pls(&self, msg: PLs) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-
-        tokio::spawn(async move {
-            let children = match wb.pls(msg.parent_pattern).await {
-                Ok(it) => it,
-                Result::Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = LsState {
-                transaction_id: msg.transaction_id,
-                children,
-                trace: None,
-            };
-
-            let msg = ServerMessage::LsState(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch.pls_deferred(msg.parent_pattern),
+            move |children| {
+                ServerMessage::LsState(LsState {
+                    transaction_id,
+                    children,
+                    trace: None,
+                })
+            },
+        )
+        .await;
     }
 
     pub async fn subscribe_ls(&self, msg: SubscribeLs) -> bool {
@@ -843,27 +677,14 @@ impl V0 {
     }
 
     pub async fn unsubscribe_ls(&self, msg: UnsubscribeLs) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.worterbuch.clone();
-        let permit = self.acquire_permit().await;
-        let client_id = self.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb.unsubscribe_ls(client_id, msg.transaction_id).await {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            let msg = ServerMessage::Ack(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.respond(
+            transaction_id,
+            self.worterbuch
+                .unsubscribe_ls_deferred(self.client_id, transaction_id),
+            move |()| ServerMessage::Ack(Ack { transaction_id }),
+        )
+        .await;
     }
 
     pub(crate) async fn acquire_permit(&self) -> OwnedSemaphorePermit {
@@ -873,17 +694,38 @@ impl V0 {
             .await
             .expect("Semaphore acquire failed")
     }
-}
 
-pub async fn handle_store_error(
-    tx: oneshot::Sender<ServerMessage>,
-    e: WorterbuchError,
-    transaction_id: TransactionId,
-) {
-    let msg = err_msg(e, transaction_id);
-    trace!("Error in store, queuing error message for client …");
-    let _ = tx.send(msg);
-    trace!("Error in store, queuing error message for client done");
+    /// Sends a request to the core system and queues the response for the client. The request has been handed to the
+    /// core system by the time this returns, which guarantees that a client's requests are processed in the order in
+    /// which the client sent them. Only waiting for the response happens concurrently.
+    pub(crate) async fn respond<T: Send + 'static>(
+        &self,
+        transaction_id: TransactionId,
+        request: impl Future<Output = WorterbuchResult<PendingResponse<T>>>,
+        to_message: impl FnOnce(T) -> ServerMessage + Send + 'static,
+    ) {
+        let permit = self.acquire_permit().await;
+        let response = request.await;
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let result = match response {
+                Ok(response) => response.response().await,
+                Err(e) => Err(e),
+            };
+            let msg = match result {
+                Ok(value) => to_message(value),
+                Err(e) => {
+                    trace!("Error in store, queuing error message for client.");
+                    err_msg(e, transaction_id)
+                }
+            };
+            let _ = tx.send(msg);
+            drop(permit);
+        });
+
+        let _ = self.tx.send(rx).await;
+    }
 }
 
 pub async fn handle_store_error_lazy(

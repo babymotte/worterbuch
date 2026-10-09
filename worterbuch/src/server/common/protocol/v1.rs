@@ -21,11 +21,9 @@ use super::v0::V0;
 use crate::{
     auth::JwtClaims,
     server::common::protocol::{
-        LazyBroadcaster, forward_lock_acquired, forward_lock_lost,
-        v0::{handle_store_error, handle_store_error_lazy},
+        LazyBroadcaster, forward_lock_acquired, forward_lock_lost, v0::handle_store_error_lazy,
     },
 };
-use tokio::sync::oneshot;
 use tracing::{Level, instrument, trace};
 use worterbuch_common::{
     Privilege, WbApi,
@@ -113,66 +111,36 @@ impl V1 {
     }
 
     pub async fn cget(&self, msg: Get) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.v0.worterbuch.clone();
-        let permit = self.v0.acquire_permit().await;
-
-        tokio::spawn(async move {
-            let (value, version) = match wb.cget(msg.key).await {
-                Ok(it) => it,
-                Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
-
-            let response = CState {
-                transaction_id: msg.transaction_id,
-                event: CStateEvent { value, version },
-            };
-
-            let msg = ServerMessage::CState(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.v0.tx.send(rx).await;
+        let transaction_id = msg.transaction_id;
+        self.v0
+            .respond(
+                transaction_id,
+                self.v0.worterbuch.cget_deferred(msg.key),
+                move |(value, version)| {
+                    ServerMessage::CState(CState {
+                        transaction_id,
+                        event: CStateEvent { value, version },
+                    })
+                },
+            )
+            .await;
     }
 
     pub async fn cset(&self, msg: CSet) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.v0.worterbuch.clone();
-        let permit = self.v0.acquire_permit().await;
-        let client_id = self.v0.client_id;
-
-        tokio::spawn(async move {
-            if let Err(e) = wb
-                .cset(
-                    msg.transaction_id,
+        let transaction_id = msg.transaction_id;
+        self.v0
+            .respond(
+                transaction_id,
+                self.v0.worterbuch.cset_deferred(
+                    transaction_id,
                     msg.key,
                     msg.value,
                     msg.version,
-                    client_id,
-                )
-                .await
-            {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
-
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            trace!("Value set, queuing Ack …");
-            let _ = tx.send(ServerMessage::Ack(response));
-            trace!("Value set, queuing Ack done.");
-
-            drop(permit);
-        });
-
-        let _ = self.v0.tx.send(rx).await;
+                    self.v0.client_id,
+                ),
+                move |()| ServerMessage::Ack(Ack { transaction_id }),
+            )
+            .await;
     }
 
     pub async fn lock(&self, msg: Lock) {

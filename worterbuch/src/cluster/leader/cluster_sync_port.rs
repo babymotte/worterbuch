@@ -280,7 +280,7 @@ async fn follower_session(
     )>,
     config: Config,
     proxy_server: &mut VirtualProxyServer,
-    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
+    send_rx: mpsc::Receiver<VirtualServerMessage>,
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<()> {
@@ -307,20 +307,64 @@ async fn follower_session(
         .into_diagnostic()
         .wrap_err("failed to forward follower connected event")?;
 
-    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
+    let (state, commands) = sync_rx.await.into_diagnostic()?;
 
     send_initial_state(subsys, &mut socket_tx, follower, &config, state).await?;
 
+    // Writing to the follower/proxy must happen in a separate task: the core system blocks until state changes have
+    // been taken from `commands`, while processing proxy messages below may wait for the core system. Draining
+    // `commands` in the same task would allow the core system and this session to wait for each other forever.
+    let session = subsys.clone();
+    let send_config = config.clone();
+    subsys.spawn("follower-writer", move |s| {
+        follower_writer_loop(
+            s,
+            session,
+            socket_tx,
+            commands,
+            send_rx,
+            send_config,
+            follower,
+        )
+    });
+
     while_select! {
         _ = proxy_server.subsys.shutdown_requested() => break,
-        recv = commands.recv() => forward_change_to_follower(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
         recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,
-        recv = send_rx.recv() => forward_response_to_proxy(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
 
     Ok(())
+}
+
+/// Forwards state changes and responses to proxied clients to the follower/proxy. This must never wait for the core
+/// system, see [`follower_session`].
+async fn follower_writer_loop(
+    subsys: Subsystem,
+    session: Subsystem,
+    mut socket_tx: OwnedWriteHalf,
+    mut commands: ClusterStateChangeReceiver,
+    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
+    config: Config,
+    follower: SocketAddr,
+) {
+    let res: miette::Result<()> = async {
+        while_select! {
+            _ = subsys.shutdown_requested() => break,
+            recv = commands.recv() => forward_change_to_follower(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
+            recv = send_rx.recv() => forward_response_to_proxy(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
+        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = res {
+        error!("Error in follower/proxy writer loop: {e}");
+        eprintln!("{e:?}");
+    }
+
+    session.request_local_shutdown_because("writer loop to follower/proxy stopped");
 }
 
 async fn send_welcome(

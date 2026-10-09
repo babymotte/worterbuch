@@ -401,6 +401,22 @@ impl fmt::Debug for WbFunction {
     }
 }
 
+/// The response to a request that has already been sent to the core system.
+pub struct PendingResponse<T> {
+    name: String,
+    request: &'static str,
+    rx: oneshot::Receiver<WorterbuchResult<T>>,
+}
+
+impl<T> PendingResponse<T> {
+    pub async fn response(self) -> WorterbuchResult<T> {
+        trace!(self.name, self.request, "waiting for response to request …");
+        let res = self.rx.await;
+        trace!(self.name, self.request, "received response");
+        res?
+    }
+}
+
 #[derive(Clone)]
 pub struct CloneableWbApi {
     name: String,
@@ -469,6 +485,204 @@ impl CloneableWbApi {
             .await
     }
 
+    #[instrument(level = Level::TRACE, skip_all, err)]
+    pub async fn get_deferred(&self, key: Key) -> WorterbuchResult<PendingResponse<Value>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::Get(key, tx, Span::current());
+        self.send_deferred(function, "get", rx).await
+    }
+
+    pub async fn cget_deferred(
+        &self,
+        key: Key,
+    ) -> WorterbuchResult<PendingResponse<(Value, CasVersion)>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::CGet(key, tx);
+        self.send_deferred(function, "cget", rx).await
+    }
+
+    pub async fn pget_deferred(
+        &self,
+        pattern: RequestPattern,
+    ) -> WorterbuchResult<PendingResponse<KeyValuePairs>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::PGet(pattern, tx);
+        self.send_deferred(function, "pget", rx).await
+    }
+
+    #[instrument(level=Level::TRACE, skip(self), err)]
+    pub async fn set_deferred(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        value: Value,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::Set(
+            transaction_id,
+            self.interface.clone(),
+            key,
+            value,
+            client_id,
+            tx,
+            Span::current(),
+        );
+        self.send_deferred(function, "set", rx).await
+    }
+
+    pub async fn cset_deferred(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        value: Value,
+        version: CasVersion,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::CSet(
+            transaction_id,
+            self.interface.clone(),
+            key,
+            value,
+            version,
+            client_id,
+            tx,
+        );
+        self.send_deferred(function, "cset", rx).await
+    }
+
+    pub async fn spub_init_deferred(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function =
+            WbFunction::SPubInit(transaction_id, self.interface.clone(), key, client_id, tx);
+        self.send_deferred(function, "spub init", rx).await
+    }
+
+    pub async fn spub_deferred(
+        &self,
+        transaction_id: TransactionId,
+        value: Value,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function =
+            WbFunction::SPub(transaction_id, self.interface.clone(), value, client_id, tx);
+        self.send_deferred(function, "spub", rx).await
+    }
+
+    pub async fn publish_deferred(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        value: Value,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::Publish(
+            transaction_id,
+            self.interface.clone(),
+            key,
+            value,
+            client_id,
+            tx,
+        );
+        self.send_deferred(function, "publish", rx).await
+    }
+
+    pub async fn ls_deferred(
+        &self,
+        parent: Option<Key>,
+    ) -> WorterbuchResult<PendingResponse<Vec<RegularKeySegment>>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::Ls(parent, tx);
+        self.send_deferred(function, "ls", rx).await
+    }
+
+    pub async fn pls_deferred(
+        &self,
+        parent: Option<RequestPattern>,
+    ) -> WorterbuchResult<PendingResponse<Vec<RegularKeySegment>>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::PLs(parent, tx);
+        self.send_deferred(function, "pls", rx).await
+    }
+
+    pub async fn unsubscribe_deferred(
+        &self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function =
+            WbFunction::Unsubscribe(client_id, transaction_id, self.interface.clone(), tx);
+        self.send_deferred(function, "unsubscribe", rx).await
+    }
+
+    pub async fn unsubscribe_ls_deferred(
+        &self,
+        client_id: ClientId,
+        transaction_id: TransactionId,
+    ) -> WorterbuchResult<PendingResponse<()>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::UnsubscribeLs(client_id, transaction_id, tx);
+        self.send_deferred(function, "unsubscribe ls", rx).await
+    }
+
+    pub async fn delete_deferred(
+        &self,
+        transaction_id: TransactionId,
+        key: Key,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<Value>> {
+        let (tx, rx) = oneshot::channel();
+        let function =
+            WbFunction::Delete(transaction_id, self.interface.clone(), key, client_id, tx);
+        self.send_deferred(function, "delete", rx).await
+    }
+
+    pub async fn pdelete_deferred(
+        &self,
+        transaction_id: TransactionId,
+        pattern: RequestPattern,
+        quiet: Option<bool>,
+        client_id: ClientId,
+    ) -> WorterbuchResult<PendingResponse<KeyValuePairs>> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::PDelete(
+            transaction_id,
+            self.interface.clone(),
+            pattern,
+            quiet,
+            client_id,
+            tx,
+        );
+        self.send_deferred(function, "pdelete", rx).await
+    }
+
+    /// Sends a request to the core system and returns a handle to await its response with. Requests are processed by
+    /// the core system in the order in which they were sent, so awaiting this before sending the next request of the
+    /// same client guarantees that the client's requests are processed in order, even if their responses are awaited
+    /// concurrently.
+    async fn send_deferred<T>(
+        &self,
+        wb_function: WbFunction,
+        request: &'static str,
+        rx: oneshot::Receiver<WorterbuchResult<T>>,
+    ) -> WorterbuchResult<PendingResponse<T>> {
+        self.send_with_timeout(wb_function, request).await?;
+        Ok(PendingResponse {
+            name: self.name.clone(),
+            request,
+            rx,
+        })
+    }
+
     async fn request_with_timeout<T>(
         &self,
         wb_function: WbFunction,
@@ -525,26 +739,18 @@ impl WbApi for CloneableWbApi {
         VERSION
     }
 
-    #[instrument(level = Level::TRACE, skip_all, err)]
     async fn get(&self, key: Key) -> WorterbuchResult<Value> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Get(key, tx, Span::current());
-        self.request_with_timeout(function, "get", rx).await
+        self.get_deferred(key).await?.response().await
     }
 
     async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::CGet(key, tx);
-        self.request_with_timeout(function, "cget", rx).await
+        self.cget_deferred(key).await?.response().await
     }
 
     async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PGet(pattern, tx);
-        self.request_with_timeout(function, "pget", rx).await
+        self.pget_deferred(pattern).await?.response().await
     }
 
-    #[instrument(level=Level::TRACE, skip(self), err)]
     async fn set(
         &self,
         transaction_id: TransactionId,
@@ -552,17 +758,10 @@ impl WbApi for CloneableWbApi {
         value: Value,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Set(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            client_id,
-            tx,
-            Span::current(),
-        );
-        self.request_with_timeout(function, "set", rx).await
+        self.set_deferred(transaction_id, key, value, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn cset(
@@ -573,17 +772,10 @@ impl WbApi for CloneableWbApi {
         version: CasVersion,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::CSet(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            version,
-            client_id,
-            tx,
-        );
-        self.request_with_timeout(function, "cset", rx).await
+        self.cset_deferred(transaction_id, key, value, version, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn lock(
@@ -629,10 +821,10 @@ impl WbApi for CloneableWbApi {
         key: Key,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::SPubInit(transaction_id, self.interface.clone(), key, client_id, tx);
-        self.request_with_timeout(function, "spub init", rx).await
+        self.spub_init_deferred(transaction_id, key, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn spub(
@@ -641,10 +833,10 @@ impl WbApi for CloneableWbApi {
         value: Value,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::SPub(transaction_id, self.interface.clone(), value, client_id, tx);
-        self.request_with_timeout(function, "spub", rx).await
+        self.spub_deferred(transaction_id, value, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn publish(
@@ -654,31 +846,21 @@ impl WbApi for CloneableWbApi {
         value: Value,
         client_id: ClientId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Publish(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            client_id,
-            tx,
-        );
-        self.request_with_timeout(function, "publish", rx).await
+        self.publish_deferred(transaction_id, key, value, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Ls(parent, tx);
-        self.request_with_timeout(function, "ls", rx).await
+        self.ls_deferred(parent).await?.response().await
     }
 
     async fn pls(
         &self,
         parent: Option<RequestPattern>,
     ) -> WorterbuchResult<Vec<RegularKeySegment>> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PLs(parent, tx);
-        self.request_with_timeout(function, "pls", rx).await
+        self.pls_deferred(parent).await?.response().await
     }
 
     async fn subscribe(
@@ -752,10 +934,10 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::Unsubscribe(client_id, transaction_id, self.interface.clone(), tx);
-        self.request_with_timeout(function, "unsubscribe", rx).await
+        self.unsubscribe_deferred(client_id, transaction_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn unsubscribe_ls(
@@ -763,9 +945,9 @@ impl WbApi for CloneableWbApi {
         client_id: ClientId,
         transaction_id: TransactionId,
     ) -> WorterbuchResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::UnsubscribeLs(client_id, transaction_id, tx);
-        self.request_with_timeout(function, "unsubscribe ls", rx)
+        self.unsubscribe_ls_deferred(client_id, transaction_id)
+            .await?
+            .response()
             .await
     }
 
@@ -775,10 +957,10 @@ impl WbApi for CloneableWbApi {
         key: Key,
         client_id: ClientId,
     ) -> WorterbuchResult<Value> {
-        let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::Delete(transaction_id, self.interface.clone(), key, client_id, tx);
-        self.request_with_timeout(function, "delete", rx).await
+        self.delete_deferred(transaction_id, key, client_id)
+            .await?
+            .response()
+            .await
     }
 
     async fn pdelete(
@@ -788,16 +970,10 @@ impl WbApi for CloneableWbApi {
         quiet: Option<bool>,
         client_id: ClientId,
     ) -> WorterbuchResult<KeyValuePairs> {
-        let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PDelete(
-            transaction_id,
-            self.interface.clone(),
-            pattern,
-            quiet,
-            client_id,
-            tx,
-        );
-        self.request_with_timeout(function, "pdelete", rx).await
+        self.pdelete_deferred(transaction_id, pattern, quiet, client_id)
+            .await?
+            .response()
+            .await
     }
 
     #[instrument(level=Level::TRACE, skip(self))]
