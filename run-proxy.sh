@@ -2,7 +2,7 @@
 
 # cargo build -p worterbuch --release &&
 WORTERBUCH_TOKIO_CONSOLE_PORT=4444 \
-WORTERBUCH_LOG=worterbuch::persistence=info,worterbuch=trace,info \
+WORTERBUCH_LOG=info \
 WORTERBUCH_DATA_DIR=./data/proxy \
 WORTERBUCH_WS_SERVER_PORT=8084 \
 WORTERBUCH_TCP_SERVER_PORT=9094 \
