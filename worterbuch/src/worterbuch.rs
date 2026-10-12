@@ -20,7 +20,7 @@
 #[cfg(not(feature = "jemalloc"))]
 use crate::mem_tools;
 use crate::{
-    INTERNAL_CLIENT_ID,
+    ClusterRole, INTERNAL_CLIENT_ID,
     cluster::protocol::{ClientWriteCommand, ClusterStateChange, locks::Locks},
     config::Config,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
@@ -324,15 +324,23 @@ struct Follower {
 }
 
 impl Follower {
-    fn is_interested(&self, msg: &ClusterStateChange) -> bool {
+    fn is_interested(&self, msg: &ClusterStateChange, ignore_sys_checks: bool) -> bool {
+        let system_key = msg.command.is_system_key() && !ignore_sys_checks;
+        let clients_key = msg.command.is_clients_key();
+        let locks_key = msg.command.is_locks_key();
+        let grave_goods_or_last_will = msg.command.is_grave_goods_or_last_will();
+        let read_only = system_key && !grave_goods_or_last_will;
+        if read_only && (!self.is_proxy || (self.is_proxy && !clients_key && !locks_key)) {
+            return false;
+        }
+
         match &msg.command {
             ClientWriteCommand::Set(_, _)
             | ClientWriteCommand::CSet(_, _, _)
             | ClientWriteCommand::Delete(_)
             | ClientWriteCommand::PDelete(_)
             | ClientWriteCommand::Import(_) => true,
-            ClientWriteCommand::Publish(_, _) if self.is_proxy => true,
-            ClientWriteCommand::Publish(_, _) => false,
+            ClientWriteCommand::Publish(_, _) => self.is_proxy,
         }
     }
 }
@@ -1180,6 +1188,10 @@ impl Worterbuch {
         trace: Trace,
         ignore_sys_checks: bool,
     ) {
+        if !self.is_leader() {
+            return;
+        }
+
         debug!("Notifying followers of state change");
 
         let len = self.followers.len();
@@ -1187,9 +1199,6 @@ impl Worterbuch {
             trace!("No followers to notify.");
             return;
         }
-
-        let system_key = command.is_system_key() && !ignore_sys_checks;
-        let grave_goods_or_last_will = command.is_grave_goods_or_last_will();
 
         let msg = ClusterStateChange {
             client_id,
@@ -1199,32 +1208,27 @@ impl Worterbuch {
         trace!("Forwarding state change to {} followers/proxies", len);
         let mut dead: Option<Vec<SocketAddr>> = None;
         for follower in &self.followers {
-            let read_only = system_key && !grave_goods_or_last_will;
-
-            if read_only || (grave_goods_or_last_will && follower.is_proxy) {
-                continue;
-            }
-
-            if follower.is_interested(&msg) {
-                if follower.tx.send(msg.clone()).await.is_err() {
-                    error!("Error forwarding state change to follower/proxy");
-                    match dead.take() {
-                        Some(mut the_dead) => {
-                            the_dead.push(follower.addr);
-                            dead = Some(the_dead);
-                        }
-                        None => {
-                            let mut new_dead = Vec::new();
-                            new_dead.push(follower.addr);
-                            dead = Some(new_dead);
-                        }
-                    }
-                }
-            } else {
+            if !follower.is_interested(&msg, ignore_sys_checks) {
                 trace!(
                     "Follower/proxy {} is not interested in the state change.",
                     follower.addr
                 );
+                continue;
+            }
+
+            if follower.tx.send(msg.clone()).await.is_err() {
+                error!("Error forwarding state change to follower/proxy");
+                match dead.take() {
+                    Some(mut the_dead) => {
+                        the_dead.push(follower.addr);
+                        dead = Some(the_dead);
+                    }
+                    None => {
+                        let mut new_dead = Vec::new();
+                        new_dead.push(follower.addr);
+                        dead = Some(new_dead);
+                    }
+                }
             }
         }
         if let Some(dead) = dead {
@@ -1567,23 +1571,31 @@ impl Worterbuch {
 
         self.clients
             .insert(client_id, ClientInfo::new(protocol.clone(), eject));
-        let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
         let trace = Trace::InternalAction(InternalAction::ClientConnected {
             client_id,
             protocol: protocol.clone(),
         });
-        if let Err(e) = self
-            .internal_set(
-                client_count_key,
-                json!(self.clients.len()),
-                INTERNAL_CLIENT_ID,
-                trace.clone(),
-                true,
-            )
-            .await
-        {
-            error!("Error updating client count: {e}");
+
+        if self.is_leader() {
+            self.add_client_system_entries(client_id, remote_addr, protocol, now, trace)
+                .await;
         }
+
+        Ok(())
+    }
+
+    async fn add_client_system_entries(
+        &mut self,
+        client_id: uuid::Uuid,
+        remote_addr: Option<SocketAddr>,
+        protocol: Protocol,
+        now: DateTime<Utc>,
+        trace: Trace,
+    ) {
+        if let Err(e) = self.set_client_count(trace.clone()).await {
+            error!("Error updating client protocol: {e}");
+        };
+
         if let Err(e) = self
             .set_client_protocol(&client_id, &protocol, trace.clone())
             .await
@@ -1604,8 +1616,21 @@ impl Worterbuch {
         {
             error!("Error updating client timestamp: {e}");
         }
+    }
 
-        Ok(())
+    async fn remove_client_system_entries(&mut self, client_id: uuid::Uuid, trace: Trace) {
+        if let Err(e) = self.set_client_count(trace.clone()).await {
+            error!("Error updating client protocol: {e}");
+        };
+
+        let client_pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
+        debug!("Deleting {client_pattern}");
+        if let Err(e) = self
+            .internal_pdelete(client_pattern.clone(), INTERNAL_CLIENT_ID, trace.clone())
+            .await
+        {
+            debug!("Error in subscription monitoring: {e}");
+        }
     }
 
     pub async fn protocol_switched(
@@ -1638,6 +1663,23 @@ impl Worterbuch {
         {
             error!("Error updating client protocol version: {e}");
         }
+    }
+
+    async fn set_client_count(&mut self, cause: Trace) -> WorterbuchResult<()> {
+        let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
+        if let Err(e) = self
+            .internal_set(
+                client_count_key,
+                json!(self.clients.len()),
+                INTERNAL_CLIENT_ID,
+                cause,
+                true,
+            )
+            .await
+        {
+            error!("Error updating client count: {e}");
+        }
+        Ok(())
     }
 
     async fn set_client_protocol(
@@ -1755,7 +1797,7 @@ impl Worterbuch {
         client_id: ClientId,
         protocol: Protocol,
         remote_addr: Option<SocketAddr>,
-    ) -> WorterbuchResult<()> {
+    ) {
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
         if let Some(spubs) = self.spub_keys.remove(&client_id) {
@@ -1785,19 +1827,6 @@ impl Worterbuch {
         let last_wills = self.last_will_for_client(&client_id);
 
         self.clients.remove(&client_id);
-        let client_count_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS);
-        if let Err(e) = self
-            .internal_set(
-                client_count_key,
-                json!(self.clients.len()),
-                INTERNAL_CLIENT_ID,
-                trace.clone(),
-                true,
-            )
-            .await
-        {
-            error!("Error updating client count: {e}");
-        }
 
         let subscription_keys: Vec<SubscriptionId> = self
             .subscriptions
@@ -1823,22 +1852,24 @@ impl Worterbuch {
             }
         }
 
-        let client_pattern = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CLIENTS, client_id, "#");
-        debug!("Deleting {client_pattern}");
-        if let Err(e) = self
-            .internal_pdelete(client_pattern.clone(), INTERNAL_CLIENT_ID, trace.clone())
-            .await
+        if self.config.extended_monitoring
+            && let Err(e) = self
+                .internal_set(
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
+                    json!(self.subscriptions.len()),
+                    INTERNAL_CLIENT_ID,
+                    trace.clone(),
+                    true,
+                )
+                .await
         {
             debug!("Error in subscription monitoring: {e}");
         }
 
-        self.notify_followers(
-            client_id,
-            ClientWriteCommand::PDelete(client_pattern),
-            trace.clone(),
-            true,
-        )
-        .await;
+        if self.is_leader() {
+            self.remove_client_system_entries(client_id, trace.clone())
+                .await;
+        }
 
         if let Some(grave_goods) = grave_goods {
             self.apply_grave_goods(
@@ -1862,7 +1893,7 @@ impl Worterbuch {
             self.apply_last_wills(
                 last_wills,
                 Trace::InternalAction(InternalAction::ApplyingLastWill {
-                    cause: Box::new(trace.clone()),
+                    cause: Box::new(trace),
                 }),
                 remote_addr,
             )
@@ -1876,24 +1907,8 @@ impl Worterbuch {
             );
         }
 
-        if self.config.extended_monitoring
-            && let Err(e) = self
-                .internal_set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
-                    json!(self.subscriptions.len()),
-                    INTERNAL_CLIENT_ID,
-                    trace,
-                    true,
-                )
-                .await
-        {
-            debug!("Error in subscription monitoring: {e}");
-        }
-
         #[cfg(not(feature = "jemalloc"))]
         mem_tools::schedule_trim();
-
-        Ok(())
     }
 
     fn store_key(&mut self, client_id: ClientId, transaction_id: TransactionId, key: Key) {
@@ -2310,6 +2325,13 @@ impl Worterbuch {
             Some(name)
         } else {
             Some(res.to_string())
+        }
+    }
+
+    fn is_leader(&self) -> bool {
+        match self.config.role {
+            ClusterRole::Standalone { .. } | ClusterRole::Leader { .. } => true,
+            ClusterRole::Follower { .. } | ClusterRole::Proxy { .. } => false,
         }
     }
 }

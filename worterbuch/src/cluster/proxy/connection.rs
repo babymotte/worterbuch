@@ -41,7 +41,7 @@ use tokio::{
 use tosub::Subsystem;
 use tracing::{debug, error, trace, warn};
 use worterbuch_common::{
-    ClientId, INTERNAL_CLIENT_ID, LockLostSender,
+    ClientId, LockLostSender,
     error::{ConnectionResult, WorterbuchResult},
     is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
@@ -193,61 +193,39 @@ impl<'a> LeaderConnection<'a> {
                 trace!(exit = "process_leader_message");
                 bail!("already synced");
             }
-            LeaderMessage::Mut(ClusterStateChange { command, trace, .. }) => match command {
+            LeaderMessage::Mut(ClusterStateChange {
+                command,
+                trace,
+                client_id,
+            }) => match command {
                 ClientWriteCommand::Set(key, value) => {
                     self.worterbuch
-                        .internal_set(
-                            key,
-                            value,
-                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
-                            trace,
-                            true,
-                        )
+                        .internal_set(key, value, client_id, trace, true)
                         .await
                 }
                 ClientWriteCommand::CSet(key, value, versions) => {
                     self.worterbuch
-                        .internal_cset(
-                            key,
-                            value,
-                            versions,
-                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
-                            trace,
-                            true,
-                        )
+                        .internal_cset(key, value, versions, client_id, trace, true)
                         .await
                 }
                 ClientWriteCommand::Delete(key) => self
                     .worterbuch
-                    .internal_delete(key, trace.client_id().unwrap_or(INTERNAL_CLIENT_ID), trace)
+                    .internal_delete(key, client_id, trace)
                     .await
                     .map(|_| ()),
                 ClientWriteCommand::PDelete(pattern) => self
                     .worterbuch
-                    .internal_pdelete(
-                        pattern,
-                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
-                        trace,
-                    )
+                    .internal_pdelete(pattern, client_id, trace)
                     .await
                     .map(|_| ()),
                 ClientWriteCommand::Publish(key, value) => {
                     self.worterbuch
-                        .internal_publish(
-                            key,
-                            value,
-                            trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
-                            trace,
-                        )
+                        .internal_publish(key, value, client_id, trace)
                         .await
                 }
                 ClientWriteCommand::Import(persisted_store) => self
                     .worterbuch
-                    .internal_import(
-                        persisted_store,
-                        trace.client_id().unwrap_or(INTERNAL_CLIENT_ID),
-                        trace,
-                    )
+                    .internal_import(persisted_store, client_id, trace)
                     .await
                     .map(|_| ()),
             },

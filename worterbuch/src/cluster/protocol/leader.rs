@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_ROOT_PREFIX,
-        ServerMessage, Trace, Value,
+        CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_CLIENTS_PREFIX,
+        SYSTEM_TOPIC_LOCKS_PREFIX, SYSTEM_TOPIC_ROOT_PREFIX, ServerMessage, Trace, Value,
     },
 };
 
@@ -87,6 +87,20 @@ impl ClientWriteCommand {
     pub fn is_system_key(&self) -> bool {
         match self.key() {
             Some(key) => key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX),
+            None => false,
+        }
+    }
+
+    pub fn is_clients_key(&self) -> bool {
+        match self.key() {
+            Some(key) => key.starts_with(SYSTEM_TOPIC_CLIENTS_PREFIX),
+            None => false,
+        }
+    }
+
+    pub fn is_locks_key(&self) -> bool {
+        match self.key() {
+            Some(key) => key.starts_with(SYSTEM_TOPIC_LOCKS_PREFIX),
             None => false,
         }
     }
