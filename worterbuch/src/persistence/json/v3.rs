@@ -18,7 +18,10 @@
  */
 
 use super::*;
-use crate::persistence::{TIMESTAMP_FILE_NAME, is_persistence_locked};
+use crate::{
+    persistence::{TIMESTAMP_FILE_NAME, is_persistence_locked},
+    store::PersistedStore,
+};
 use std::fmt::Debug;
 use totils::CancelOn;
 use tracing::{Instrument, Level, debug_span, instrument};
@@ -268,8 +271,8 @@ pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
 
 async fn try_load(path: &Path, checksum: &Path, config: Config) -> PersistenceResult<Worterbuch> {
     let json = read_json_from_file(path, checksum).await?;
-    let store = serde_json::from_str(&json)?;
-    let worterbuch = Worterbuch::from_persistence(store, config);
+    let store = serde_json::from_str::<PersistedStore>(&json)?;
+    let worterbuch = Worterbuch::with_store(store.into(), config);
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }

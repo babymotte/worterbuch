@@ -139,6 +139,8 @@ async fn do_run_worterbuch(
     let mut worterbuch =
         persistence::restore(&subsys, config.clone(), api.named("worterbuch-core")).await?;
 
+    worterbuch.update_config_entries().await?;
+
     set_instance_name(&mut worterbuch, &config).await?;
 
     let web_server = web_server(&api, &subsys, &config);

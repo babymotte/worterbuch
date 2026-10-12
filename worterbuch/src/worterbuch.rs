@@ -23,6 +23,7 @@ use crate::{
     ClusterRole, INTERNAL_CLIENT_ID,
     cluster::protocol::{ClientWriteCommand, ClusterStateChange, locks::Locks},
     config::Config,
+    error::WorterbuchAppResult,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
     server::common::{
         UpdatedLocks,
@@ -61,8 +62,8 @@ use worterbuch_common::{
         LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
         SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
         SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
-        SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
-        SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
+        SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_CONFIG, SYSTEM_TOPIC_GRAVE_GOODS,
+        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
         SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, Trace, TraceData, TransactionId,
     },
     topic,
@@ -358,32 +359,7 @@ pub struct Worterbuch {
 }
 
 impl Worterbuch {
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    pub fn with_config(config: Config) -> Worterbuch {
-        Worterbuch {
-            config,
-            clients: Default::default(),
-            ls_subscriptions: Default::default(),
-            store: Default::default(),
-            subscribers: Default::default(),
-            subscriptions: Default::default(),
-            spub_keys: Default::default(),
-            persistent_storage: Default::default(),
-            followers: Default::default(),
-        }
-    }
-
-    pub fn clients(&self) -> &HashMap<ClientId, ClientInfo> {
-        &self.clients
-    }
-
-    #[instrument(level = Level::DEBUG,skip(store, config))]
-    pub fn from_persistence(store: PersistedStore, config: Config) -> Worterbuch {
-        let store: Store = store.into();
-        debug!("Loaded persisted store with {} entries.", store.len());
+    fn new(config: Config, store: Store) -> Self {
         Worterbuch {
             config,
             store,
@@ -395,23 +371,25 @@ impl Worterbuch {
             persistent_storage: Default::default(),
             followers: Default::default(),
         }
+    }
+
+    pub(crate) fn with_config(config: Config) -> Worterbuch {
+        Worterbuch::new(config, Store::default())
     }
 
     #[instrument(level = Level::DEBUG, skip(store, config))]
     #[cfg(any(feature = "redb", feature = "sqlite", feature = "turso"))]
-    pub fn with_store(store: Store, config: Config) -> Worterbuch {
+    pub(crate) fn with_store(store: Store, config: Config) -> Worterbuch {
         debug!("Loaded persisted store with {} entries.", store.len());
-        Worterbuch {
-            config,
-            store,
-            clients: Default::default(),
-            ls_subscriptions: Default::default(),
-            subscribers: Default::default(),
-            subscriptions: Default::default(),
-            spub_keys: Default::default(),
-            persistent_storage: Default::default(),
-            followers: Default::default(),
-        }
+        Worterbuch::new(config, store)
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn clients(&self) -> &HashMap<ClientId, ClientInfo> {
+        &self.clients
     }
 
     pub fn len(&self) -> usize {
@@ -2333,6 +2311,25 @@ impl Worterbuch {
             ClusterRole::Standalone { .. } | ClusterRole::Leader { .. } => true,
             ClusterRole::Follower { .. } | ClusterRole::Proxy { .. } => false,
         }
+    }
+
+    pub(crate) async fn update_config_entries(&mut self) -> WorterbuchAppResult<()> {
+        if self.config.extended_monitoring {
+            if let Value::Object(config) = json!(&self.config) {
+                for (k, v) in config {
+                    self.internal_set(
+                        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CONFIG, k),
+                        v,
+                        INTERNAL_CLIENT_ID,
+                        Trace::InternalAction(InternalAction::Startup),
+                        true,
+                    )
+                    .await
+                    .wrap("failed to set config system entries")?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

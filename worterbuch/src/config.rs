@@ -39,7 +39,6 @@ use worterbuch_common::{
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]
-// #[serde(rename_all = "camelCase")]
 pub enum PersistenceMode {
     Json,
     ReDB,
@@ -81,6 +80,7 @@ pub enum Commands {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Endpoint {
     pub tls: bool,
     pub bind_addr: IpAddr,
@@ -89,11 +89,13 @@ pub struct Endpoint {
 
 #[cfg(target_family = "unix")]
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UnixEndpoint {
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QuicEndpoint {
     pub bind_addr: IpAddr,
     pub port: u16,
@@ -105,15 +107,12 @@ pub struct QuicEndpoint {
 pub enum ClusterRole {
     #[default]
     Standalone,
-    Leader {
-        sync_port: u16,
-    },
-    Follower {
-        leader_address: String,
-    },
-    Proxy {
-        leader_addresses: Box<[String]>,
-    },
+    #[serde(rename_all = "camelCase")]
+    Leader { sync_port: u16 },
+    #[serde(rename_all = "camelCase")]
+    Follower { leader_address: String },
+    #[serde(rename_all = "camelCase")]
+    Proxy { leader_addresses: Box<[String]> },
 }
 
 impl ClusterRole {
@@ -141,6 +140,7 @@ impl ClusterRole {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     pub instance_name: Option<String>,
     pub ws_endpoint: Option<Endpoint>,

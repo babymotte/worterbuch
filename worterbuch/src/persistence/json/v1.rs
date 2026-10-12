@@ -18,6 +18,7 @@
  */
 
 use super::*;
+use crate::store::PersistedStore;
 
 #[instrument(skip(config) fields(version=1), err)]
 pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
@@ -59,8 +60,8 @@ async fn try_load(
     if sha != loaded_sha {
         Err(PersistenceError::ChecksumMismatch)
     } else {
-        let store = serde_json::from_str(&json)?;
-        let worterbuch = Worterbuch::from_persistence(store, config);
+        let store = serde_json::from_str::<PersistedStore>(&json)?;
+        let worterbuch = Worterbuch::with_store(store.into(), config);
         Ok(worterbuch)
     }
 }

@@ -33,6 +33,7 @@ use crate::{ClientId, Protocol};
 
 pub const SYSTEM_TOPIC_ROOT: &str = "$SYS";
 pub const SYSTEM_TOPIC_ROOT_PREFIX: &str = "$SYS/";
+pub const SYSTEM_TOPIC_CONFIG: &str = "config";
 pub const SYSTEM_TOPIC_NAME: &str = "name";
 pub const SYSTEM_TOPIC_CLIENTS: &str = "clients";
 pub const SYSTEM_TOPIC_CLIENTS_PREFIX: &str = "$SYS/clients";

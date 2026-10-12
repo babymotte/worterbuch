@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::store::PersistedStore;
 use worterbuch_common::protocol::v1::{InternalAction, Trace};
 
 use super::*;
@@ -87,8 +88,8 @@ pub async fn load(config: Config) -> PersistenceResult<Worterbuch> {
 
 async fn try_load(path: &Path, config: Config) -> PersistenceResult<Worterbuch> {
     let json = fs::read_to_string(path).await?;
-    let store = serde_json::from_str(&json)?;
-    let worterbuch = Worterbuch::from_persistence(store, config);
+    let store = serde_json::from_str::<PersistedStore>(&json)?;
+    let worterbuch = Worterbuch::with_store(store.into(), config);
     info!("Wörterbuch successfully restored form persistence.");
     Ok(worterbuch)
 }
