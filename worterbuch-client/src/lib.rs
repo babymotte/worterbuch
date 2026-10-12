@@ -53,7 +53,6 @@ use std::{
 #[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
 #[cfg(feature = "tcp")]
-use tokio::net::TcpStream;
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use tokio::net::UnixStream;
 use tokio::sync::watch;
@@ -77,6 +76,11 @@ use tracing::{Level, debug, error, info, instrument, trace, warn};
 use unix::UnixClientSocket;
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use worterbuch_common::error::{ConnectionError, ConnectionResult, WorterbuchError};
+#[cfg(feature = "tcp")]
+use worterbuch_common::{
+    error::WrappedResult,
+    socket::{TcpSocketConfig, connect_to_tcp_server_socket},
+};
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
@@ -1666,17 +1670,13 @@ async fn connect_tcp(
         timeout.as_millis()
     );
 
-    let stream = select! {
-        conn = TcpStream::connect(host_addr) => conn,
-        _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for TCP connection.".to_owned())));
-        },
-    }?;
-    debug!("Connected to tcp://{host_addr}.");
-    let (tcp_rx, mut tcp_tx) = stream.into_split();
-    let mut tcp_rx = BufReader::new(tcp_rx).lines();
+    let tcp_config = TcpSocketConfig::from(&config);
+    let (mut tcp_rx, mut tcp_tx, host_addr) =
+        connect_to_tcp_server_socket(&host_addr, timeout, tcp_config)
+            .await
+            .wrap_with(|| format!("failed to connect to leader {}", host_addr))?;
 
-    debug!("Connected to server.");
+    debug!("Connected to tcp://{host_addr}.");
 
     let Welcome { client_id, info } = select! {
         line = tcp_rx.next_line() => match line {

@@ -30,7 +30,7 @@ use crate::{
         proxy::connection::LeaderConnection,
         shutdown,
     },
-    error::{WorterbuchAppError, WorterbuchAppResult},
+    error::{WorterbuchAppError, WorterbuchAppResult, WrappedResult},
     persistence::unlock_persistence,
     server::common::WbFunction,
     store::StoreNode,
@@ -41,11 +41,8 @@ use hashbrown::HashMap;
 use serde_json::json;
 use std::{future::pending, ops::ControlFlow, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
-    net::{
-        TcpStream,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
+    io::{BufReader, BufWriter, Lines},
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     select,
     sync::{mpsc, oneshot},
 };
@@ -59,7 +56,9 @@ use worterbuch_common::{
         ClientMessage, InternalAction, KeyValuePairs, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER,
         SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace, TransactionId, Value,
     },
-    receive_msg, topic, write_line_and_flush,
+    receive_msg,
+    socket::{TcpSocketConfig, connect_to_tcp_server_socket},
+    topic, write_line_and_flush,
 };
 
 struct RunResult {
@@ -289,33 +288,20 @@ impl Proxy {
 
         // TODO should this be configurable?
         let timeout_duration = Duration::from_secs(1);
-
-        let stream = match tokio::time::timeout(
-            timeout_duration,
-            TcpStream::connect(leader_address.clone()),
-        )
-        .await
-        {
-            Ok(Ok(it)) => it,
-            Ok(Err(e)) => {
-                warn!("Failed to connect to leader {}: {}", leader_address, e);
-                trace!(exit = "run_with_leader", leader_address);
-                return Ok(RunResult {
-                    leader_addresses_updated: false,
-                    initial_connection_successful: false,
-                });
-            }
-            Err(_) => {
-                warn!("Connection attempt to leader {} timed out.", leader_address);
-                trace!(exit = "run_with_leader", leader_address);
-                return Ok(RunResult {
-                    leader_addresses_updated: false,
-                    initial_connection_successful: false,
-                });
-            }
-        };
-        let (leader_rx, leader_tx) = stream.into_split();
-        let mut lines = BufReader::new(leader_rx).lines();
+        let tcp_config = TcpSocketConfig::from(&self.config);
+        let (mut lines, leader_tx, _) =
+            match connect_to_tcp_server_socket(&leader_address, timeout_duration, tcp_config).await
+            {
+                Ok(it) => it,
+                Err(e) => {
+                    warn!("Failed to connect to leader {}: {}", leader_address, e);
+                    trace!(exit = "run_with_leader", leader_address);
+                    return Ok(RunResult {
+                        leader_addresses_updated: false,
+                        initial_connection_successful: false,
+                    });
+                }
+            };
 
         let proxy_request_tx = init_request_sender(
             &self.subsys,
@@ -802,7 +788,7 @@ fn connected_clients(worterbuch: &Worterbuch) -> Vec<Connected> {
 
 fn init_request_sender(
     subsys: &Subsystem,
-    leader_tx: OwnedWriteHalf,
+    leader_tx: BufWriter<OwnedWriteHalf>,
     config: &Config,
     leader_addr: String,
 ) -> mpsc::Sender<ProxyMessage> {
@@ -817,7 +803,7 @@ fn init_request_sender(
 
 async fn request_sender_loop(
     subsys: Subsystem,
-    mut leader_tx: OwnedWriteHalf,
+    mut leader_tx: BufWriter<OwnedWriteHalf>,
     mut rx: mpsc::Receiver<ProxyMessage>,
     timeout: Duration,
     leader_addr: String,
@@ -834,7 +820,7 @@ async fn request_sender_loop(
 async fn forward_client_request(
     subsys: &Subsystem,
     recv: Option<ProxyMessage>,
-    leader_tx: &mut OwnedWriteHalf,
+    leader_tx: &mut BufWriter<OwnedWriteHalf>,
     timeout: Duration,
     leader_addr: String,
 ) -> ControlFlow<()> {

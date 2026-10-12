@@ -33,11 +33,7 @@ use crate::{
 };
 use serde_json::json;
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{TcpStream, tcp::OwnedWriteHalf},
-    sync::mpsc,
-};
+use tokio::{io::BufWriter, net::tcp::OwnedWriteHalf, sync::mpsc};
 use tosub::{CancelOnShutdown, Subsystem};
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
@@ -47,7 +43,9 @@ use worterbuch_common::{
         InternalAction, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
         SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace,
     },
-    receive_msg, topic, write_line_and_flush,
+    receive_msg,
+    socket::{TcpSocketConfig, connect_to_tcp_server_socket},
+    topic, write_line_and_flush,
 };
 
 pub(crate) async fn run(
@@ -82,20 +80,11 @@ pub(crate) async fn run(
 
     // TODO should this be configurable?
     let timeout_duration = Duration::from_secs(1);
-
-    let stream = tokio::time::timeout(timeout_duration, TcpStream::connect(&leader_address))
-        .await
-        .into_wb_app_result()
-        .wrap_with(|| format!("connection attempt to leader {} timed out", leader_address))?
-        .into_wb_app_result()
-        .wrap_with(|| format!("failed to connect to leader {}", leader_address))?;
-    let leader_address = stream
-        .peer_addr()
-        .into_wb_app_result()
-        .wrap("failed to get leader address")?;
-
-    let (leader_rx, leader_tx) = stream.into_split();
-    let mut lines = BufReader::new(leader_rx).lines();
+    let tcp_config = TcpSocketConfig::from(&config);
+    let (mut lines, leader_tx, leader_address) =
+        connect_to_tcp_server_socket(&leader_address, timeout_duration, tcp_config)
+            .await
+            .wrap_with(|| format!("failed to connect to leader {}", leader_address))?;
 
     let follower_request_tx = init_request_sender(subsys, leader_tx, &config, leader_address);
 
@@ -266,7 +255,7 @@ async fn try_flush(worterbuch: &mut Worterbuch) -> WorterbuchAppResult<ControlFl
 
 fn init_request_sender(
     subsys: &Subsystem,
-    leader_tx: OwnedWriteHalf,
+    leader_tx: BufWriter<OwnedWriteHalf>,
     config: &Config,
     leader_addr: SocketAddr,
 ) -> mpsc::Sender<ProxyMessage> {
@@ -280,7 +269,7 @@ fn init_request_sender(
 
 async fn request_sender_loop(
     subsys: Subsystem,
-    mut leader_tx: OwnedWriteHalf,
+    mut leader_tx: BufWriter<OwnedWriteHalf>,
     mut rx: mpsc::Receiver<ProxyMessage>,
     timeout: Duration,
     leader_addr: SocketAddr,
@@ -296,7 +285,7 @@ async fn request_sender_loop(
 async fn forward_client_request(
     subsys: &Subsystem,
     recv: Option<ProxyMessage>,
-    leader_tx: &mut OwnedWriteHalf,
+    leader_tx: &mut BufWriter<OwnedWriteHalf>,
     timeout: Duration,
     leader_addr: SocketAddr,
 ) -> ControlFlow<()> {

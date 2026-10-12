@@ -36,7 +36,6 @@ use worterbuch_common::{
         ProtocolMajorVersion, ProtocolVersion, ProtocolVersionSegment, RequestPattern,
         SendTracesFlag, TransactionId, UniqueFlag, Value,
     },
-    socket::TcpSocketConfig,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1045,16 +1044,5 @@ impl WbApi for CloneableWbApi {
         let function = WbFunction::Len(tx);
         self.send_with_timeout(function, "entries").await?;
         Ok(rx.await?)
-    }
-}
-
-impl From<&Config> for TcpSocketConfig {
-    fn from(config: &Config) -> Self {
-        Self {
-            keepalive_time: config.keepalive_time,
-            keepalive_interval: config.keepalive_interval,
-            keepalive_retries: config.keepalive_retries,
-            send_timeout: config.send_timeout,
-        }
     }
 }

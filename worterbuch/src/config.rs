@@ -36,6 +36,7 @@ use worterbuch_common::{
     Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
     protocol::v1::{AuthTokenKey, ProtocolVersion},
+    socket::TcpSocketConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString)]
@@ -567,4 +568,15 @@ pub fn print_quic_endpoint(addr: SocketAddr) -> Result<(), miette::Error> {
     let json = json!(addr);
     println!("{json}");
     Ok(())
+}
+
+impl From<&Config> for TcpSocketConfig {
+    fn from(config: &Config) -> Self {
+        Self {
+            keepalive_time: config.keepalive_time,
+            keepalive_interval: config.keepalive_interval,
+            keepalive_retries: config.keepalive_retries,
+            send_timeout: config.send_timeout,
+        }
+    }
 }

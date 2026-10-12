@@ -80,6 +80,8 @@ pub enum WorterbuchAppError {
     ),
     #[error("{0}")]
     Wrapped(String, #[source] Box<WorterbuchAppError>),
+    #[error("{0}")]
+    Report(String, #[diagnostic_source] miette::Report),
 }
 
 pub trait IntoWbAppResult<T> {
@@ -113,5 +115,18 @@ impl<T> WrappedResult for WorterbuchAppResult<T> {
 
     fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
         self.map_err(|e| WorterbuchAppError::Wrapped(f(), Box::new(e)))
+    }
+}
+
+impl<T> WrappedResult for miette::Result<T> {
+    type Result = WorterbuchAppResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| WorterbuchAppError::Report(msg.into(), e))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| WorterbuchAppError::Report(f(), e))
     }
 }

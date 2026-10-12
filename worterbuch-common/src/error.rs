@@ -326,6 +326,7 @@ pub enum ConnectionError {
     LockLost(LockLost),
     ShutdownRequested,
     Wrapped(String, #[source] Box<ConnectionError>),
+    Report(String, #[diagnostic_source] miette::Report),
 }
 
 impl fmt::Display for ConnectionError {
@@ -361,6 +362,7 @@ impl fmt::Display for ConnectionError {
             ),
             Self::ShutdownRequested => "shutdown requested".fmt(f),
             Self::Wrapped(msg, _) => msg.fmt(f),
+            Self::Report(msg, _) => msg.fmt(f),
         }
     }
 }
@@ -613,5 +615,18 @@ impl<T> WrappedResult for ConnectionResult<T> {
 
     fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
         self.map_err(|e| ConnectionError::Wrapped(f(), Box::new(e)))
+    }
+}
+
+impl<T> WrappedResult for miette::Result<T> {
+    type Result = ConnectionResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| ConnectionError::Report(msg.into(), e))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| ConnectionError::Report(f(), e))
     }
 }

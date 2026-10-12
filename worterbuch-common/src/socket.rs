@@ -18,10 +18,17 @@
  */
 
 use miette::{Context, IntoDiagnostic};
-use socket2::{Domain, Protocol, SockAddr, Socket, TcpKeepalive, Type};
+use socket2::{Domain, Protocol, SockAddr, SockRef, Socket, TcpKeepalive, Type};
 use std::{
     net::{IpAddr, SocketAddr, TcpListener, UdpSocket},
     time::Duration,
+};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
+    net::{
+        ToSocketAddrs,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
 };
 use tracing::{instrument, trace};
 
@@ -42,6 +49,64 @@ impl Default for TcpSocketConfig {
             send_timeout: Duration::from_secs(5),
         }
     }
+}
+
+#[instrument]
+pub async fn connect_to_tcp_server_socket(
+    addrs: impl ToSocketAddrs + std::fmt::Debug + Clone,
+    timeout: Duration,
+    config: TcpSocketConfig,
+) -> miette::Result<(
+    Lines<BufReader<OwnedReadHalf>>,
+    BufWriter<OwnedWriteHalf>,
+    SocketAddr,
+)> {
+    let mut tcp_keepalive = TcpKeepalive::new();
+    if let Some(keepalive) = config.keepalive_time {
+        tcp_keepalive = tcp_keepalive.with_time(keepalive);
+    }
+    if let Some(keepalive) = config.keepalive_interval {
+        tcp_keepalive = tcp_keepalive.with_interval(keepalive);
+    }
+    if let Some(retries) = config.keepalive_retries {
+        tcp_keepalive = tcp_keepalive.with_retries(retries);
+    }
+
+    let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(addrs.clone()))
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| format!("connection attempt to {:?} timed out", addrs))?
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to connect to {:?}", addrs))?;
+
+    let sf = SockRef::from(&stream);
+    sf.set_tcp_keepalive(&tcp_keepalive)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP keepalive option")?;
+    sf.set_tcp_user_timeout(Some(config.send_timeout))
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_USER_TIMEOUT option")?;
+
+    stream
+        .set_nodelay(true)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_NODELAY option")?;
+    stream
+        .set_quickack(true)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_QUICKACK option")?;
+
+    let leader_address = stream
+        .peer_addr()
+        .into_diagnostic()
+        .wrap_err("failed to get remote address")?;
+    let (rx, tx) = stream.into_split();
+
+    Ok((
+        tokio::io::BufReader::new(rx).lines(),
+        BufWriter::new(tx),
+        leader_address,
+    ))
 }
 
 #[instrument]
@@ -100,6 +165,10 @@ pub fn create_tcp_server_socket(
         .set_tcp_nodelay(true)
         .into_diagnostic()
         .wrap_err("failed to set TCP_NODELAY option")?;
+    socket
+        .set_tcp_quickack(true)
+        .into_diagnostic()
+        .wrap_err("failed to set TCP_QUICKACK option")?;
     socket
         .bind(&SockAddr::from(addr))
         .into_diagnostic()

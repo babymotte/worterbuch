@@ -21,11 +21,15 @@
 use std::path::PathBuf;
 use std::{env, ops::Deref, time::Duration};
 use tracing::{debug, error, instrument};
+use worterbuch_common::socket::TcpSocketConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub proto: String,
     pub servers: Box<[String]>,
+    pub keepalive_time: Option<Duration>,
+    pub keepalive_interval: Option<Duration>,
+    pub keepalive_retries: Option<u32>,
     pub send_timeout: Duration,
     pub connection_timeout: Duration,
     pub auth_token: Option<String>,
@@ -68,6 +72,30 @@ impl Config {
             };
             let addr = format!("{val}:{port}");
             self.servers = Box::new([addr]);
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_KEEPALIVE_TIME") {
+            if let Ok(secs) = val.parse() {
+                self.keepalive_time = Some(Duration::from_secs(secs));
+            } else {
+                error!("invalid time: {val}");
+            }
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_KEEPALIVE_INTERVAL") {
+            if let Ok(secs) = val.parse() {
+                self.keepalive_interval = Some(Duration::from_secs(secs));
+            } else {
+                error!("invalid interval: {val}");
+            }
+        }
+
+        if let Ok(val) = env::var("WORTERBUCH_KEEPALIVE_RETRIES") {
+            if let Ok(retries) = val.parse() {
+                self.keepalive_retries = Some(retries);
+            } else {
+                error!("invalid retries: {val}");
+            }
         }
 
         if let Ok(val) = env::var("WORTERBUCH_SEND_TIMEOUT") {
@@ -138,6 +166,9 @@ impl Default for Config {
             proto,
             servers,
             send_timeout,
+            keepalive_time: None,
+            keepalive_interval: None,
+            keepalive_retries: None,
             connection_timeout,
             auth_token: None,
             channel_buffer_size,
@@ -170,5 +201,16 @@ impl Config {
         config.proto = proto;
         config.servers = servers.into_iter().map(Into::into).collect();
         config
+    }
+}
+
+impl From<&Config> for TcpSocketConfig {
+    fn from(config: &Config) -> Self {
+        Self {
+            keepalive_time: config.keepalive_time,
+            keepalive_interval: config.keepalive_interval,
+            keepalive_retries: config.keepalive_retries,
+            send_timeout: config.send_timeout,
+        }
     }
 }

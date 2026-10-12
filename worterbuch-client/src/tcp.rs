@@ -19,7 +19,7 @@
 
 use std::time::Duration;
 use tokio::{
-    io::{BufReader, Lines},
+    io::{BufReader, BufWriter, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     spawn,
     sync::{mpsc, oneshot},
@@ -42,7 +42,7 @@ pub struct TcpClientSocket {
 impl TcpClientSocket {
     pub(crate) async fn new(
         cancellation_token: CancellationToken,
-        tx: OwnedWriteHalf,
+        tx: BufWriter<OwnedWriteHalf>,
         rx: Lines<BufReader<OwnedReadHalf>>,
         send_timeout: Duration,
         buffer_size: usize,
@@ -87,7 +87,7 @@ impl TcpClientSocket {
 
 async fn forward_tcp_messages(
     cancellation_token: CancellationToken,
-    mut tx: OwnedWriteHalf,
+    mut tx: BufWriter<OwnedWriteHalf>,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     timeout: Duration,
     closed_tx: oneshot::Sender<()>,
