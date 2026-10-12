@@ -86,7 +86,12 @@ pub fn create_tcp_server_socket(
         .set_tcp_keepalive(&tcp_keepalive)
         .into_diagnostic()
         .wrap_err("failed to set TCP keepallive option")?;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
     socket
         .set_tcp_user_timeout(Some(config.send_timeout))
         .into_diagnostic()
