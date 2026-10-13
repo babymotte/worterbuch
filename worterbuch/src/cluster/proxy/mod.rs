@@ -30,7 +30,7 @@ use crate::{
         proxy::connection::LeaderConnection,
         shutdown,
     },
-    error::{WorterbuchAppError, WorterbuchAppResult, WrappedResult},
+    error::{WorterbuchAppError, WorterbuchAppResult},
     persistence::unlock_persistence,
     server::common::WbFunction,
     store::StoreNode,

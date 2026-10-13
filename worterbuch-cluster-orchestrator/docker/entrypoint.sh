@@ -5,4 +5,4 @@ if [[ -n "$WBCLUSTER_STARTUP_DELAY" ]]; then
     sleep "$WBCLUSTER_STARTUP_DELAY"
 fi
 
-/usr/local/bin/worterbuch-cluster-orchestrator
+/usr/local/bin/worterbuch-cluster-orchestrator "$@"
