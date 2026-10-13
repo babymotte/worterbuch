@@ -16,11 +16,11 @@
  */
 
 use crate::{
+    PeerMessage, Ping,
     config::{self},
     socket::init_socket,
 };
 use miette::{Context, IntoDiagnostic, bail};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     env, io,
@@ -31,9 +31,6 @@ use std::{
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{info, warn};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Ping(usize);
 
 pub async fn run_udp_check(subsys: Subsystem, config: config::Config) -> miette::Result<()> {
     let udp_check_address = env::var("WBCLUSTER_UDP_CHECK_ADDRESS")
@@ -78,7 +75,8 @@ async fn send_ping(
         bail!("Max ping attempts ({max}) exceeded.");
     }
 
-    let msg = json!(Ping(counter)).to_string();
+    let msg = PeerMessage::Ping(Ping(counter));
+    let msg = json!(msg).to_string();
 
     for addr in addrs {
         info!("Sending ping message '{}' to {} …", msg, addr);
@@ -96,9 +94,9 @@ async fn receive_ping(received: io::Result<usize>, buf: &[u8]) -> miette::Result
     let received = received
         .into_diagnostic()
         .wrap_err("failed to received UDP message")?;
-    match serde_json::from_slice::<Ping>(&buf[..received]) {
-        Ok(ping) => {
-            info!("Received ping: {}", json!(ping));
+    match serde_json::from_slice::<PeerMessage>(&buf[..received]) {
+        Ok(msg) => {
+            info!("Received peer message: {}", json!(msg));
             return Ok(ControlFlow::Break(()));
         }
         Err(e) => warn!("received invalid ping: {}", e),

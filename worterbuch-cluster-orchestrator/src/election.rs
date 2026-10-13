@@ -269,6 +269,9 @@ impl<'a> Election<'a> {
                         heartbeat.node_id
                     );
                 }
+                PeerMessage::Ping(_) => {
+                    // pings can be ignored
+                }
             }
         }
         Ok(None)
@@ -406,6 +409,9 @@ impl<'a> Election<'a> {
                         heartbeat.node_id
                     );
                 }
+                PeerMessage::Ping(_) => {
+                    // pings can be ignored
+                }
             }
         }
 
@@ -450,6 +456,9 @@ impl<'a> Election<'a> {
                         PeerMessage::Heartbeat(Heartbeat::Response(heartbeat)) => {
                             warn!("Node '{}' just sent a heartbeat response. That doesn't make any sense.", heartbeat.node_id);
                         },
+                        PeerMessage::Ping(_) => {
+                            // pings can be ignored
+                        }
                     }
                 },
                 _ = self.subsys.shutdown_requested() => return Ok(Some(ElectionOutcome::Cancelled)),

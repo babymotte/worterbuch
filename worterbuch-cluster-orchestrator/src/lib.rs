@@ -51,6 +51,7 @@ use tracing::{debug, instrument};
 pub enum PeerMessage {
     Vote(Vote),
     Heartbeat(Heartbeat),
+    Ping(Ping),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +96,10 @@ pub enum Heartbeat {
     Request(HeartbeatRequest),
     Response(HeartbeatResponse),
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ping(usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

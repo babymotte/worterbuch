@@ -122,6 +122,9 @@ async fn process_peer_message(
                 heartbeat.node_id
             );
         }
+        PeerMessage::Ping(_) => {
+            // pings can be ignored
+        }
     }
     Ok(ControlFlow::Continue(()))
 }
