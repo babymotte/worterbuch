@@ -2,7 +2,7 @@ version: "2"
 
 services:
   worterbuch:
-    image: babymotte/worterbuch:1.7.0-alpha.28
+    image: babymotte/worterbuch:1.7.0-alpha.29
     hostname: worterbuch
     container_name: worterbuch
     restart: always
