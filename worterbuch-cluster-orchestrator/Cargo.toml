@@ -9,6 +9,7 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database-implementations"]
+default-run = "worterbuch-cluster-orchestrator"
 
 [features]
 jemalloc = ["worterbuch-common/jemalloc"]

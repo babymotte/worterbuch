@@ -24,9 +24,10 @@ mod process_manager;
 mod socket;
 mod stats;
 mod telemetry;
+mod udp_check;
 mod utils;
 
-use crate::config::Peers;
+use crate::{config::Peers, udp_check::run_udp_check};
 use config::instrument_and_load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
@@ -133,6 +134,13 @@ pub async fn instrument_and_run_main(subsys: Subsystem) -> Result<()> {
         .await
         .wrap_err("failed to init telemetry and config")?;
     run_main(subsys, config, peers_rx).await
+}
+
+pub async fn instrument_and_run_udp_check(subsys: Subsystem) -> Result<()> {
+    let (config, _) = instrument_and_load_config(&subsys)
+        .await
+        .wrap_err("failed to init telemetry and config")?;
+    run_udp_check(subsys, config).await
 }
 
 async fn run_main(
