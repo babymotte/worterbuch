@@ -26,6 +26,7 @@ mod stats;
 mod telemetry;
 mod utils;
 
+use crate::config::Peers;
 use config::instrument_and_load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
@@ -43,8 +44,6 @@ use tokio::{fs::File, sync::mpsc};
 use tosub::Subsystem;
 use totils::CancelOn;
 use tracing::{debug, instrument};
-
-use crate::config::Peers;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
