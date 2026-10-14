@@ -342,8 +342,7 @@ impl Proxy {
         let leader_addresses_updated = match leader_connection.run().await {
             Ok(updated) => updated,
             Err(e) => {
-                error!("Leader connection broke with an error: {}", e);
-                eprintln!("{e:?}");
+                error!("Leader connection broke with an error: {:?}", e);
                 false
             }
         };
