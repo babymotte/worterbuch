@@ -19,10 +19,7 @@
 
 use crate::{
     auth::JwtClaims,
-    server::common::{
-        CloneableWbApi,
-        protocol::{LazyBroadcaster, Proto},
-    },
+    server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
 use axum::extract::ws::{Message, WebSocket};
@@ -32,13 +29,9 @@ use futures::{
 };
 use miette::{IntoDiagnostic, Result, bail};
 use std::{net::SocketAddr, ops::ControlFlow, time::Duration};
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-    time::timeout,
-};
+use tokio::{select, sync::mpsc, time::timeout};
 use tosub::Subsystem;
-use totils::{CancelOn, while_select};
+use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -123,7 +116,7 @@ async fn serve_loop(
             authorization_required,
         ),
     });
-    ws_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    ws_send_tx.send(welcome).await.into_diagnostic()?;
 
     let mut proto = Proto::new(
         subsys.clone(),
@@ -183,13 +176,12 @@ async fn send_loop(
     client_id: ClientId,
     send_timeout: Duration,
     mut ws_tx: SplitSink<WebSocket, Message>,
-    mut ws_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
+    mut ws_send_rx: mpsc::Receiver<ServerMessage>,
 ) -> miette::Result<()> {
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = ws_send_rx.recv() => if let Some(msg) = recv {
-            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,

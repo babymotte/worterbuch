@@ -23,7 +23,7 @@ use crate::{
     cluster::protocol::{Connected, Disconnected, ProxyMessage, Request, locks::Locks},
     server::common::{
         self, CloneableWbApi,
-        protocol::{Proto, ServerMessageLazyBroadcaster},
+        protocol::{Proto, ServerMessageBroadcaster},
     },
 };
 use hashbrown::HashMap;
@@ -34,10 +34,7 @@ use std::{
     net::SocketAddr,
     ops::ControlFlow,
 };
-use tokio::{
-    spawn,
-    sync::{mpsc, oneshot},
-};
+use tokio::{spawn, sync::mpsc};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::{Level, debug, enabled, error, info, instrument, trace, warn};
@@ -187,7 +184,7 @@ impl VirtualProxyServer {
         protocol: Protocol,
         config: Config,
         worterbuch: CloneableWbApi,
-    ) -> miette::Result<ServerMessageLazyBroadcaster> {
+    ) -> miette::Result<ServerMessageBroadcaster> {
         trace!(enter = "spawn_virtual_client", %client_id);
         let proxied_protocol = Protocol::Proxied(Box::new(protocol.clone()));
 
@@ -327,7 +324,7 @@ impl VirtualProxyServer {
     pub async fn register_clients(
         &mut self,
         connected_clients: &[Connected],
-    ) -> miette::Result<HashMap<ClientId, ServerMessageLazyBroadcaster>> {
+    ) -> miette::Result<HashMap<ClientId, ServerMessageBroadcaster>> {
         trace!(enter = "register_clients");
         let mut client_txs = HashMap::new();
 
@@ -435,7 +432,7 @@ impl VirtualProxyServer {
 
 async fn response_forwarder_loop(
     subsys: Subsystem,
-    mut send_client_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
+    mut send_client_rx: mpsc::Receiver<ServerMessage>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     proxy_addr: SocketAddr,
@@ -452,29 +449,23 @@ async fn response_forwarder_loop(
 }
 
 async fn forward_leader_response(
-    recv: Option<oneshot::Receiver<ServerMessage>>,
+    recv: Option<ServerMessage>,
     send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     remote_addr: SocketAddr,
 ) -> ControlFlow<()> {
     trace!(enter = "forward_leader_response", %client_id);
     match recv {
-        Some(msg) => match msg.await {
-            Ok(msg) => match send_tx
-                .send(VirtualServerMessage::ServerMessage((client_id, msg)))
-                .await
-                .into_diagnostic()
-                .wrap_err("could not forward response to proxy")
-            {
-                Ok(_) => ControlFlow::Continue(()),
-                Err(e) => {
-                    error!("Failed to forward response to proxy: {:?}", e);
-                    error!("Closing connection to proxy {}", remote_addr);
-                    trace!(exit = "forward_leader_response");
-                    ControlFlow::Break(())
-                }
-            },
-            Err(_) => {
+        Some(msg) => match send_tx
+            .send(VirtualServerMessage::ServerMessage((client_id, msg)))
+            .await
+            .into_diagnostic()
+            .wrap_err("could not forward response to proxy")
+        {
+            Ok(_) => ControlFlow::Continue(()),
+            Err(e) => {
+                error!("Failed to forward response to proxy: {:?}", e);
+                error!("Closing connection to proxy {}", remote_addr);
                 trace!(exit = "forward_leader_response");
                 ControlFlow::Break(())
             }

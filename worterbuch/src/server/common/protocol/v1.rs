@@ -20,12 +20,8 @@
 use super::v0::V0;
 use crate::{
     auth::JwtClaims,
-    server::common::protocol::{
-        LazyBroadcaster, forward_lock_acquired, forward_lock_lost,
-        v0::{handle_store_error, handle_store_error_lazy},
-    },
+    server::common::protocol::{forward_lock_acquired, forward_lock_lost, v0::handle_store_error},
 };
-use tokio::sync::oneshot;
 use tracing::{Level, instrument, trace};
 use worterbuch_common::{
     Privilege, WbApi,
@@ -113,66 +109,47 @@ impl V1 {
     }
 
     pub async fn cget(&self, msg: Get) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.v0.worterbuch.clone();
-        let permit = self.v0.acquire_permit().await;
+        let (value, version) = match self.v0.worterbuch.cget(msg.key).await {
+            Ok(it) => it,
+            Err(e) => {
+                handle_store_error(&self.v0.tx, e, msg.transaction_id).await;
+                return;
+            }
+        };
 
-        tokio::spawn(async move {
-            let (value, version) = match wb.cget(msg.key).await {
-                Ok(it) => it,
-                Err(e) => {
-                    handle_store_error(tx, e, msg.transaction_id).await;
-                    return;
-                }
-            };
+        let response = CState {
+            transaction_id: msg.transaction_id,
+            event: CStateEvent { value, version },
+        };
 
-            let response = CState {
-                transaction_id: msg.transaction_id,
-                event: CStateEvent { value, version },
-            };
-
-            let msg = ServerMessage::CState(response);
-            let _ = tx.send(msg);
-
-            drop(permit);
-        });
-
-        let _ = self.v0.tx.send(rx).await;
+        let msg = ServerMessage::CState(response);
+        let _ = self.v0.tx.send(msg).await;
     }
 
     pub async fn cset(&self, msg: CSet) {
-        let (tx, rx) = oneshot::channel();
-        let wb = self.v0.worterbuch.clone();
-        let permit = self.v0.acquire_permit().await;
-        let client_id = self.v0.client_id;
+        if let Err(e) = self
+            .v0
+            .worterbuch
+            .cset(
+                msg.transaction_id,
+                msg.key,
+                msg.value,
+                msg.version,
+                self.v0.client_id,
+            )
+            .await
+        {
+            handle_store_error(&self.v0.tx, e, msg.transaction_id).await;
+            return;
+        }
 
-        tokio::spawn(async move {
-            if let Err(e) = wb
-                .cset(
-                    msg.transaction_id,
-                    msg.key,
-                    msg.value,
-                    msg.version,
-                    client_id,
-                )
-                .await
-            {
-                handle_store_error(tx, e, msg.transaction_id).await;
-                return;
-            }
+        let response = Ack {
+            transaction_id: msg.transaction_id,
+        };
 
-            let response = Ack {
-                transaction_id: msg.transaction_id,
-            };
-
-            trace!("Value set, queuing Ack …");
-            let _ = tx.send(ServerMessage::Ack(response));
-            trace!("Value set, queuing Ack done.");
-
-            drop(permit);
-        });
-
-        let _ = self.v0.tx.send(rx).await;
+        trace!("Value set, queuing Ack …");
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        trace!("Value set, queuing Ack done.");
     }
 
     pub async fn lock(&self, msg: Lock) {
@@ -185,7 +162,7 @@ impl V1 {
         {
             Ok(it) => it,
             Err(e) => {
-                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.v0.tx, e, msg.transaction_id).await;
                 return;
             }
         };
@@ -195,7 +172,7 @@ impl V1 {
         };
 
         trace!("Key locked, queuing Ack …");
-        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
         trace!("Key locked, queuing Ack done.");
 
         let client = self.v0.tx.clone();
@@ -216,7 +193,7 @@ impl V1 {
             .await
         {
             Err(e) => {
-                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.v0.tx, e, msg.transaction_id).await;
                 return;
             }
             Ok(rx) => rx,
@@ -239,7 +216,7 @@ impl V1 {
             .release_lock(msg.transaction_id, msg.key, self.v0.client_id)
             .await
         {
-            handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+            handle_store_error(&self.v0.tx, e, msg.transaction_id).await;
             return;
         }
 
@@ -248,7 +225,7 @@ impl V1 {
         };
 
         trace!("Key unlocked, queuing Ack …");
-        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
         trace!("Key unlocked, queuing Ack done.");
     }
 }

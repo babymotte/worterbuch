@@ -52,6 +52,8 @@ use std::{
 };
 #[cfg(feature = "tcp")]
 use tcp::TcpClientSocket;
+#[cfg(feature = "quic")]
+use tokio::io::BufWriter;
 #[cfg(feature = "tcp")]
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use tokio::net::UnixStream;
@@ -1869,13 +1871,14 @@ async fn connect_unix(
         },
     }?;
     debug!("Connected to {path}.");
-    let (tcp_rx, mut tcp_tx) = stream.into_split();
-    let mut tcp_rx = BufReader::new(tcp_rx).lines();
+    let (unix_rx, unix_tx) = stream.into_split();
+    let mut unix_tx = BufWriter::new(unix_tx);
+    let mut unix_rx = BufReader::new(unix_rx).lines();
 
     debug!("Connected to server.");
 
     let Welcome { client_id, info } = select! {
-        line = tcp_rx.next_line() => match line {
+        line = unix_rx.next_line() => match line {
             Ok(None) => {
                 return Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
@@ -1930,9 +1933,9 @@ async fn connect_unix(
     let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
     msg.push('\n');
     debug!("Sending protocol switch message: {msg}");
-    tcp_tx.write_all(msg.as_bytes()).await?;
+    unix_tx.write_all(msg.as_bytes()).await?;
 
-    match tcp_rx.next_line().await {
+    match unix_rx.next_line().await {
         Ok(None) => {
             return Err(ConnectionError::IoError(Box::new(io::Error::new(
                 io::ErrorKind::ConnectionReset,
@@ -1974,9 +1977,9 @@ async fn connect_unix(
             let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
             msg.push('\n');
             debug!("Sending authorization message: {msg}");
-            tcp_tx.write_all(msg.as_bytes()).await?;
+            unix_tx.write_all(msg.as_bytes()).await?;
 
-            match tcp_rx.next_line().await {
+            match unix_rx.next_line().await {
                 Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "connection closed before handshake",
@@ -1990,8 +1993,8 @@ async fn connect_unix(
                                 ClientSocket::Unix(
                                     UnixClientSocket::new(
                                         cancellation_token,
-                                        tcp_tx,
-                                        tcp_rx,
+                                        unix_tx,
+                                        unix_rx,
                                         config.channel_buffer_size,
                                     )
                                     .await,
@@ -2028,8 +2031,8 @@ async fn connect_unix(
         let client_socket = ClientSocket::Unix(
             UnixClientSocket::new(
                 cancellation_token,
-                tcp_tx,
-                tcp_rx,
+                unix_tx,
+                unix_rx,
                 config.channel_buffer_size,
             )
             .await,
@@ -2082,12 +2085,14 @@ async fn connect_quic(
     // before the peer's accept_bi() can succeed - so it is the *server* that
     // opens the single bidirectional stream used for the connection, and the
     // client has to accept it here rather than opening it itself.
-    let (mut quic_tx, quic_rx) = select! {
+    let (quic_tx, quic_rx) = select! {
         streams = connection.accept_bi() => streams.map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?,
         _ = sleep(timeout) => {
             return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for QUIC stream.".to_owned())));
         },
     };
+
+    let mut quic_tx = BufWriter::new(quic_tx);
     let mut quic_rx = BufReader::new(quic_rx).lines();
 
     debug!("Connected to server.");

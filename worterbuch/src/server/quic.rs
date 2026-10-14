@@ -36,12 +36,7 @@
 //! receive it.
 
 use super::common::protocol::Proto;
-use crate::{
-    auth::JwtClaims,
-    print_quic_endpoint,
-    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
-    stats::VERSION,
-};
+use crate::{auth::JwtClaims, print_quic_endpoint, server::common::CloneableWbApi, stats::VERSION};
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
 use quinn::{
@@ -57,12 +52,12 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     select,
-    sync::{mpsc, oneshot},
+    sync::mpsc,
 };
 use tosub::Subsystem;
-use totils::{CancelOn, while_select};
+use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -377,7 +372,14 @@ async fn serve_loop(
 
     let (quic_send_tx, quic_send_rx) = mpsc::channel(config.channel_buffer_size);
     subsys.spawn("forward_messages_to_socket", async move |s| {
-        forward_messages_to_socket(s, quic_send_rx, quic_tx, client_id, send_timeout).await
+        forward_messages_to_socket(
+            s,
+            quic_send_rx,
+            BufWriter::new(quic_tx),
+            client_id,
+            send_timeout,
+        )
+        .await
     });
 
     let quic_rx = BufReader::new(quic_rx);
@@ -391,7 +393,7 @@ async fn serve_loop(
             authorization_required,
         ),
     });
-    quic_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    quic_send_tx.send(welcome).await.into_diagnostic()?;
 
     let proto = Proto::new(
         subsys.clone(),
@@ -417,8 +419,8 @@ async fn serve_loop(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut quic_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
-    mut quic_tx: SendStream,
+    mut quic_send_rx: mpsc::Receiver<ServerMessage>,
+    mut quic_tx: BufWriter<SendStream>,
     client_id: ClientId,
     send_timeout: Duration,
 ) -> Result<()> {
@@ -426,7 +428,6 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = quic_send_rx.recv() => if let Some(msg) = recv {
-            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut quic_tx, send_timeout).await {
                 error!("Error sending QUIC message to client {client_id}: {e}");
                 trace!(?msg);

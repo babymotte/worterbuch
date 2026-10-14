@@ -28,7 +28,7 @@ use quinn::{
 use rustls_platform_verifier::BuilderVerifierExt;
 use std::{io, sync::Arc, time::Duration};
 use tokio::{
-    io::{BufReader, Lines},
+    io::{BufReader, BufWriter, Lines},
     spawn,
     sync::{mpsc, oneshot},
 };
@@ -59,7 +59,7 @@ impl QuicClientSocket {
     pub(crate) async fn new(
         cancellation_token: CancellationToken,
         connection: Connection,
-        tx: SendStream,
+        tx: BufWriter<SendStream>,
         rx: Lines<BufReader<RecvStream>>,
         send_timeout: Duration,
         buffer_size: usize,
@@ -105,7 +105,7 @@ impl QuicClientSocket {
 
 async fn forward_quic_messages(
     cancellation_token: CancellationToken,
-    mut tx: SendStream,
+    mut tx: BufWriter<SendStream>,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     timeout: Duration,
     closed_tx: oneshot::Sender<()>,
@@ -124,7 +124,6 @@ async fn forward_quic_messages(
         }
     }
 
-    let _ = tx.finish();
     drop(tx);
 
     let _ = closed_tx.send(());

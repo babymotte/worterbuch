@@ -25,10 +25,7 @@ use crate::{
     config::Config,
     error::WorterbuchAppResult,
     persistence::{PersistentStorageImpl, error::PersistenceResult},
-    server::common::{
-        UpdatedLocks,
-        protocol::{LazyBroadcaster, ServerMessageLazyBroadcaster},
-    },
+    server::common::{UpdatedLocks, protocol::ServerMessageBroadcaster},
     store::{PersistedStore, Store, StoreNode},
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
@@ -55,7 +52,7 @@ use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
     Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
-    error::{WorterbuchError, WorterbuchResult},
+    error::{WorterbuchError, WorterbuchResult, WrappedResult},
     is_client_sys_wildcard_topic, parse_segments,
     protocol::v1::{
         CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
@@ -121,7 +118,7 @@ struct PStateAggregatorState {
     request_pattern: RequestPattern,
     set_buffer: Map<Key, Value>,
     deleted_buffer: Map<Key, Value>,
-    client_sub: ServerMessageLazyBroadcaster,
+    client_sub: ServerMessageBroadcaster,
     send_is_scheduled: bool,
 }
 
@@ -244,9 +241,7 @@ impl PStateAggregatorState {
             event,
             trace: None,
         };
-        self.client_sub
-            .lazy_send(ServerMessage::PState(pstate))
-            .await?;
+        self.client_sub.send(ServerMessage::PState(pstate)).await?;
         Ok(())
     }
 
@@ -280,7 +275,7 @@ pub struct PStateAggregator {
 
 impl PStateAggregator {
     pub fn new(
-        client_sub: ServerMessageLazyBroadcaster,
+        client_sub: ServerMessageBroadcaster,
         request_pattern: RequestPattern,
         aggregate_duration: Duration,
         transaction_id: TransactionId,

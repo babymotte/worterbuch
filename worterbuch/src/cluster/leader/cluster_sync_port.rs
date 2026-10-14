@@ -27,10 +27,7 @@ use crate::{
             StateSync,
         },
     },
-    server::common::{
-        CloneableWbApi,
-        protocol::{self, LazyBroadcaster},
-    },
+    server::common::{CloneableWbApi, protocol},
     worterbuch_version,
 };
 use hashbrown::HashMap;
@@ -43,7 +40,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     net::{
         TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -284,7 +281,8 @@ async fn follower_session(
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<()> {
-    let (socket_rx, mut socket_tx) = tcp_stream.into_split();
+    let (socket_rx, socket_tx) = tcp_stream.into_split();
+    let mut socket_tx = BufWriter::new(socket_tx);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
 
     send_welcome(subsys, &mut socket_tx, follower, &config).await?;
@@ -325,7 +323,7 @@ async fn follower_session(
 
 async fn send_welcome(
     subsys: &Subsystem,
-    tcp_stream: &mut OwnedWriteHalf,
+    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
     follower: SocketAddr,
     config: &Config,
 ) -> miette::Result<()> {
@@ -437,7 +435,7 @@ async fn process_handshake(
                     error_code: ErrorCode::LockLost,
                     metadata: json!("lock lost").to_string(),
                 });
-                let _ = tx.lazy_send(msg).await;
+                let _ = tx.send(msg).await;
             }
         }
 
@@ -528,7 +526,7 @@ fn authenticate_against_key(_auth_token: Option<&str>, _key: &str) -> miette::Re
 
 async fn send_initial_state(
     subsys: &Subsystem,
-    tcp_stream: &mut OwnedWriteHalf,
+    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
     follower: SocketAddr,
     config: &Config,
     state: StateSync,
@@ -555,7 +553,7 @@ async fn send_initial_state(
 async fn forward_change_to_follower(
     subsys: &Subsystem,
     recv: Option<ClusterStateChange>,
-    socket_tx: &mut OwnedWriteHalf,
+    socket_tx: &mut BufWriter<OwnedWriteHalf>,
     config: &Config,
     follower: SocketAddr,
 ) -> miette::Result<ControlFlow<()>> {
@@ -584,7 +582,7 @@ async fn forward_change_to_follower(
 async fn forward_response_to_proxy(
     subsys: &Subsystem,
     recv: Option<VirtualServerMessage>,
-    socket_tx: &mut OwnedWriteHalf,
+    socket_tx: &mut BufWriter<OwnedWriteHalf>,
     config: &Config,
     follower: SocketAddr,
 ) -> miette::Result<ControlFlow<()>> {

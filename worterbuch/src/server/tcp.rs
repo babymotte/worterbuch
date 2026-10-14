@@ -19,11 +19,7 @@
 
 use super::common::protocol::Proto;
 use crate::{
-    Config,
-    auth::JwtClaims,
-    print_endpoint,
-    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
-    stats::VERSION,
+    Config, auth::JwtClaims, print_endpoint, server::common::CloneableWbApi, stats::VERSION,
 };
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
@@ -34,16 +30,16 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     net::{
         TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
     select,
-    sync::{mpsc, oneshot},
+    sync::mpsc,
 };
 use tosub::Subsystem;
-use totils::{CancelOn, while_select};
+use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
@@ -254,7 +250,14 @@ async fn serve_loop<'a>(
     let (tcp_rx, tcp_tx) = socket.into_split();
     let (tcp_send_tx, tcp_send_rx) = mpsc::channel(config.channel_buffer_size);
     subsys.spawn("forward_messages_to_socket", async move |s| {
-        forward_messages_to_socket(s, tcp_send_rx, tcp_tx, client_id, send_timeout).await
+        forward_messages_to_socket(
+            s,
+            tcp_send_rx,
+            BufWriter::new(tcp_tx),
+            client_id,
+            send_timeout,
+        )
+        .await
     });
 
     let tcp_rx = BufReader::new(tcp_rx);
@@ -268,7 +271,7 @@ async fn serve_loop<'a>(
             authorization_required,
         ),
     });
-    tcp_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    tcp_send_tx.send(welcome).await.into_diagnostic()?;
 
     let proto = Proto::new(
         subsys.clone(),
@@ -294,8 +297,8 @@ async fn serve_loop<'a>(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut tcp_send_rx: mpsc::Receiver<oneshot::Receiver<ServerMessage>>,
-    mut tcp_tx: OwnedWriteHalf,
+    mut tcp_send_rx: mpsc::Receiver<ServerMessage>,
+    mut tcp_tx: BufWriter<OwnedWriteHalf>,
     client_id: ClientId,
     send_timeout: Duration,
 ) -> Result<()> {
@@ -303,7 +306,6 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = tcp_send_rx.recv() => if let Some(msg) = recv {
-            let Some(msg) = msg.or_cancel_on(subsys.shutdown_requested()).await.map(Result::ok).flatten() else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut tcp_tx, send_timeout).await {
                 error!("Error sending TCP message to client {client_id}: {e}");
                 trace!(?msg);

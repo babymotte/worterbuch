@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::CancellationToken;
 use std::time::Duration;
 use tokio::{
     io::{BufReader, BufWriter, Lines},
@@ -30,8 +31,6 @@ use worterbuch_common::{
     protocol::v1::{ClientMessage, ServerMessage},
     write_line_and_flush,
 };
-
-use crate::CancellationToken;
 
 pub struct TcpClientSocket {
     tx: mpsc::Sender<ClientMessage>,

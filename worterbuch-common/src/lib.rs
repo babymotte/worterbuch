@@ -46,7 +46,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncRead, AsyncWriteExt, BufReader, Lines},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter, Lines},
     select,
     sync::{mpsc, oneshot},
     time::timeout,
@@ -674,10 +674,10 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
     }
 }
 
-pub async fn write_line_and_flush<F, Fut, T>(
+pub async fn write_line_and_flush<F, Fut, T, WR: AsyncWrite + Unpin>(
     mut shutdown_request: F,
     msg: impl Serialize,
-    mut tx: impl AsyncWriteExt + Unpin,
+    tx: &mut BufWriter<WR>,
     send_timeout: Duration,
 ) -> ConnectionResult<()>
 where
