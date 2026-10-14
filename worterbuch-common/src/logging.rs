@@ -49,12 +49,11 @@ pub fn init() -> ConfigResult<ReloadableTargets<Registry>> {
 
 pub struct ReloadableTargets<S> {
     reload_handler: reload::Handle<Targets, S>,
-    current: Targets,
 }
 
 impl<S> ReloadableTargets<S> {
     pub fn reload_log_targets(&mut self, targets: Option<String>) -> ConfigResult<()> {
-        let targets = read_targets_from_string(targets, "info", Some(&self.current))
+        let targets = read_targets_from_string(targets, "info")
             .unwrap_or_else(|| Targets::new().with_default(LevelFilter::INFO));
         self.reload_handler.modify(|filter| *filter = targets)?;
 
@@ -65,15 +64,19 @@ impl<S> ReloadableTargets<S> {
         let targets = env::var("WORTERBUCH_LOG").ok();
 
         let targets = if let Some(t) = targets {
-            read_targets_async(t, &self.current)
+            read_targets_async(t)
                 .await
                 .unwrap_or_else(|| Targets::new().with_default(LevelFilter::INFO))
         } else {
             Targets::new().with_default(LevelFilter::INFO)
         };
 
-        self.reload_handler
-            .modify(|filter| *filter = targets.clone())?;
+        self.reload_handler.modify(|filter| {
+            if filter != &targets {
+                eprintln!("log targets updated: {targets}");
+                *filter = targets.clone()
+            }
+        })?;
 
         Ok(targets)
     }
@@ -118,10 +121,7 @@ where
         .unwrap_or_else(|| Targets::new().with_default(LevelFilter::INFO));
 
     let (filter_layer, reload_handler) = reload::Layer::new(targets.clone());
-    let reloadable_targets = ReloadableTargets {
-        reload_handler,
-        current: targets,
-    };
+    let reloadable_targets = ReloadableTargets { reload_handler };
 
     let stderr_layer = fmt::Layer::new()
         .with_ansi(color)
@@ -195,38 +195,27 @@ where
 }
 
 fn read_targets(env: String) -> Option<Targets> {
-    read_targets_from_string(std::fs::read_to_string(&env).ok(), env, None)
+    read_targets_from_string(std::fs::read_to_string(&env).ok(), env)
 }
 
-async fn read_targets_async(env: String, current: &Targets) -> Option<Targets> {
-    read_targets_from_string(
-        tokio::fs::read_to_string(&env).await.ok(),
-        env,
-        Some(current),
-    )
+async fn read_targets_async(env: String) -> Option<Targets> {
+    read_targets_from_string(tokio::fs::read_to_string(&env).await.ok(), env)
 }
 
 fn read_targets_from_string(
     targets: Option<String>,
     default: impl Into<String>,
-    current: Option<&Targets>,
 ) -> Option<Targets> {
     let targets_str = targets.and_then(|c| extract_targets_str(&c));
 
     let targets_str = targets_str.unwrap_or_else(|| default.into());
 
-    match Targets::from_str(&targets_str) {
-        Ok(it) => {
-            if current.map_or(true, |c| &it != c) {
-                eprintln!("log targets updated: {}", it);
-            }
-            Some(it)
-        }
-        Err(e) => {
+    Targets::from_str(&targets_str)
+        .map_err(|e| {
             eprintln!("{:?}", e);
-            None
-        }
-    }
+            e
+        })
+        .ok()
 }
 
 fn extract_targets_str(targets_str: &str) -> Option<String> {

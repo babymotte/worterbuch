@@ -473,7 +473,7 @@ impl<'a> ServeLoop<'a> {
     }
 
     async fn process_line(&mut self, json: String) -> Result<ControlFlow<()>> {
-        trace!("Processing incoming message …");
+        trace!("Processing incoming message of client {} …", self.client_id);
         let msg_processed = self
             .proto
             .process_incoming_message(&json, &mut self.authorized)
@@ -481,7 +481,10 @@ impl<'a> ServeLoop<'a> {
         if !msg_processed {
             return Ok(ControlFlow::Break(()));
         }
-        trace!("Processing incoming message done.");
+        trace!(
+            "Processing incoming message of client {} done.",
+            self.client_id
+        );
         Ok(ControlFlow::Continue(()))
     }
 
