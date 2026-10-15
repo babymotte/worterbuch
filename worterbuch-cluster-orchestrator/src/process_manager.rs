@@ -154,9 +154,9 @@ impl ChildProcessManagerActor {
                 .or_cancel_on(self.subsys.shutdown_requested())
                 .await
                 .is_none()
-            {
-                self.stop().await.wrap_err("failed to stop child process")?;
-            }
+        {
+            self.stop().await.wrap_err("failed to stop child process")?;
+        }
 
         Ok(ControlFlow::Continue(()))
     }

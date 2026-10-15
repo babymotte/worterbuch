@@ -328,9 +328,10 @@ fn start_wb(setup: &IntegrationTestEnvironment, clean_persistence_data: bool) ->
 
     if clean_persistence_data
         && let Err(e) = fs::remove_dir_all(data_dir)
-            && e.kind() != io::ErrorKind::NotFound {
-                panic!("failed to clear data dir: {}", e);
-            }
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        panic!("failed to clear data dir: {}", e);
+    }
     fs::create_dir_all(data_dir).expect("failed to create data dir");
 
     let child = Command::new("../target/debug/worterbuch")

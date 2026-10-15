@@ -779,7 +779,7 @@ fn err_msg(e: WorterbuchError, transaction_id: u64) -> ServerMessage {
         transaction_id,
         metadata: json!(err_msg).to_string(),
     };
-    
+
     ServerMessage::Err(err)
 }
 
