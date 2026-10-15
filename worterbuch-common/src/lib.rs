@@ -81,11 +81,18 @@ pub type LsSubscriptionSender = mpsc::Sender<(Vec<RegularKeySegment>, Option<Tra
 pub type LockAcquiredSender = oneshot::Sender<()>;
 pub type LockAcquiredReceiver = oneshot::Receiver<()>;
 pub type LockLostSender = oneshot::Sender<()>;
+pub type LockLostSenders = Vec<oneshot::Sender<()>>;
 pub type LockLostReceiver = oneshot::Receiver<()>;
 
 pub type Subscription = (SubscriptionReceiver, SubscriptionId);
 pub type PSubscription = (PSubscriptionReceiver, SubscriptionId);
 pub type LsSubscription = (LsSubscriptionReceiver, SubscriptionId);
+
+pub type Export = (
+    Value,
+    HashMap<ClientId, GraveGoods>,
+    HashMap<ClientId, LastWill>,
+);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorterbuchVersion(
@@ -622,16 +629,7 @@ pub trait WbApi {
         remote_addr: Option<SocketAddr>,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
-    fn export(
-        &self,
-        span: Span,
-    ) -> impl Future<
-        Output = WorterbuchResult<(
-            Value,
-            HashMap<ClientId, GraveGoods>,
-            HashMap<ClientId, LastWill>,
-        )>,
-    > + Send;
+    fn export(&self, span: Span) -> impl Future<Output = WorterbuchResult<Export>> + Send;
 
     fn import(
         &self,

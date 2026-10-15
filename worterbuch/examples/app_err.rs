@@ -42,7 +42,7 @@ async fn run(s: Subsystem) -> miette::Result<()> {
 
 async fn mock_wb_app(s: Subsystem) -> WorterbuchAppResult<()> {
     s.spawn::<()>("wb-subsys", |_| async move {
-        Err(io::Error::new(io::ErrorKind::Other, "oopsies"))
+        Err(io::Error::other("oopsies"))
             .into_wb_app_result()
             .wrap("something went wrong")
     });

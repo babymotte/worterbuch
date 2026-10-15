@@ -57,6 +57,14 @@ use worterbuch_common::{
     write_line_and_flush,
 };
 
+pub type FollowerConnected = (
+    oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+    SocketAddr,
+    bool,
+);
+pub type OnFollowerConnected = mpsc::Sender<FollowerConnected>;
+pub type OnFollowerDisconnected = mpsc::Sender<SocketAddr>;
+
 /// The currently active connection of each proxy instance, identified by the proxy's ID
 #[derive(Debug, Clone, Default)]
 struct ProxySessions(Arc<Mutex<HashMap<ProxyId, (SocketAddr, Subsystem)>>>);
@@ -100,12 +108,8 @@ pub async fn run_cluster_sync_port(
     subsys: Subsystem,
     config: Config,
     wb: CloneableWbApi,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     port: u16,
 ) -> Result<()> {
     let ip = config
@@ -144,12 +148,8 @@ fn accecpt_client(
     subsys: &Subsystem,
     config: &Config,
     wb: &CloneableWbApi,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     proxy_sessions: &ProxySessions,
 ) -> ControlFlow<()> {
     trace!(enter = "accecpt_client");
@@ -167,25 +167,21 @@ fn accecpt_client(
                 proxy_sessions.clone(),
             );
             trace!(exit = "accecpt_client");
-            return ControlFlow::Continue(());
+            ControlFlow::Continue(())
         }
         Err(e) => {
             error!("Error accepting follower connections: {e}");
-            return ControlFlow::Break(());
+            ControlFlow::Break(())
         }
-    };
+    }
 }
 
 #[instrument(skip_all, fields(client = %client.1))]
 fn serve(
     subsys: &Subsystem,
     client: (TcpStream, SocketAddr),
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     config: Config,
     wb: CloneableWbApi,
     proxy_sessions: ProxySessions,
@@ -209,7 +205,7 @@ fn serve(
             eprintln!("{e:?}");
         }
 
-        let _ = on_follower_disconnected
+        on_follower_disconnected
             .try_send(follower_addr)
             .expect("follower disconnected channel is clogged");
 
@@ -221,11 +217,7 @@ async fn follower_serve_loop(
     subsys: &Subsystem,
     tcp_stream: TcpStream,
     follower: SocketAddr,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
+    on_follower_connected: OnFollowerConnected,
     config: Config,
     worterbuch: CloneableWbApi,
     proxy_sessions: ProxySessions,
@@ -268,11 +260,7 @@ async fn follower_serve_loop(
 async fn follower_session<'a>(
     tcp_stream: TcpStream,
     follower: SocketAddr,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
+    on_follower_connected: OnFollowerConnected,
     config: Config,
     proxy_server: &mut VirtualProxyServer<'a>,
     send_rx: mpsc::Receiver<VirtualServerMessage>,
@@ -283,11 +271,11 @@ async fn follower_session<'a>(
     let mut socket_tx = BufWriter::new(socket_tx);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
 
-    send_welcome(&proxy_server.subsys, &mut socket_tx, follower, &config).await?;
+    send_welcome(proxy_server.subsys, &mut socket_tx, follower, &config).await?;
     let handshake = receive_handshake(&mut proxy_messages, follower).await?;
 
     let is_proxy = process_handshake(
-        &proxy_server.subsys,
+        proxy_server.subsys,
         handshake,
         &config,
         proxy_server,
@@ -306,7 +294,7 @@ async fn follower_session<'a>(
     let (state, commands) = sync_rx.await.into_diagnostic()?;
 
     send_initial_state(
-        &proxy_server.subsys,
+        proxy_server.subsys,
         &mut socket_tx,
         follower,
         &config,

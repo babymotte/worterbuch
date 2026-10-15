@@ -325,19 +325,8 @@ impl Proxy {
             return Ok(result);
         }
 
-        let leader_connection = LeaderConnection::new(
-            &self.subsys,
-            proxy_request_tx,
-            &mut self.worterbuch,
-            &mut self.api_rx,
-            lines,
-            leader_address.clone(),
-            &mut self.locks,
-            &mut self.response_interests,
-            &mut self.leader_addresses,
-            &mut self.stdin,
-            &mut self.read_leader_addresses_from_stdin,
-        );
+        let leader_connection =
+            LeaderConnection::new(self, proxy_request_tx, lines, leader_address.clone());
 
         let leader_addresses_updated = match leader_connection.run().await {
             Ok(updated) => updated,
@@ -431,8 +420,8 @@ impl Proxy {
                     return Err(WorterbuchAppError::ClusterError("shut down before receiving leader welcome message".to_owned()));
                 },
                 recv = read_stdin(&mut self.stdin, &mut self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => {
-                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin) {
-                        if !self.leader_addresses.contains(&leader_address) {
+                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin)
+                        && !self.leader_addresses.contains(&leader_address) {
                             warn!(
                                 "Current leader address {} is no longer in the list of known leader addresses {:?}",
                                 leader_address, self.leader_addresses
@@ -443,7 +432,6 @@ impl Proxy {
                                 initial_connection_successful: false,
                             }));
                         }
-                    }
                 },
                 recv = receive_msg(lines, timeout) => {
                     debug!("Received leader message");
@@ -547,8 +535,8 @@ impl Proxy {
                     return Err(WorterbuchAppError::ClusterError("shut down before initial sync".to_owned()));
                 },
                 recv = read_stdin(&mut self.stdin, &mut self.read_leader_addresses_from_stdin, self.subsys.shutdown_requested()) => {
-                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin) {
-                        if !self.leader_addresses.contains(&leader_address) {
+                    if self.read_leader_addresses_from_stdin && update_leader_addresses(recv, &mut self.leader_addresses, self.read_leader_addresses_from_stdin)
+                        && !self.leader_addresses.contains(&leader_address) {
                             warn!(
                                 "Current leader address {} is no longer in the list of known leader addresses {:?}",
                                 leader_address, self.leader_addresses
@@ -559,7 +547,6 @@ impl Proxy {
                                 initial_connection_successful: false,
                             }));
                         }
-                    }
                 },
                 recv = receive_msg(lines, timeout) => {
                     debug!("Received leader message");

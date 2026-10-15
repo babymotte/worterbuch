@@ -232,8 +232,8 @@ struct ServeLoop<'a> {
     ejected: mpsc::Receiver<()>,
 }
 
-async fn serve_loop<'a>(
-    subsys: &'a Subsystem,
+async fn serve_loop(
+    subsys: &Subsystem,
     client_id: ClientId,
     remote_addr: SocketAddr,
     worterbuch: CloneableWbApi,

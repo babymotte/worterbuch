@@ -85,7 +85,7 @@ pub struct SequenceTest {
 }
 
 impl SequenceTest {
-    pub fn new(
+    pub fn spawn(
         subsys: &Subsystem,
         clients: usize,
         burst: u64,

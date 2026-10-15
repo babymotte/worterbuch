@@ -202,7 +202,7 @@ async fn do_run_worterbuch(
                     unix_socket,
                     quic_server,
                 },
-                leader_addresses.into(),
+                leader_addresses,
                 stdin,
             )
             .await?;

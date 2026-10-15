@@ -50,8 +50,8 @@ use tokio::{
 use totils::while_select;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 use worterbuch_common::{
-    ClientId, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
-    Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
+    ClientId, Export, KeySegment, LockAcquiredReceiver, LockLostReceiver, LsSubscription,
+    PSubscription, Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult, WrappedResult},
     is_client_sys_wildcard_topic, parse_segments,
     protocol::v1::{
@@ -144,7 +144,7 @@ impl PStateAggregatorState {
         client_id: ClientId,
     ) -> ControlFlow<()> {
         if let Some(event) = event {
-            if let Err(e) = self.do_aggregate(event, &send_trigger_tx, client_id).await {
+            if let Err(e) = self.do_aggregate(event, send_trigger_tx, client_id).await {
                 error!("Error aggregating PState event for client {client_id}: {e}");
                 ControlFlow::Break(())
             } else {
@@ -886,14 +886,7 @@ impl Worterbuch {
     }
 
     #[instrument(level=Level::TRACE, skip(self, tx))]
-    pub fn export_for_persistence(
-        &mut self,
-        tx: oneshot::Sender<(
-            Value,
-            HashMap<ClientId, GraveGoods>,
-            HashMap<ClientId, LastWill>,
-        )>,
-    ) {
+    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<Export>) {
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
@@ -1191,8 +1184,7 @@ impl Worterbuch {
                         dead = Some(the_dead);
                     }
                     None => {
-                        let mut new_dead = Vec::new();
-                        new_dead.push(follower.addr);
+                        let new_dead = vec![follower.addr];
                         dead = Some(new_dead);
                     }
                 }
@@ -1785,7 +1777,7 @@ impl Worterbuch {
             && !keys.is_empty()
         {
             info!("Dropping locks of client {}.", client_id);
-            for (key, client_id, _) in keys {
+            for (key, (client_id, _)) in keys {
                 self.locked(client_id, &key, trace.clone()).await;
             }
         }
@@ -2297,25 +2289,25 @@ impl Worterbuch {
 
     fn is_leader(&self) -> bool {
         match self.config.role {
-            ClusterRole::Standalone { .. } | ClusterRole::Leader { .. } => true,
+            ClusterRole::Standalone | ClusterRole::Leader { .. } => true,
             ClusterRole::Follower { .. } | ClusterRole::Proxy { .. } => false,
         }
     }
 
     pub(crate) async fn update_config_entries(&mut self) -> WorterbuchAppResult<()> {
-        if self.config.extended_monitoring {
-            if let Value::Object(config) = json!(&self.config) {
-                for (k, v) in config {
-                    self.internal_set(
-                        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CONFIG, k),
-                        v,
-                        INTERNAL_CLIENT_ID,
-                        Trace::InternalAction(InternalAction::Startup),
-                        true,
-                    )
-                    .await
-                    .wrap("failed to set config system entries")?;
-                }
+        if self.config.extended_monitoring
+            && let Value::Object(config) = json!(&self.config)
+        {
+            for (k, v) in config {
+                self.internal_set(
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_CONFIG, k),
+                    v,
+                    INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::Startup),
+                    true,
+                )
+                .await
+                .wrap("failed to set config system entries")?;
             }
         }
         Ok(())

@@ -28,8 +28,8 @@ use tokio::{
 };
 use tracing::{Level, Span, debug, instrument, trace};
 use worterbuch_common::{
-    ClientId, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription, Protocol,
-    RegularKeySegment, Subscription, ValueEntry, WbApi,
+    ClientId, Export, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
+    Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::{WorterbuchError, WorterbuchResult},
     protocol::v1::{
         CasVersion, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
@@ -199,14 +199,7 @@ pub enum WbFunction {
     ProtocolSwitched(ClientId, Interface, ProtocolMajorVersion),
     Disconnected(ClientId, Protocol, Option<SocketAddr>),
     Config(oneshot::Sender<Config>),
-    Export(
-        oneshot::Sender<(
-            Value,
-            HashMap<ClientId, GraveGoods>,
-            HashMap<ClientId, LastWill>,
-        )>,
-        Span,
-    ),
+    Export(oneshot::Sender<Export>, Span),
     Import(
         TransactionId,
         ClientId,

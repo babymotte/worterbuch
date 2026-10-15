@@ -93,7 +93,7 @@ pub(crate) async fn run(
     info!("Successfully connected to leader {leader_address}. Waiting for initial sync message …");
 
     let Some(recv) = receive_msg(&mut lines, timeout)
-        .or_cancel_on_shutdown(&subsys)
+        .or_cancel_on_shutdown(subsys)
         .await
     else {
         warn!("Shutdown requested before receiving leader welcome message.");

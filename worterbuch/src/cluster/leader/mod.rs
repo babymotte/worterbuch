@@ -24,7 +24,9 @@ use crate::{
     Config, INTERNAL_CLIENT_ID, Worterbuch,
     cluster::{
         ClusterStateChangeReceiver, ClusterStateChangeSender, Mode, Servers,
-        leader::cluster_sync_port::run_cluster_sync_port, process_api_call, protocol::StateSync,
+        leader::cluster_sync_port::{FollowerConnected, run_cluster_sync_port},
+        process_api_call,
+        protocol::StateSync,
         shutdown,
     },
     error::WorterbuchAppResult,
@@ -128,11 +130,7 @@ async fn forward_api_call(
 }
 
 async fn forward_follower_connected(
-    recv: Option<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
+    recv: Option<FollowerConnected>,
     worterbuch: &mut Worterbuch,
     client_write_txs: &mut Vec<(usize, ClusterStateChangeSender, bool)>,
     config: &Config,

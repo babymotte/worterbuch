@@ -24,7 +24,7 @@ use crate::{
             ClientWriteCommand, ClusterStateChange, Connected, Disconnected, LeaderMessage,
             ProxyMessage, Request, locks::Locks,
         },
-        proxy::{ClientResponseInterests, read_stdin, update_leader_addresses},
+        proxy::{ClientResponseInterests, Proxy, read_stdin, update_leader_addresses},
     },
     server::common::WbFunction,
     worterbuch::Worterbuch,
@@ -45,7 +45,7 @@ use worterbuch_common::{
     error::{ConnectionResult, WorterbuchResult},
     is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CSet, ClientMessage, Delete, ErrorCode, Key, KeyValuePairs, Lock, PDelete, PStateEvent,
+        CSet, ClientMessage, Delete, ErrorCode, KeyValuePairs, Lock, PDelete, PStateEvent,
         ProtocolSwitchRequest, Publish, SPub, SPubInit, ServerMessage, Set, StateEvent,
         TransactionId, Value,
     },
@@ -69,31 +69,24 @@ pub struct LeaderConnection<'a> {
 
 impl<'a> LeaderConnection<'a> {
     pub fn new(
-        subsys: &'a Subsystem,
+        proxy: &'a mut Proxy,
         proxy_request_tx: mpsc::Sender<ProxyMessage>,
-        worterbuch: &'a mut Worterbuch,
-        api_rx: &'a mut mpsc::Receiver<WbFunction>,
         lines: Lines<BufReader<OwnedReadHalf>>,
         leader_address: String,
-        locks: &'a mut Locks,
-        response_interests: &'a mut HashMap<ClientId, ClientResponseInterests>,
-        leader_addresses: &'a mut Box<[String]>,
-        stdin: &'a mut mpsc::Receiver<String>,
-        read_leader_addresses_from_stdin: &'a mut bool,
     ) -> Self {
         Self {
             leader_address,
-            subsys,
-            response_interests,
+            subsys: &proxy.subsys,
+            response_interests: &mut proxy.response_interests,
             proxy_request_tx,
-            worterbuch,
-            api_rx,
+            worterbuch: &mut proxy.worterbuch,
+            api_rx: &mut proxy.api_rx,
             lines,
-            locks,
-            leader_addresses,
+            locks: &mut proxy.locks,
+            leader_addresses: &mut proxy.leader_addresses,
             leader_addresses_updated: false,
-            stdin,
-            read_leader_addresses_from_stdin,
+            stdin: &mut proxy.stdin,
+            read_leader_addresses_from_stdin: &mut proxy.read_leader_addresses_from_stdin,
         }
     }
 
@@ -442,10 +435,11 @@ impl<'a> LeaderConnection<'a> {
                 self.queue_leader_request(request).await?;
             }
             WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
-                let client_message = ClientMessage::Lock(Lock {
+                let lock = Lock {
                     transaction_id,
                     key: key.clone(),
-                });
+                };
+                let client_message = ClientMessage::Lock(lock.clone());
                 let request = ProxyMessage::Request(Request {
                     client_id,
                     msg: client_message.clone(),
@@ -475,8 +469,7 @@ impl<'a> LeaderConnection<'a> {
                 });
                 self.register_lock_acquired_interest(
                     client_id,
-                    key.clone(),
-                    transaction_id,
+                    lock,
                     client_message,
                     ack_tx,
                     lost_tx,
@@ -485,10 +478,11 @@ impl<'a> LeaderConnection<'a> {
                 self.queue_leader_request(request).await?;
             }
             WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
-                let client_message = ClientMessage::AcquireLock(Lock {
+                let lock = Lock {
                     transaction_id,
                     key: key.clone(),
-                });
+                };
+                let client_message = ClientMessage::AcquireLock(lock.clone());
                 let request = ProxyMessage::Request(Request {
                     client_id,
                     msg: client_message.clone(),
@@ -504,8 +498,7 @@ impl<'a> LeaderConnection<'a> {
                 });
                 self.register_lock_acquired_interest(
                     client_id,
-                    key.clone(),
-                    transaction_id,
+                    lock,
                     client_message,
                     ack_tx,
                     lost_tx,
@@ -524,7 +517,7 @@ impl<'a> LeaderConnection<'a> {
                     msg: client_message.clone(),
                     interface,
                 });
-                let Some(tids) = self.locks.released(client_id, key, &self.worterbuch) else {
+                let Some(tids) = self.locks.released(client_id, key, self.worterbuch) else {
                     return Ok(());
                 };
 
@@ -594,7 +587,7 @@ impl<'a> LeaderConnection<'a> {
                     self.get_lock_acquired_interest(client_id, ack.transaction_id)
                 {
                     self.locks
-                        .acquired(client_id, ack.transaction_id, &self.worterbuch);
+                        .acquired(client_id, ack.transaction_id, self.worterbuch);
                     self.register_lock_lost_interest(client_id, ack.transaction_id, lost_tx);
                     let _ = tx.send(Ok(()));
                 } else {
@@ -660,7 +653,7 @@ impl<'a> LeaderConnection<'a> {
 
                 if let Some((tx, _)) = self.get_lock_acquired_interest(client_id, transaction_id) {
                     self.locks
-                        .acquisition_failed(client_id, transaction_id, &self.worterbuch);
+                        .acquisition_failed(client_id, transaction_id, self.worterbuch);
                     let e = e.take();
                     debug_assert!(e.is_some(), "multiple interests registered for same error");
                     if let Some(e) = e {
@@ -771,19 +764,20 @@ impl<'a> LeaderConnection<'a> {
     fn register_lock_acquired_interest(
         &mut self,
         client_id: ClientId,
-        key: Key,
-        transaction_id: TransactionId,
+        lock: Lock,
         client_message: ClientMessage,
         tx: oneshot::Sender<WorterbuchResult<()>>,
         lost_tx: LockLostSender,
         wait_for_lock: bool,
     ) {
         trace!(
-            "Registering lock acquired interest for client {client_id}, transaction {transaction_id}, key {key:?}"
+            "Registering lock acquired interest for client {client_id}, transaction {}, key {:?}",
+            lock.transaction_id, lock.key
         );
 
-        self.locks
-            .requested(client_id, transaction_id, key, wait_for_lock);
+        let transaction_id = lock.transaction_id;
+
+        self.locks.requested(client_id, lock, wait_for_lock);
 
         self.response_interests
             .entry(client_id)

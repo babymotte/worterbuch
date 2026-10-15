@@ -89,7 +89,7 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
     }
 
     pub async fn send_prepared_sets(&mut self, subsys: &Subsystem) -> miette::Result<()> {
-        let set_commands = self.set_commands.drain(..).collect::<Vec<_>>();
+        let set_commands = std::mem::take(&mut self.set_commands);
 
         for msg in set_commands {
             let transaction_id = msg.transaction_id().expect("tid must be present");
