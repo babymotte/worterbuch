@@ -53,13 +53,14 @@ pub struct VirtualProxyClientHandler {
     protocol: Protocol,
 }
 
+#[derive(Debug)]
 pub enum VirtualServerMessage {
     ServerMessage((ClientId, ServerMessage)),
     Disconnect(ClientId),
 }
 
-pub struct VirtualProxyServer {
-    pub subsys: Subsystem,
+pub struct VirtualProxyServer<'a> {
+    pub subsys: &'a Subsystem,
     pub clients: HashMap<ClientId, VirtualProxyClientHandler>,
     pub worterbuch: CloneableWbApi,
     pub config: Config,
@@ -67,7 +68,7 @@ pub struct VirtualProxyServer {
     pub send_tx: mpsc::Sender<VirtualServerMessage>,
 }
 
-impl Drop for VirtualProxyServer {
+impl<'a> Drop for VirtualProxyServer<'a> {
     fn drop(&mut self) {
         if self.clients.is_empty() {
             return;
@@ -93,7 +94,7 @@ impl Drop for VirtualProxyServer {
     }
 }
 
-impl VirtualProxyServer {
+impl<'a> VirtualProxyServer<'a> {
     #[instrument(level=Level::TRACE, skip_all)]
     pub async fn process_proxy_message(
         &mut self,

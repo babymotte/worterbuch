@@ -232,7 +232,7 @@ async fn follower_serve_loop(
 ) -> miette::Result<()> {
     let (send_tx, send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_server = VirtualProxyServer {
-        subsys: subsys.clone(),
+        subsys,
         clients: HashMap::new(),
         worterbuch: worterbuch.named("server/virtual-proxy"),
         config: config.clone(),
@@ -242,7 +242,6 @@ async fn follower_serve_loop(
     let mut proxy_id = None;
 
     let res = follower_session(
-        subsys,
         tcp_stream,
         follower,
         on_follower_connected,
@@ -266,8 +265,7 @@ async fn follower_serve_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn follower_session(
-    subsys: &Subsystem,
+async fn follower_session<'a>(
     tcp_stream: TcpStream,
     follower: SocketAddr,
     on_follower_connected: mpsc::Sender<(
@@ -276,8 +274,8 @@ async fn follower_session(
         bool,
     )>,
     config: Config,
-    proxy_server: &mut VirtualProxyServer,
-    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
+    proxy_server: &mut VirtualProxyServer<'a>,
+    send_rx: mpsc::Receiver<VirtualServerMessage>,
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<()> {
@@ -285,11 +283,11 @@ async fn follower_session(
     let mut socket_tx = BufWriter::new(socket_tx);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
 
-    send_welcome(subsys, &mut socket_tx, follower, &config).await?;
+    send_welcome(&proxy_server.subsys, &mut socket_tx, follower, &config).await?;
     let handshake = receive_handshake(&mut proxy_messages, follower).await?;
 
     let is_proxy = process_handshake(
-        subsys,
+        &proxy_server.subsys,
         handshake,
         &config,
         proxy_server,
@@ -305,19 +303,45 @@ async fn follower_session(
         .into_diagnostic()
         .wrap_err("failed to forward follower connected event")?;
 
-    let (state, mut commands) = sync_rx.await.into_diagnostic()?;
+    let (state, commands) = sync_rx.await.into_diagnostic()?;
 
-    send_initial_state(subsys, &mut socket_tx, follower, &config, state).await?;
+    send_initial_state(
+        &proxy_server.subsys,
+        &mut socket_tx,
+        follower,
+        &config,
+        state,
+    )
+    .await?;
+
+    proxy_server.subsys.spawn(
+        format!("state-and-response-forwarder/{follower}"),
+        move |s| forward_messages_to_proxy(s, follower, config, send_rx, socket_tx, commands),
+    );
 
     while_select! {
         _ = proxy_server.subsys.shutdown_requested() => break,
-        recv = commands.recv() => forward_change_to_follower(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
         recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,
-        recv = send_rx.recv() => forward_response_to_proxy(&proxy_server.subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
 
     info!("TCP connection to follower/proxy {} closed.", follower);
 
+    Ok(())
+}
+
+async fn forward_messages_to_proxy(
+    s: Subsystem,
+    follower: SocketAddr,
+    config: Config,
+    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
+    mut socket_tx: BufWriter<OwnedWriteHalf>,
+    mut commands: mpsc::Receiver<ClusterStateChange>,
+) -> std::prelude::v1::Result<(), miette::Error> {
+    while_select! {
+        _ = s.shutdown_requested() => break,
+        recv = commands.recv() => forward_change_to_follower(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
+        recv = send_rx.recv() => forward_response_to_proxy(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
+    }
     Ok(())
 }
 
@@ -397,11 +421,11 @@ async fn receive_handshake(
     handshake
 }
 
-async fn process_handshake(
+async fn process_handshake<'a>(
     subsys: &Subsystem,
     handshake: Handshake,
     config: &Config,
-    proxy_server: &mut VirtualProxyServer,
+    proxy_server: &mut VirtualProxyServer<'a>,
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<bool> {
@@ -466,10 +490,10 @@ async fn process_handshake(
 /// (e.g. one that broke without the leader noticing yet), that connection is closed and all of its clients are
 /// disconnected before this returns, so that the clients of the new connection can be registered without
 /// colliding with their stale registrations.
-async fn take_over_proxy_session(
+async fn take_over_proxy_session<'a>(
     proxy_sessions: &ProxySessions,
     proxy_id: ProxyId,
-    proxy_server: &VirtualProxyServer,
+    proxy_server: &VirtualProxyServer<'a>,
 ) {
     trace!(enter = "take_over_proxy_session");
     let previous = proxy_sessions.update(
