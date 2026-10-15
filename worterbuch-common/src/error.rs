@@ -50,6 +50,7 @@ pub enum ConfigError {
     InvalidInterval(#[source] ParseIntError),
     #[error("license file could not be loaded: {0}")]
     InvalidLicense(String),
+    #[cfg(feature = "commercial")]
     #[error("{0}")]
     InsufficientLicense(String),
     #[error("could not load config file")]

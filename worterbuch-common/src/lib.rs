@@ -107,27 +107,27 @@ impl WorterbuchVersion {
         &self,
         license_min: (WorterbuchVersionSegment, WorterbuchVersionSegment),
         license_max: (WorterbuchVersionSegment, WorterbuchVersionSegment),
-    ) -> ConfigResult<()> {
+    ) -> error::ConfigResult<()> {
         if license_min.0 == self.0 && license_min.1 > self.1 {
-            return Err(ConfigError::InsufficientLicense(format!(
+            return Err(error::ConfigError::InsufficientLicense(format!(
                 "License is only valid for Wörterbuch versions {}.{} and later, but this is version {}.{}",
                 license_min.0, license_min.1, self.0, self.1,
             )));
         }
         if license_max.0 == self.0 && license_max.1 <= self.1 {
-            return Err(ConfigError::InsufficientLicense(format!(
+            return Err(error::ConfigError::InsufficientLicense(format!(
                 "License is only valid for Wörterbuch versions earlier than {}.{}, but this is version {}.{}",
                 license_max.0, license_max.1, self.0, self.1,
             )));
         }
         if license_min.0 > self.0 {
-            return Err(ConfigError::InsufficientLicense(format!(
+            return Err(error::ConfigError::InsufficientLicense(format!(
                 "License is only valid for Wörterbuch versions {}.{} and later, but this is version {}.{}",
                 license_min.0, license_min.1, self.0, self.1,
             )));
         }
         if license_max.0 < self.0 {
-            return Err(ConfigError::InsufficientLicense(format!(
+            return Err(error::ConfigError::InsufficientLicense(format!(
                 "License is only valid for Wörterbuch versions earlier than {}.{}, but this is version {}.{}",
                 license_max.0, license_max.1, self.0, self.1,
             )));

@@ -367,7 +367,6 @@ impl Worterbuch {
     }
 
     #[instrument(level = Level::DEBUG, skip(store, config))]
-    #[cfg(any(feature = "redb", feature = "sqlite", feature = "turso"))]
     pub(crate) fn with_store(store: Store, config: Config) -> Worterbuch {
         debug!("Loaded persisted store with {} entries.", store.len());
         Worterbuch::new(config, store)

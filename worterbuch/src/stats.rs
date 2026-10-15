@@ -25,12 +25,13 @@ use tosub::Subsystem;
 use totils::while_select;
 use tracing::debug;
 #[cfg(not(feature = "commercial"))]
+use worterbuch_common::protocol::v1::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
     WbApi,
     error::WorterbuchResult,
     protocol::v1::{
-        SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES,
-        SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
+        SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE,
+        SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
     },
     topic,
 };

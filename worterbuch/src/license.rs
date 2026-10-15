@@ -34,6 +34,8 @@ pub struct Features {
     pub extended_monitoring: bool,
     #[serde(default = "Default::default")]
     pub persistence: Vec<PersistenceMode>,
+    #[serde(default = "Default::default")]
+    pub proxy: bool,
 }
 
 impl Default for Features {
@@ -43,6 +45,7 @@ impl Default for Features {
             clustering: true,
             extended_monitoring: true,
             persistence: vec![PersistenceMode::Json],
+            proxy: true,
         }
     }
 }
@@ -99,6 +102,7 @@ impl License {
                     #[cfg(feature = "turso")]
                     PersistenceMode::Turso,
                 ],
+                proxy: true,
             },
             license_validation: None,
         }
@@ -118,16 +122,12 @@ pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<Lice
 #[cfg(feature = "commercial")]
 pub mod commercial {
 
-    use crate::{WORTERBUCH_VERSION, worterbuch_version};
-
     use super::License;
+    use crate::worterbuch_version;
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use std::{env, path::Path, str};
     use tokio::fs;
-    use worterbuch_common::{
-        WorterbuchVersion,
-        error::{ConfigError, ConfigResult},
-    };
+    use worterbuch_common::error::{ConfigError, ConfigResult};
 
     pub const LICENSE_PUBLIC_KEY: &str = env!("WORTERBUCH_LICENSE_PUBLIC_KEY");
 
@@ -176,6 +176,7 @@ mod test {
                 extended_monitoring: false,
                 jwt_authorization: false,
                 persistence: vec![],
+                proxy: false,
             }
         )
     }
@@ -191,6 +192,7 @@ mod test {
                 extended_monitoring: false,
                 jwt_authorization: false,
                 persistence: vec![],
+                proxy: false
             }
         )
     }

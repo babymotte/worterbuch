@@ -135,6 +135,7 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
             bail!("Received invalid data from server");
         };
 
+        #[cfg(feature = "trace")]
         trace!("received server message: {:#?}", msg);
 
         match msg {
