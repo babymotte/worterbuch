@@ -31,8 +31,8 @@ use worterbuch_common::{
     AuthCheck, ClientId, PSubscriptionReceiver, Privilege, SubscriptionId, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
     protocol::v1::{
-        Ack, AuthorizationRequest, ClientMessage, Delete, Err, ErrorCode, Get, Ls, LsState,
-        PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
+        Ack, AuthorizationRequest, ClientInfo, ClientMessage, Delete, Err, ErrorCode, Get, Ls,
+        LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, SPub, SPubInit,
         ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs, TransactionId, Unsubscribe,
         UnsubscribeLs,
     },
@@ -41,7 +41,7 @@ use worterbuch_common::{
 #[derive(Clone)]
 pub struct V0 {
     pub subsys: Subsystem,
-    pub client_id: ClientId,
+    pub client_info: ClientInfo,
     pub tx: ServerMessageBroadcaster,
     pub auth_required: bool,
     pub config: Config,
@@ -49,7 +49,15 @@ pub struct V0 {
 }
 
 impl V0 {
-    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v0", client_id=%self.client_id))]
+    pub fn client_id(&self) -> ClientId {
+        self.client_info.client_id
+    }
+
+    pub fn client_info(&self) -> ClientInfo {
+        self.client_info.clone()
+    }
+
+    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v0", client_id=%self.client_info.client_id))]
     pub async fn process_incoming_message(
         &self,
         msg: ClientMessage,
@@ -60,18 +68,18 @@ impl V0 {
                 if authorized.is_some() {
                     return Err(WorterbuchError::AlreadyAuthorized);
                 }
-                trace!("Authorizing client {} …", self.client_id);
+                trace!("Authorizing client {} …", self.client_id());
                 *authorized = Some(self.authorize(msg).await?);
-                trace!("Authorizing client {} done.", self.client_id);
+                trace!("Authorizing client {} done.", self.client_id());
             }
             ClientMessage::Get(msg) => {
                 if self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Getting value for client {} …", self.client_id);
+                    trace!("Getting value for client {} …", self.client_id());
                     self.get(msg).await;
-                    trace!("Getting value for client {} done.", self.client_id);
+                    trace!("Getting value for client {} done.", self.client_id());
                 }
             }
             ClientMessage::PGet(msg) => {
@@ -84,9 +92,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    trace!("PGetting values for client {} …", self.client_id);
+                    trace!("PGetting values for client {} …", self.client_id());
                     self.pget(msg).await;
-                    trace!("PGetting values for client {} done.", self.client_id);
+                    trace!("PGetting values for client {} done.", self.client_id());
                 }
             }
             ClientMessage::Set(msg) => {
@@ -94,9 +102,9 @@ impl V0 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Setting value for client {} …", self.client_id);
+                    trace!("Setting value for client {} …", self.client_id());
                     self.set(msg).await;
-                    trace!("Setting value for client {} done.", self.client_id);
+                    trace!("Setting value for client {} done.", self.client_id());
                 }
             }
             ClientMessage::SPubInit(msg) => {
@@ -106,28 +114,28 @@ impl V0 {
                 {
                     trace!(
                         "Mapping key to transaction ID for for client {} …",
-                        self.client_id
+                        self.client_id()
                     );
                     self.spub_init(msg).await;
                     trace!(
                         "Mapping key to transaction ID for client {} done.",
-                        self.client_id
+                        self.client_id()
                     );
                 }
             }
             ClientMessage::SPub(msg) => {
-                trace!("Setting value for client {} …", self.client_id);
+                trace!("Setting value for client {} …", self.client_id());
                 self.spub(msg).await;
-                trace!("Setting value for client {} done.", self.client_id);
+                trace!("Setting value for client {} done.", self.client_id());
             }
             ClientMessage::Publish(msg) => {
                 if self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Publishing value for client {} …", self.client_id);
+                    trace!("Publishing value for client {} …", self.client_id());
                     self.publish(msg).await;
-                    trace!("Publishing value for client {} done.", self.client_id);
+                    trace!("Publishing value for client {} done.", self.client_id());
                 }
             }
             ClientMessage::Subscribe(msg) => {
@@ -135,9 +143,9 @@ impl V0 {
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Making subscription for client {} …", self.client_id);
+                    trace!("Making subscription for client {} …", self.client_id());
                     self.subscribe(msg).await;
-                    trace!("Making subscription for client {} done.", self.client_id);
+                    trace!("Making subscription for client {} done.", self.client_id());
                 }
             }
             ClientMessage::PSubscribe(msg) => {
@@ -150,9 +158,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    trace!("Making psubscription for client {} …", self.client_id);
+                    trace!("Making psubscription for client {} …", self.client_id());
                     self.psubscribe(msg).await;
-                    trace!("Making psubscription for client {} done.", self.client_id);
+                    trace!("Making psubscription for client {} done.", self.client_id());
                 }
             }
             ClientMessage::Unsubscribe(msg) => self.unsubscribe(msg).await,
@@ -161,9 +169,9 @@ impl V0 {
                     .check_auth(Privilege::Delete, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Deleting value for client {} …", self.client_id);
+                    trace!("Deleting value for client {} …", self.client_id());
                     self.delete(msg).await;
-                    trace!("Deleting value for client {} done.", self.client_id);
+                    trace!("Deleting value for client {} done.", self.client_id());
                 }
             }
             ClientMessage::PDelete(msg) => {
@@ -176,9 +184,9 @@ impl V0 {
                     )
                     .await?
                 {
-                    trace!("PDeleting value for client {} …", self.client_id);
+                    trace!("PDeleting value for client {} …", self.client_id());
                     self.pdelete(msg).await;
-                    trace!("PDeleting value for client {} done.", self.client_id);
+                    trace!("PDeleting value for client {} done.", self.client_id());
                 }
             }
             ClientMessage::Ls(msg) => {
@@ -191,9 +199,9 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Listing subkeys for client {} …", self.client_id);
+                    trace!("Listing subkeys for client {} …", self.client_id());
                     self.ls(msg).await;
-                    trace!("Listing subkeys for client {} done.", self.client_id);
+                    trace!("Listing subkeys for client {} done.", self.client_id());
                 }
             }
             ClientMessage::PLs(msg) => {
@@ -206,11 +214,11 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Listing matching subkeys for client {} …", self.client_id);
+                    trace!("Listing matching subkeys for client {} …", self.client_id());
                     self.pls(msg).await;
                     trace!(
                         "Listing matching subkeys for client {} done.",
-                        self.client_id
+                        self.client_id()
                     );
                 }
             }
@@ -224,17 +232,17 @@ impl V0 {
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Subscribing to subkeys for client {} …", self.client_id);
+                    trace!("Subscribing to subkeys for client {} …", self.client_id());
                     self.subscribe_ls(msg).await;
-                    trace!("Subscribing to subkeys for client {} done.", self.client_id);
+                    trace!("Subscribing to subkeys for client {} done.", self.client_id());
                 }
             }
             ClientMessage::UnsubscribeLs(msg) => {
-                trace!("Unsubscribing from subkeys for client {} …", self.client_id);
+                trace!("Unsubscribing from subkeys for client {} …", self.client_id());
                 self.unsubscribe_ls(msg).await;
                 trace!(
                     "Unsubscribing from subkeys for client {} done.",
-                    self.client_id
+                    self.client_id()
                 );
             }
 
@@ -296,16 +304,17 @@ impl V0 {
     }
 
     pub async fn get(&self, msg: Get) {
-        let value = match self.worterbuch.get(msg.key).await {
+        let transaction_id = msg.transaction_id;
+        let value = match self.worterbuch.get(msg, self.client_info()).await {
             Ok(it) => it,
             Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = State {
-            transaction_id: msg.transaction_id,
+            transaction_id,
             event: StateEvent::Value(value),
             trace: None,
         };
@@ -315,17 +324,19 @@ impl V0 {
     }
 
     pub async fn pget(&self, msg: PGet) {
-        let values = match self.worterbuch.pget(msg.request_pattern.clone()).await {
+        let transaction_id = msg.transaction_id;
+        let request_pattern = msg.request_pattern.clone();
+        let values = match self.worterbuch.pget(msg, self.client_info()).await {
             Ok(values) => values.into_iter().collect(),
             Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = PState {
-            transaction_id: msg.transaction_id,
-            request_pattern: msg.request_pattern,
+            transaction_id,
+            request_pattern,
             event: PStateEvent::KeyValuePairs(values),
             trace: None,
         };
@@ -335,19 +346,14 @@ impl V0 {
         let _ = self.tx.send(msg).await;
     }
 
-    #[instrument(level = Level::TRACE, skip(self), fields(client_id=%self.client_id))]
+    #[instrument(level = Level::TRACE, skip(self), fields(client_id=%self.client_id()))]
     pub async fn set(&self, msg: Set) {
-        if let Err(e) = self
-            .worterbuch
-            .set(msg.transaction_id, msg.key, msg.value, self.client_id)
-            .await
-        {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.worterbuch.set(msg, self.client_info()).await {
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         }
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         trace!("Value set, queuing Ack …");
         let msg = ServerMessage::Ack(response);
@@ -356,18 +362,13 @@ impl V0 {
     }
 
     pub async fn spub_init(&self, msg: SPubInit) {
-        if let Err(e) = self
-            .worterbuch
-            .spub_init(msg.transaction_id, msg.key, self.client_id)
-            .await
-        {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.worterbuch.spub_init(msg, self.client_info()).await {
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         }
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         trace!("Value set, queuing Ack …");
         let msg = ServerMessage::Ack(response);
@@ -376,18 +377,13 @@ impl V0 {
     }
 
     pub async fn spub(&self, msg: SPub) {
-        if let Err(e) = self
-            .worterbuch
-            .spub(msg.transaction_id, msg.value, self.client_id)
-            .await
-        {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.worterbuch.spub(msg, self.client_info()).await {
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         }
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         trace!("Value set, queuing Ack …");
         let msg = ServerMessage::Ack(response);
@@ -396,55 +392,39 @@ impl V0 {
     }
 
     pub async fn publish(&self, msg: Publish) {
-        if let Err(e) = self
-            .worterbuch
-            .publish(msg.transaction_id, msg.key, msg.value, self.client_id)
-            .await
-        {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.worterbuch.publish(msg, self.client_info()).await {
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         }
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let msg = ServerMessage::Ack(response);
         let _ = self.tx.send(msg).await;
     }
 
     pub async fn subscribe(&self, msg: Subscribe) -> bool {
-        let (mut rx, subscription) = match self
-            .worterbuch
-            .subscribe(
-                self.client_id,
-                msg.transaction_id,
-                msg.key.clone(),
-                msg.unique.unwrap_or(false),
-                msg.live_only.unwrap_or(false),
-                msg.send_traces.unwrap_or(false),
-            )
-            .await
+        let transaction_id = msg.transaction_id;
+        let (mut rx, subscription) = match self.worterbuch.subscribe(msg, self.client_info()).await
         {
             Ok(it) => it,
             Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return false;
             }
         };
 
         let response = Ack {
-            transaction_id: msg.transaction_id,
+            transaction_id: transaction_id,
         };
 
         let smsg = ServerMessage::Ack(response);
         let _ = self.tx.send(smsg).await;
 
-        let transaction_id = msg.transaction_id;
-
         let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
-        let client_id = self.client_id;
+        let client_info = self.client_info();
 
         self.subsys
             .spawn("protocol/subscribe/send-loop", move |_| async move {
@@ -461,7 +441,8 @@ impl V0 {
                     };
                 }
 
-                match wb_unsub.unsubscribe(client_id, transaction_id).await {
+                let req = Unsubscribe { transaction_id };
+                match wb_unsub.unsubscribe(req, client_info).await {
                     Ok(()) => {
                         warn!("Subscription was not cleaned up properly!");
                     }
@@ -476,44 +457,30 @@ impl V0 {
     }
 
     pub async fn psubscribe(&self, msg: PSubscribe) -> bool {
+        let transaction_id = msg.transaction_id;
         let live_only = msg.live_only.unwrap_or(false);
+        let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
+        let request_pattern = msg.request_pattern.clone();
 
-        let (rx, subscription) = match self
-            .worterbuch
-            .psubscribe(
-                self.client_id,
-                msg.transaction_id,
-                msg.request_pattern.clone(),
-                msg.unique.unwrap_or(false),
-                live_only,
-                msg.send_traces.unwrap_or(false),
-            )
-            .await
-        {
+        let (rx, subscription) = match self.worterbuch.psubscribe(msg, self.client_info()).await {
             Ok(rx) => rx,
             Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return false;
             }
         };
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let smsg = ServerMessage::Ack(response);
         let _ = self.tx.send(smsg).await;
 
-        let transaction_id = msg.transaction_id;
-        let request_pattern = msg.request_pattern;
-
         let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
-        let client_id = self.client_id;
+        let client_info = self.client_info();
 
         let channel_buffer_size = self.worterbuch.config().channel_buffer_size;
 
-        let aggregate_events = msg.aggregate_events.map(Duration::from_millis);
         if let Some(aggregate_duration) = aggregate_events {
             let subscription = SubscriptionInfo {
                 aggregate_duration,
@@ -524,9 +491,10 @@ impl V0 {
             };
             self.subsys
                 .spawn("protocol/pSubscribe/aggregate-loop", move |_| async move {
-                    aggregate_loop(rx, subscription, client_sub, client_id).await;
+                    aggregate_loop(rx, subscription, client_sub, client_info.client_id).await;
 
-                    match wb_unsub.unsubscribe(client_id, transaction_id).await {
+                    let req = Unsubscribe { transaction_id };
+                    match wb_unsub.unsubscribe(req, client_info).await {
                         Ok(()) => {
                             warn!("Subscription was not cleaned up properly!");
                         }
@@ -548,7 +516,8 @@ impl V0 {
                     )
                     .await;
 
-                    match wb_unsub.unsubscribe(client_id, transaction_id).await {
+                    let req = Unsubscribe { transaction_id };
+                    match wb_unsub.unsubscribe(req, client_info).await {
                         Ok(()) => {
                             warn!("Subscription was not cleaned up properly!");
                         }
@@ -564,17 +533,12 @@ impl V0 {
     }
 
     pub async fn unsubscribe(&self, msg: Unsubscribe) {
-        if let Err(e) = self
-            .worterbuch
-            .unsubscribe(self.client_id, msg.transaction_id)
-            .await
-        {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.worterbuch.unsubscribe(msg, self.client_info()).await {
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         };
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let msg = ServerMessage::Ack(response);
 
@@ -582,20 +546,17 @@ impl V0 {
     }
 
     pub async fn delete(&self, msg: Delete) {
-        let value = match self
-            .worterbuch
-            .delete(msg.transaction_id, msg.key, self.client_id)
-            .await
-        {
+        let transaction_id = msg.transaction_id;
+        let value = match self.worterbuch.delete(msg, self.client_info()).await {
             Ok(it) => it,
             Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = State {
-            transaction_id: msg.transaction_id,
+            transaction_id,
             event: StateEvent::Deleted(value),
             trace: None,
         };
@@ -606,31 +567,21 @@ impl V0 {
     }
 
     pub async fn pdelete(&self, msg: PDelete) {
-        let deleted = match self
-            .worterbuch
-            .pdelete(
-                msg.transaction_id,
-                msg.request_pattern.clone(),
-                msg.quiet,
-                self.client_id,
-            )
-            .await
-        {
+        let transaction_id = msg.transaction_id;
+        let request_pattern = msg.request_pattern.clone();
+        let quiet = msg.quiet.unwrap_or(false);
+        let deleted = match self.worterbuch.pdelete(msg, self.client_info()).await {
             Ok(it) => it,
             Result::Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = PState {
-            transaction_id: msg.transaction_id,
-            request_pattern: msg.request_pattern,
-            event: PStateEvent::Deleted(if msg.quiet.unwrap_or(false) {
-                vec![]
-            } else {
-                deleted
-            }),
+            transaction_id,
+            request_pattern,
+            event: PStateEvent::Deleted(if quiet { vec![] } else { deleted }),
             trace: None,
         };
 
@@ -639,16 +590,17 @@ impl V0 {
     }
 
     pub async fn ls(&self, msg: Ls) {
-        let children = match self.worterbuch.ls(msg.parent).await {
+        let transaction_id = msg.transaction_id;
+        let children = match self.worterbuch.ls(msg, self.client_info()).await {
             Ok(it) => it,
             Result::Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = LsState {
-            transaction_id: msg.transaction_id,
+            transaction_id,
             children,
             trace: None,
         };
@@ -659,16 +611,17 @@ impl V0 {
     }
 
     pub async fn pls(&self, msg: PLs) {
-        let children = match self.worterbuch.pls(msg.parent_pattern).await {
+        let transaction_id = msg.transaction_id;
+        let children = match self.worterbuch.pls(msg, self.client_info()).await {
             Ok(it) => it,
             Result::Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.tx, e, transaction_id).await;
                 return;
             }
         };
 
         let response = LsState {
-            transaction_id: msg.transaction_id,
+            transaction_id,
             children,
             trace: None,
         };
@@ -679,35 +632,24 @@ impl V0 {
     }
 
     pub async fn subscribe_ls(&self, msg: SubscribeLs) -> bool {
-        let (mut rx, subscription) = match self
-            .worterbuch
-            .subscribe_ls(
-                self.client_id,
-                msg.transaction_id,
-                msg.parent.clone(),
-                msg.send_traces.unwrap_or(false),
-            )
-            .await
-        {
-            Ok(it) => it,
-            Err(e) => {
-                handle_store_error(&self.tx, e, msg.transaction_id).await;
-                return false;
-            }
-        };
+        let transaction_id = msg.transaction_id;
+        let (mut rx, subscription) =
+            match self.worterbuch.subscribe_ls(msg, self.client_info()).await {
+                Ok(it) => it,
+                Err(e) => {
+                    handle_store_error(&self.tx, e, transaction_id).await;
+                    return false;
+                }
+            };
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let smsg = ServerMessage::Ack(response);
         let _ = self.tx.send(smsg).await;
 
-        let transaction_id = msg.transaction_id;
-
         let wb_unsub = self.worterbuch.named("unsubscribe");
         let client_sub = self.tx.clone();
-        let client_id = self.client_id;
+        let client_info = self.client_info();
 
         self.subsys.spawn(
             format!("protocol/lsSubscribe/send-loop/{subscription}"),
@@ -725,7 +667,8 @@ impl V0 {
                     };
                 }
 
-                match wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+                let req = UnsubscribeLs { transaction_id };
+                match wb_unsub.unsubscribe_ls(req, client_info).await {
                     Ok(()) => {
                         warn!("Ls Subscription was not cleaned up properly!");
                     }
@@ -741,18 +684,16 @@ impl V0 {
     }
 
     pub async fn unsubscribe_ls(&self, msg: UnsubscribeLs) {
-        let client_id = self.client_id;
+        let transaction_id = msg.transaction_id;
         if let Err(e) = self
             .worterbuch
-            .unsubscribe_ls(client_id, msg.transaction_id)
+            .unsubscribe_ls(msg, self.client_info())
             .await
         {
-            handle_store_error(&self.tx, e, msg.transaction_id).await;
+            handle_store_error(&self.tx, e, transaction_id).await;
             return;
         }
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let msg = ServerMessage::Ack(response);
 

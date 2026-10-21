@@ -32,9 +32,10 @@ use worterbuch_common::{
     Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::{WorterbuchError, WorterbuchResult},
     protocol::v1::{
-        CasVersion, GraveGoods, Interface, Key, KeyValuePairs, LastWill, LiveOnlyFlag,
-        ProtocolMajorVersion, ProtocolVersion, ProtocolVersionSegment, RequestPattern,
-        SendTracesFlag, TransactionId, UniqueFlag, Value,
+        CSet, CasVersion, ClientInfo, Delete, Get, GraveGoods, Key, KeyValuePairs, LastWill, Lock,
+        Ls, PDelete, PGet, PLs, PSubscribe, ProtocolMajorVersion, ProtocolVersion,
+        ProtocolVersionSegment, Publish, RequestPattern, SPub, SPubInit, Set, Subscribe,
+        SubscribeLs, TransactionId, Unsubscribe, UnsubscribeLs, Value,
     },
 };
 
@@ -60,335 +61,193 @@ pub struct UpdatedLocks {
 }
 
 pub enum WbFunction {
-    Get(Key, oneshot::Sender<WorterbuchResult<Value>>, Span),
-    CGet(Key, oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>),
-    Set(
-        TransactionId,
-        Interface,
-        Key,
-        Value,
-        ClientId,
+    Get(
+        Get,
+        ClientInfo,
+        oneshot::Sender<WorterbuchResult<Value>>,
+        Span,
+    ),
+    CGet(
+        Get,
+        ClientInfo,
+        oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>,
+        Span,
+    ),
+    Set(Set, ClientInfo, oneshot::Sender<WorterbuchResult<()>>, Span),
+    CSet(
+        CSet,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
         Span,
     ),
-    CSet(
-        TransactionId,
-        Interface,
-        Key,
-        Value,
-        CasVersion,
-        ClientId,
-        oneshot::Sender<WorterbuchResult<()>>,
-    ),
     SPubInit(
-        TransactionId,
-        Interface,
-        Key,
-        ClientId,
+        SPubInit,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     SPub(
-        TransactionId,
-        Interface,
-        Value,
-        ClientId,
+        SPub,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     Publish(
-        TransactionId,
-        Interface,
-        Key,
-        Value,
-        ClientId,
+        Publish,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     Ls(
-        Option<Key>,
+        Ls,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<Vec<RegularKeySegment>>>,
+        Span,
     ),
     PLs(
-        Option<RequestPattern>,
+        PLs,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<Vec<RegularKeySegment>>>,
+        Span,
     ),
     PGet(
-        RequestPattern,
+        PGet,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
+        Span,
     ),
     Subscribe(
-        ClientId,
-        TransactionId,
-        Interface,
-        Key,
-        UniqueFlag,
-        LiveOnlyFlag,
-        SendTracesFlag,
+        Subscribe,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<Subscription>>,
+        Span,
     ),
     PSubscribe(
-        ClientId,
-        TransactionId,
-        Interface,
-        RequestPattern,
-        UniqueFlag,
-        LiveOnlyFlag,
-        SendTracesFlag,
+        PSubscribe,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<PSubscription>>,
+        Span,
     ),
     SubscribeLs(
-        ClientId,
-        TransactionId,
-        Interface,
-        Option<Key>,
-        SendTracesFlag,
+        SubscribeLs,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<LsSubscription>>,
+        Span,
     ),
     Unsubscribe(
-        ClientId,
-        TransactionId,
-        Interface,
+        Unsubscribe,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     UnsubscribeLs(
-        ClientId,
-        TransactionId,
+        UnsubscribeLs,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     Delete(
-        TransactionId,
-        Interface,
-        Key,
-        ClientId,
+        Delete,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<Value>>,
+        Span,
     ),
     PDelete(
-        TransactionId,
-        Interface,
-        RequestPattern,
-        Option<bool>,
-        ClientId,
+        PDelete,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<KeyValuePairs>>,
+        Span,
     ),
     Lock(
-        TransactionId,
-        Interface,
-        Key,
-        ClientId,
+        Lock,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<LockLostReceiver>>,
+        Span,
     ),
     AcquireLock(
-        TransactionId,
-        Interface,
-        Key,
-        ClientId,
+        Lock,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)>>,
+        Span,
     ),
     ReleaseLock(
-        TransactionId,
-        Interface,
-        Key,
-        ClientId,
+        Lock,
+        ClientInfo,
         oneshot::Sender<WorterbuchResult<()>>,
+        Span,
     ),
     Connected(
-        ClientId,
+        ClientInfo,
         Option<SocketAddr>,
-        Protocol,
         mpsc::Sender<()>,                      // signal for ejecting this client
         oneshot::Sender<WorterbuchResult<()>>, // response channel
+        Span,
     ),
-    ProtocolSwitched(ClientId, Interface, ProtocolMajorVersion),
-    Disconnected(ClientId, Protocol, Option<SocketAddr>),
-    Config(oneshot::Sender<Config>),
+    ProtocolSwitched(ClientInfo, ProtocolMajorVersion, Span),
+    Disconnected(ClientInfo, Option<SocketAddr>, Span),
+    Config(oneshot::Sender<Config>, Span),
     Export(oneshot::Sender<Export>, Span),
     Import(
         TransactionId,
-        ClientId,
-        Interface,
+        ClientInfo,
         String,
         oneshot::Sender<WorterbuchResult<InsertedValues>>,
+        Span,
     ),
-    Len(oneshot::Sender<usize>),
-    ReGrantLocks(Locks, oneshot::Sender<WorterbuchResult<UpdatedLocks>>),
+    Len(oneshot::Sender<usize>, Span),
+    ReGrantLocks(Locks, oneshot::Sender<WorterbuchResult<UpdatedLocks>>, Span),
 }
 
 impl fmt::Debug for WbFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WbFunction::Get(key, _, _) => f.debug_tuple("Get").field(key).finish(),
-            WbFunction::CGet(key, _) => f.debug_tuple("CGet").field(key).finish(),
-            WbFunction::Set(transaction_id, interface, key, value, client_id, _, _) => f
-                .debug_tuple("Set")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(value)
-                .field(client_id)
-                .finish(),
-            WbFunction::CSet(transaction_id, interface, key, value, version, client_id, _) => f
-                .debug_tuple("CSet")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(value)
-                .field(version)
-                .field(client_id)
-                .finish(),
-            WbFunction::SPubInit(transaction_id, interface, key, client_id, _) => f
-                .debug_tuple("SPubInit")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(client_id)
-                .finish(),
-            WbFunction::SPub(transaction_id, interface, value, client_id, _) => f
-                .debug_tuple("SPub")
-                .field(transaction_id)
-                .field(interface)
-                .field(value)
-                .field(client_id)
-                .finish(),
-            WbFunction::Publish(transaction_id, interface, key, value, client_id, _) => f
-                .debug_tuple("Publish")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(value)
-                .field(client_id)
-                .finish(),
-            WbFunction::Ls(parent, _) => f.debug_tuple("Ls").field(parent).finish(),
-            WbFunction::PLs(parent, _) => f.debug_tuple("PLs").field(parent).finish(),
-            WbFunction::PGet(pattern, _) => f.debug_tuple("PGet").field(pattern).finish(),
-            WbFunction::Subscribe(
-                client_id,
-                transaction_id,
-                interface,
-                key,
-                unique,
-                live_only,
-                send_traces,
-                _,
-            ) => f
-                .debug_tuple("Subscribe")
-                .field(client_id)
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(unique)
-                .field(live_only)
-                .field(send_traces)
-                .finish(),
-            WbFunction::PSubscribe(
-                client_id,
-                transaction_id,
-                interface,
-                pattern,
-                unique,
-                live_only,
-                send_traces,
-                _,
-            ) => f
-                .debug_tuple("PSubscribe")
-                .field(client_id)
-                .field(transaction_id)
-                .field(interface)
-                .field(pattern)
-                .field(unique)
-                .field(live_only)
-                .field(send_traces)
-                .finish(),
-            WbFunction::SubscribeLs(
-                client_id,
-                transaction_id,
-                interface,
-                parent,
-                send_traces,
-                _,
-            ) => f
-                .debug_tuple("SubscribeLs")
-                .field(client_id)
-                .field(transaction_id)
-                .field(interface)
-                .field(parent)
-                .field(send_traces)
-                .finish(),
-            WbFunction::Unsubscribe(client_id, transaction_id, interface, _) => f
-                .debug_tuple("Unsubscribe")
-                .field(client_id)
-                .field(transaction_id)
-                .field(interface)
-                .finish(),
-            WbFunction::UnsubscribeLs(client_id, transaction_id, _) => f
-                .debug_tuple("UnsubscribeLs")
-                .field(client_id)
-                .field(transaction_id)
-                .finish(),
-            WbFunction::Delete(transaction_id, interface, key, client_id, _) => f
-                .debug_tuple("Delete")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(client_id)
-                .finish(),
-            WbFunction::PDelete(transaction_id, interface, pattern, quiet, client_id, _) => f
-                .debug_tuple("PDelete")
-                .field(transaction_id)
-                .field(interface)
-                .field(pattern)
-                .field(quiet)
-                .field(client_id)
-                .finish(),
-            WbFunction::Lock(transaction_id, interface, key, client_id, _) => f
-                .debug_tuple("Lock")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(client_id)
-                .finish(),
-            WbFunction::AcquireLock(transaction_id, interface, key, client_id, _) => f
-                .debug_tuple("AcquireLock")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(client_id)
-                .finish(),
-            WbFunction::ReleaseLock(transaction_id, interface, key, client_id, _) => f
-                .debug_tuple("ReleaseLock")
-                .field(transaction_id)
-                .field(interface)
-                .field(key)
-                .field(client_id)
-                .finish(),
-            WbFunction::Connected(client_id, remote_addr, protocol, _, _) => f
+            WbFunction::Get(req, ..) => req.fmt(f),
+            WbFunction::CGet(req, ..) => req.fmt(f),
+            WbFunction::Set(req, ..) => req.fmt(f),
+            WbFunction::CSet(req, ..) => req.fmt(f),
+            WbFunction::SPubInit(req, ..) => req.fmt(f),
+            WbFunction::SPub(req, ..) => req.fmt(f),
+            WbFunction::Publish(req, ..) => req.fmt(f),
+            WbFunction::Ls(req, ..) => req.fmt(f),
+            WbFunction::PLs(req, ..) => req.fmt(f),
+            WbFunction::PGet(req, ..) => req.fmt(f),
+            WbFunction::Subscribe(req, ..) => req.fmt(f),
+            WbFunction::PSubscribe(req, ..) => req.fmt(f),
+            WbFunction::SubscribeLs(req, ..) => req.fmt(f),
+            WbFunction::Unsubscribe(req, ..) => req.fmt(f),
+            WbFunction::UnsubscribeLs(req, ..) => req.fmt(f),
+            WbFunction::Delete(req, ..) => req.fmt(f),
+            WbFunction::PDelete(req, ..) => req.fmt(f),
+            WbFunction::Lock(req, ..) => req.fmt(f),
+            WbFunction::AcquireLock(req, ..) => req.fmt(f),
+            WbFunction::ReleaseLock(req, ..) => req.fmt(f),
+            WbFunction::Connected(client_info, remote_addr, _, _, _) => f
                 .debug_tuple("Connected")
-                .field(client_id)
+                .field(client_info)
                 .field(remote_addr)
-                .field(protocol)
                 .finish(),
-            WbFunction::ProtocolSwitched(client_id, interface, version) => f
+            WbFunction::ProtocolSwitched(client_info, version, _) => f
                 .debug_tuple("ProtocolSwitched")
-                .field(client_id)
-                .field(interface)
+                .field(client_info)
                 .field(version)
                 .finish(),
-            WbFunction::Disconnected(client_id, protocol, remote_addr) => f
+            WbFunction::Disconnected(client_info, remote_addr, _) => f
                 .debug_tuple("Disconnected")
-                .field(client_id)
-                .field(protocol)
+                .field(client_info)
                 .field(remote_addr)
                 .finish(),
-            WbFunction::Config(_) => f.debug_tuple("Config").finish(),
+            WbFunction::Config(_, _) => f.debug_tuple("Config").finish(),
             WbFunction::Export(_, _) => f.debug_tuple("Export").finish(),
-            WbFunction::Import(transaction_id, client_id, interface, path, _) => f
+            WbFunction::Import(transaction_id, client_info, path, _, _) => f
                 .debug_tuple("Import")
                 .field(transaction_id)
-                .field(client_id)
-                .field(interface)
+                .field(client_info)
                 .field(path)
                 .finish(),
-            WbFunction::ReGrantLocks(locks, _) => {
+            WbFunction::ReGrantLocks(locks, _, _) => {
                 f.debug_tuple("ReGrantLocks").field(locks).finish()
             }
-            WbFunction::Len(_) => f.debug_tuple("Len").finish(),
+            WbFunction::Len(_, _) => f.debug_tuple("Len").finish(),
         }
     }
 }
@@ -398,7 +257,7 @@ pub struct CloneableWbApi {
     name: String,
     config: Config,
     tx: mpsc::Sender<WbFunction>,
-    interface: Interface,
+    protocol: Protocol,
     supported_client_protocol_versions: Box<[ProtocolVersionSegment]>,
 }
 
@@ -415,14 +274,14 @@ impl CloneableWbApi {
     pub fn new(
         tx: mpsc::Sender<WbFunction>,
         config: Config,
-        interface: Interface,
+        protocol: Protocol,
         supported_client_protocol_versions: &[ProtocolVersion],
     ) -> Self {
         CloneableWbApi {
             name: "".to_string(),
             tx,
             config,
-            interface,
+            protocol,
             supported_client_protocol_versions: supported_client_protocol_versions
                 .iter()
                 .map(ProtocolVersion::major)
@@ -439,24 +298,24 @@ impl CloneableWbApi {
             name: format!("{}/{}", self.name, name),
             config: self.config.clone(),
             tx: self.tx.clone(),
-            interface: self.interface.clone(),
+            protocol: self.protocol.clone(),
             supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
     }
 
-    pub fn for_interface(&self, name: impl fmt::Display, interface: Interface) -> Self {
+    pub fn for_protocol(&self, name: impl fmt::Display, protocol: Protocol) -> Self {
         CloneableWbApi {
             name: format!("{}/{}", self.name, name),
             config: self.config.clone(),
             tx: self.tx.clone(),
-            interface,
+            protocol: protocol,
             supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
     }
 
     pub(crate) async fn re_grant_locks(&self, locks: Locks) -> WorterbuchResult<UpdatedLocks> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::ReGrantLocks(locks, tx);
+        let function = WbFunction::ReGrantLocks(locks, tx, Span::current());
         self.request_with_timeout(function, "re grant locks", rx)
             .await
     }
@@ -518,290 +377,176 @@ impl WbApi for CloneableWbApi {
     }
 
     #[instrument(level = Level::TRACE, skip_all, err)]
-    async fn get(&self, key: Key) -> WorterbuchResult<Value> {
+    async fn get(&self, req: Get, client_info: ClientInfo) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Get(key, tx, Span::current());
+        let function = WbFunction::Get(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "get", rx).await
     }
 
-    async fn cget(&self, key: Key) -> WorterbuchResult<(Value, CasVersion)> {
+    async fn cget(
+        &self,
+        req: Get,
+        client_info: ClientInfo,
+    ) -> WorterbuchResult<(Value, CasVersion)> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::CGet(key, tx);
+        let function = WbFunction::CGet(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "cget", rx).await
     }
 
-    async fn pget(&self, pattern: RequestPattern) -> WorterbuchResult<KeyValuePairs> {
+    async fn pget(&self, req: PGet, client_info: ClientInfo) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PGet(pattern, tx);
+        let function = WbFunction::PGet(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "pget", rx).await
     }
 
     #[instrument(level=Level::TRACE, skip(self), err)]
-    async fn set(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn set(&self, req: Set, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Set(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            client_id,
-            tx,
-            Span::current(),
-        );
+        let function = WbFunction::Set(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "set", rx).await
     }
 
-    async fn cset(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        version: CasVersion,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn cset(&self, req: CSet, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::CSet(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            version,
-            client_id,
-            tx,
-        );
+        let function = WbFunction::CSet(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "cset", rx).await
     }
 
-    async fn lock(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
-    ) -> WorterbuchResult<LockLostReceiver> {
+    async fn lock(&self, req: Lock, client_info: ClientInfo) -> WorterbuchResult<LockLostReceiver> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Lock(transaction_id, self.interface.clone(), key, client_id, tx);
+        let function = WbFunction::Lock(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "lock", rx).await
     }
 
     async fn acquire_lock(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: Lock,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::AcquireLock(transaction_id, self.interface.clone(), key, client_id, tx);
+        let function = WbFunction::AcquireLock(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "acquire lock", rx)
             .await
     }
 
-    async fn release_lock(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn release_lock(&self, req: Lock, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::ReleaseLock(transaction_id, self.interface.clone(), key, client_id, tx);
+        let function = WbFunction::ReleaseLock(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "release lock", rx)
             .await
     }
 
-    async fn spub_init(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn spub_init(&self, req: SPubInit, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::SPubInit(transaction_id, self.interface.clone(), key, client_id, tx);
+        let function = WbFunction::SPubInit(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "spub init", rx).await
     }
 
-    async fn spub(
-        &self,
-        transaction_id: TransactionId,
-        value: Value,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn spub(&self, req: SPub, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::SPub(transaction_id, self.interface.clone(), value, client_id, tx);
+        let function = WbFunction::SPub(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "spub", rx).await
     }
 
-    async fn publish(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        client_id: ClientId,
-    ) -> WorterbuchResult<()> {
+    async fn publish(&self, req: Publish, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Publish(
-            transaction_id,
-            self.interface.clone(),
-            key,
-            value,
-            client_id,
-            tx,
-        );
+        let function = WbFunction::Publish(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "publish", rx).await
     }
 
-    async fn ls(&self, parent: Option<Key>) -> WorterbuchResult<Vec<RegularKeySegment>> {
+    async fn ls(
+        &self,
+        req: Ls,
+        client_info: ClientInfo,
+    ) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Ls(parent, tx);
+        let function = WbFunction::Ls(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "ls", rx).await
     }
 
     async fn pls(
         &self,
-        parent: Option<RequestPattern>,
+        req: PLs,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<Vec<RegularKeySegment>> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PLs(parent, tx);
+        let function = WbFunction::PLs(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "pls", rx).await
     }
 
     async fn subscribe(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        key: Key,
-        unique: UniqueFlag,
-        live_only: LiveOnlyFlag,
-        send_traces: SendTracesFlag,
+        req: Subscribe,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<Subscription> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Subscribe(
-            client_id,
-            transaction_id,
-            self.interface.clone(),
-            key,
-            unique,
-            live_only,
-            send_traces,
-            tx,
-        );
+        let function = WbFunction::Subscribe(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "subscribe", rx).await
     }
 
     async fn psubscribe(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        pattern: RequestPattern,
-        unique: UniqueFlag,
-        live_only: LiveOnlyFlag,
-        send_traces: SendTracesFlag,
+        req: PSubscribe,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<PSubscription> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PSubscribe(
-            client_id,
-            transaction_id,
-            self.interface.clone(),
-            pattern,
-            unique,
-            live_only,
-            send_traces,
-            tx,
-        );
+        let function = WbFunction::PSubscribe(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "psubscribe", rx).await
     }
 
     async fn subscribe_ls(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        parent: Option<Key>,
-        send_traces: SendTracesFlag,
+        req: SubscribeLs,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<LsSubscription> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::SubscribeLs(
-            client_id,
-            transaction_id,
-            self.interface.clone(),
-            parent,
-            send_traces,
-            tx,
-        );
+        let function = WbFunction::SubscribeLs(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "subscribe ls", rx)
             .await
     }
 
-    async fn unsubscribe(
-        &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-    ) -> WorterbuchResult<()> {
+    async fn unsubscribe(&self, req: Unsubscribe, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::Unsubscribe(client_id, transaction_id, self.interface.clone(), tx);
+        let function = WbFunction::Unsubscribe(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "unsubscribe", rx).await
     }
 
     async fn unsubscribe_ls(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
+        req: UnsubscribeLs,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::UnsubscribeLs(client_id, transaction_id, tx);
+        let function = WbFunction::UnsubscribeLs(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "unsubscribe ls", rx)
             .await
     }
 
-    async fn delete(
-        &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
-    ) -> WorterbuchResult<Value> {
+    async fn delete(&self, req: Delete, client_info: ClientInfo) -> WorterbuchResult<Value> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::Delete(transaction_id, self.interface.clone(), key, client_id, tx);
+        let function = WbFunction::Delete(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "delete", rx).await
     }
 
     async fn pdelete(
         &self,
-        transaction_id: TransactionId,
-        pattern: RequestPattern,
-        quiet: Option<bool>,
-        client_id: ClientId,
+        req: PDelete,
+        client_info: ClientInfo,
     ) -> WorterbuchResult<KeyValuePairs> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::PDelete(
-            transaction_id,
-            self.interface.clone(),
-            pattern,
-            quiet,
-            client_id,
-            tx,
-        );
+        let function = WbFunction::PDelete(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "pdelete", rx).await
     }
 
     #[instrument(level=Level::TRACE, skip(self))]
     async fn connected(
         &self,
-        client_id: ClientId,
+        client_info: ClientInfo,
         remote_addr: Option<SocketAddr>,
-        protocol: Protocol,
     ) -> WorterbuchResult<mpsc::Receiver<()>> {
         let (tx, rx) = oneshot::channel();
         let (eject, eject_rx) = mpsc::channel(1);
-        let function = WbFunction::Connected(client_id, remote_addr, protocol, eject, tx);
+        let function = WbFunction::Connected(client_info, remote_addr, eject, tx, Span::current());
         self.request_with_timeout(function, "connected", rx).await?;
         Ok(eject_rx)
     }
@@ -809,10 +554,10 @@ impl WbApi for CloneableWbApi {
     #[instrument(level=Level::TRACE, skip(self))]
     async fn protocol_switched(
         &self,
-        client_id: ClientId,
+        client_info: ClientInfo,
         protocol: ProtocolMajorVersion,
     ) -> WorterbuchResult<()> {
-        let function = WbFunction::ProtocolSwitched(client_id, self.interface.clone(), protocol);
+        let function = WbFunction::ProtocolSwitched(client_info, protocol, Span::current());
         self.send_with_timeout(function, "protocol switched")
             .await?;
         Ok(())
@@ -821,11 +566,10 @@ impl WbApi for CloneableWbApi {
     #[instrument(level=Level::TRACE, skip(self))]
     async fn disconnected(
         &self,
-        client_id: ClientId,
-        protocol: Protocol,
+        client_info: ClientInfo,
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
-        let function = WbFunction::Disconnected(client_id, protocol, remote_addr);
+        let function = WbFunction::Disconnected(client_info, remote_addr, Span::current());
         self.send_with_timeout(function, "disconnected").await?;
         Ok(())
     }
@@ -851,14 +595,22 @@ impl WbApi for CloneableWbApi {
         json: String,
     ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         let (tx, rx) = oneshot::channel();
-        let function =
-            WbFunction::Import(transaction_id, client_id, self.interface.clone(), json, tx);
+        let function = WbFunction::Import(
+            transaction_id,
+            ClientInfo {
+                client_id,
+                protocol: self.protocol.clone(),
+            },
+            json,
+            tx,
+            Span::current(),
+        );
         self.request_with_timeout(function, "import", rx).await
     }
 
     async fn entries(&self) -> WorterbuchResult<usize> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Len(tx);
+        let function = WbFunction::Len(tx, Span::current());
         self.send_with_timeout(function, "entries").await?;
         Ok(rx.await?)
     }

@@ -28,10 +28,11 @@ pub mod socket;
 use crate::{
     error::{ConnectionError, ConnectionResult},
     protocol::v1::{
-        CasVersion, GraveGoods, Key, KeyValuePair, KeyValuePairs, LastWill, LiveOnlyFlag,
-        PStateEvent, ProtocolMajorVersion, ProtocolVersion, RequestPattern, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, SendTracesFlag,
-        StateEvent, Trace, TransactionId, UniqueFlag, Value,
+        CSet, CasVersion, ClientInfo, Delete, Get, GraveGoods, Key, KeyValuePair, KeyValuePairs,
+        LastWill, Lock, Ls, PDelete, PGet, PLs, PStateEvent, PSubscribe, ProtocolMajorVersion,
+        ProtocolVersion, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, Set, StateEvent, Subscribe, SubscribeLs, Trace,
+        TransactionId, Unsubscribe, UnsubscribeLs, Value,
     },
 };
 use error::WorterbuchResult;
@@ -243,13 +244,19 @@ macro_rules! topic {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, Deserialize, JsonSchema)]
-#[serde(rename_all = "UPPERCASE")]
 pub enum Protocol {
-    TCP,
-    WS,
-    HTTP,
-    UNIX,
-    QUIC,
+    #[serde(rename = "TCP")]
+    Tcp,
+    #[serde(rename = "WS")]
+    Ws,
+    #[serde(rename = "HTTP")]
+    Http,
+    #[serde(rename = "UNIX")]
+    Unix,
+    #[serde(rename = "QUIC")]
+    Quic,
+    #[serde(rename = "LOCAL")]
+    Local,
     Proxied(Box<Protocol>),
 }
 
@@ -475,157 +482,141 @@ pub trait WbApi {
 
     fn version(&self) -> &str;
 
-    fn get(&self, key: Key) -> impl Future<Output = WorterbuchResult<Value>> + Send;
+    fn get(
+        &self,
+        req: Get,
+        client_info: ClientInfo,
+    ) -> impl Future<Output = WorterbuchResult<Value>> + Send;
 
-    fn cget(&self, key: Key) -> impl Future<Output = WorterbuchResult<(Value, CasVersion)>> + Send;
+    fn cget(
+        &self,
+        req: Get,
+        client_info: ClientInfo,
+    ) -> impl Future<Output = WorterbuchResult<(Value, CasVersion)>> + Send;
 
     fn pget(
         &self,
-        pattern: RequestPattern,
+        req: PGet,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
 
     fn set(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        client_id: ClientId,
+        req: Set,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn cset(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        version: CasVersion,
-        client_id: ClientId,
+        req: CSet,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn lock(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: Lock,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<LockLostReceiver>> + Send;
 
     fn acquire_lock(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: Lock,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)>> + Send;
 
     fn release_lock(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: Lock,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn spub_init(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: SPubInit,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn spub(
         &self,
-        transaction_id: TransactionId,
-        value: Value,
-        client_id: ClientId,
+        req: SPub,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn publish(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        value: Value,
-        client_id: ClientId,
+        req: Publish,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn ls(
         &self,
-        parent: Option<Key>,
+        req: Ls,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<Vec<RegularKeySegment>>> + Send;
 
     fn pls(
         &self,
-        parent: Option<RequestPattern>,
+        req: PLs,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<Vec<RegularKeySegment>>> + Send;
 
     fn subscribe(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        key: Key,
-        unique: UniqueFlag,
-        live_only: LiveOnlyFlag,
-        send_traces: SendTracesFlag,
+        req: Subscribe,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<Subscription>> + Send;
 
     fn psubscribe(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        pattern: RequestPattern,
-        unique: UniqueFlag,
-        live_only: LiveOnlyFlag,
-        send_traces: SendTracesFlag,
+        req: PSubscribe,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<PSubscription>> + Send;
 
     fn subscribe_ls(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        parent: Option<Key>,
-        send_traces: SendTracesFlag,
+        req: SubscribeLs,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<LsSubscription>> + Send;
 
     fn unsubscribe(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
+        req: Unsubscribe,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn unsubscribe_ls(
         &self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
+        req: UnsubscribeLs,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn delete(
         &self,
-        transaction_id: TransactionId,
-        key: Key,
-        client_id: ClientId,
+        req: Delete,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<Value>> + Send;
 
     fn pdelete(
         &self,
-        transaction_id: TransactionId,
-        pattern: RequestPattern,
-        quiet: Option<bool>,
-        client_id: ClientId,
+        req: PDelete,
+        client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
 
     fn connected(
         &self,
-        client_id: ClientId,
+        client_info: ClientInfo,
         remote_addr: Option<SocketAddr>,
-        protocol: Protocol,
     ) -> impl Future<Output = WorterbuchResult<mpsc::Receiver<()>>> + Send;
 
     fn protocol_switched(
         &self,
-        client_id: ClientId,
+        client_info: ClientInfo,
         protocol: ProtocolMajorVersion,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn disconnected(
         &self,
-        client_id: ClientId,
-        protocol: Protocol,
+        client_info: ClientInfo,
         remote_addr: Option<SocketAddr>,
     ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 

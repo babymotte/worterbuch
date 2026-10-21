@@ -64,6 +64,12 @@ pub enum WorterbuchAppError {
     Report(String, #[diagnostic_source] miette::Report),
 }
 
+impl From<miette::Report> for WorterbuchAppError {
+    fn from(e: miette::Report) -> Self {
+        WorterbuchAppError::Report(e.to_string(), e)
+    }
+}
+
 impl From<WorterbuchError> for WorterbuchAppError {
     fn from(e: WorterbuchError) -> Self {
         WorterbuchAppError::WorterbuchError(Box::new(e))

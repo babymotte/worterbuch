@@ -27,11 +27,11 @@ use tracing::debug;
 #[cfg(not(feature = "commercial"))]
 use worterbuch_common::protocol::v1::SYSTEM_TOPIC_SOURCES;
 use worterbuch_common::{
-    WbApi,
+    Protocol, WbApi,
     error::WorterbuchResult,
     protocol::v1::{
-        SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_STORE,
-        SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION,
+        ClientInfo, SYSTEM_TOPIC_COUNT, SYSTEM_TOPIC_LICENSE, SYSTEM_TOPIC_ROOT,
+        SYSTEM_TOPIC_STORE, SYSTEM_TOPIC_UPTIME, SYSTEM_TOPIC_VALUES, SYSTEM_TOPIC_VERSION, Set,
     },
     topic,
 };
@@ -44,42 +44,49 @@ pub const LICENSE: &str = "COMMERCIAL";
 #[cfg(not(feature = "commercial"))]
 pub const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
+fn client_info() -> ClientInfo {
+    ClientInfo {
+        client_id: INTERNAL_CLIENT_ID,
+        protocol: Protocol::Local,
+    }
+}
+
 pub async fn track_stats(wb: CloneableWbApi, subsys: Subsystem) -> WorterbuchResult<()> {
     let start = Instant::now();
 
-    wb.set(
-        0,
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION),
-        json!(VERSION),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_VERSION),
+        value: json!(VERSION),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE),
-        json!(LICENSE),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE),
+        value: json!(LICENSE),
+    };
+    wb.set(req, client_info()).await?;
 
     #[cfg(feature = "commercial")]
-    wb.set(
-        0,
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "data"),
-        json!(wb.config().license),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+    {
+        let req = Set {
+            transaction_id: 0,
+            key: topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_LICENSE, "data"),
+            value: json!(wb.config().license),
+        };
+        wb.set(req, client_info()).await?;
+    }
 
     #[cfg(not(feature = "commercial"))]
-    wb.set(
-        0,
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES),
-        json!(format!("{REPO}/releases/tag/v{VERSION}")),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+    {
+        let req = Set {
+            transaction_id: 0,
+            key: topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SOURCES),
+            value: json!(format!("{REPO}/releases/tag/v{VERSION}")),
+        };
+        wb.set(req, client_info()).await?;
+    }
 
     let mut interval = interval(Duration::from_secs(1));
 
@@ -109,29 +116,27 @@ async fn update_stats(wb: &CloneableWbApi, start: Instant) -> ControlFlow<()> {
 }
 
 async fn update_uptime(wb: &CloneableWbApi, uptime: Duration) -> WorterbuchResult<()> {
-    wb.set(
-        0,
-        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_UPTIME),
-        json!(uptime.as_secs()),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_UPTIME),
+        value: json!(uptime.as_secs()),
+    };
+    wb.set(req, client_info()).await
 }
 
 async fn update_message_count(wb: &CloneableWbApi) -> WorterbuchResult<()> {
     let len = wb.entries().await?;
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_STORE,
             SYSTEM_TOPIC_VALUES,
             SYSTEM_TOPIC_COUNT
         ),
-        json!(len),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await
+        value: json!(len),
+    };
+    wb.set(req, client_info()).await
 }
 
 #[cfg(feature = "jemalloc")]
@@ -152,161 +157,149 @@ async fn update_jemalloc_stats(wb: &CloneableWbApi) -> miette::Result<()> {
     let metadata = stats::metadata::read().into_diagnostic()?;
     let retained = stats::retained::read().into_diagnostic()?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "allocated"
         ),
-        json!(allocated),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(allocated),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "resident"
         ),
-        json!(resident),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(resident),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "active"
         ),
-        json!(active),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(active),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "mapped"
         ),
-        json!(mapped),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(mapped),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "retained"
         ),
-        json!(retained),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(retained),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_RAW,
             "metadata"
         ),
-        json!(metadata),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(metadata),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "allocated"
         ),
-        json!(format_bytes(allocated)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(allocated)),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "resident"
         ),
-        json!(format_bytes(resident)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(resident)),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "active"
         ),
-        json!(format_bytes(active)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(active)),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "mapped"
         ),
-        json!(format_bytes(mapped)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(mapped)),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "retained"
         ),
-        json!(format_bytes(retained)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(retained)),
+    };
+    wb.set(req, client_info()).await?;
 
-    wb.set(
-        0,
-        topic!(
+    let req = Set {
+        transaction_id: 0,
+        key: topic!(
             SYSTEM_TOPIC_ROOT,
             SYSTEM_TOPIC_JEMALLOC,
             SYSTEM_TOPIC_FORMATTED,
             "metadata"
         ),
-        json!(format_bytes(metadata)),
-        INTERNAL_CLIENT_ID.to_owned(),
-    )
-    .await?;
+        value: json!(format_bytes(metadata)),
+    };
+    wb.set(req, client_info()).await?;
 
     Ok(())
 }

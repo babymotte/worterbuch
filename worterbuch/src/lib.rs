@@ -57,7 +57,7 @@ use tracing::{debug, info};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
     protocol::v1::{
-        Interface, InternalAction, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
+        InternalAction, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
     },
     topic,
@@ -130,7 +130,7 @@ async fn do_run_worterbuch(
     let api = CloneableWbApi::new(
         api_tx,
         config.clone(),
-        Interface::Local,
+        Protocol::Local,
         &supported_client_protocol_versions,
     );
 
@@ -252,7 +252,7 @@ fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
     }) = &config.ws_endpoint
     {
         info!("Starting web server …");
-        let sapi = api.for_interface("server/http", Interface::Protocol(Protocol::HTTP));
+        let sapi = api.for_protocol("server/http", Protocol::Http);
         let tls = tls.to_owned();
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
@@ -276,7 +276,7 @@ fn tcp_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
         }) = &config.tcp_endpoint
         && !config.tcp_disabled
     {
-        let sapi = api.for_interface("server/tcp", Interface::Protocol(Protocol::TCP));
+        let sapi = api.for_protocol("server/tcp", Protocol::Tcp);
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         subsys.spawn("tcpserver", async move |subsys| {
@@ -293,7 +293,7 @@ fn unix_socket(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
         && let Some(UnixEndpoint { path }) = &config.unix_endpoint
         && !config.unix_disabled
     {
-        let sapi = api.for_interface("server/unix", Interface::Protocol(Protocol::UNIX));
+        let sapi = api.for_protocol("server/unix", Protocol::Unix);
         let path = path.clone();
         subsys.spawn("unixsocket", async move |subsys| {
             server::unix::start(sapi, path, subsys).await
@@ -316,7 +316,7 @@ fn quic_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
         }) = &config.quic_endpoint
         && !config.quic_disabled
     {
-        let sapi = api.for_interface("server/quic", Interface::Protocol(Protocol::QUIC));
+        let sapi = api.for_protocol("server/quic", Protocol::Quic);
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         let cert_path = cert_path.clone();

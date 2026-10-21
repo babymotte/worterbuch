@@ -20,8 +20,8 @@
 use crate::cluster::protocol::locks::Locks;
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    ClientId, Protocol, WorterbuchVersion,
-    protocol::v1::{ClientMessage, GraveGoods, Interface, LastWill},
+    WorterbuchVersion,
+    protocol::v1::{ClientInfo, ClientMessage, GraveGoods, LastWill},
 };
 
 pub type ProxyId = uuid::Uuid;
@@ -82,15 +82,13 @@ pub struct ProxyHandshake {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Connected {
-    pub client_id: ClientId,
-    pub protocol: Protocol,
+    pub client_info: ClientInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Disconnected {
-    pub client_id: ClientId,
-    pub protocol: Protocol,
+    pub client_info: ClientInfo,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub grave_goods: GraveGoods,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -100,7 +98,15 @@ pub struct Disconnected {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
-    pub client_id: ClientId,
     pub msg: ClientMessage,
-    pub interface: Interface,
+    pub client_info: ClientInfo,
+}
+
+impl Request {
+    pub fn new(client_message: ClientMessage, client_info: ClientInfo) -> Self {
+        Self {
+            client_info,
+            msg: client_message,
+        }
+    }
 }

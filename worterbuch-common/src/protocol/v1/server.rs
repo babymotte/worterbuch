@@ -348,7 +348,7 @@ mod test {
     use super::*;
     use crate::{
         Protocol,
-        protocol::v1::{Interface, InternalAction, Method},
+        protocol::v1::{ClientInfo, InternalAction, Method},
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -370,14 +370,16 @@ mod test {
             transaction_id: 1,
             event: StateEvent::Deleted(json!(2)),
             trace: Some(Trace::ClientRequest {
-                client_id,
+                client_info: ClientInfo {
+                    client_id,
+                    protocol: Protocol::Local,
+                },
                 method: Method::Delete,
                 transaction_id: 1,
-                interface: Interface::Local,
             }),
         };
 
-        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientId":"$CLID","transactionId":1,"method":"delete","interface":"local"}}}"#.replace("$CLID", &client_id.to_string());
+        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientInfo":{"clientId":"$CLID","protocol":"LOCAL"},"transactionId":1,"method":"delete"}}}"#.replace("$CLID", &client_id.to_string());
 
         assert_eq!(json, serde_json::to_string(&state).unwrap());
     }
@@ -399,14 +401,16 @@ mod test {
             transaction_id: 1,
             event: StateEvent::Deleted(json!(2)),
             trace: Some(Trace::ClientRequest {
-                client_id,
+                client_info: ClientInfo {
+                    client_id,
+                    protocol: Protocol::Tcp,
+                },
                 method: Method::Delete,
                 transaction_id: 1,
-                interface: Interface::Protocol(Protocol::TCP),
             }),
         };
 
-        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientId":"$CLID","transactionId":1,"method":"delete","interface":{"protocol":"TCP"}}}}"#.replace("$CLID", &client_id.to_string());
+        let json = r#"{"transactionId":1,"deleted":2,"trace":{"clientRequest":{"clientInfo":{"clientId":"$CLID","protocol":"TCP"},"transactionId":1,"method":"delete"}}}"#.replace("$CLID", &client_id.to_string());
 
         assert_eq!(state, serde_json::from_str(&json).unwrap());
     }
@@ -429,10 +433,12 @@ mod test {
             transaction_id: 1,
             request_pattern: "$SYS/clients".to_owned(),
             event: PStateEvent::Deleted(vec![KeyValuePair::of("$SYS/clients", 2)]),
-            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected {
-                client_id,
-                protocol: Protocol::TCP,
-            })),
+            trace: Some(Trace::InternalAction(InternalAction::ClientDisconnected(
+                ClientInfo {
+                    client_id,
+                    protocol: Protocol::Tcp,
+                },
+            ))),
         };
 
         let json = r#"{"transactionId":1,"requestPattern":"$SYS/clients","deleted":[{"key":"$SYS/clients","value":2}],"trace":{"internalAction":{"clientDisconnected":{"clientId":"$CLID","protocol":"TCP"}}}}"#.replace("$CLID", &client_id.to_string());
@@ -461,16 +467,18 @@ mod test {
             trace: Some(Trace::InternalAction(
                 InternalAction::SubscriptionsChanged {
                     cause: Box::new(Trace::ClientRequest {
-                        client_id,
+                        client_info: ClientInfo {
+                            client_id,
+                            protocol: Protocol::Local,
+                        },
                         transaction_id: 123,
                         method: Method::Unsubscribe,
-                        interface: Interface::Local,
                     }),
                 },
             )),
         };
 
-        let json = r#"{"deleted":[{"key":"$SYS/clients","value":2}],"requestPattern":"$SYS/clients","trace":{"internalAction":{"subscriptionsChanged":{"cause":{"clientRequest":{"clientId":"$CLID","interface":"local","method":"unsubscribe","transactionId":123}}}}},"transactionId":1}"#.replace("$CLID", &client_id.to_string());
+        let json = r#"{"deleted":[{"key":"$SYS/clients","value":2}],"requestPattern":"$SYS/clients","trace":{"internalAction":{"subscriptionsChanged":{"cause":{"clientRequest":{"clientInfo":{"clientId":"$CLID","protocol":"LOCAL"},"method":"unsubscribe","transactionId":123}}}}},"transactionId":1}"#.replace("$CLID", &client_id.to_string());
 
         assert_eq!(pstate, serde_json::from_str(&json).unwrap());
     }

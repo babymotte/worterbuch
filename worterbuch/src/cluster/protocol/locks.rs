@@ -381,8 +381,10 @@ mod test {
     use serde_json::json;
     use uuid::Uuid;
     use worterbuch_common::{
+        Protocol,
         protocol::v1::{
-            Interface, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT, TraceData,
+            ClientInfo, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT,
+            TraceData,
         },
         topic,
     };
@@ -1064,7 +1066,13 @@ mod test {
             ),
             json!("my-client"),
             false,
-            TraceData::new(INTERNAL_CLIENT_ID, Interface::Local, 1),
+            TraceData::new(
+                1,
+                ClientInfo {
+                    client_id: INTERNAL_CLIENT_ID,
+                    protocol: Protocol::Local,
+                },
+            ),
         )
         .await
         .unwrap();

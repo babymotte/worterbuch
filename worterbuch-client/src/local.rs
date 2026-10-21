@@ -23,13 +23,13 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use worterbuch_common::{
-    INTERNAL_CLIENT_ID, LsSubscriptionReceiver, PSubscriptionReceiver, SubscriptionReceiver, WbApi,
+    INTERNAL_CLIENT_ID, LsSubscriptionReceiver, PSubscriptionReceiver, Protocol,
+    SubscriptionReceiver, WbApi,
     error::{ConnectionResult, WorterbuchError},
     protocol::v1::{
-        Ack, CSet, CState, CStateEvent, ClientMessage, Delete, Err, ErrorCode, Get, Lock, Ls,
-        LsState, PDelete, PGet, PLs, PState, PStateEvent, PSubscribe, Publish, RequestPattern,
-        SPub, SPubInit, ServerInfo, ServerMessage, Set, State, StateEvent, Subscribe, SubscribeLs,
-        TransactionId, Unsubscribe, UnsubscribeLs, Welcome,
+        Ack, CState, CStateEvent, ClientInfo, ClientMessage, Err, ErrorCode, LsState, PState,
+        PStateEvent, RequestPattern, ServerInfo, ServerMessage, State, StateEvent, TransactionId,
+        Welcome,
     },
 };
 
@@ -90,305 +90,272 @@ async fn forward_loop(
         return;
     }
 
+    let client_info = ClientInfo {
+        client_id: INTERNAL_CLIENT_ID,
+        protocol: Protocol::Local,
+    };
+
     while let Some(client_message) = crx.recv().await {
         match client_message {
             ClientMessage::ProtocolSwitchRequest(_) => {
                 let _ = stx.send(ServerMessage::Ack(Ack { transaction_id: 0 }));
             }
             ClientMessage::AuthorizationRequest(_) => {
-                let _ = stx.send(ServerMessage::Err(Err {
+                let response = ServerMessage::Err(Err {
                     error_code: ErrorCode::AlreadyAuthorized,
                     metadata: "No authorization required".to_owned(),
                     transaction_id: 0,
-                }));
+                });
+                let _ = stx.send(response);
             }
-            ClientMessage::Get(Get {
-                transaction_id,
-                key,
-            }) => match api.get(key).await {
-                Ok(val) => {
-                    let _ = stx.send(ServerMessage::State(State {
-                        event: StateEvent::Value(val),
-                        transaction_id,
-                        trace: None,
-                    }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::CGet(Get {
-                transaction_id,
-                key,
-            }) => match api.cget(key).await {
-                Ok(val) => {
-                    let _ = stx.send(ServerMessage::CState(CState {
-                        event: CStateEvent {
-                            value: val.0,
-                            version: val.1,
-                        },
-                        transaction_id,
-                    }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::PGet(PGet {
-                transaction_id,
-                request_pattern,
-            }) => match api.pget(request_pattern.clone()).await {
-                Ok(kvps) => {
-                    let _ = stx.send(ServerMessage::PState(PState {
-                        event: PStateEvent::KeyValuePairs(kvps),
-                        request_pattern,
-                        transaction_id,
-                        trace: None,
-                    }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::Set(Set {
-                transaction_id,
-                key,
-                value,
-            }) => match api
-                .set(transaction_id, key, value, INTERNAL_CLIENT_ID)
-                .await
-            {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::CSet(CSet {
-                transaction_id,
-                key,
-                value,
-                version,
-            }) => match api
-                .cset(transaction_id, key, value, version, INTERNAL_CLIENT_ID)
-                .await
-            {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::SPubInit(SPubInit {
-                transaction_id,
-                key,
-            }) => match api.spub_init(transaction_id, key, INTERNAL_CLIENT_ID).await {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::SPub(SPub {
-                transaction_id,
-                value,
-            }) => match api.spub(transaction_id, value, INTERNAL_CLIENT_ID).await {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::Publish(Publish {
-                transaction_id,
-                key,
-                value,
-            }) => match api
-                .publish(transaction_id, key, value, INTERNAL_CLIENT_ID)
-                .await
-            {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::Subscribe(Subscribe {
-                transaction_id,
-                key,
-                unique,
-                live_only,
-                send_traces,
-            }) => match api
-                .subscribe(
-                    INTERNAL_CLIENT_ID,
-                    transaction_id,
-                    key,
-                    unique.unwrap_or(false),
-                    live_only.unwrap_or(false),
-                    send_traces.unwrap_or(false),
-                )
-                .await
-            {
-                Ok((sub_rx, _)) => {
-                    spawn_forward_sub_events_loop(sub_rx, transaction_id, stx.clone());
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::PSubscribe(PSubscribe {
-                transaction_id,
-                request_pattern,
-                unique,
-                live_only,
-                send_traces,
-                aggregate_events: _,
-            }) => match api
-                .psubscribe(
-                    INTERNAL_CLIENT_ID,
-                    transaction_id,
-                    request_pattern.clone(),
-                    unique.unwrap_or(false),
-                    live_only.unwrap_or(false),
-                    send_traces.unwrap_or(false),
-                )
-                .await
-            {
-                Ok((psub_rx, _)) => {
-                    spawn_forward_psub_events_loop(
-                        psub_rx,
-                        transaction_id,
-                        request_pattern,
-                        stx.clone(),
-                    );
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::Unsubscribe(Unsubscribe { transaction_id }) => {
-                match api.unsubscribe(INTERNAL_CLIENT_ID, transaction_id).await {
-                    Ok(_) => {
-                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
+            ClientMessage::Get(req) => {
+                let transaction_id = req.transaction_id;
+                match api.get(req, client_info.clone()).await {
+                    Ok(val) => {
+                        let response = ServerMessage::State(State {
+                            event: StateEvent::Value(val),
+                            transaction_id,
+                            trace: None,
+                        });
+                        let _ = stx.send(response);
                     }
-                    Result::Err(e) => handle_error(&stx, e, transaction_id).await,
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
             }
-            ClientMessage::Delete(Delete {
-                transaction_id,
-                key,
-            }) => match api.delete(transaction_id, key, INTERNAL_CLIENT_ID).await {
-                Ok(val) => {
-                    let _ = stx.send(ServerMessage::State(State {
-                        transaction_id,
-                        event: StateEvent::Deleted(val),
-                        trace: None,
-                    }));
+            ClientMessage::CGet(req) => {
+                let transaction_id = req.transaction_id;
+                match api.cget(req, client_info.clone()).await {
+                    Ok(val) => {
+                        let response = ServerMessage::CState(CState {
+                            event: CStateEvent {
+                                value: val.0,
+                                version: val.1,
+                            },
+                            transaction_id,
+                        });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::PDelete(PDelete {
-                transaction_id,
-                request_pattern,
-                quiet,
-            }) => match api
-                .pdelete(
-                    transaction_id,
-                    request_pattern.clone(),
-                    quiet,
-                    INTERNAL_CLIENT_ID,
-                )
-                .await
-            {
-                Ok(kvps) => {
-                    if quiet.unwrap_or(false) {
-                        let _ = stx.send(ServerMessage::PState(PState {
+            }
+            ClientMessage::PGet(req) => {
+                let transaction_id = req.transaction_id;
+                let request_pattern = req.request_pattern.clone();
+                match api.pget(req, client_info.clone()).await {
+                    Ok(kvps) => {
+                        let response = ServerMessage::PState(PState {
+                            event: PStateEvent::KeyValuePairs(kvps),
+                            request_pattern,
+                            transaction_id,
+                            trace: None,
+                        });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::Set(req) => {
+                let transaction_id = req.transaction_id;
+                match api.set(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::CSet(req) => {
+                let transaction_id = req.transaction_id;
+                match api.cset(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::SPubInit(req) => {
+                let transaction_id = req.transaction_id;
+                match api.spub_init(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::SPub(req) => {
+                let transaction_id = req.transaction_id;
+                match api.spub(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::Publish(req) => {
+                let transaction_id = req.transaction_id;
+                match api.publish(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::Subscribe(req) => {
+                let transaction_id = req.transaction_id;
+                match api.subscribe(req, client_info.clone()).await {
+                    Ok((sub_rx, _)) => {
+                        spawn_forward_sub_events_loop(sub_rx, transaction_id, stx.clone());
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::PSubscribe(req) => {
+                let transaction_id = req.transaction_id;
+                let request_pattern = req.request_pattern.clone();
+                match api.psubscribe(req, client_info.clone()).await {
+                    Ok((psub_rx, _)) => {
+                        spawn_forward_psub_events_loop(
+                            psub_rx,
                             transaction_id,
                             request_pattern,
-                            event: PStateEvent::Deleted(kvps),
-                            trace: None,
-                        }));
-                    } else {
-                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
+                            stx.clone(),
+                        );
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
                     }
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::Ls(Ls {
-                transaction_id,
-                parent,
-            }) => match api.ls(parent).await {
-                Ok(children) => {
-                    let _ = stx.send(ServerMessage::LsState(LsState {
-                        transaction_id,
-                        children,
-                        trace: None,
-                    }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::PLs(PLs {
-                transaction_id,
-                parent_pattern,
-            }) => match api.pls(parent_pattern).await {
-                Ok(children) => {
-                    let _ = stx.send(ServerMessage::LsState(LsState {
-                        transaction_id,
-                        children,
-                        trace: None,
-                    }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::SubscribeLs(SubscribeLs {
-                transaction_id,
-                parent,
-                send_traces,
-            }) => match api
-                .subscribe_ls(
-                    INTERNAL_CLIENT_ID,
-                    transaction_id,
-                    parent,
-                    send_traces.unwrap_or(false),
-                )
-                .await
-            {
-                Ok((lssub_rx, _)) => {
-                    spawn_forward_lssub_events_loop(lssub_rx, transaction_id, stx.clone());
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::UnsubscribeLs(UnsubscribeLs { transaction_id }) => {
-                match api.unsubscribe_ls(INTERNAL_CLIENT_ID, transaction_id).await {
-                    Ok(_) => {
-                        let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
-                    }
-                    Result::Err(e) => handle_error(&stx, e, transaction_id).await,
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
             }
-            ClientMessage::Lock(Lock {
-                transaction_id,
-                key,
-            }) => match api.lock(transaction_id, key, INTERNAL_CLIENT_ID).await {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
+            ClientMessage::Unsubscribe(req) => {
+                let transaction_id = req.transaction_id;
+                match api.unsubscribe(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::AcquireLock(Lock {
-                transaction_id,
-                key,
-            }) => match api
-                .acquire_lock(transaction_id, key, INTERNAL_CLIENT_ID)
-                .await
-            {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
+            }
+            ClientMessage::Delete(req) => {
+                let transaction_id = req.transaction_id;
+                match api.delete(req, client_info.clone()).await {
+                    Ok(val) => {
+                        let response = ServerMessage::State(State {
+                            transaction_id,
+                            event: StateEvent::Deleted(val),
+                            trace: None,
+                        });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            ClientMessage::ReleaseLock(Lock {
-                transaction_id,
-                key,
-            }) => match api
-                .release_lock(transaction_id, key, INTERNAL_CLIENT_ID)
-                .await
-            {
-                Ok(_) => {
-                    let _ = stx.send(ServerMessage::Ack(Ack { transaction_id }));
+            }
+            ClientMessage::PDelete(req) => {
+                let transaction_id = req.transaction_id;
+                let request_pattern = req.request_pattern.clone();
+                let quiet = req.quiet;
+                match api.pdelete(req, client_info.clone()).await {
+                    Ok(kvps) => {
+                        let response = if quiet.unwrap_or(false) {
+                            ServerMessage::PState(PState {
+                                transaction_id,
+                                request_pattern,
+                                event: PStateEvent::Deleted(kvps),
+                                trace: None,
+                            })
+                        } else {
+                            ServerMessage::Ack(Ack { transaction_id })
+                        };
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
                 }
-                Result::Err(e) => handle_error(&stx, e, transaction_id).await,
-            },
-            // ClientMessage::Transform(_) => todo!(),
+            }
+            ClientMessage::Ls(req) => {
+                let transaction_id = req.transaction_id;
+                match api.ls(req, client_info.clone()).await {
+                    Ok(children) => {
+                        let response = ServerMessage::LsState(LsState {
+                            transaction_id,
+                            children,
+                            trace: None,
+                        });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::PLs(req) => {
+                let transaction_id = req.transaction_id;
+                match api.pls(req, client_info.clone()).await {
+                    Ok(children) => {
+                        let response = ServerMessage::LsState(LsState {
+                            transaction_id,
+                            children,
+                            trace: None,
+                        });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::SubscribeLs(req) => {
+                let transaction_id = req.transaction_id;
+                match api.subscribe_ls(req, client_info.clone()).await {
+                    Ok((lssub_rx, _)) => {
+                        spawn_forward_lssub_events_loop(lssub_rx, transaction_id, stx.clone());
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::UnsubscribeLs(req) => {
+                let transaction_id = req.transaction_id;
+                match api.unsubscribe_ls(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::Lock(req) => {
+                let transaction_id = req.transaction_id;
+                match api.lock(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::AcquireLock(req) => {
+                let transaction_id = req.transaction_id;
+                match api.acquire_lock(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            }
+            ClientMessage::ReleaseLock(req) => {
+                let transaction_id = req.transaction_id;
+                match api.release_lock(req, client_info.clone()).await {
+                    Ok(_) => {
+                        let response = ServerMessage::Ack(Ack { transaction_id });
+                        let _ = stx.send(response);
+                    }
+                    Err(e) => handle_error(&stx, e, transaction_id).await,
+                }
+            } // ClientMessage::Transform(_) => todo!(),
         }
     }
 }

@@ -61,7 +61,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_udp_server_socket,
     write_line_and_flush,
 };
@@ -307,8 +307,13 @@ async fn serve(
 
     info!("New client connected: {client_id} ({remote_addr})");
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Quic,
+    };
+
     match worterbuch
-        .connected(client_id, Some(remote_addr), Protocol::QUIC)
+        .connected(client_info.clone(), Some(remote_addr))
         .await
     {
         Ok(ejected) => {
@@ -334,7 +339,7 @@ async fn serve(
     info!("Client disconnected: {client_id} ({remote_addr})");
 
     worterbuch
-        .disconnected(client_id, Protocol::QUIC, Some(remote_addr))
+        .disconnected(client_info, Some(remote_addr))
         .await?;
 
     Ok(())
@@ -395,9 +400,14 @@ async fn serve_loop(
     });
     quic_send_tx.send(welcome).await.into_diagnostic()?;
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Quic,
+    };
+
     let proto = Proto::new(
         subsys.clone(),
-        client_id,
+        client_info,
         quic_send_tx,
         authorization_required,
         config,

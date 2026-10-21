@@ -81,7 +81,11 @@ use websocket::serve;
 use worterbuch_common::{
     AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    protocol::v1::{Interface, Key, KeyValuePairs, ServerInfo, StateEvent},
+    protocol::v1::{
+        ClientInfo, Delete, Get, Key, KeyValuePairs, Ls, PDelete, PGet, PSubscribe, Publish,
+        RequestPattern, ServerInfo, Set, StateEvent, Subscribe, SubscribeLs, Unsubscribe,
+        UnsubscribeLs,
+    },
     socket::create_tcp_server_socket,
 };
 
@@ -257,6 +261,13 @@ fn decompress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
     e.finish()
 }
 
+fn http_client_info() -> ClientInfo {
+    ClientInfo {
+        client_id: Uuid::new_v4(),
+        protocol: Protocol::Http,
+    }
+}
+
 async fn get_value(
     Path(key): Path<Key>,
     content_type: Option<TypedHeader<ContentType>>,
@@ -272,7 +283,11 @@ async fn get_value(
 
     let content_type = content_type.map(|h| h.0);
 
-    match wb.get(key.clone()).await {
+    let req = Get {
+        transaction_id: 1,
+        key: key.clone(),
+    };
+    match wb.get(req, http_client_info()).await {
         Ok(value) => {
             if let Some(pointer) = pointer {
                 let key = key + pointer;
@@ -308,7 +323,11 @@ async fn pget(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
     }
-    Ok(Json(wb.pget(pattern).await?))
+    let req = PGet {
+        transaction_id: 1,
+        request_pattern: pattern,
+    };
+    Ok(Json(wb.pget(req, http_client_info()).await?))
 }
 
 async fn set(
@@ -320,8 +339,12 @@ async fn set(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
-    let client_id = ClientId::new_v4();
-    wb.set(1, key, value, client_id).await?;
+    let req = Set {
+        transaction_id: 1,
+        key,
+        value,
+    };
+    wb.set(req, http_client_info()).await?;
     Ok(Json("Ok"))
 }
 
@@ -334,7 +357,12 @@ async fn publish(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
-    wb.publish(1, key, value, Uuid::new_v4()).await?;
+    let req = Publish {
+        transaction_id: 1,
+        key,
+        value,
+    };
+    wb.publish(req, http_client_info()).await?;
     Ok(Json("Ok"))
 }
 
@@ -346,8 +374,11 @@ async fn delete_value(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
-    let client_id = ClientId::new_v4();
-    Ok(Json(wb.delete(1, key, client_id).await?))
+    let req = Delete {
+        transaction_id: 1,
+        key,
+    };
+    Ok(Json(wb.delete(req, http_client_info()).await?))
 }
 
 async fn pdelete(
@@ -360,8 +391,12 @@ async fn pdelete(
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
     let quiet = params.get("quiet").map(|it| it.to_lowercase() != "false");
-    let client_id = ClientId::new_v4();
-    Ok(Json(wb.pdelete(1, pattern, quiet, client_id).await?))
+    let req = PDelete {
+        transaction_id: 1,
+        request_pattern: pattern,
+        quiet,
+    };
+    Ok(Json(wb.pdelete(req, http_client_info()).await?))
 }
 
 async fn ls(
@@ -372,7 +407,11 @@ async fn ls(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
-    Ok(Json(wb.ls(Some(parent)).await?))
+    let req = Ls {
+        transaction_id: 1,
+        parent: Some(parent),
+    };
+    Ok(Json(wb.ls(req, http_client_info()).await?))
 }
 
 async fn ls_root(
@@ -382,7 +421,11 @@ async fn ls_root(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
-    Ok(Json(wb.ls(None).await?))
+    let req = Ls {
+        transaction_id: 1,
+        parent: None,
+    };
+    Ok(Json(wb.ls(req, http_client_info()).await?))
 }
 
 async fn subscribe(
@@ -395,33 +438,22 @@ async fn subscribe(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
-    let client_id = ClientId::new_v4();
-    connected(&wb, client_id, remote_addr).await?;
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let unique: bool = params
-        .get("unique")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
-    let live_only: bool = params
-        .get("liveOnly")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
-    let send_traces: bool = params
-        .get("sendTraces")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
+    let unique = params.get("unique").map(trueish);
+    let live_only = params.get("liveOnly").map(trueish);
+    let send_traces = params.get("sendTraces").map(trueish);
     let wb_unsub = wb.named("unsubscribe");
+    let req = Subscribe {
+        transaction_id,
+        key,
+        unique,
+        live_only,
+        send_traces,
+    };
 
-    let (mut rx, _) = wb
-        .subscribe(
-            client_id,
-            transaction_id,
-            key,
-            unique,
-            live_only,
-            send_traces,
-        )
-        .await?;
+    let (mut rx, _) = wb.subscribe(req, client_info.clone()).await?;
     let (sse_tx, sse_rx) = mpsc::channel(100);
 
     // TODO listen for shutdown requests
@@ -457,13 +489,11 @@ async fn subscribe(
                 }
             }
         }
-        if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+        let req = Unsubscribe { transaction_id };
+        if let Err(e) = wb_unsub.unsubscribe(req, client_info.clone()).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub
-            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
-            .await
-        {
+        if let Err(e) = wb_unsub.disconnected(client_info, Some(remote_addr)).await {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -473,42 +503,35 @@ async fn subscribe(
 }
 
 async fn psubscribe(
-    Path(key): Path<Key>,
+    Path(request_pattern): Path<RequestPattern>,
     Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
     ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Sse<impl Stream<Item = Result<Event, axum::Error>>>> {
     if let Some(privileges) = privileges {
-        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
+        privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&request_pattern))?;
     }
-    let client_id = ClientId::new_v4();
-    connected(&wb, client_id, remote_addr).await?;
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let unique: bool = params
-        .get("unique")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
-    let live_only: bool = params
-        .get("liveOnly")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
-    let send_traces: bool = params
-        .get("sendTraces")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
+    let unique = params.get("unique").map(trueish);
+    let live_only = params.get("liveOnly").map(trueish);
+    let send_traces = params.get("sendTraces").map(trueish);
+    let aggregate_events = params
+        .get("aggregateEvents")
+        .and_then(|p| p.parse::<u64>().ok());
     let wb_unsub = wb.named("unsubscribe");
+    let req = PSubscribe {
+        transaction_id,
+        request_pattern,
+        unique,
+        live_only,
+        send_traces,
+        aggregate_events,
+    };
 
-    let (mut rx, _) = wb
-        .psubscribe(
-            client_id,
-            transaction_id,
-            key,
-            unique,
-            live_only,
-            send_traces,
-        )
-        .await?;
+    let (mut rx, _) = wb.psubscribe(req, client_info.clone()).await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
 
@@ -535,13 +558,11 @@ async fn psubscribe(
                 }
             }
         }
-        if let Err(e) = wb_unsub.unsubscribe(client_id, transaction_id).await {
+        let req = Unsubscribe { transaction_id };
+        if let Err(e) = wb_unsub.unsubscribe(req, client_info.clone()).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub
-            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
-            .await
-        {
+        if let Err(e) = wb_unsub.disconnected(client_info, Some(remote_addr)).await {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -559,18 +580,19 @@ async fn subscribels_root(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
-    let client_id = ClientId::new_v4();
-    connected(&wb, client_id, remote_addr).await?;
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let send_traces: bool = params
-        .get("sendTraces")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
+    let send_traces = params.get("sendTraces").map(trueish);
+    let parent = None;
     let wb_unsub = wb.named("unsubscribe");
+    let req = SubscribeLs {
+        transaction_id,
+        send_traces,
+        parent,
+    };
 
-    let (mut rx, _) = wb
-        .subscribe_ls(client_id, transaction_id, None, send_traces)
-        .await?;
+    let (mut rx, _) = wb.subscribe_ls(req, client_info.clone()).await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
 
@@ -597,13 +619,11 @@ async fn subscribels_root(
                 }
             }
         }
-        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+        let req = UnsubscribeLs { transaction_id };
+        if let Err(e) = wb_unsub.unsubscribe_ls(req, client_info.clone()).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub
-            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
-            .await
-        {
+        if let Err(e) = wb_unsub.disconnected(client_info, Some(remote_addr)).await {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -622,18 +642,19 @@ async fn subscribels(
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
-    let client_id = ClientId::new_v4();
-    connected(&wb, client_id, remote_addr).await?;
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let send_traces: bool = params
-        .get("sendTraces")
-        .map(|it| it.to_lowercase() != "false")
-        .unwrap_or(false);
+    let send_traces = params.get("sendTraces").map(trueish);
+    let parent = Some(parent);
     let wb_unsub = wb.named("unsubscribe");
+    let req = SubscribeLs {
+        transaction_id,
+        send_traces,
+        parent,
+    };
 
-    let (mut rx, _) = wb
-        .subscribe_ls(client_id, transaction_id, Some(parent), send_traces)
-        .await?;
+    let (mut rx, _) = wb.subscribe_ls(req, client_info.clone()).await?;
 
     let (sse_tx, sse_rx) = mpsc::channel(100);
 
@@ -660,13 +681,11 @@ async fn subscribels(
                 }
             }
         }
-        if let Err(e) = wb_unsub.unsubscribe_ls(client_id, transaction_id).await {
+        let req = UnsubscribeLs { transaction_id };
+        if let Err(e) = wb_unsub.unsubscribe_ls(req, client_info.clone()).await {
             error!("Error stopping subscription: {e}");
         }
-        if let Err(e) = wb_unsub
-            .disconnected(client_id, Protocol::HTTP, Some(remote_addr))
-            .await
-        {
+        if let Err(e) = wb_unsub.disconnected(client_info, Some(remote_addr)).await {
             error!("Error disconnecting client: {e}");
         }
     });
@@ -873,7 +892,7 @@ pub async fn build_worterbuch_router(
 
     if ws_enabled {
         let (ws_stream_tx, ws_stream_rx) = mpsc::channel(1024);
-        let wb = worterbuch.for_interface("ws", Interface::Protocol(Protocol::WS));
+        let wb = worterbuch.for_protocol("ws", Protocol::Ws);
         subsys.spawn("wsserver", async |s| {
             run_ws_server(s, ws_stream_rx, wb).await
         });
@@ -1057,16 +1076,19 @@ async fn run_ws_server(
 
 async fn connected(
     wb: &CloneableWbApi,
-    client_id: ClientId,
+    client_info: ClientInfo,
     remote_addr: SocketAddr,
 ) -> WorterbuchResult<()> {
-    if let Err(e) = wb
-        .connected(client_id, Some(remote_addr), Protocol::HTTP)
-        .await
-    {
+    let client_id = client_info.client_id;
+    if let Err(e) = wb.connected(client_info, Some(remote_addr)).await {
         error!("Error adding client {client_id} ({remote_addr}): {e}");
         Err(e)?
     } else {
         Ok(())
     }
+}
+
+fn trueish(it: &String) -> bool {
+    let trimmed = it.trim();
+    trimmed != "0" && trimmed.to_lowercase() != "false"
 }

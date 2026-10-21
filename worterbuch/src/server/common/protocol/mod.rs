@@ -34,7 +34,8 @@ use worterbuch_common::{
     ClientId, LockAcquiredReceiver, LockLostReceiver, WbApi,
     error::{Context, WorterbuchError, WorterbuchResult},
     protocol::v1::{
-        Ack, ClientMessage, Err, ErrorCode, ProtocolVersionSegment, ServerMessage, TransactionId,
+        Ack, ClientInfo, ClientMessage, Err, ErrorCode, ProtocolVersionSegment, ServerMessage,
+        TransactionId,
     },
 };
 
@@ -54,7 +55,7 @@ pub struct Proto {
 impl Proto {
     pub fn new(
         subsys: Subsystem,
-        client_id: ClientId,
+        client_info: ClientInfo,
         tx: ServerMessageBroadcaster,
         auth_required: bool,
         config: Config,
@@ -63,7 +64,7 @@ impl Proto {
         let latest = V2::new(V1::new(V0 {
             subsys,
             auth_required,
-            client_id,
+            client_info,
             config,
             tx,
             worterbuch,
@@ -143,7 +144,7 @@ impl Proto {
                     .v1
                     .v0
                     .worterbuch
-                    .protocol_switched(self.client_id(), protocol_switch_request.version)
+                    .protocol_switched(self.client_info(), protocol_switch_request.version)
                     .await?;
                 let response = Ack { transaction_id: 0 };
                 trace!("Protocol switched, queuing Ack …");
@@ -174,7 +175,11 @@ impl Proto {
     }
 
     fn client_id(&self) -> ClientId {
-        self.latest.v1.v0.client_id
+        self.latest.v1.v0.client_id()
+    }
+
+    fn client_info(&self) -> ClientInfo {
+        self.latest.v1.v0.client_info()
     }
 
     fn tx(&self) -> &ServerMessageBroadcaster {

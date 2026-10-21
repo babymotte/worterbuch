@@ -41,10 +41,7 @@ use std::{
 };
 use tokio::{
     spawn,
-    sync::{
-        mpsc::{self, Receiver, channel},
-        oneshot,
-    },
+    sync::mpsc::{self, Receiver, channel},
     time::sleep,
 };
 use totils::while_select;
@@ -54,14 +51,18 @@ use worterbuch_common::{
     PSubscription, Protocol, RegularKeySegment, Subscription, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult, WrappedResult},
     is_client_sys_wildcard_topic, parse_segments,
-    protocol::v1::{
-        CasVersion, GraveGoods, Interface, InternalAction, Key, KeyValuePair, KeyValuePairs,
-        LastWill, Method, PState, PStateEvent, ProtocolMajorVersion, RequestPattern,
-        SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
-        SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
-        SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_CONFIG, SYSTEM_TOPIC_GRAVE_GOODS,
-        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_ROOT_PREFIX,
-        SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent, Trace, TraceData, TransactionId,
+    protocol::{
+        self,
+        v1::{
+            CasVersion, GraveGoods, InternalAction, Key, KeyValuePair, KeyValuePairs, LastWill,
+            Method, PState, PStateEvent, PSubscribe, ProtocolMajorVersion, RequestPattern,
+            SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_CLIENTS_ADDRESS,
+            SYSTEM_TOPIC_CLIENTS_PROTOCOL, SYSTEM_TOPIC_CLIENTS_PROTOCOL_VERSION,
+            SYSTEM_TOPIC_CLIENTS_TIMESTAMP, SYSTEM_TOPIC_CONFIG, SYSTEM_TOPIC_GRAVE_GOODS,
+            SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_ROOT_PREFIX, SYSTEM_TOPIC_SUBSCRIPTIONS, ServerMessage, StateEvent,
+            Subscribe, SubscribeLs, Trace, TraceData, TransactionId,
+        },
     },
     topic,
 };
@@ -83,6 +84,36 @@ impl SubscriptionFlags {
             unique,
             live_only,
             send_traces,
+        }
+    }
+}
+
+impl From<&Subscribe> for SubscriptionFlags {
+    fn from(subscribe: &Subscribe) -> Self {
+        Self {
+            unique: subscribe.unique.unwrap_or(false),
+            live_only: subscribe.live_only.unwrap_or(false),
+            send_traces: subscribe.send_traces.unwrap_or(false),
+        }
+    }
+}
+
+impl From<&PSubscribe> for SubscriptionFlags {
+    fn from(subscribe: &PSubscribe) -> Self {
+        Self {
+            unique: subscribe.unique.unwrap_or(false),
+            live_only: subscribe.live_only.unwrap_or(false),
+            send_traces: subscribe.send_traces.unwrap_or(false),
+        }
+    }
+}
+
+impl From<&SubscribeLs> for SubscriptionFlags {
+    fn from(subscribe: &SubscribeLs) -> Self {
+        Self {
+            unique: false,
+            live_only: false,
+            send_traces: subscribe.send_traces.unwrap_or(false),
         }
     }
 }
@@ -420,7 +451,7 @@ impl Worterbuch {
         trace_data: TraceData,
     ) -> WorterbuchResult<()> {
         let cause = Trace::client_request(Method::Set, &trace_data);
-        self.internal_set(key, value, trace_data.client_id, cause, force)
+        self.internal_set(key, value, trace_data.client_id(), cause, force)
             .await
     }
 
@@ -479,7 +510,7 @@ impl Worterbuch {
         trace_data: TraceData,
     ) -> WorterbuchResult<()> {
         let trace = Trace::client_request(Method::CSet, &trace_data);
-        self.internal_cset(key, value, version, trace_data.client_id, trace, force)
+        self.internal_cset(key, value, version, trace_data.client_id(), trace, force)
             .await
     }
 
@@ -534,8 +565,8 @@ impl Worterbuch {
     }
 
     pub async fn spub_init(&mut self, key: Key, trace_data: TraceData) -> WorterbuchResult<()> {
-        check_for_read_only_key(&key, trace_data.client_id)?;
-        self.store_key(trace_data.client_id, trace_data.transaction_id, key);
+        check_for_read_only_key(&key, trace_data.client_id())?;
+        self.store_key(trace_data.client_id(), trace_data.transaction_id, key);
 
         Ok(())
     }
@@ -546,7 +577,7 @@ impl Worterbuch {
         client_id: ClientId,
         trace_data: TraceData,
     ) -> WorterbuchResult<()> {
-        if let Some(key) = self.lookup_key(trace_data.client_id, trace_data.transaction_id) {
+        if let Some(key) = self.lookup_key(trace_data.client_id(), trace_data.transaction_id) {
             self.publish(key, value, client_id, trace_data).await
         } else {
             Err(WorterbuchError::NoPubStream(trace_data.transaction_id))
@@ -600,7 +631,7 @@ impl Worterbuch {
     ) -> WorterbuchResult<Subscription> {
         let trace = Trace::client_request(Method::Subscribe, &trace_data);
         self.internal_subscribe(
-            trace_data.client_id,
+            trace_data.client_id(),
             trace_data.transaction_id,
             trace,
             key,
@@ -713,7 +744,7 @@ impl Worterbuch {
     ) -> WorterbuchResult<PSubscription> {
         let trace = Trace::client_request(Method::PSubscribe, &trace_data);
         self.internal_psubscribe(
-            trace_data.client_id,
+            trace_data.client_id(),
             trace_data.transaction_id,
             trace,
             pattern,
@@ -856,14 +887,15 @@ impl Worterbuch {
             .map(|p| p.split('/').map(ToOwned::to_owned).collect())
             .unwrap_or_default();
         let (tx, rx) = channel(self.config.channel_buffer_size);
-        let subscription = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
+        let subscription = SubscriptionId::new(trace_data.client_id(), trace_data.transaction_id);
         let subscriber =
             LsSubscriber::new(subscription.clone(), path.clone(), tx.clone(), send_traces);
         self.store.add_ls_subscriber(&path, subscriber);
         tx.send((children, Some(trace.clone())))
             .await
             .expect("rx is neither closed nor dropped");
-        let subscription_id = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
+        let subscription_id =
+            SubscriptionId::new(trace_data.client_id(), trace_data.transaction_id);
         self.ls_subscriptions.insert(subscription_id, path);
         debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
         Ok((rx, subscription))
@@ -884,22 +916,19 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
-    #[instrument(level=Level::TRACE, skip(self, tx))]
-    pub fn export_for_persistence(&mut self, tx: oneshot::Sender<Export>) {
+    #[instrument(level=Level::TRACE, skip(self))]
+    pub fn export_for_persistence(&mut self) -> Export {
         let store = self.store.export_for_persistence();
         let grave_goods = self.grave_goods();
         let last_will = self.last_wills();
-        spawn(async move {
-            let _ = tx.send((json!(store), grave_goods, last_will));
-        });
+        (json!(store), grave_goods, last_will)
     }
 
     pub async fn import(
         &mut self,
         json: &str,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<Vec<(String, (ValueEntry, bool))>> {
         debug!("Parsing store data …");
         let store: PersistedStore = from_str(json).map_err(|e| {
@@ -907,11 +936,8 @@ impl Worterbuch {
         })?;
         debug!("Done. Merging nodes …");
 
-        let trace_data = TraceData {
-            client_id,
-            transaction_id,
-            interface,
-        };
+        let client_id = client_info.client_id;
+        let trace_data = TraceData::new(transaction_id, client_info);
         let cause = Trace::client_request(Method::Import, &trace_data);
 
         self.internal_import(store, client_id, cause).await
@@ -957,8 +983,8 @@ impl Worterbuch {
 
     pub async fn unsubscribe(&mut self, trace_data: TraceData) -> WorterbuchResult<()> {
         let trace = Trace::client_request(Method::Unsubscribe, &trace_data);
-        let subscription = SubscriptionId::new(trace_data.client_id, trace_data.transaction_id);
-        self.do_unsubscribe(&subscription, trace_data.client_id, trace)
+        let subscription = SubscriptionId::new(trace_data.client_id(), trace_data.transaction_id);
+        self.do_unsubscribe(&subscription, trace_data.client_id(), trace)
             .await
     }
 
@@ -1204,15 +1230,14 @@ impl Worterbuch {
     pub async fn delete(
         &mut self,
         key: Key,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<Value> {
+        let client_id = client_info.client_id;
         let cause = Trace::ClientRequest {
-            client_id,
             transaction_id,
             method: Method::Delete,
-            interface,
+            client_info,
         };
         self.internal_delete(key, client_id, cause).await
     }
@@ -1261,15 +1286,14 @@ impl Worterbuch {
     pub async fn pdelete(
         &mut self,
         pattern: RequestPattern,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<KeyValuePairs> {
+        let client_id = client_info.client_id;
         let cause = Trace::ClientRequest {
-            client_id,
             transaction_id,
             method: Method::PDelete,
-            interface,
+            client_info,
         };
         self.internal_pdelete(pattern, client_id, cause).await
     }
@@ -1337,15 +1361,15 @@ impl Worterbuch {
     pub async fn lock(
         &mut self,
         key: Key,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<LockLostReceiver> {
+        let client_id = client_info.client_id;
+
         let trace = Trace::ClientRequest {
-            client_id,
             transaction_id,
             method: Method::Lock,
-            interface,
+            client_info,
         };
 
         self.internal_lock(key, client_id, trace).await
@@ -1373,15 +1397,15 @@ impl Worterbuch {
     pub async fn acquire_lock(
         &mut self,
         key: Key,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<(LockAcquiredReceiver, LockLostReceiver)> {
+        let client_id = client_info.client_id;
+
         let trace = Trace::ClientRequest {
-            client_id,
             transaction_id,
             method: Method::AcquireLock,
-            interface,
+            client_info,
         };
 
         self.internal_acquire_lock(key, client_id, trace).await
@@ -1440,17 +1464,16 @@ impl Worterbuch {
     pub async fn release_lock(
         &mut self,
         key: Key,
-        client_id: ClientId,
         transaction_id: TransactionId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
     ) -> WorterbuchResult<()> {
+        let client_id = client_info.client_id;
         let path: Box<[RegularKeySegment]> = parse_segments(&key)?.into();
 
         let trace = Trace::ClientRequest {
-            client_id,
             transaction_id,
             method: Method::ReleaseLock,
-            interface,
+            client_info,
         };
 
         let (client_id, _) = self.store.unlock(client_id, &path)?;
@@ -1514,11 +1537,11 @@ impl Worterbuch {
 
     pub async fn connected(
         &mut self,
-        client_id: ClientId,
+        client_info: protocol::v1::ClientInfo,
         remote_addr: Option<SocketAddr>,
-        protocol: Protocol,
         eject: mpsc::Sender<()>,
     ) -> WorterbuchResult<()> {
+        let client_id = client_info.client_id;
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
         if self.clients.contains_key(&client_id) {
@@ -1527,15 +1550,15 @@ impl Worterbuch {
 
         let now = SystemTime::now().into();
 
-        self.clients
-            .insert(client_id, ClientInfo::new(protocol.clone(), eject));
-        let trace = Trace::InternalAction(InternalAction::ClientConnected {
+        self.clients.insert(
             client_id,
-            protocol: protocol.clone(),
-        });
+            ClientInfo::new(client_info.protocol.clone(), eject),
+        );
+
+        let trace = Trace::InternalAction(InternalAction::ClientConnected(client_info.clone()));
 
         if self.is_leader() {
-            self.add_client_system_entries(client_id, remote_addr, protocol, now, trace)
+            self.add_client_system_entries(client_info, remote_addr, now, trace)
                 .await;
         }
 
@@ -1544,18 +1567,19 @@ impl Worterbuch {
 
     async fn add_client_system_entries(
         &mut self,
-        client_id: uuid::Uuid,
+        client_info: protocol::v1::ClientInfo,
         remote_addr: Option<SocketAddr>,
-        protocol: Protocol,
         now: DateTime<Utc>,
         trace: Trace,
     ) {
+        let client_id = client_info.client_id;
+
         if let Err(e) = self.set_client_count(trace.clone()).await {
             error!("Error updating client protocol: {e}");
         };
 
         if let Err(e) = self
-            .set_client_protocol(&client_id, &protocol, trace.clone())
+            .set_client_protocol(&client_id, &client_info.protocol, trace.clone())
             .await
         {
             error!("Error updating client protocol: {e}");
@@ -1593,14 +1617,13 @@ impl Worterbuch {
 
     pub async fn protocol_switched(
         &mut self,
-        client_id: ClientId,
-        interface: Interface,
+        client_info: protocol::v1::ClientInfo,
         protocol: ProtocolMajorVersion,
     ) {
+        let client_id = client_info.client_id;
         let trace = Trace::ProtocolSwitch {
-            client_id,
+            client_info,
             protocol_version: protocol,
-            interface,
         };
         self.internal_protocol_switched(client_id, protocol, trace)
             .await;
@@ -1752,10 +1775,10 @@ impl Worterbuch {
 
     pub async fn disconnected(
         &mut self,
-        client_id: ClientId,
-        protocol: Protocol,
+        client_info: protocol::v1::ClientInfo,
         remote_addr: Option<SocketAddr>,
     ) {
+        let client_id = client_info.client_id;
         debug_assert!(client_id != INTERNAL_CLIENT_ID);
 
         if let Some(spubs) = self.spub_keys.remove(&client_id) {
@@ -1766,10 +1789,7 @@ impl Worterbuch {
             );
         }
 
-        let trace = Trace::InternalAction(InternalAction::ClientDisconnected {
-            client_id,
-            protocol,
-        });
+        let trace = Trace::InternalAction(InternalAction::ClientDisconnected(client_info));
 
         if let Some(keys) = self.store.unlock_all(client_id)
             && self.config.extended_monitoring
@@ -2363,6 +2383,8 @@ mod test {
     #![allow(clippy::as_conversions)]
     #![allow(clippy::unwrap_used)]
 
+    use worterbuch_common::protocol::v1::ClientInfo;
+
     use super::*;
 
     #[tokio::test]
@@ -2373,7 +2395,13 @@ mod test {
             "hello/world".to_owned(),
             json!("test"),
             false,
-            TraceData::new(INTERNAL_CLIENT_ID, Interface::Local, 123),
+            TraceData::new(
+                123,
+                ClientInfo {
+                    client_id: INTERNAL_CLIENT_ID,
+                    protocol: Protocol::Local,
+                },
+            ),
         )
         .await
         .unwrap();
@@ -2381,7 +2409,13 @@ mod test {
             "$SYS/something".to_owned(),
             json!("this should not be exported"),
             false,
-            TraceData::new(INTERNAL_CLIENT_ID, Interface::Protocol(Protocol::HTTP), 321),
+            TraceData::new(
+                321,
+                ClientInfo {
+                    client_id: INTERNAL_CLIENT_ID,
+                    protocol: Protocol::Http,
+                },
+            ),
         )
         .await
         .unwrap();
@@ -2389,7 +2423,13 @@ mod test {
             "$SYS/clients/17e679d9-a1d5-48ed-a8ec-aee155b90557/graveGoods".to_owned(),
             json!(["this/should/be/exported"]),
             false,
-            TraceData::new(INTERNAL_CLIENT_ID, Interface::Protocol(Protocol::HTTP), 321),
+            TraceData::new(
+                321,
+                ClientInfo {
+                    client_id: INTERNAL_CLIENT_ID,
+                    protocol: Protocol::Http,
+                },
+            ),
         )
         .await
         .unwrap();

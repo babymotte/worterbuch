@@ -17,6 +17,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod request_queue;
+
 use crate::{
     cluster::{
         self,
@@ -45,9 +47,8 @@ use worterbuch_common::{
     error::{ConnectionResult, WorterbuchResult},
     is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CSet, ClientMessage, Delete, ErrorCode, KeyValuePairs, Lock, PDelete, PStateEvent,
-        ProtocolSwitchRequest, Publish, SPub, SPubInit, ServerMessage, Set, StateEvent,
-        TransactionId, Value,
+        ClientMessage, ErrorCode, KeyValuePairs, Lock, PStateEvent, ProtocolSwitchRequest,
+        ServerMessage, StateEvent, TransactionId, Value,
     },
     receive_msg,
 };
@@ -65,6 +66,7 @@ pub struct LeaderConnection<'a> {
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
     read_leader_addresses_from_stdin: &'a mut bool,
+    in_flight_requests: &'a mut Vec<Request>,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -87,6 +89,7 @@ impl<'a> LeaderConnection<'a> {
             leader_addresses_updated: false,
             stdin: &mut proxy.stdin,
             read_leader_addresses_from_stdin: &mut proxy.read_leader_addresses_from_stdin,
+            in_flight_requests: &mut proxy.in_flight_requests,
         }
     }
 
@@ -262,31 +265,29 @@ impl<'a> LeaderConnection<'a> {
         trace!(enter = "process_api_call");
         debug!("Processing API call: {function:?}");
         match function {
-            WbFunction::Connected(client_id, addr, protocol, eject, tx) => {
+            WbFunction::Connected(client_info, addr, eject, tx, span) => {
                 let request = ProxyMessage::Connected(Connected {
-                    client_id,
-                    protocol: protocol.clone(),
+                    client_info: client_info.clone(),
                 });
                 self.queue_leader_request(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
-                    WbFunction::Connected(client_id, addr, protocol, eject, tx),
+                    WbFunction::Connected(client_info, addr, eject, tx, span),
                 )
                 .await;
             }
-            WbFunction::Disconnected(client_id, protocol, socket_addr) => {
+            WbFunction::Disconnected(client_info, socket_addr, span) => {
                 let grave_goods = self
                     .worterbuch
-                    .grave_goods_for_client(&client_id)
+                    .grave_goods_for_client(&client_info.client_id)
                     .unwrap_or_default();
                 let last_will = self
                     .worterbuch
-                    .last_will_for_client(&client_id)
+                    .last_will_for_client(&client_info.client_id)
                     .unwrap_or_default();
 
                 let request = ProxyMessage::Disconnected(Disconnected {
-                    client_id,
-                    protocol: protocol.clone(),
+                    client_info: client_info.clone(),
                     grave_goods,
                     last_will,
                 });
@@ -296,155 +297,153 @@ impl<'a> LeaderConnection<'a> {
                     .wrap_err("failed to forward client disconnect to leader");
                 cluster::process_api_call(
                     self.worterbuch,
-                    WbFunction::Disconnected(client_id, protocol, socket_addr),
+                    WbFunction::Disconnected(client_info.clone(), socket_addr, span),
                 )
                 .await;
-                self.locks.client_disconnected(client_id);
-                self.drop_response_interests(client_id);
+                self.locks.client_disconnected(client_info.client_id);
+                self.drop_response_interests(client_info.client_id);
                 res?;
             }
-            WbFunction::ProtocolSwitched(client_id, interface, version) => {
+            WbFunction::ProtocolSwitched(client_info, version, span) => {
                 let client_message =
                     ClientMessage::ProtocolSwitchRequest(ProtocolSwitchRequest { version });
                 let request = ProxyMessage::Request(Request {
-                    client_id,
                     msg: client_message.clone(),
-                    interface: interface.clone(),
+                    client_info: client_info.clone(),
                 });
                 let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
                 spawn(ack_rx);
-                self.register_ack_interest(client_id, 0, client_message, ack_tx);
+                self.register_ack_interest(client_info.client_id, 0, client_message, ack_tx);
                 self.queue_leader_request(request).await?;
                 cluster::process_api_call(
                     self.worterbuch,
-                    WbFunction::ProtocolSwitched(client_id, interface, version),
+                    WbFunction::ProtocolSwitched(client_info, version, span),
                 )
                 .await;
             }
-            WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
+            WbFunction::Set(req, client_info, tx, span) => {
+                let transaction_id = req.transaction_id;
                 let is_grave_goods_or_last_will =
-                    is_grave_goods_topic(&key) || is_last_will_topic(&key);
+                    is_grave_goods_topic(&req.key) || is_last_will_topic(&req.key);
                 if is_grave_goods_or_last_will {
                     cluster::process_api_call(
                         self.worterbuch,
-                        WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span),
+                        WbFunction::Set(req, client_info, tx, span),
                     )
                     .await;
                 } else {
-                    let client_message = ClientMessage::Set(Set {
+                    let client_message = ClientMessage::Set(req);
+                    let request = ProxyMessage::Request(Request::new(
+                        client_message.clone(),
+                        client_info.clone(),
+                    ));
+                    self.register_ack_interest(
+                        client_info.client_id,
                         transaction_id,
-                        key,
-                        value,
-                    });
-                    let request = ProxyMessage::Request(Request {
-                        client_id,
-                        msg: client_message.clone(),
-                        interface,
-                    });
-                    self.register_ack_interest(client_id, transaction_id, client_message, tx);
+                        client_message,
+                        tx,
+                    );
                     self.queue_leader_request(request).await?;
                 }
             }
-            WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
-                let client_message = ClientMessage::CSet(CSet {
+            WbFunction::CSet(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::CSet(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_ack_interest(
+                    client_info.client_id,
                     transaction_id,
-                    key,
-                    value,
-                    version,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_ack_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
-                let client_message = ClientMessage::SPubInit(SPubInit {
+            WbFunction::SPubInit(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::SPubInit(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_ack_interest(
+                    client_info.client_id,
                     transaction_id,
-                    key,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_ack_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
-                let client_message = ClientMessage::SPub(SPub {
+            WbFunction::SPub(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::SPub(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_ack_interest(
+                    client_info.client_id,
                     transaction_id,
-                    value,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_ack_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
-                let client_message = ClientMessage::Publish(Publish {
+            WbFunction::Publish(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::Publish(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_ack_interest(
+                    client_info.client_id,
                     transaction_id,
-                    key,
-                    value,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_ack_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
-                let client_message = ClientMessage::Delete(Delete {
+            WbFunction::Delete(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::Delete(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_state_interest(
+                    client_info.client_id,
                     transaction_id,
-                    key,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_state_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::PDelete(
-                transaction_id,
-                interface,
-                request_pattern,
-                quiet,
-                client_id,
-                tx,
-            ) => {
-                let client_message = ClientMessage::PDelete(PDelete {
+            WbFunction::PDelete(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_message = ClientMessage::PDelete(req);
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                self.register_pstate_interest(
+                    client_info.client_id,
                     transaction_id,
-                    request_pattern,
-                    quiet,
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                self.register_pstate_interest(client_id, transaction_id, client_message, tx);
+                    client_message,
+                    tx,
+                );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
-                let lock = Lock {
-                    transaction_id,
-                    key: key.clone(),
-                };
-                let client_message = ClientMessage::Lock(lock.clone());
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
+            WbFunction::Lock(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_id = client_info.client_id;
+                let client_message = ClientMessage::Lock(req.clone());
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
                 let (ack_tx, ack_rx) = oneshot::channel();
                 let (lost_tx, lost_rx) = oneshot::channel();
                 spawn(async move {
@@ -469,7 +468,7 @@ impl<'a> LeaderConnection<'a> {
                 });
                 self.register_lock_acquired_interest(
                     client_id,
-                    lock,
+                    req,
                     client_message,
                     ack_tx,
                     lost_tx,
@@ -477,17 +476,13 @@ impl<'a> LeaderConnection<'a> {
                 );
                 self.queue_leader_request(request).await?;
             }
-            WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
-                let lock = Lock {
-                    transaction_id,
-                    key: key.clone(),
-                };
-                let client_message = ClientMessage::AcquireLock(lock.clone());
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
+            WbFunction::AcquireLock(req, client_info, tx, _span) => {
+                let client_id = client_info.client_id;
+                let client_message = ClientMessage::AcquireLock(req.clone());
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
                 let (ack_tx, ack_rx) = oneshot::channel();
                 let (acked_tx, acked_rx) = oneshot::channel();
                 let (lost_tx, lost_rx) = oneshot::channel();
@@ -498,7 +493,7 @@ impl<'a> LeaderConnection<'a> {
                 });
                 self.register_lock_acquired_interest(
                     client_id,
-                    lock,
+                    req,
                     client_message,
                     ack_tx,
                     lost_tx,
@@ -507,17 +502,15 @@ impl<'a> LeaderConnection<'a> {
                 self.queue_leader_request(request).await?;
                 let _ = tx.send(Ok((acked_rx, lost_rx)));
             }
-            WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
-                let client_message = ClientMessage::ReleaseLock(Lock {
-                    transaction_id,
-                    key: key.clone(),
-                });
-                let request = ProxyMessage::Request(Request {
-                    client_id,
-                    msg: client_message.clone(),
-                    interface,
-                });
-                let Some(tids) = self.locks.released(client_id, key, self.worterbuch) else {
+            WbFunction::ReleaseLock(req, client_info, tx, _span) => {
+                let transaction_id = req.transaction_id;
+                let client_id = client_info.client_id;
+                let client_message = ClientMessage::ReleaseLock(req.clone());
+                let request = ProxyMessage::Request(Request::new(
+                    client_message.clone(),
+                    client_info.clone(),
+                ));
+                let Some(tids) = self.locks.released(client_id, req.key, self.worterbuch) else {
                     return Ok(());
                 };
 
@@ -531,7 +524,7 @@ impl<'a> LeaderConnection<'a> {
                     .await
                     .wrap_err("failed to queue leader request")?;
             }
-            WbFunction::Import(_, _, _, _, _) => {
+            WbFunction::Import(..) => {
                 warn!("Import not yet implemented");
                 // TODO forward to leader
                 // TODO register response interest

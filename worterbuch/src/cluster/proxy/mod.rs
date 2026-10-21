@@ -25,7 +25,7 @@ use crate::{
         LeaderState, Mode,
         protocol::{
             Connected, Handshake, LeaderMessage, LeaderWelcome, ProxyHandshake, ProxyId,
-            ProxyMessage, locks::Locks,
+            ProxyMessage, Request, locks::Locks,
         },
         proxy::connection::LeaderConnection,
         shutdown,
@@ -53,8 +53,8 @@ use worterbuch_common::{
     ClientId, INTERNAL_CLIENT_ID, LockLostSender,
     error::WorterbuchResult,
     protocol::v1::{
-        ClientMessage, InternalAction, KeyValuePairs, SYSTEM_TOPIC_CLUSTER, SYSTEM_TOPIC_LEADER,
-        SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace, TransactionId, Value,
+        ClientInfo, ClientMessage, InternalAction, KeyValuePairs, SYSTEM_TOPIC_CLUSTER,
+        SYSTEM_TOPIC_LEADER, SYSTEM_TOPIC_MODE, SYSTEM_TOPIC_ROOT, Trace, TransactionId, Value,
     },
     receive_msg,
     socket::{TcpSocketConfig, connect_to_tcp_server_socket},
@@ -80,6 +80,7 @@ struct Proxy {
     response_interests: HashMap<ClientId, ClientResponseInterests>,
     read_leader_addresses_from_stdin: bool,
     proxy_id: ProxyId,
+    in_flight_requests: Vec<Request>,
 }
 
 impl Proxy {
@@ -105,6 +106,7 @@ impl Proxy {
         let locks = Locks::default();
         let response_interests = HashMap::new();
         let proxy_id = ProxyId::new_v4();
+        let in_flight_requests = Vec::new();
 
         Ok(Proxy {
             subsys,
@@ -121,6 +123,7 @@ impl Proxy {
             // TODO get from config
             read_leader_addresses_from_stdin: true,
             proxy_id,
+            in_flight_requests,
         })
     }
 
@@ -329,7 +332,7 @@ impl Proxy {
             LeaderConnection::new(self, proxy_request_tx, lines, leader_address.clone());
 
         let leader_addresses_updated = match leader_connection.run().await {
-            Ok(updated) => updated,
+            Ok(it) => it,
             Err(e) => {
                 error!("Leader connection broke with an error: {:?}", e);
                 false
@@ -388,6 +391,8 @@ impl Proxy {
                 true,
             )
             .await?;
+
+        self.re_send_in_flight_requests().await?;
 
         trace!(exit = "establish_leader_session");
         Ok(Ok(()))
@@ -624,6 +629,13 @@ impl Proxy {
         trace!(exit = "initial_sync");
         Ok(())
     }
+
+    async fn re_send_in_flight_requests(&mut self) -> WorterbuchAppResult<()> {
+        for request in self.in_flight_requests.drain(..) {
+            todo!("re-send in flight requests");
+        }
+        Ok(())
+    }
 }
 
 pub(crate) async fn run(
@@ -766,8 +778,10 @@ fn connected_clients(worterbuch: &Worterbuch) -> Vec<Connected> {
         .clients()
         .iter()
         .map(|(client_id, client_info)| Connected {
-            client_id: *client_id,
-            protocol: client_info.protocol.clone(),
+            client_info: ClientInfo {
+                client_id: *client_id,
+                protocol: client_info.protocol.clone(),
+            },
         })
         .collect()
 }

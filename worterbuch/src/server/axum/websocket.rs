@@ -35,7 +35,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
 };
 
 pub(crate) async fn serve(
@@ -48,8 +48,13 @@ pub(crate) async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Ws,
+    };
+
     match worterbuch
-        .connected(client_id, Some(remote_addr), Protocol::WS)
+        .connected(client_info.clone(), Some(remote_addr))
         .await
     {
         Ok(ejected) => {
@@ -78,7 +83,7 @@ pub(crate) async fn serve(
     info!("Client disconnected: {client_id} ({remote_addr})");
 
     worterbuch
-        .disconnected(client_id, Protocol::WS, Some(remote_addr))
+        .disconnected(client_info, Some(remote_addr))
         .await?;
 
     Ok(())
@@ -118,9 +123,14 @@ async fn serve_loop(
     });
     ws_send_tx.send(welcome).await.into_diagnostic()?;
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Ws,
+    };
+
     let mut proto = Proto::new(
         subsys.clone(),
-        client_id,
+        client_info,
         ws_send_tx,
         authorization_required,
         config,
