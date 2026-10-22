@@ -20,7 +20,7 @@ mod test_common;
 use crate::test_common::TestRunner;
 
 #[test]
-fn grave_goods_and_last_will_are_presisted_with_json_storage_and_applied_after_crash() {
+fn grave_goods_and_last_will_are_persisted_with_json_storage_and_applied_after_crash() {
     let runner = TestRunner::new(
         "./tests/json/server_setup_json.json",
         "./tests/json/test_grave_goods_last_will.json",

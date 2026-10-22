@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use worterbuch_common::{
     ClientId, WorterbuchVersion, is_grave_goods_topic, is_last_will_topic,
     protocol::v1::{
-        CasVersion, GraveGoods, Key, LastWill, RequestPattern, SYSTEM_TOPIC_CLIENTS_PREFIX,
+        CasVersion, GraveGoods, Key, LastWill, Method, RequestPattern, SYSTEM_TOPIC_CLIENTS_PREFIX,
         SYSTEM_TOPIC_LOCKS_PREFIX, SYSTEM_TOPIC_ROOT_PREFIX, ServerMessage, Trace, Value,
     },
 };
@@ -113,6 +113,19 @@ impl ClientWriteCommand {
             ClientWriteCommand::Delete(key) => Some(key),
             ClientWriteCommand::PDelete(pattern) => Some(pattern),
             ClientWriteCommand::Import(_) => None,
+        }
+    }
+}
+
+impl From<&ClientWriteCommand> for Method {
+    fn from(command: &ClientWriteCommand) -> Self {
+        match command {
+            ClientWriteCommand::Set(_, _) => Method::Set,
+            ClientWriteCommand::CSet(_, _, _) => Method::CSet,
+            ClientWriteCommand::Publish(_, _) => Method::Publish,
+            ClientWriteCommand::Delete(_) => Method::Delete,
+            ClientWriteCommand::PDelete(_) => Method::PDelete,
+            ClientWriteCommand::Import(_) => Method::Import,
         }
     }
 }

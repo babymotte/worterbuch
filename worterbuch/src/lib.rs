@@ -26,7 +26,7 @@
 //! own application.
 
 mod auth;
-mod cluster;
+pub mod cluster;
 mod config;
 pub mod error;
 pub(crate) mod license;

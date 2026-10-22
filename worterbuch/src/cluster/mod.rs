@@ -19,7 +19,7 @@
 
 pub(crate) mod follower;
 pub(crate) mod leader;
-pub(crate) mod protocol;
+pub mod protocol;
 pub(crate) mod proxy;
 pub(crate) mod standalone;
 

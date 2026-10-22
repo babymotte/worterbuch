@@ -87,6 +87,9 @@ turso = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 worterbuch-common = { workspace = true, features = ["axum-errors"] }
 
+[dev-dependencies]
+worterbuch-client = { workspace = true }
+
 [lints.rust]
 # unsafe_code = "forbid"
 

@@ -194,11 +194,11 @@ impl Config {
     }
 
     pub fn with_servers(
-        proto: String,
+        proto: impl Into<String>,
         servers: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         let mut config = Config::new();
-        config.proto = proto;
+        config.proto = proto.into();
         config.servers = servers.into_iter().map(Into::into).collect();
         config
     }

@@ -15,6 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+pub mod mock_server;
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
