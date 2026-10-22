@@ -1850,14 +1850,8 @@ impl Worterbuch {
         }
 
         if let Some(grave_goods) = grave_goods {
-            self.apply_grave_goods(
-                grave_goods,
-                Trace::InternalAction(InternalAction::ApplyingGraveGoods {
-                    cause: Box::new(trace.clone()),
-                }),
-                remote_addr,
-            )
-            .await;
+            self.apply_grave_goods(grave_goods, trace.clone(), remote_addr)
+                .await;
         } else {
             debug!(
                 "Client {client_id} ({}) has no grave goods.",
@@ -1868,14 +1862,7 @@ impl Worterbuch {
         }
 
         if let Some(last_wills) = last_wills {
-            self.apply_last_wills(
-                last_wills,
-                Trace::InternalAction(InternalAction::ApplyingLastWill {
-                    cause: Box::new(trace),
-                }),
-                remote_addr,
-            )
-            .await;
+            self.apply_last_wills(last_wills, trace, remote_addr).await;
         } else {
             debug!(
                 "Client {client_id} ({}) has no last will.",
