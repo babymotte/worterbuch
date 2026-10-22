@@ -31,7 +31,7 @@ impl V2 {
         Self { v1 }
     }
 
-    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v2", client_id=%self.v1.v0.client_id))]
+    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v2", client_id=%self.v1.v0.client_id()))]
     pub async fn process_incoming_message(
         &self,
         msg: ClientMessage,

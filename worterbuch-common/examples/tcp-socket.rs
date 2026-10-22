@@ -21,7 +21,7 @@ async fn main() {
 
     let socket = TcpListener::from_std(socket).expect("socket conversion failed");
 
-    while let Some((stream, addr)) = socket.accept().await.ok() {
+    while let Ok((stream, addr)) = socket.accept().await {
         spawn(serve(stream, addr));
     }
 }

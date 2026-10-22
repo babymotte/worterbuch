@@ -178,7 +178,7 @@ async fn provide_key_value_pair_from_line(
     tx: &mpsc::Sender<(Key, Value)>,
 ) -> ControlFlow<()> {
     if let Some(line) = recv {
-        provide_key_value_pair(json, line, &tx).await
+        provide_key_value_pair(json, line, tx).await
     } else {
         ControlFlow::Break(())
     }

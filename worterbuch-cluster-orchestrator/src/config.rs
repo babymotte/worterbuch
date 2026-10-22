@@ -352,7 +352,7 @@ pub async fn instrument_and_load_config(
         .wrap_err("failed to load config")?;
 
     log_reload_handle
-        .start_log_targets_reload_loop(&subsys, Duration::from_secs(config.config_scan_interval));
+        .start_log_targets_reload_loop(subsys, Duration::from_secs(config.config_scan_interval));
 
     Ok((config, peer_rx))
 }

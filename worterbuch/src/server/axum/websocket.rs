@@ -19,10 +19,7 @@
 
 use crate::{
     auth::JwtClaims,
-    server::common::{
-        CloneableWbApi,
-        protocol::{LazyBroadcaster, Proto, ServerMessageReceiver, server_message_channel},
-    },
+    server::common::{CloneableWbApi, protocol::Proto},
     stats::VERSION,
 };
 use axum::extract::ws::{Message, WebSocket};
@@ -38,7 +35,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
 };
 
 pub(crate) async fn serve(
@@ -51,8 +48,13 @@ pub(crate) async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr})");
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Ws,
+    };
+
     match worterbuch
-        .connected(client_id, Some(remote_addr), Protocol::WS)
+        .connected(client_info.clone(), Some(remote_addr))
         .await
     {
         Ok(ejected) => {
@@ -81,7 +83,7 @@ pub(crate) async fn serve(
     info!("Client disconnected: {client_id} ({remote_addr})");
 
     worterbuch
-        .disconnected(client_id, Protocol::WS, Some(remote_addr))
+        .disconnected(client_info, Some(remote_addr))
         .await?;
 
     Ok(())
@@ -104,7 +106,7 @@ async fn serve_loop(
     let mut authorized = None;
 
     let (ws_tx, mut ws_rx) = websocket.split();
-    let (ws_send_tx, ws_send_rx) = server_message_channel(config.channel_buffer_size);
+    let (ws_send_tx, ws_send_rx) = mpsc::channel(config.channel_buffer_size);
 
     // websocket send loop
     subsys.spawn("send-loop", move |s| {
@@ -119,11 +121,16 @@ async fn serve_loop(
             authorization_required,
         ),
     });
-    ws_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    ws_send_tx.send(welcome).await.into_diagnostic()?;
+
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Ws,
+    };
 
     let mut proto = Proto::new(
         subsys.clone(),
-        client_id,
+        client_info,
         ws_send_tx,
         authorization_required,
         config,
@@ -179,13 +186,12 @@ async fn send_loop(
     client_id: ClientId,
     send_timeout: Duration,
     mut ws_tx: SplitSink<WebSocket, Message>,
-    mut ws_send_rx: ServerMessageReceiver,
+    mut ws_send_rx: mpsc::Receiver<ServerMessage>,
 ) -> miette::Result<()> {
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = ws_send_rx.recv() => if let Some(msg) = recv {
-            let Ok(msg) = msg else { break; };
             select! {
                 biased;
                 _ = subsys.shutdown_requested() => break,

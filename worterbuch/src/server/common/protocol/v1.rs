@@ -20,9 +20,7 @@
 use super::v0::V0;
 use crate::{
     auth::JwtClaims,
-    server::common::protocol::{
-        LazyBroadcaster, forward_lock_acquired, forward_lock_lost, v0::handle_store_error_lazy,
-    },
+    server::common::protocol::{forward_lock_acquired, forward_lock_lost, v0::handle_store_error},
 };
 use tracing::{Level, instrument, trace};
 use worterbuch_common::{
@@ -41,7 +39,7 @@ impl V1 {
         Self { v0 }
     }
 
-    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v1", client_id=%self.v0.client_id))]
+    #[instrument(level=Level::TRACE, skip(self), fields(protocol = "v1", client_id=%self.v0.client_id()))]
     pub async fn process_incoming_message(
         &self,
         msg: ClientMessage,
@@ -54,9 +52,9 @@ impl V1 {
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Getting CAS value for client {} …", self.v0.client_id);
+                    trace!("Getting CAS value for client {} …", self.v0.client_id());
                     self.cget(msg).await;
-                    trace!("Getting CAS value for client {} done.", self.v0.client_id);
+                    trace!("Getting CAS value for client {} done.", self.v0.client_id());
                 }
             }
             ClientMessage::CSet(msg) => {
@@ -65,9 +63,9 @@ impl V1 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Setting cas value for client {} …", self.v0.client_id);
+                    trace!("Setting cas value for client {} …", self.v0.client_id());
                     self.cset(msg).await;
-                    trace!("Setting cas value for client {} done.", self.v0.client_id);
+                    trace!("Setting cas value for client {} done.", self.v0.client_id());
                 }
             }
             ClientMessage::Lock(msg) => {
@@ -76,9 +74,9 @@ impl V1 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Locking key for client {} …", self.v0.client_id);
+                    trace!("Locking key for client {} …", self.v0.client_id());
                     self.lock(msg).await;
-                    trace!("Locking key for client {} done.", self.v0.client_id);
+                    trace!("Locking key for client {} done.", self.v0.client_id());
                 }
             }
             ClientMessage::AcquireLock(msg) => {
@@ -87,9 +85,9 @@ impl V1 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Locking key for client {} …", self.v0.client_id);
+                    trace!("Locking key for client {} …", self.v0.client_id());
                     self.acquire_lock(msg).await;
-                    trace!("Locking key for client {} done.", self.v0.client_id);
+                    trace!("Locking key for client {} done.", self.v0.client_id());
                 }
             }
             ClientMessage::ReleaseLock(msg) => {
@@ -98,9 +96,9 @@ impl V1 {
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
-                    trace!("Unlocking key for client {} …", self.v0.client_id);
+                    trace!("Unlocking key for client {} …", self.v0.client_id());
                     self.release_lock(msg).await;
-                    trace!("Unlocking key for client {} done.", self.v0.client_id);
+                    trace!("Unlocking key for client {} done.", self.v0.client_id());
                 }
             }
             msg => {
@@ -112,62 +110,55 @@ impl V1 {
 
     pub async fn cget(&self, msg: Get) {
         let transaction_id = msg.transaction_id;
-        self.v0
-            .respond(
-                transaction_id,
-                self.v0.worterbuch.cget_deferred(msg.key),
-                move |(value, version)| {
-                    ServerMessage::CState(CState {
-                        transaction_id,
-                        event: CStateEvent { value, version },
-                    })
-                },
-            )
-            .await;
-    }
-
-    pub async fn cset(&self, msg: CSet) {
-        let transaction_id = msg.transaction_id;
-        self.v0
-            .respond(
-                transaction_id,
-                self.v0.worterbuch.cset_deferred(
-                    transaction_id,
-                    msg.key,
-                    msg.value,
-                    msg.version,
-                    self.v0.client_id,
-                ),
-                move |()| ServerMessage::Ack(Ack { transaction_id }),
-            )
-            .await;
-    }
-
-    pub async fn lock(&self, msg: Lock) {
-        let lock_lost_forwarder_name = format!("forward_lock_lost/{}", msg.key);
-        let lost_rx = match self
-            .v0
-            .worterbuch
-            .lock(msg.transaction_id, msg.key, self.v0.client_id)
-            .await
-        {
+        let (value, version) = match self.v0.worterbuch.cget(msg, self.v0.client_info()).await {
             Ok(it) => it,
             Err(e) => {
-                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.v0.tx, e, transaction_id).await;
                 return;
             }
         };
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
+        let response = CState {
+            transaction_id,
+            event: CStateEvent { value, version },
         };
 
+        let msg = ServerMessage::CState(response);
+        let _ = self.v0.tx.send(msg).await;
+    }
+
+    pub async fn cset(&self, msg: CSet) {
+        let transaction_id = msg.transaction_id;
+        if let Err(e) = self.v0.worterbuch.cset(msg, self.v0.client_info()).await {
+            handle_store_error(&self.v0.tx, e, transaction_id).await;
+            return;
+        }
+
+        let response = Ack { transaction_id };
+
+        trace!("Value set, queuing Ack …");
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
+        trace!("Value set, queuing Ack done.");
+    }
+
+    pub async fn lock(&self, msg: Lock) {
+        let transaction_id = msg.transaction_id;
+        let lock_lost_forwarder_name = format!("forward_lock_lost/{}", msg.key);
+        let lost_rx = match self.v0.worterbuch.lock(msg, self.v0.client_info()).await {
+            Ok(it) => it,
+            Err(e) => {
+                handle_store_error(&self.v0.tx, e, transaction_id).await;
+                return;
+            }
+        };
+
+        let response = Ack { transaction_id };
+
         trace!("Key locked, queuing Ack …");
-        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
         trace!("Key locked, queuing Ack done.");
 
         let client = self.v0.tx.clone();
-        let transaction_id = msg.transaction_id;
         self.v0
             .subsys
             .spawn(lock_lost_forwarder_name, move |s| async move {
@@ -176,22 +167,22 @@ impl V1 {
     }
 
     pub async fn acquire_lock(&self, msg: Lock) {
+        let transaction_id = msg.transaction_id;
         let lock_lost_forwarder_name = format!("forward_lock_lost/{}", msg.key);
         let (acquired_rx, lost_rx) = match self
             .v0
             .worterbuch
-            .acquire_lock(msg.transaction_id, msg.key, self.v0.client_id)
+            .acquire_lock(msg, self.v0.client_info())
             .await
         {
             Err(e) => {
-                handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+                handle_store_error(&self.v0.tx, e, transaction_id).await;
                 return;
             }
             Ok(rx) => rx,
         };
 
         let client = self.v0.tx.clone();
-        let transaction_id = msg.transaction_id;
 
         self.v0
             .subsys
@@ -201,22 +192,21 @@ impl V1 {
     }
 
     pub async fn release_lock(&self, msg: Lock) {
+        let transaction_id = msg.transaction_id;
         if let Err(e) = self
             .v0
             .worterbuch
-            .release_lock(msg.transaction_id, msg.key, self.v0.client_id)
+            .release_lock(msg, self.v0.client_info())
             .await
         {
-            handle_store_error_lazy(&self.v0.tx, e, msg.transaction_id).await;
+            handle_store_error(&self.v0.tx, e, transaction_id).await;
             return;
         }
 
-        let response = Ack {
-            transaction_id: msg.transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         trace!("Key unlocked, queuing Ack …");
-        let _ = self.v0.tx.lazy_send(ServerMessage::Ack(response)).await;
+        let _ = self.v0.tx.send(ServerMessage::Ack(response)).await;
         trace!("Key unlocked, queuing Ack done.");
     }
 }

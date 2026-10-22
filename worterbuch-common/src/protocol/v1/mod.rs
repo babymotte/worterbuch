@@ -24,7 +24,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fmt;
-use uuid::Uuid;
 
 pub use client::*;
 pub use server::*;
@@ -173,29 +172,35 @@ impl fmt::Display for ProtocolVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum Interface {
-    Protocol(Protocol),
-    Local,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceData {
     pub transaction_id: TransactionId,
-    pub client_id: ClientId,
-    pub interface: Interface,
+    pub client_info: ClientInfo,
 }
 
 impl TraceData {
-    pub fn new(client_id: ClientId, interface: Interface, transaction_id: TransactionId) -> Self {
+    pub fn new(transaction_id: TransactionId, client_info: ClientInfo) -> Self {
         TraceData {
             transaction_id,
-            client_id,
-            interface,
+            client_info,
         }
     }
+
+    pub fn client_id(&self) -> ClientId {
+        self.client_info.client_id
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.client_info.protocol.clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientInfo {
+    pub client_id: ClientId,
+    pub protocol: Protocol,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -203,16 +208,14 @@ impl TraceData {
 pub enum Trace {
     #[serde(rename_all = "camelCase")]
     ClientRequest {
-        client_id: ClientId,
+        client_info: ClientInfo,
         transaction_id: TransactionId,
         method: Method,
-        interface: Interface,
     },
     #[serde(rename_all = "camelCase")]
     ProtocolSwitch {
-        client_id: ClientId,
+        client_info: ClientInfo,
         protocol_version: ProtocolMajorVersion,
-        interface: Interface,
     },
     #[serde(rename_all = "camelCase")]
     InternalAction(InternalAction),
@@ -221,17 +224,16 @@ pub enum Trace {
 impl Trace {
     pub fn client_request(method: Method, trace_data: &TraceData) -> Self {
         Trace::ClientRequest {
-            client_id: trace_data.client_id,
             transaction_id: trace_data.transaction_id,
+            client_info: trace_data.client_info.clone(),
             method,
-            interface: trace_data.interface.clone(),
         }
     }
 
-    pub fn client_id(&self) -> Option<Uuid> {
+    pub fn client_id(&self) -> Option<ClientId> {
         match self {
-            Trace::ClientRequest { client_id, .. } => Some(*client_id),
-            Trace::ProtocolSwitch { client_id, .. } => Some(*client_id),
+            Trace::ClientRequest { client_info, .. } => Some(client_info.client_id),
+            Trace::ProtocolSwitch { client_info, .. } => Some(client_info.client_id),
             Trace::InternalAction(_) => None,
         }
     }
@@ -259,15 +261,9 @@ pub enum Method {
 #[serde(rename_all = "camelCase")]
 pub enum InternalAction {
     #[serde(rename_all = "camelCase")]
-    ClientConnected {
-        client_id: ClientId,
-        protocol: Protocol,
-    },
+    ClientConnected(ClientInfo),
     #[serde(rename_all = "camelCase")]
-    ClientDisconnected {
-        client_id: ClientId,
-        protocol: Protocol,
-    },
+    ClientDisconnected(ClientInfo),
     #[serde(rename_all = "camelCase")]
     SubscriptionsChanged {
         cause: Box<Trace>,

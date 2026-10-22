@@ -73,7 +73,7 @@ pub struct LatencyTestPublisher {
 }
 
 impl LatencyTestPublisher {
-    pub fn new(
+    pub fn spawn(
         subsys: &Subsystem<Option<LatencyTestResult>>,
         id: usize,
         key_length: usize,

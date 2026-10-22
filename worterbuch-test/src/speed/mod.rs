@@ -42,7 +42,7 @@ pub struct SpeedTest {
 }
 
 impl SpeedTest {
-    pub fn new(
+    pub fn spawn(
         subsys: &Subsystem,
         publishers: usize,
         key_length: usize,
@@ -76,7 +76,7 @@ impl SpeedTest {
         let mut publishers = Vec::new();
 
         for i in 0..self.publishers {
-            let publisher = LatencyTestPublisher::new(
+            let publisher = LatencyTestPublisher::spawn(
                 &self.subsys,
                 i,
                 self.key_length,

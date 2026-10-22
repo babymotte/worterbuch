@@ -23,10 +23,7 @@ use crate::{
     cluster::protocol::{Connected, Disconnected, ProxyMessage, Request, locks::Locks},
     server::common::{
         self, CloneableWbApi,
-        protocol::{
-            Proto, ResponseDropped, ServerMessageLazyBroadcaster, ServerMessageReceiver,
-            server_message_channel,
-        },
+        protocol::{Proto, ServerMessageBroadcaster},
     },
 };
 use hashbrown::HashMap;
@@ -44,8 +41,8 @@ use tracing::{Level, debug, enabled, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
     protocol::v1::{
-        ClientMessage, GraveGoods, Interface, LastWill, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, ServerMessage,
+        ClientInfo, ClientMessage, GraveGoods, LastWill, SYSTEM_TOPIC_CLIENTS,
+        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, ServerMessage, Set,
     },
     topic,
 };
@@ -56,13 +53,23 @@ pub struct VirtualProxyClientHandler {
     protocol: Protocol,
 }
 
+impl VirtualProxyClientHandler {
+    pub fn info(&self, client_id: ClientId) -> ClientInfo {
+        ClientInfo {
+            client_id,
+            protocol: self.protocol.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum VirtualServerMessage {
     ServerMessage((ClientId, ServerMessage)),
     Disconnect(ClientId),
 }
 
-pub struct VirtualProxyServer {
-    pub subsys: Subsystem,
+pub struct VirtualProxyServer<'a> {
+    pub subsys: &'a Subsystem,
     pub clients: HashMap<ClientId, VirtualProxyClientHandler>,
     pub worterbuch: CloneableWbApi,
     pub config: Config,
@@ -70,7 +77,7 @@ pub struct VirtualProxyServer {
     pub send_tx: mpsc::Sender<VirtualServerMessage>,
 }
 
-impl Drop for VirtualProxyServer {
+impl<'a> Drop for VirtualProxyServer<'a> {
     fn drop(&mut self) {
         if self.clients.is_empty() {
             return;
@@ -90,13 +97,21 @@ impl Drop for VirtualProxyServer {
         let wb = self.worterbuch.clone();
         spawn(async move {
             for (client_id, protocol) in clients {
-                let _ = wb.disconnected(client_id, protocol, None).await;
+                let _ = wb
+                    .disconnected(
+                        ClientInfo {
+                            client_id,
+                            protocol,
+                        },
+                        None,
+                    )
+                    .await;
             }
         });
     }
 }
 
-impl VirtualProxyServer {
+impl<'a> VirtualProxyServer<'a> {
     #[instrument(level=Level::TRACE, skip_all)]
     pub async fn process_proxy_message(
         &mut self,
@@ -136,40 +151,32 @@ impl VirtualProxyServer {
             ProxyMessage::Handshake(_) => {
                 bail!("received handshake message from proxy after initial handshake");
             }
-            ProxyMessage::Connected(Connected {
-                client_id,
-                protocol,
-            }) => {
+            ProxyMessage::Connected(Connected { client_info }) => {
+                let client_id = client_info.client_id;
                 self.spawn_virtual_client(
-                    client_id,
-                    protocol,
+                    client_info,
                     self.config.clone(),
                     self.worterbuch.named(format!("client/{client_id}")),
                 )
                 .await?;
             }
             ProxyMessage::Disconnected(Disconnected {
-                client_id,
-                protocol,
+                client_info,
                 grave_goods,
                 last_will,
             }) => {
-                self.apply_grave_goods_and_last_will(client_id, grave_goods, last_will)
+                self.apply_grave_goods_and_last_will(client_info.clone(), grave_goods, last_will)
                     .await?;
-                self.stop_virtual_client(client_id, protocol).await?;
+                self.stop_virtual_client(client_info).await?;
             }
-            ProxyMessage::Request(Request {
-                client_id,
-                msg,
-                interface,
-            }) => {
+            ProxyMessage::Request(Request { msg, client_info }) => {
                 let processed = self
-                    .process_client_request(client_id, msg, interface)
+                    .process_client_request(msg, client_info.clone())
                     .await?;
                 if !processed {
                     let _ = self
                         .send_tx
-                        .send(VirtualServerMessage::Disconnect(client_id))
+                        .send(VirtualServerMessage::Disconnect(client_info.client_id))
                         .await;
                 }
             }
@@ -183,19 +190,24 @@ impl VirtualProxyServer {
     #[instrument(level=Level::TRACE, skip_all)]
     pub async fn spawn_virtual_client(
         &mut self,
-        client_id: ClientId,
-        protocol: Protocol,
+        client_info: ClientInfo,
         config: Config,
         worterbuch: CloneableWbApi,
-    ) -> miette::Result<ServerMessageLazyBroadcaster> {
+    ) -> miette::Result<ServerMessageBroadcaster> {
+        let client_id = client_info.client_id;
         trace!(enter = "spawn_virtual_client", %client_id);
+        let protocol = client_info.protocol.clone();
         let proxied_protocol = Protocol::Proxied(Box::new(protocol.clone()));
+        let client_info = ClientInfo {
+            client_id,
+            protocol: proxied_protocol.clone(),
+        };
 
         // register the client before anything else so that the registration is guaranteed to be processed
         // before any request or disconnect of this client; on error (e.g. a client ID collision with a stale
         // connection of the same proxy) nothing has been spawned yet, so the existing registration is left untouched
         worterbuch
-            .connected(client_id, None, proxied_protocol.clone())
+            .connected(client_info.clone(), None)
             .await
             .into_diagnostic()
             .wrap_err_with(|| {
@@ -206,7 +218,7 @@ impl VirtualProxyServer {
             })?;
 
         let auth_required = config.auth_token_key.is_some();
-        let (send_client_tx, send_client_rx) = server_message_channel(config.channel_buffer_size);
+        let (send_client_tx, send_client_rx) = mpsc::channel(config.channel_buffer_size);
 
         // the forwarder does not notify the core system about the client's disconnect, that is done either by
         // stop_virtual_client or by disconnect_all once the connection to the proxy is closed
@@ -218,7 +230,7 @@ impl VirtualProxyServer {
 
         let proto = Proto::new(
             self.subsys.clone(),
-            client_id,
+            client_info,
             send_client_tx.clone(),
             auth_required,
             config,
@@ -243,11 +255,10 @@ impl VirtualProxyServer {
     }
 
     #[instrument(level=Level::TRACE, skip_all)]
-    async fn stop_virtual_client(
-        &mut self,
-        client_id: ClientId,
-        protocol: Protocol,
-    ) -> miette::Result<()> {
+    async fn stop_virtual_client(&mut self, client_info: ClientInfo) -> miette::Result<()> {
+        let client_id = client_info.client_id;
+        let protocol = client_info.protocol.clone();
+
         trace!(enter = "stop_virtual_client", %client_id);
         debug!("Stopping virtual client {client_id} …");
         let Some(client) = self.clients.remove(&client_id) else {
@@ -263,9 +274,7 @@ impl VirtualProxyServer {
             "Virtual client {client_id} removed from local register, triggering client disconnect callback …"
         );
 
-        self.worterbuch
-            .disconnected(client_id, client.protocol, None)
-            .await?;
+        self.worterbuch.disconnected(client_info, None).await?;
 
         info!(
             "Proxied client disconnected: {} ({}/{:?})",
@@ -285,7 +294,7 @@ impl VirtualProxyServer {
         for (client_id, client) in self.clients.drain() {
             if let Err(e) = self
                 .worterbuch
-                .disconnected(client_id, client.protocol, None)
+                .disconnected(client.info(client_id), None)
                 .await
             {
                 error!("Could not notify core system about disconnect of client {client_id}: {e}");
@@ -302,16 +311,18 @@ impl VirtualProxyServer {
     #[instrument(level=Level::TRACE, skip_all)]
     async fn process_client_request(
         &mut self,
-        client_id: ClientId,
         msg: ClientMessage,
-        interface: Interface,
+        ClientInfo {
+            client_id,
+            protocol,
+        }: ClientInfo,
     ) -> miette::Result<bool> {
         trace!(enter = "process_client_request", %client_id, ?msg);
         let Some(client_handler) = self.clients.get_mut(&client_id) else {
             bail!(
                 "Received request for unknown client {client_id} ({}/{:?})",
                 self.proxy_address,
-                interface
+                protocol
             );
         };
 
@@ -327,24 +338,20 @@ impl VirtualProxyServer {
     pub async fn register_clients(
         &mut self,
         connected_clients: &[Connected],
-    ) -> miette::Result<HashMap<ClientId, ServerMessageLazyBroadcaster>> {
+    ) -> miette::Result<HashMap<ClientId, ServerMessageBroadcaster>> {
         trace!(enter = "register_clients");
         let mut client_txs = HashMap::new();
 
-        for Connected {
-            client_id,
-            protocol,
-        } in connected_clients
-        {
+        for Connected { client_info } in connected_clients {
             let tx = self
                 .spawn_virtual_client(
-                    *client_id,
-                    protocol.clone(),
+                    client_info.to_owned(),
                     self.config.clone(),
-                    self.worterbuch.named(format!("client/{client_id}")),
+                    self.worterbuch
+                        .named(format!("client/{}", client_info.client_id)),
                 )
                 .await?;
-            client_txs.insert(*client_id, tx);
+            client_txs.insert(client_info.client_id, tx);
         }
 
         trace!(exit = "register_clients");
@@ -395,47 +402,44 @@ impl VirtualProxyServer {
 
     async fn apply_grave_goods_and_last_will(
         &self,
-        client_id: ClientId,
+        client_info: ClientInfo,
         grave_goods: GraveGoods,
         last_will: LastWill,
     ) -> miette::Result<()> {
+        let client_id = client_info.client_id;
         trace!(enter = "apply_grave_goods_and_last_will", %client_id, ?grave_goods, ?last_will);
-        self.worterbuch
-            .set(
-                0,
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_GRAVE_GOODS
-                ),
-                json!(grave_goods),
+        let req = Set {
+            transaction_id: 1,
+            key: topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
                 client_id,
-            )
-            .await?;
+                SYSTEM_TOPIC_GRAVE_GOODS
+            ),
+            value: json!(grave_goods),
+        };
+        self.worterbuch.set(req, client_info.clone()).await?;
 
-        self.worterbuch
-            .set(
-                0,
-                topic!(
-                    SYSTEM_TOPIC_ROOT,
-                    SYSTEM_TOPIC_CLIENTS,
-                    client_id,
-                    SYSTEM_TOPIC_LAST_WILL
-                ),
-                json!(last_will),
+        let req = Set {
+            transaction_id: 1,
+            key: topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
                 client_id,
-            )
-            .await?;
+                SYSTEM_TOPIC_LAST_WILL
+            ),
+            value: json!(last_will),
+        };
+        self.worterbuch.set(req, client_info).await?;
 
-        trace!(exit = "apply_grave_goods_and_last_will");
+        trace!(exit = "apply_grave_goods_and_last_will", %client_id,);
         Ok(())
     }
 }
 
 async fn response_forwarder_loop(
     subsys: Subsystem,
-    mut send_client_rx: ServerMessageReceiver,
+    mut send_client_rx: mpsc::Receiver<ServerMessage>,
     send_tx: mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     proxy_addr: SocketAddr,
@@ -452,30 +456,23 @@ async fn response_forwarder_loop(
 }
 
 async fn forward_leader_response(
-    recv: Option<Result<ServerMessage, ResponseDropped>>,
+    recv: Option<ServerMessage>,
     send_tx: &mpsc::Sender<VirtualServerMessage>,
     client_id: ClientId,
     remote_addr: SocketAddr,
 ) -> ControlFlow<()> {
     trace!(enter = "forward_leader_response", %client_id);
     match recv {
-        Some(msg) => match msg {
-            Ok(msg) => match send_tx
-                .send(VirtualServerMessage::ServerMessage((client_id, msg)))
-                .await
-                .into_diagnostic()
-                .wrap_err("could not forward response to proxy")
-            {
-                Ok(_) => ControlFlow::Continue(()),
-                Err(e) => {
-                    error!("Failed to forward response to proxy: {}", e);
-                    eprintln!("{e:?}");
-                    error!("Closing connection to proxy {}", remote_addr);
-                    trace!(exit = "forward_leader_response");
-                    ControlFlow::Break(())
-                }
-            },
-            Err(_) => {
+        Some(msg) => match send_tx
+            .send(VirtualServerMessage::ServerMessage((client_id, msg)))
+            .await
+            .into_diagnostic()
+            .wrap_err("could not forward response to proxy")
+        {
+            Ok(_) => ControlFlow::Continue(()),
+            Err(e) => {
+                error!("Failed to forward response to proxy: {:?}", e);
+                error!("Closing connection to proxy {}", remote_addr);
                 trace!(exit = "forward_leader_response");
                 ControlFlow::Break(())
             }

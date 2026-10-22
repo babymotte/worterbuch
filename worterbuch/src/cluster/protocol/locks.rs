@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, trace};
 use worterbuch_common::{
     ClientId,
-    protocol::v1::{Key, TransactionId},
+    protocol::v1::{Key, Lock, TransactionId},
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,31 +44,25 @@ impl Locks {
         self.held.is_empty() && self.requested.is_empty()
     }
 
-    pub fn requested(
-        &mut self,
-        client_id: ClientId,
-        transaction_id: TransactionId,
-        key: Key,
-        wait: bool,
-    ) {
-        debug!("Client {client_id} requested lock for key {key:?}");
+    pub fn requested(&mut self, client_id: ClientId, lock: Lock, wait: bool) {
+        debug!("Client {client_id} requested lock for key {:?}", lock.key);
         if wait {
             self.requested
                 .entry(client_id)
                 .or_default()
-                .insert(transaction_id);
+                .insert(lock.transaction_id);
         }
         self.keys
             .entry(client_id)
             .or_default()
-            .insert(transaction_id, key.clone());
+            .insert(lock.transaction_id, lock.key.clone());
 
         self.tids
             .entry(client_id)
             .or_default()
-            .entry(key)
+            .entry(lock.key)
             .or_default()
-            .insert(transaction_id);
+            .insert(lock.transaction_id);
 
         trace!("Locks: {:#?}", self);
     }
@@ -387,8 +381,10 @@ mod test {
     use serde_json::json;
     use uuid::Uuid;
     use worterbuch_common::{
+        Protocol,
         protocol::v1::{
-            Interface, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT, TraceData,
+            ClientInfo, SYSTEM_TOPIC_CLIENT_NAME, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_ROOT,
+            TraceData,
         },
         topic,
     };
@@ -513,14 +509,14 @@ mod test {
     #[test]
     fn waiting_request_makes_non_empty() {
         let mut locks = Locks::default();
-        locks.requested(client(), 1, key("a/b"), true);
+        locks.requested(client(), (1, key("a/b")).into(), true);
         assert!(!locks.is_empty());
     }
 
     #[test]
     fn non_waiting_request_keeps_empty() {
         let mut locks = Locks::default();
-        locks.requested(client(), 1, key("a/b"), false);
+        locks.requested(client(), (1, key("a/b")).into(), false);
         // a try-lock that has not yet been granted is neither held nor requested
         assert!(locks.is_empty());
     }
@@ -533,7 +529,7 @@ mod test {
     fn requested_with_wait_tracks_request_and_key() {
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
 
         assert!(is_requested(&locks, c, 1));
         assert!(!is_held(&locks, c, 1));
@@ -544,7 +540,7 @@ mod test {
     fn requested_without_wait_tracks_only_key() {
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), false);
+        locks.requested(c, (1, key("a/b")).into(), false);
 
         assert!(!is_requested(&locks, c, 1));
         assert!(!is_held(&locks, c, 1));
@@ -555,9 +551,9 @@ mod test {
     fn requested_populates_tids() {
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
-        locks.requested(c, 2, key("a/b"), false);
-        locks.requested(c, 3, key("c/d"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
+        locks.requested(c, (2, key("a/b")).into(), false);
+        locks.requested(c, (3, key("c/d")).into(), true);
 
         assert_eq!(tids_of(&locks, c, "a/b"), vec![1, 2]);
         assert_eq!(tids_of(&locks, c, "c/d"), vec![3]);
@@ -569,8 +565,8 @@ mod test {
         let mut locks = Locks::default();
         let c1 = client();
         let c2 = client();
-        locks.requested(c1, 1, key("a/b"), true);
-        locks.requested(c2, 1, key("c/d"), true);
+        locks.requested(c1, (1, key("a/b")).into(), true);
+        locks.requested(c2, (1, key("c/d")).into(), true);
 
         assert_eq!(key_of(&locks, c1, 1), Some(&key("a/b")));
         assert_eq!(key_of(&locks, c2, 1), Some(&key("c/d")));
@@ -590,7 +586,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         assert!(!is_requested(&locks, c, 1));
@@ -606,7 +602,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), false);
+        locks.requested(c, (1, key("a/b")).into(), false);
         locks.acquired(c, 1, &wb);
 
         assert!(is_held(&locks, c, 1));
@@ -620,8 +616,8 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
-        locks.requested(c, 2, key("c/d"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
+        locks.requested(c, (2, key("c/d")).into(), true);
         locks.acquired(c, 1, &wb);
 
         assert!(is_held(&locks, c, 1));
@@ -644,7 +640,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 2, &wb);
 
         assert!(is_requested(&locks, c, 1));
@@ -658,7 +654,7 @@ mod test {
         let mut locks = Locks::default();
         let c1 = client();
         let c2 = client();
-        locks.requested(c1, 1, key("a/b"), true);
+        locks.requested(c1, (1, key("a/b")).into(), true);
         locks.acquired(c2, 1, &wb);
 
         assert!(is_requested(&locks, c1, 1));
@@ -675,7 +671,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquisition_failed(c, 1, &wb);
 
         assert_fully_empty(&locks);
@@ -686,7 +682,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), false);
+        locks.requested(c, (1, key("a/b")).into(), false);
         locks.acquisition_failed(c, 1, &wb);
 
         assert_fully_empty(&locks);
@@ -697,9 +693,9 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
-        locks.requested(c, 2, key("a/b"), true);
-        locks.requested(c, 3, key("c/d"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
+        locks.requested(c, (2, key("a/b")).into(), true);
+        locks.requested(c, (3, key("c/d")).into(), true);
         locks.acquired(c, 3, &wb);
         locks.acquisition_failed(c, 1, &wb);
 
@@ -717,7 +713,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquisition_failed(c, 2, &wb);
         locks.acquisition_failed(client(), 1, &wb);
 
@@ -735,7 +731,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         let tids = locks.released(c, key("a/b"), &wb).map(ToVec::to_vec);
@@ -750,9 +746,9 @@ mod test {
         let mut locks = Locks::default();
         let c = client();
         // one held lock plus one queued request on the same key
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
-        locks.requested(c, 2, key("a/b"), true);
+        locks.requested(c, (2, key("a/b")).into(), true);
 
         let tids = locks.released(c, key("a/b"), &wb).unwrap().to_vec();
 
@@ -768,9 +764,9 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
-        locks.requested(c, 2, key("c/d"), true);
+        locks.requested(c, (2, key("c/d")).into(), true);
         locks.acquired(c, 2, &wb);
 
         let tids = locks.released(c, key("a/b"), &wb).map(ToVec::to_vec);
@@ -790,9 +786,9 @@ mod test {
         let mut locks = Locks::default();
         let c1 = client();
         let c2 = client();
-        locks.requested(c1, 1, key("a/b"), true);
+        locks.requested(c1, (1, key("a/b")).into(), true);
         locks.acquired(c1, 1, &wb);
-        locks.requested(c2, 1, key("a/b"), true);
+        locks.requested(c2, (1, key("a/b")).into(), true);
 
         let tids = locks.released(c1, key("a/b"), &wb).map(ToVec::to_vec);
 
@@ -808,7 +804,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         assert!(locks.released(c, key("a/b"), &wb).is_some());
@@ -829,7 +825,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         assert_eq!(locks.released(c, key("c/d"), &wb), None);
@@ -846,7 +842,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
         locks.released(c, key("a/b"), &wb);
         locks.release_failed(c, key("a/b"), &wb);
@@ -859,9 +855,9 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
-        locks.requested(c, 2, key("c/d"), true);
+        locks.requested(c, (2, key("c/d")).into(), true);
         locks.acquired(c, 2, &wb);
         locks.released(c, key("a/b"), &wb);
         locks.release_failed(c, key("a/b"), &wb);
@@ -878,7 +874,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
         locks.released(c, key("c/d"), &wb);
         locks.release_failed(c, key("c/d"), &wb);
@@ -898,7 +894,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
         locks.lost(c, 1, &wb);
 
@@ -910,9 +906,9 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
-        locks.requested(c, 2, key("a/b"), true);
+        locks.requested(c, (2, key("a/b")).into(), true);
         locks.lost(c, 1, &wb);
 
         assert!(!is_held(&locks, c, 1));
@@ -927,7 +923,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
         locks.lost(c, 2, &wb);
         locks.lost(client(), 1, &wb);
@@ -945,10 +941,10 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
-        locks.requested(c, 2, key("c/d"), true);
-        locks.requested(c, 3, key("e/f"), false);
+        locks.requested(c, (2, key("c/d")).into(), true);
+        locks.requested(c, (3, key("e/f")).into(), false);
 
         locks.client_disconnected(c);
 
@@ -961,9 +957,9 @@ mod test {
         let mut locks = Locks::default();
         let c1 = client();
         let c2 = client();
-        locks.requested(c1, 1, key("a/b"), true);
+        locks.requested(c1, (1, key("a/b")).into(), true);
         locks.acquired(c1, 1, &wb);
-        locks.requested(c2, 1, key("a/b"), true);
+        locks.requested(c2, (1, key("a/b")).into(), true);
 
         locks.client_disconnected(c1);
 
@@ -979,7 +975,7 @@ mod test {
     fn client_disconnected_unknown_client_is_noop() {
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.client_disconnected(client());
 
         assert!(is_requested(&locks, c, 1));
@@ -995,14 +991,14 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
         assert_eq!(
             locks.released(c, key("a/b"), &wb).map(ToVec::to_vec),
             Some(vec![1])
         );
 
-        locks.requested(c, 1, key("c/d"), true);
+        locks.requested(c, (1, key("c/d")).into(), true);
         locks.acquired(c, 1, &wb);
 
         assert!(is_held(&locks, c, 1));
@@ -1019,10 +1015,10 @@ mod test {
         let c1 = client();
         let c2 = client();
 
-        locks.requested(c1, 1, key("a"), true);
-        locks.requested(c1, 2, key("b"), false);
-        locks.requested(c2, 1, key("a"), true);
-        locks.requested(c2, 2, key("c"), true);
+        locks.requested(c1, (1, key("a")).into(), true);
+        locks.requested(c1, (2, key("b")).into(), false);
+        locks.requested(c2, (1, key("a")).into(), true);
+        locks.requested(c2, (2, key("c")).into(), true);
         assert_consistent(&locks);
 
         locks.acquired(c1, 1, &wb);
@@ -1070,7 +1066,13 @@ mod test {
             ),
             json!("my-client"),
             false,
-            TraceData::new(INTERNAL_CLIENT_ID, Interface::Local, 1),
+            TraceData::new(
+                1,
+                ClientInfo {
+                    client_id: INTERNAL_CLIENT_ID,
+                    protocol: Protocol::Local,
+                },
+            ),
         )
         .await
         .unwrap();
@@ -1099,7 +1101,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         let value = serde_json::to_value(&locks).unwrap();
@@ -1120,10 +1122,10 @@ mod test {
         let mut locks = Locks::default();
         let c1 = client();
         let c2 = client();
-        locks.requested(c1, 1, key("a/b"), true);
+        locks.requested(c1, (1, key("a/b")).into(), true);
         locks.acquired(c1, 1, &wb);
-        locks.requested(c1, 2, key("a/b"), true);
-        locks.requested(c2, 7, key("c/d"), false);
+        locks.requested(c1, (2, key("a/b")).into(), true);
+        locks.requested(c2, (7, key("c/d")).into(), false);
 
         let json = serde_json::to_string(&locks).unwrap();
         let restored: Locks = serde_json::from_str(&json).unwrap();
@@ -1139,7 +1141,7 @@ mod test {
         let wb = worterbuch().await;
         let mut locks = Locks::default();
         let c = client();
-        locks.requested(c, 1, key("a/b"), true);
+        locks.requested(c, (1, key("a/b")).into(), true);
         locks.acquired(c, 1, &wb);
 
         let json = serde_json::to_string(&locks).unwrap();

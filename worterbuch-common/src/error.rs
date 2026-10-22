@@ -18,8 +18,10 @@
  */
 
 use crate::{
-    AuthCheckOwned, ClientId, Key, Privilege, RequestPattern, TransactionId,
-    protocol::v1::{ClientMessage, Err, ErrorCode, LockLost, MetaData, ProtocolVersionSegment},
+    AuthCheckOwned, ClientId, Key, Privilege, TransactionId,
+    protocol::v1::{
+        ClientMessage, Err, ErrorCode, LockLost, MetaData, ProtocolVersionSegment, RequestPattern,
+    },
 };
 use http::StatusCode;
 #[cfg(feature = "ws")]
@@ -50,6 +52,7 @@ pub enum ConfigError {
     InvalidInterval(#[source] ParseIntError),
     #[error("license file could not be loaded: {0}")]
     InvalidLicense(String),
+    #[cfg(feature = "commercial")]
     #[error("{0}")]
     InsufficientLicense(String),
     #[error("could not load config file")]

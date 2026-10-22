@@ -86,5 +86,5 @@ fn do_something_that_might_fail() -> Result<()> {
 
 fn _fail() -> Result<()> {
     eprintln!("Oops, something went wrong!");
-    bail!("Simulated error")
+    bail!("Simulated error");
 }

@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, KeySegment, LockAcquiredReceiver, LockAcquiredSender, LockLostReceiver,
-    LockLostSender, RegularKeySegment, SubscriptionId, ValueEntry,
+    LockLostSender, LockLostSenders, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
     protocol::v1::{CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
@@ -45,6 +45,8 @@ pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
 
 pub type StoreNode = Node<ValueEntry>;
 type LockNode = Node<Lock>;
+
+pub type UnlockResult = (Option<ClientId>, Option<LockLostSenders>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedStore {
@@ -114,7 +116,7 @@ impl Lock {
         client_id: ClientId,
     ) -> (bool, Option<ClientId>, Option<Vec<LockLostSender>>) {
         if client_id == self.holder.client_id {
-            let on_lost = Some(self.holder.on_lost.drain(..).collect());
+            let on_lost = Some(std::mem::take(&mut self.holder.on_lost));
             if let Some(candidate) = self.candidates.pop_front() {
                 self.holder = candidate.holder;
                 for tx in candidate.on_acquired {
@@ -1170,15 +1172,12 @@ impl Store {
         (lock_acquired_rx, lock_lost_rx, holder)
     }
 
-    pub fn unlock_all(
-        &mut self,
-        client_id: ClientId,
-    ) -> Option<Vec<(String, Option<ClientId>, Option<Vec<LockLostSender>>)>> {
+    pub fn unlock_all(&mut self, client_id: ClientId) -> Option<Vec<(String, UnlockResult)>> {
         if let Some(paths) = self.locked_keys.remove(&client_id) {
             let mut out = vec![];
             for path in paths {
-                if let Ok((client_id, lock_lost_txs)) = self.unlock(client_id, &path) {
-                    out.push((path.join("/"), client_id, lock_lost_txs));
+                if let Ok(result) = self.unlock(client_id, &path) {
+                    out.push((path.join("/"), result));
                 }
             }
             Some(out)
@@ -1191,7 +1190,7 @@ impl Store {
         &mut self,
         client_id: ClientId,
         path: &[RegularKeySegment],
-    ) -> WorterbuchResult<(Option<ClientId>, Option<Vec<LockLostSender>>)> {
+    ) -> WorterbuchResult<UnlockResult> {
         let node = self.get_or_create_lock_node(path.into());
 
         if let Some(lock) = node.value_mut() {

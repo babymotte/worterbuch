@@ -35,13 +35,8 @@
 //! the client. A QUIC client implementation therefore has to call `accept_bi` to
 //! receive it.
 
-use super::common::protocol::{Proto, ServerMessageReceiver, server_message_channel};
-use crate::{
-    auth::JwtClaims,
-    print_quic_endpoint,
-    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
-    stats::VERSION,
-};
+use super::common::protocol::Proto;
+use crate::{auth::JwtClaims, print_quic_endpoint, server::common::CloneableWbApi, stats::VERSION};
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
 use quinn::{
@@ -57,7 +52,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     select,
     sync::mpsc,
 };
@@ -66,7 +61,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ProtocolVersion, ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_udp_server_socket,
     write_line_and_flush,
 };
@@ -312,8 +307,13 @@ async fn serve(
 
     info!("New client connected: {client_id} ({remote_addr})");
 
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Quic,
+    };
+
     match worterbuch
-        .connected(client_id, Some(remote_addr), Protocol::QUIC)
+        .connected(client_info.clone(), Some(remote_addr))
         .await
     {
         Ok(ejected) => {
@@ -339,7 +339,7 @@ async fn serve(
     info!("Client disconnected: {client_id} ({remote_addr})");
 
     worterbuch
-        .disconnected(client_id, Protocol::QUIC, Some(remote_addr))
+        .disconnected(client_info, Some(remote_addr))
         .await?;
 
     Ok(())
@@ -375,9 +375,16 @@ async fn serve_loop(
         .into_diagnostic()
         .context("failed to open QUIC stream to client")?;
 
-    let (quic_send_tx, quic_send_rx) = server_message_channel(config.channel_buffer_size);
+    let (quic_send_tx, quic_send_rx) = mpsc::channel(config.channel_buffer_size);
     subsys.spawn("forward_messages_to_socket", async move |s| {
-        forward_messages_to_socket(s, quic_send_rx, quic_tx, client_id, send_timeout).await
+        forward_messages_to_socket(
+            s,
+            quic_send_rx,
+            BufWriter::new(quic_tx),
+            client_id,
+            send_timeout,
+        )
+        .await
     });
 
     let quic_rx = BufReader::new(quic_rx);
@@ -391,11 +398,16 @@ async fn serve_loop(
             authorization_required,
         ),
     });
-    quic_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    quic_send_tx.send(welcome).await.into_diagnostic()?;
+
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Quic,
+    };
 
     let proto = Proto::new(
         subsys.clone(),
-        client_id,
+        client_info,
         quic_send_tx,
         authorization_required,
         config,
@@ -417,8 +429,8 @@ async fn serve_loop(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut quic_send_rx: ServerMessageReceiver,
-    mut quic_tx: SendStream,
+    mut quic_send_rx: mpsc::Receiver<ServerMessage>,
+    mut quic_tx: BufWriter<SendStream>,
     client_id: ClientId,
     send_timeout: Duration,
 ) -> Result<()> {
@@ -426,7 +438,6 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = quic_send_rx.recv() => if let Some(msg) = recv {
-            let Ok(msg) = msg else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut quic_tx, send_timeout).await {
                 error!("Error sending QUIC message to client {client_id}: {e}");
                 trace!(?msg);

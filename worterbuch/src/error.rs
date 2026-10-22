@@ -27,23 +27,11 @@ use worterbuch_common::error::{ConfigError, WorterbuchError};
 #[derive(Debug, Diagnostic, thiserror::Error)]
 pub enum WorterbuchAppError {
     #[error("Persistence error")]
-    PersistenceError(
-        #[source]
-        #[from]
-        PersistenceError,
-    ),
+    PersistenceError(#[source] Box<PersistenceError>),
     #[error("Worterbuch error")]
-    WorterbuchError(
-        #[source]
-        #[from]
-        WorterbuchError,
-    ),
+    WorterbuchError(#[source] Box<WorterbuchError>),
     #[error("Config error")]
-    ConfigError(
-        #[source]
-        #[from]
-        ConfigError,
-    ),
+    ConfigError(#[source] Box<ConfigError>),
     #[error("Cluster error: {0}")]
     ClusterError(String),
     #[error("I/O error")]
@@ -59,19 +47,11 @@ pub enum WorterbuchAppError {
         oneshot::error::RecvError,
     ),
     #[error("Proxy send error")]
-    ProxySendError(
-        #[source]
-        #[from]
-        mpsc::error::SendError<ProxyMessage>,
-    ),
+    ProxySendError(#[source] Box<mpsc::error::SendError<ProxyMessage>>),
     #[error("No license for feature {0}")]
     NoLicense(String),
     #[error("A critical subsystem terminated with an error")]
-    RootSystemError(
-        #[source]
-        #[from]
-        RootSystemError,
-    ),
+    RootSystemError(#[source] Box<RootSystemError>),
     #[error("Operation timed out")]
     Timeout(
         #[source]
@@ -82,6 +62,42 @@ pub enum WorterbuchAppError {
     Wrapped(String, #[source] Box<WorterbuchAppError>),
     #[error("{0}")]
     Report(String, #[diagnostic_source] miette::Report),
+}
+
+impl From<miette::Report> for WorterbuchAppError {
+    fn from(e: miette::Report) -> Self {
+        WorterbuchAppError::Report(e.to_string(), e)
+    }
+}
+
+impl From<WorterbuchError> for WorterbuchAppError {
+    fn from(e: WorterbuchError) -> Self {
+        WorterbuchAppError::WorterbuchError(Box::new(e))
+    }
+}
+
+impl From<PersistenceError> for WorterbuchAppError {
+    fn from(e: PersistenceError) -> Self {
+        WorterbuchAppError::PersistenceError(Box::new(e))
+    }
+}
+
+impl From<ConfigError> for WorterbuchAppError {
+    fn from(e: ConfigError) -> Self {
+        WorterbuchAppError::ConfigError(Box::new(e))
+    }
+}
+
+impl From<RootSystemError> for WorterbuchAppError {
+    fn from(e: RootSystemError) -> Self {
+        WorterbuchAppError::RootSystemError(Box::new(e))
+    }
+}
+
+impl From<mpsc::error::SendError<ProxyMessage>> for WorterbuchAppError {
+    fn from(e: mpsc::error::SendError<ProxyMessage>) -> Self {
+        WorterbuchAppError::ProxySendError(Box::new(e))
+    }
 }
 
 pub trait IntoWbAppResult<T> {

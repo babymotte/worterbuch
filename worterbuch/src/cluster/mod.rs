@@ -62,218 +62,219 @@ pub enum LeaderState {
 async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
     trace!(enter = "process_api_call");
     match function {
-        WbFunction::Get(key, tx, span) => {
+        WbFunction::Get(req, _client_info, tx, span) => {
             let _guard = span.enter();
-            let _ = tx.send(worterbuch.get(&key));
+            let res = worterbuch.get(&req.key);
+            let _ = tx.send(res);
         }
-        WbFunction::CGet(key, tx) => {
-            let _ = tx.send(worterbuch.cget(&key));
+        WbFunction::CGet(req, _client_info, tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.cget(&req.key);
+            let _ = tx.send(res);
         }
-        WbFunction::Set(transaction_id, interface, key, value, client_id, tx, span) => {
-            let _ = tx.send(
-                worterbuch
-                    .set(
-                        key,
-                        value,
-                        false,
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .instrument(span)
-                    .await,
-            );
+        WbFunction::Set(req, client_info, tx, span) => {
+            let res = worterbuch
+                .set(
+                    req.key,
+                    req.value,
+                    false,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::CSet(transaction_id, interface, key, value, version, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .cset(
-                        key,
-                        value,
-                        version,
-                        false,
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::CSet(req, client_info, tx, span) => {
+            let res = worterbuch
+                .cset(
+                    req.key,
+                    req.value,
+                    req.version,
+                    false,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::SPubInit(transaction_id, interface, key, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .spub_init(key, TraceData::new(client_id, interface, transaction_id))
-                    .await,
-            );
+        WbFunction::SPubInit(req, client_info, tx, span) => {
+            let res = worterbuch
+                .spub_init(req.key, TraceData::new(req.transaction_id, client_info))
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::SPub(transaction_id, interface, value, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .spub(
-                        value,
-                        client_id,
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::SPub(req, client_info, tx, span) => {
+            let res = worterbuch
+                .spub(
+                    req.value,
+                    client_info.client_id,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Publish(transaction_id, interface, key, value, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .publish(
-                        key,
-                        value,
-                        client_id,
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::Publish(req, client_info, tx, span) => {
+            let res = worterbuch
+                .publish(
+                    req.key,
+                    req.value,
+                    client_info.client_id,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Ls(parent, tx) => {
-            let _ = tx.send(worterbuch.ls(&parent));
+        WbFunction::Ls(req, _client_info, tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.ls(&req.parent);
+            let _ = tx.send(res);
         }
-        WbFunction::PLs(parent, tx) => {
-            let _ = tx.send(worterbuch.pls(&parent));
+        WbFunction::PLs(req, _client_info, tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.pls(&req.parent_pattern);
+            let _ = tx.send(res);
         }
-        WbFunction::PGet(pattern, tx) => {
-            let _ = tx.send(worterbuch.pget(&pattern));
+        WbFunction::PGet(req, _client_info, tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.pget(&req.request_pattern);
+            let _ = tx.send(res);
         }
-        WbFunction::Subscribe(
-            client_id,
-            transaction_id,
-            interface,
-            key,
-            unique,
-            live_only,
-            send_traces,
-            tx,
-        ) => {
-            let _ = tx.send(
-                worterbuch
-                    .subscribe(
-                        key,
-                        SubscriptionFlags::new(unique, live_only, send_traces),
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::Subscribe(req, client_info, tx, span) => {
+            let flags = SubscriptionFlags::from(&req);
+            let res = worterbuch
+                .subscribe(
+                    req.key,
+                    flags,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::PSubscribe(
-            client_id,
-            transaction_id,
-            interface,
-            pattern,
-            unique,
-            live_only,
-            send_traces,
-            tx,
-        ) => {
-            let _ = tx.send(
-                worterbuch
-                    .psubscribe(
-                        pattern,
-                        SubscriptionFlags::new(unique, live_only, send_traces),
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::PSubscribe(req, client_info, tx, span) => {
+            let flags = SubscriptionFlags::from(&req);
+            let res = worterbuch
+                .psubscribe(
+                    req.request_pattern,
+                    flags,
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::SubscribeLs(client_id, transaction_id, interface, parent, send_traces, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .subscribe_ls(
-                        parent,
-                        send_traces,
-                        TraceData::new(client_id, interface, transaction_id),
-                    )
-                    .await,
-            );
+        WbFunction::SubscribeLs(req, client_info, tx, span) => {
+            let res = worterbuch
+                .subscribe_ls(
+                    req.parent,
+                    req.send_traces.unwrap_or(false),
+                    TraceData::new(req.transaction_id, client_info),
+                )
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Unsubscribe(client_id, transaction_id, interface, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .unsubscribe(TraceData::new(client_id, interface, transaction_id))
-                    .await,
-            );
+        WbFunction::Unsubscribe(req, client_info, tx, span) => {
+            let res = worterbuch
+                .unsubscribe(TraceData::new(req.transaction_id, client_info))
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::UnsubscribeLs(client_id, transaction_id, tx) => {
-            let _ = tx.send(worterbuch.unsubscribe_ls(client_id, transaction_id));
+        WbFunction::UnsubscribeLs(req, client_info, tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.unsubscribe_ls(client_info.client_id, req.transaction_id);
+            let _ = tx.send(res);
         }
-        WbFunction::Delete(transaction_id, interface, key, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .delete(key, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::Delete(req, client_info, tx, span) => {
+            let res = worterbuch
+                .delete(req.key, req.transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::PDelete(transaction_id, interface, pattern, _, client_id, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .pdelete(pattern, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::PDelete(req, client_info, tx, span) => {
+            let res = worterbuch
+                .pdelete(req.request_pattern, req.transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Lock(transaction_id, interface, key, client_id, tx) => {
-            trace!(%client_id, key, "lock");
-            let _ = tx.send(
-                worterbuch
-                    .lock(key, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::Lock(req, client_info, tx, span) => {
+            trace!(client_id = %client_info.client_id, key = req.key, "lock");
+            let res = worterbuch
+                .lock(req.key, req.transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::AcquireLock(transaction_id, interface, key, client_id, tx) => {
-            trace!(%client_id, key, "acquire_lock");
-            let _ = tx.send(
-                worterbuch
-                    .acquire_lock(key, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::AcquireLock(req, client_info, tx, span) => {
+            trace!(client_id = %client_info.client_id, key = req.key, "acquire_lock");
+            let res = worterbuch
+                .acquire_lock(req.key, req.transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::ReleaseLock(transaction_id, interface, key, client_id, tx) => {
-            trace!(%client_id, key, "release_lock");
-            let _ = tx.send(
-                worterbuch
-                    .release_lock(key, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::ReleaseLock(req, client_info, tx, span) => {
+            trace!(client_id = %client_info.client_id, key = req.key, "release_lock");
+            let res = worterbuch
+                .release_lock(req.key, req.transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Connected(client_id, remote_addr, protocol, eject, tx) => {
-            trace!(%client_id, "connected");
-            let _ = tx.send(
-                worterbuch
-                    .connected(client_id, remote_addr, protocol, eject)
-                    .await,
-            );
+        WbFunction::Connected(client_info, remote_addr, eject, tx, span) => {
+            trace!(client_id = %client_info.client_id, "connected");
+            let res = worterbuch
+                .connected(client_info, remote_addr, eject)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::ProtocolSwitched(client_id, interface, protocol) => {
-            trace!(%client_id, protocol, "protocol_switched");
+        WbFunction::ProtocolSwitched(client_info, protocol, span) => {
+            trace!(client_id = %client_info.client_id, protocol, "protocol_switched");
             let _ = worterbuch
-                .protocol_switched(client_id, interface, protocol)
+                .protocol_switched(client_info, protocol)
+                .instrument(span)
                 .await;
         }
-        WbFunction::Disconnected(client_id, protocol, remote_addr) => {
+        WbFunction::Disconnected(client_info, remote_addr, span) => {
+            let client_id = client_info.client_id;
             trace!(%client_id, "disconnected");
             let _ = worterbuch
-                .disconnected(client_id, protocol, remote_addr)
+                .disconnected(client_info, remote_addr)
+                .instrument(span)
                 .await;
         }
-        WbFunction::Config(tx) => {
-            let _ = tx.send(worterbuch.config().clone());
+        WbFunction::Config(tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.config().to_owned();
+            let _ = tx.send(res);
         }
         WbFunction::Export(tx, span) => {
-            let g = span.enter();
-            worterbuch.export_for_persistence(tx);
-            drop(g);
-            drop(span);
+            let _guard = span.enter();
+            let res = worterbuch.export_for_persistence();
+            let _ = tx.send(res);
         }
-        WbFunction::Import(transaction_id, client_id, interface, json, tx) => {
-            let _ = tx.send(
-                worterbuch
-                    .import(&json, client_id, transaction_id, interface)
-                    .await,
-            );
+        WbFunction::Import(transaction_id, client_info, json, tx, span) => {
+            let res = worterbuch
+                .import(&json, transaction_id, client_info)
+                .instrument(span)
+                .await;
+            let _ = tx.send(res);
         }
-        WbFunction::Len(tx) => {
-            let _ = tx.send(worterbuch.len());
+        WbFunction::Len(tx, span) => {
+            let _guard = span.enter();
+            let res = worterbuch.len();
+            let _ = tx.send(res);
         }
-        WbFunction::ReGrantLocks(locks, tx) => {
-            let _ = tx.send(worterbuch.re_grant_locks(locks).await);
+        WbFunction::ReGrantLocks(locks, tx, span) => {
+            let res = worterbuch.re_grant_locks(locks).instrument(span).await;
+            let _ = tx.send(res);
         }
     }
     trace!(exit = "process_api_call");

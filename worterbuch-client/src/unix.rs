@@ -17,10 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::CancellationToken;
 use std::time::Duration;
-
 use tokio::{
-    io::{BufReader, Lines},
+    io::{BufReader, BufWriter, Lines},
     net::unix::{OwnedReadHalf, OwnedWriteHalf},
     spawn,
     sync::{mpsc, oneshot},
@@ -32,8 +32,6 @@ use worterbuch_common::{
     write_line_and_flush,
 };
 
-use crate::CancellationToken;
-
 pub struct UnixClientSocket {
     tx: mpsc::Sender<ClientMessage>,
     rx: Lines<BufReader<OwnedReadHalf>>,
@@ -43,7 +41,7 @@ pub struct UnixClientSocket {
 impl UnixClientSocket {
     pub(crate) async fn new(
         cancellation_token: CancellationToken,
-        tx: OwnedWriteHalf,
+        tx: BufWriter<OwnedWriteHalf>,
         rx: Lines<BufReader<OwnedReadHalf>>,
         buffer_size: usize,
     ) -> Self {
@@ -94,7 +92,7 @@ impl UnixClientSocket {
 
 async fn forward_unix_messages(
     cancellation_token: CancellationToken,
-    mut tx: OwnedWriteHalf,
+    mut tx: BufWriter<OwnedWriteHalf>,
     mut send_rx: mpsc::Receiver<ClientMessage>,
     closed_tx: oneshot::Sender<()>,
 ) -> ()

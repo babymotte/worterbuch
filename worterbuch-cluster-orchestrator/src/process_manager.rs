@@ -149,14 +149,13 @@ impl ChildProcessManagerActor {
             };
         }
 
-        if let Some(millis) = wait.take() {
-            if sleep(Duration::from_millis(millis))
+        if let Some(millis) = wait.take()
+            && sleep(Duration::from_millis(millis))
                 .or_cancel_on(self.subsys.shutdown_requested())
                 .await
                 .is_none()
-            {
-                self.stop().await.wrap_err("failed to stop child process")?;
-            }
+        {
+            self.stop().await.wrap_err("failed to stop child process")?;
         }
 
         Ok(ControlFlow::Continue(()))

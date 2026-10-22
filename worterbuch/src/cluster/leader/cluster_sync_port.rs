@@ -27,10 +27,7 @@ use crate::{
             StateSync,
         },
     },
-    server::common::{
-        CloneableWbApi,
-        protocol::{self, LazyBroadcaster},
-    },
+    server::common::{CloneableWbApi, protocol},
     worterbuch_version,
 };
 use hashbrown::HashMap;
@@ -43,7 +40,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     net::{
         TcpListener, TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -59,6 +56,14 @@ use worterbuch_common::{
     socket::{TcpSocketConfig, create_tcp_server_socket},
     write_line_and_flush,
 };
+
+pub type FollowerConnected = (
+    oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
+    SocketAddr,
+    bool,
+);
+pub type OnFollowerConnected = mpsc::Sender<FollowerConnected>;
+pub type OnFollowerDisconnected = mpsc::Sender<SocketAddr>;
 
 /// The currently active connection of each proxy instance, identified by the proxy's ID
 #[derive(Debug, Clone, Default)]
@@ -103,12 +108,8 @@ pub async fn run_cluster_sync_port(
     subsys: Subsystem,
     config: Config,
     wb: CloneableWbApi,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     port: u16,
 ) -> Result<()> {
     let ip = config
@@ -147,12 +148,8 @@ fn accecpt_client(
     subsys: &Subsystem,
     config: &Config,
     wb: &CloneableWbApi,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     proxy_sessions: &ProxySessions,
 ) -> ControlFlow<()> {
     trace!(enter = "accecpt_client");
@@ -170,25 +167,21 @@ fn accecpt_client(
                 proxy_sessions.clone(),
             );
             trace!(exit = "accecpt_client");
-            return ControlFlow::Continue(());
+            ControlFlow::Continue(())
         }
         Err(e) => {
             error!("Error accepting follower connections: {e}");
-            return ControlFlow::Break(());
+            ControlFlow::Break(())
         }
-    };
+    }
 }
 
 #[instrument(skip_all, fields(client = %client.1))]
 fn serve(
     subsys: &Subsystem,
     client: (TcpStream, SocketAddr),
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
-    on_follower_disconnected: mpsc::Sender<SocketAddr>,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
     config: Config,
     wb: CloneableWbApi,
     proxy_sessions: ProxySessions,
@@ -212,7 +205,7 @@ fn serve(
             eprintln!("{e:?}");
         }
 
-        let _ = on_follower_disconnected
+        on_follower_disconnected
             .try_send(follower_addr)
             .expect("follower disconnected channel is clogged");
 
@@ -224,18 +217,14 @@ async fn follower_serve_loop(
     subsys: &Subsystem,
     tcp_stream: TcpStream,
     follower: SocketAddr,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
+    on_follower_connected: OnFollowerConnected,
     config: Config,
     worterbuch: CloneableWbApi,
     proxy_sessions: ProxySessions,
 ) -> miette::Result<()> {
     let (send_tx, send_rx) = mpsc::channel(config.channel_buffer_size);
     let mut proxy_server = VirtualProxyServer {
-        subsys: subsys.clone(),
+        subsys,
         clients: HashMap::new(),
         worterbuch: worterbuch.named("server/virtual-proxy"),
         config: config.clone(),
@@ -245,7 +234,6 @@ async fn follower_serve_loop(
     let mut proxy_id = None;
 
     let res = follower_session(
-        subsys,
         tcp_stream,
         follower,
         on_follower_connected,
@@ -269,29 +257,25 @@ async fn follower_serve_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn follower_session(
-    subsys: &Subsystem,
+async fn follower_session<'a>(
     tcp_stream: TcpStream,
     follower: SocketAddr,
-    on_follower_connected: mpsc::Sender<(
-        oneshot::Sender<(StateSync, ClusterStateChangeReceiver)>,
-        SocketAddr,
-        bool,
-    )>,
+    on_follower_connected: OnFollowerConnected,
     config: Config,
-    proxy_server: &mut VirtualProxyServer,
+    proxy_server: &mut VirtualProxyServer<'a>,
     send_rx: mpsc::Receiver<VirtualServerMessage>,
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<()> {
-    let (socket_rx, mut socket_tx) = tcp_stream.into_split();
+    let (socket_rx, socket_tx) = tcp_stream.into_split();
+    let mut socket_tx = BufWriter::new(socket_tx);
     let mut proxy_messages = BufReader::new(socket_rx).lines();
 
-    send_welcome(subsys, &mut socket_tx, follower, &config).await?;
+    send_welcome(proxy_server.subsys, &mut socket_tx, follower, &config).await?;
     let handshake = receive_handshake(&mut proxy_messages, follower).await?;
 
     let is_proxy = process_handshake(
-        subsys,
+        proxy_server.subsys,
         handshake,
         &config,
         proxy_server,
@@ -309,24 +293,19 @@ async fn follower_session(
 
     let (state, commands) = sync_rx.await.into_diagnostic()?;
 
-    send_initial_state(subsys, &mut socket_tx, follower, &config, state).await?;
+    send_initial_state(
+        proxy_server.subsys,
+        &mut socket_tx,
+        follower,
+        &config,
+        state,
+    )
+    .await?;
 
-    // Writing to the follower/proxy must happen in a separate task: the core system blocks until state changes have
-    // been taken from `commands`, while processing proxy messages below may wait for the core system. Draining
-    // `commands` in the same task would allow the core system and this session to wait for each other forever.
-    let session = subsys.clone();
-    let send_config = config.clone();
-    subsys.spawn("follower-writer", move |s| {
-        follower_writer_loop(
-            s,
-            session,
-            socket_tx,
-            commands,
-            send_rx,
-            send_config,
-            follower,
-        )
-    });
+    proxy_server.subsys.spawn(
+        format!("state-and-response-forwarder/{follower}"),
+        move |s| forward_messages_to_proxy(s, follower, config, send_rx, socket_tx, commands),
+    );
 
     while_select! {
         _ = proxy_server.subsys.shutdown_requested() => break,
@@ -338,38 +317,25 @@ async fn follower_session(
     Ok(())
 }
 
-/// Forwards state changes and responses to proxied clients to the follower/proxy. This must never wait for the core
-/// system, see [`follower_session`].
-async fn follower_writer_loop(
-    subsys: Subsystem,
-    session: Subsystem,
-    mut socket_tx: OwnedWriteHalf,
-    mut commands: ClusterStateChangeReceiver,
-    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
-    config: Config,
+async fn forward_messages_to_proxy(
+    s: Subsystem,
     follower: SocketAddr,
-) {
-    let res: miette::Result<()> = async {
-        while_select! {
-            _ = subsys.shutdown_requested() => break,
-            recv = commands.recv() => forward_change_to_follower(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
-            recv = send_rx.recv() => forward_response_to_proxy(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
-        }
-        Ok(())
+    config: Config,
+    mut send_rx: mpsc::Receiver<VirtualServerMessage>,
+    mut socket_tx: BufWriter<OwnedWriteHalf>,
+    mut commands: mpsc::Receiver<ClusterStateChange>,
+) -> std::prelude::v1::Result<(), miette::Error> {
+    while_select! {
+        _ = s.shutdown_requested() => break,
+        recv = commands.recv() => forward_change_to_follower(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
+        recv = send_rx.recv() => forward_response_to_proxy(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
-    .await;
-
-    if let Err(e) = res {
-        error!("Error in follower/proxy writer loop: {e}");
-        eprintln!("{e:?}");
-    }
-
-    session.request_local_shutdown_because("writer loop to follower/proxy stopped");
+    Ok(())
 }
 
 async fn send_welcome(
     subsys: &Subsystem,
-    tcp_stream: &mut OwnedWriteHalf,
+    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
     follower: SocketAddr,
     config: &Config,
 ) -> miette::Result<()> {
@@ -443,11 +409,11 @@ async fn receive_handshake(
     handshake
 }
 
-async fn process_handshake(
+async fn process_handshake<'a>(
     subsys: &Subsystem,
     handshake: Handshake,
     config: &Config,
-    proxy_server: &mut VirtualProxyServer,
+    proxy_server: &mut VirtualProxyServer<'a>,
     proxy_sessions: &ProxySessions,
     proxy_id: &mut Option<ProxyId>,
 ) -> miette::Result<bool> {
@@ -481,7 +447,7 @@ async fn process_handshake(
                     error_code: ErrorCode::LockLost,
                     metadata: json!("lock lost").to_string(),
                 });
-                let _ = tx.lazy_send(msg).await;
+                let _ = tx.send(msg).await;
             }
         }
 
@@ -512,10 +478,10 @@ async fn process_handshake(
 /// (e.g. one that broke without the leader noticing yet), that connection is closed and all of its clients are
 /// disconnected before this returns, so that the clients of the new connection can be registered without
 /// colliding with their stale registrations.
-async fn take_over_proxy_session(
+async fn take_over_proxy_session<'a>(
     proxy_sessions: &ProxySessions,
     proxy_id: ProxyId,
-    proxy_server: &VirtualProxyServer,
+    proxy_server: &VirtualProxyServer<'a>,
 ) {
     trace!(enter = "take_over_proxy_session");
     let previous = proxy_sessions.update(
@@ -572,7 +538,7 @@ fn authenticate_against_key(_auth_token: Option<&str>, _key: &str) -> miette::Re
 
 async fn send_initial_state(
     subsys: &Subsystem,
-    tcp_stream: &mut OwnedWriteHalf,
+    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
     follower: SocketAddr,
     config: &Config,
     state: StateSync,
@@ -599,7 +565,7 @@ async fn send_initial_state(
 async fn forward_change_to_follower(
     subsys: &Subsystem,
     recv: Option<ClusterStateChange>,
-    socket_tx: &mut OwnedWriteHalf,
+    socket_tx: &mut BufWriter<OwnedWriteHalf>,
     config: &Config,
     follower: SocketAddr,
 ) -> miette::Result<ControlFlow<()>> {
@@ -628,7 +594,7 @@ async fn forward_change_to_follower(
 async fn forward_response_to_proxy(
     subsys: &Subsystem,
     recv: Option<VirtualServerMessage>,
-    socket_tx: &mut OwnedWriteHalf,
+    socket_tx: &mut BufWriter<OwnedWriteHalf>,
     config: &Config,
     follower: SocketAddr,
 ) -> miette::Result<ControlFlow<()>> {

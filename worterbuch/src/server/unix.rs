@@ -17,16 +17,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use super::common::protocol::{Proto, ServerMessageReceiver, server_message_channel};
-use crate::{
-    auth::JwtClaims,
-    server::common::{CloneableWbApi, protocol::LazyBroadcaster},
-    stats::VERSION,
-};
+use super::common::protocol::Proto;
+use crate::{auth::JwtClaims, server::common::CloneableWbApi, stats::VERSION};
 use miette::{IntoDiagnostic, Result};
 use std::{collections::HashMap, io, ops::ControlFlow, path::PathBuf, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader, BufWriter, Lines},
     net::{
         UnixListener, UnixStream,
         unix::{OwnedReadHalf, OwnedWriteHalf, SocketAddr},
@@ -39,7 +35,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    protocol::v1::{ServerInfo, ServerMessage, Welcome},
+    protocol::v1::{ClientInfo, ServerInfo, ServerMessage, Welcome},
     write_line_and_flush,
 };
 
@@ -176,7 +172,12 @@ async fn serve(
 ) -> Result<()> {
     info!("New client connected: {client_id} ({remote_addr:?})");
 
-    match worterbuch.connected(client_id, None, Protocol::UNIX).await {
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Unix,
+    };
+
+    match worterbuch.connected(client_info.clone(), None).await {
         Ok(ejected) => {
             debug!("Receiving messages from client {client_id} ({remote_addr:?}) …",);
 
@@ -198,9 +199,7 @@ async fn serve(
 
     info!("Client disconnected: {client_id} ({remote_addr:?})");
 
-    worterbuch
-        .disconnected(client_id, Protocol::UNIX, None)
-        .await?;
+    worterbuch.disconnected(client_info, None).await?;
 
     Ok(())
 }
@@ -230,9 +229,16 @@ async fn serve_loop(
 
     // unix socket send loop
     let (unix_rx, unix_tx) = socket.into_split();
-    let (unix_send_tx, unix_send_rx) = server_message_channel(config.channel_buffer_size);
+    let (unix_send_tx, unix_send_rx) = mpsc::channel(config.channel_buffer_size);
     subsys.spawn("forward_messages_to_socket", async move |s| {
-        forward_messages_to_socket(s, unix_send_rx, unix_tx, client_id, send_timeout).await
+        forward_messages_to_socket(
+            s,
+            unix_send_rx,
+            BufWriter::new(unix_tx),
+            client_id,
+            send_timeout,
+        )
+        .await
     });
 
     let unix_rx = BufReader::new(unix_rx);
@@ -246,11 +252,16 @@ async fn serve_loop(
             authorization_required,
         ),
     });
-    unix_send_tx.lazy_send(welcome).await.into_diagnostic()?;
+    unix_send_tx.send(welcome).await.into_diagnostic()?;
+
+    let client_info = ClientInfo {
+        client_id,
+        protocol: Protocol::Unix,
+    };
 
     let proto = Proto::new(
         subsys.clone(),
-        client_id,
+        client_info,
         unix_send_tx,
         authorization_required,
         config,
@@ -272,8 +283,8 @@ async fn serve_loop(
 
 async fn forward_messages_to_socket(
     subsys: Subsystem,
-    mut unix_send_rx: ServerMessageReceiver,
-    mut unix_tx: OwnedWriteHalf,
+    mut unix_send_rx: mpsc::Receiver<ServerMessage>,
+    mut unix_tx: BufWriter<OwnedWriteHalf>,
     client_id: ClientId,
     send_timeout: Duration,
 ) -> Result<()> {
@@ -281,7 +292,6 @@ async fn forward_messages_to_socket(
         biased;
         _ = subsys.shutdown_requested() => break,
         recv = unix_send_rx.recv() => if let Some(msg) = recv {
-            let Ok(msg) = msg else { break; };
             if let Err(e) = write_line_and_flush(|| subsys.shutdown_requested(), &msg, &mut unix_tx, send_timeout).await {
                 error!("Error sending UNIX message to client {client_id}: {e}");
                 trace!(?msg);

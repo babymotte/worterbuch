@@ -164,7 +164,7 @@ async fn speed_test(
     values_per_key: usize,
     subscribe: bool,
 ) -> Result<(), miette::Error> {
-    let Some(test) = speed::SpeedTest::new(
+    let Some(test) = speed::SpeedTest::spawn(
         &subsys,
         publishers,
         key_length,
@@ -203,7 +203,7 @@ async fn sequence_test(
     key_prefix: String,
 ) -> Result<(), miette::Error> {
     let Some(test) =
-        sequence::SequenceTest::new(&subsys, clients, burst, duration, key_prefix, client_config)
+        sequence::SequenceTest::spawn(&subsys, clients, burst, duration, key_prefix, client_config)
     else {
         trace!("shutdown requested, not spawning sequence test");
         return Ok(());

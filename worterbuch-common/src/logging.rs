@@ -117,7 +117,7 @@ where
 
     let targets = env::var("WORTERBUCH_LOG")
         .ok()
-        .and_then(|t| read_targets(t))
+        .and_then(read_targets)
         .unwrap_or_else(|| Targets::new().with_default(LevelFilter::INFO));
 
     let (filter_layer, reload_handler) = reload::Layer::new(targets.clone());

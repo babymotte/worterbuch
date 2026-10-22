@@ -298,6 +298,15 @@ pub struct Lock {
     pub key: Key,
 }
 
+impl From<(TransactionId, Key)> for Lock {
+    fn from((transaction_id, key): (TransactionId, Key)) -> Self {
+        Lock {
+            transaction_id,
+            key,
+        }
+    }
+}
+
 // #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 // #[serde(rename_all = "camelCase")]
 // pub struct Transform {
