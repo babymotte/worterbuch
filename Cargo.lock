@@ -6750,6 +6750,7 @@ dependencies = [
  "tracing-subscriber",
  "turso",
  "uuid",
+ "worterbuch-client",
  "worterbuch-common",
 ]
 
