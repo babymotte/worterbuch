@@ -69,6 +69,7 @@ tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [lints.rust]

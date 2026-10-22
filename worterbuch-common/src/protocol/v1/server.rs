@@ -24,10 +24,10 @@ use crate::{
         Trace, TransactionId, Value, Version,
     },
 };
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -299,7 +299,7 @@ impl ServerInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum ErrorCode {
     IllegalWildcard = 0,
@@ -331,6 +331,56 @@ pub enum ErrorCode {
     LockLost = 26,
     InternalTimeout = 27,
     Other = u8::MAX,
+}
+
+impl ErrorCode {
+    pub const ALL: [ErrorCode; 29] = [
+        ErrorCode::IllegalWildcard,
+        ErrorCode::IllegalMultiWildcard,
+        ErrorCode::MultiWildcardAtIllegalPosition,
+        ErrorCode::IoError,
+        ErrorCode::SerdeError,
+        ErrorCode::NoSuchValue,
+        ErrorCode::NotSubscribed,
+        ErrorCode::ProtocolNegotiationFailed,
+        ErrorCode::InvalidServerResponse,
+        ErrorCode::ReadOnlyKey,
+        ErrorCode::AuthorizationFailed,
+        ErrorCode::AuthorizationRequired,
+        ErrorCode::AlreadyAuthorized,
+        ErrorCode::MissingValue,
+        ErrorCode::Unauthorized,
+        ErrorCode::NoPubStream,
+        ErrorCode::NotLeader,
+        ErrorCode::Cas,
+        ErrorCode::CasVersionMismatch,
+        ErrorCode::NotImplemented,
+        ErrorCode::KeyIsLocked,
+        ErrorCode::KeyIsNotLocked,
+        ErrorCode::LockAcquisitionCancelled,
+        ErrorCode::FeatureDisabled,
+        ErrorCode::ClientIDCollision,
+        ErrorCode::EmptyKey,
+        ErrorCode::LockLost,
+        ErrorCode::InternalTimeout,
+        ErrorCode::Other,
+    ];
+}
+
+// error codes are serialized as their numeric value (see serde_repr), which the derived schema does not reflect
+impl JsonSchema for ErrorCode {
+    fn schema_name() -> Cow<'static, str> {
+        "ErrorCode".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let codes: Vec<u8> = ErrorCode::ALL.iter().map(|c| *c as u8).collect();
+        json_schema!({
+            "type": "integer",
+            "format": "uint8",
+            "enum": codes,
+        })
+    }
 }
 
 impl fmt::Display for ErrorCode {
