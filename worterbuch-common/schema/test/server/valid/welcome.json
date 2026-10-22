@@ -1,0 +1,11 @@
+{
+  "welcome": {
+    "info": {
+      "version": "1.3.0",
+      "supportedProtocolVersions": [[0, 11], [1, 6]],
+      "protocolVersion": "0.11",
+      "authorizationRequired": false
+    },
+    "clientId": "3f2b8c1e-1111-4222-8333-444455556666"
+  }
+}

@@ -179,7 +179,7 @@ pub struct Subscribe {
     /// A unique transaction ID
     pub transaction_id: TransactionId,
     /// The key to subscribe to
-    pub key: RequestPattern,
+    pub key: Key,
     /// Indicate whether all or only unique values should be received
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub unique: Option<UniqueFlag>,

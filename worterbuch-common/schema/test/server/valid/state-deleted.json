@@ -1,6 +1,1 @@
-{
-  "state": {
-    "transactionId": 1,
-    "deleted": { "key": "hello", "value": "world" }
-  }
-}
+{ "state": { "transactionId": 1, "deleted": "world" } }

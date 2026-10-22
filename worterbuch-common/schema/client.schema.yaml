@@ -111,22 +111,25 @@ properties:
       value:
         description: The new value for the key
       version:
-        description: The current value version or 0 if the value does not exist yet
+        description: The expected current value version or 0 if the value is not expected to exist yet
+        type: integer
+        format: u64
     additionalProperties: false
     required:
       - transactionId
       - key
       - value
+      - version
   sPubInit:
     description: A message sent by a client to initiate a new publish stream
     type: object
     properties:
       transactionId:
-        description: A unique transaction ID
+        description: A unique transaction ID. This transaction ID will be used instead of a key for all subsequent publish messages in this stream.
         type: integer
         format: u64
       key:
-        description: The key to be used in this pub stream
+        description: The key this stream will publish to
         type: string
     additionalProperties: false
     required:
@@ -181,11 +184,13 @@ properties:
       liveOnly:
         description: Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
         type: boolean
+      sendTraces:
+        description: Indicate whether the server should include trace data in the subscription events
+        type: boolean
     additionalProperties: false
     required:
       - transactionId
       - key
-      - unique
   pSubscribe:
     description: A message sent by a client to subscribe to values of all keys matching the provided pattern
     type: object
@@ -203,6 +208,9 @@ properties:
       liveOnly:
         description: Indicate whether there should be a callback for data already stored on the broker (false) or only for live events (true)
         type: boolean
+      sendTraces:
+        description: Indicate whether the server should include trace data in the subscription events
+        type: boolean
       aggregateEvents:
         description: Optionally aggregate events for the given number of milliseconds before sending them to the client to reduce network traffic
         type: integer
@@ -211,7 +219,6 @@ properties:
     required:
       - transactionId
       - requestPattern
-      - unique
   unsubscribe:
     description: A message sent by a client to request the cancellation of the subscription
     type: object
@@ -272,7 +279,6 @@ properties:
     additionalProperties: false
     required:
       - transactionId
-      - parent
   subscribeLs:
     description: A message sent by a client to request a subscription to all direct sub-key segments of the provided partial key
     type: object
@@ -286,10 +292,12 @@ properties:
         type:
           - "null"
           - string
+      sendTraces:
+        description: Indicate whether the server should include trace data in the subscription events
+        type: boolean
     additionalProperties: false
     required:
       - transactionId
-      - parent
   pLs:
     description: A message sent by a client to list all direct sub-key segments of all partial keys matching the provided pattern
     type: object
@@ -306,7 +314,6 @@ properties:
     additionalProperties: false
     required:
       - transactionId
-      - parentPattern
   # pSubscribeLs:
   #   description: A message sent by a client to request a subscription to all direct sub-key segments of all partial keys matching the provided pattern
   #   type: object
@@ -344,6 +351,7 @@ properties:
         type: integer
         format: u64
       key:
+        description: The key to get a lock on
         type: string
     additionalProperties: false
     required:
@@ -358,6 +366,7 @@ properties:
         type: integer
         format: u64
       key:
+        description: The key to get a lock on
         type: string
     additionalProperties: false
     required:
@@ -372,6 +381,7 @@ properties:
         type: integer
         format: u64
       key:
+        description: The key of the lock to release
         type: string
     additionalProperties: false
     required:
@@ -397,13 +407,19 @@ properties:
 additionalProperties: false
 oneOf:
   - required:
+      - protocolSwitchRequest
+  - required:
       - authorizationRequest
   - required:
       - get
   - required:
+      - cGet
+  - required:
       - pGet
   - required:
       - set
+  - required:
+      - cSet
   - required:
       - sPubInit
   - required:
@@ -430,26 +446,28 @@ oneOf:
   #     - pSubscribeLs
   - required:
       - unsubscribeLs
+  - required:
+      - lock
+  - required:
+      - acquireLock
+  - required:
+      - releaseLock
   # - required:
   #     - transform
 components:
   schemas:
     ProtocolVersion:
-      description: A protocol version with a major and minor version tag
-      type: object
-      properties:
-        major:
-          description: The protocol's major version tag
+      description: A protocol version as a [major, minor] tuple
+      type: array
+      prefixItems:
+        - description: The protocol's major version tag
           type: integer
-          format: u16
-        minor:
-          description: The protocol's minor version tag
+          format: u32
+        - description: The protocol's minor version tag
           type: integer
-          format: u16
-      additionalProperties: false
-      required:
-        - major
-        - minor
+          format: u32
+      minItems: 2
+      unevaluatedItems: false
     KeyValuePair:
       description: A key/value pair where the key is always a string and the value can be anything
       type: object

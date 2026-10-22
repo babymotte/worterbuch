@@ -40,6 +40,7 @@ http = "1.5.0"
 http-body-util = "0.1.5"
 inferno = "0.12.8"
 jemalloc_pprof = { version = "0.9.0", features = ["flamegraph"] }
+jsonschema = { version = "0.59.0", default-features = false }
 jsonwebtoken = "11.1.0"
 lazy_static = "1.5.1"
 libc = "0.2.189"
@@ -83,7 +84,7 @@ tokio-stream = "0.1.19"
 tokio-tungstenite = "0.30.0"
 tokio-tungstenite-wasm = "0.9.0"
 tosub = "4.0.0"
-totils = { version = "1.4.0", features = ["while_select"] }
+totils = { version = "1.5.2", features = ["while_select", "peekable_mpsc"] }
 tower-http = "0.7.1"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.34.0"

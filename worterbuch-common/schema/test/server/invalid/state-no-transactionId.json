@@ -1,1 +1,1 @@
-{ "state": { "keyValue": { "key": "hello", "value": "world" } } }
+{ "state": { "value": "world" } }

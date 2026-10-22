@@ -59,6 +59,7 @@ tokio = { workspace = true, features = [
     "time",
     "macros",
     "fs",
+    "net",
 ] }
 tokio-tungstenite-wasm = { workspace = true, optional = true }
 tosub.workspace = true
@@ -69,6 +70,7 @@ tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [lints.rust]

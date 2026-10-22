@@ -1,6 +1,0 @@
-{
-  "state": {
-    "transactionId": 1,
-    "keyValue": { "key": "hello", "value": "world" }
-  }
-}
