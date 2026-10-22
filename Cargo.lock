@@ -5521,9 +5521,9 @@ dependencies = [
 
 [[package]]
 name = "totils"
-version = "1.4.0"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37436c6d9d5d27c9640c43aa72018621b40cc3a75210acca31fd8e1e1f68a39"
+checksum = "2680a07e3be0a8ec7964a222c938bb64afc853a0f4a9b631ad99c722ccc0c944"
 dependencies = [
  "tokio",
 ]
