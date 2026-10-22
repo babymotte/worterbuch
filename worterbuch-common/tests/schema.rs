@@ -75,10 +75,11 @@ impl Kind {
     }
 
     fn fixtures(self, valid: bool) -> Vec<(PathBuf, Value)> {
-        let dir = schema_dir()
-            .join("test")
-            .join(self.name())
-            .join(if valid { "valid" } else { "invalid" });
+        let dir = schema_dir().join("test").join(self.name()).join(if valid {
+            "valid"
+        } else {
+            "invalid"
+        });
         let mut fixtures: Vec<(PathBuf, Value)> = fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().path())
@@ -89,7 +90,11 @@ impl Kind {
                 (p, json)
             })
             .collect();
-        assert!(!fixtures.is_empty(), "no fixtures found in {}", dir.display());
+        assert!(
+            !fixtures.is_empty(),
+            "no fixtures found in {}",
+            dir.display()
+        );
         fixtures.sort_by(|a, b| a.0.cmp(&b.0));
         fixtures
     }
@@ -210,7 +215,13 @@ fn every_message_type_has_a_valid_fixture() {
         let covered: BTreeSet<String> = kind
             .fixtures(true)
             .into_iter()
-            .flat_map(|(_, json)| json.as_object().unwrap().keys().cloned().collect::<Vec<_>>())
+            .flat_map(|(_, json)| {
+                json.as_object()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
             .collect();
         let missing: Vec<String> = message_names(&kind.rust_schema())
             .difference(&covered)
@@ -678,7 +689,12 @@ impl<'a> Normalizer<'a> {
         }
 
         for key in ["oneOf", "anyOf"] {
-            for branch in schema.get(key).and_then(Value::as_array).into_iter().flatten() {
+            for branch in schema
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 if is_null_type(branch) {
                     continue;
                 }
@@ -741,16 +757,10 @@ fn check_yaml_schema_matches_rust_schema(kind: Kind) {
         kind.name()
     );
 
-    let yaml_alternatives: BTreeSet<String> = yaml_shape
-        .one_of
-        .iter()
-        .map(|g| format!("{g:?}"))
-        .collect();
-    let rust_alternatives: BTreeSet<String> = rust_shape
-        .one_of
-        .iter()
-        .map(|g| format!("{g:?}"))
-        .collect();
+    let yaml_alternatives: BTreeSet<String> =
+        yaml_shape.one_of.iter().map(|g| format!("{g:?}")).collect();
+    let rust_alternatives: BTreeSet<String> =
+        rust_shape.one_of.iter().map(|g| format!("{g:?}")).collect();
     assert_eq!(
         yaml_alternatives,
         rust_alternatives,
