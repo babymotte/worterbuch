@@ -24,7 +24,10 @@ use tokio::sync::mpsc;
 use tosub::Subsystem;
 use totils::{CancelOn, Untangle};
 use tracing::warn;
-use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys, server_addresses};
+use worterbuch_cli::{
+    next_item, print_del_event, print_message, provide_keys, server_addresses,
+    set_grave_goods_and_last_will,
+};
 use worterbuch_client::config::Config;
 use worterbuch_client::{AuthToken, connect, logging};
 
@@ -62,6 +65,12 @@ struct Args {
         env = "WORTERBUCH_CLIENT_NAME"
     )]
     name: String,
+    /// Last will to be published by the client when it disconnects
+    #[arg(long = "lw", name = "<KEY>=<VALUE>[,<KEY>=<VALUE>,…]")]
+    last_will: Option<Vec<String>>,
+    /// Grave goods to be buried by the client when it disconnects
+    #[arg(long = "gg", name = "<KEY>[,<KEY>,…]")]
+    grave_goods: Option<Vec<String>>,
     /// Don't return deleted values
     #[arg(short, long)]
     quiet: bool,
@@ -106,6 +115,15 @@ async fn run(subsys: Subsystem) -> Result<()> {
         .or_cancel_on(subsys.shutdown_requested())
         .await
         .untangle()?;
+
+    set_grave_goods_and_last_will(
+        &subsys,
+        args.last_will.as_deref(),
+        args.grave_goods.as_deref(),
+        &wb,
+    )
+    .await?;
+
     let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;

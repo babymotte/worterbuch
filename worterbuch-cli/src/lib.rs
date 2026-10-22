@@ -28,10 +28,10 @@ use std::{
 };
 use tokio::{spawn, sync::mpsc, time::sleep};
 use tosub::Subsystem;
-use totils::while_select;
+use totils::{CancelOn, Untangle, while_select};
 use tracing::error;
 use worterbuch_client::{
-    Key, KeyValuePair, KeyValuePairs,
+    Key, KeyValuePair, KeyValuePairs, LastWill,
     protocol::v1::{Err, LsState, PState, PStateEvent, ServerMessage, State, StateEvent},
 };
 
@@ -373,4 +373,34 @@ pub fn server_addresses(from_args: &[String], config_entry: &mut Box<[String]>) 
             .flatten()
             .collect();
     }
+}
+
+pub async fn set_grave_goods_and_last_will(
+    subsys: &Subsystem,
+    last_will: Option<&[String]>,
+    grave_goods: Option<&[String]>,
+    wb: &worterbuch_client::Worterbuch,
+) -> miette::Result<()> {
+    if let Some(last_will) = last_will {
+        let last_will: LastWill = last_will
+            .iter()
+            .flat_map(|it| it.split(',').map(str::trim))
+            .filter_map(|it| KeyValuePair::try_from(it).ok())
+            .collect();
+        wb.set_last_will(&last_will)
+            .or_cancel_on(subsys.shutdown_requested())
+            .await
+            .untangle()?;
+    }
+    if let Some(grave_goods) = grave_goods {
+        let grave_goods: Vec<&str> = grave_goods
+            .iter()
+            .flat_map(|it| it.split(',').map(str::trim))
+            .collect();
+        wb.set_grave_goods(&grave_goods)
+            .or_cancel_on(subsys.shutdown_requested())
+            .await
+            .untangle()?;
+    }
+    Ok(())
 }

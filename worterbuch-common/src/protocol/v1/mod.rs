@@ -128,6 +128,20 @@ impl<S: Serialize> From<(&str, S)> for KeyValuePair {
     }
 }
 
+impl TryFrom<&str> for KeyValuePair {
+    type Error = &'static str;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let mut parts = s.splitn(2, '=');
+        let key = parts.next().ok_or("Missing key")?;
+        let value = parts.next().ok_or("Missing value")?;
+        Ok(KeyValuePair {
+            key: key.to_owned(),
+            value: json!(value),
+        })
+    }
+}
+
 impl KeyValuePair {
     pub fn new(key: String, value: Value) -> Self {
         KeyValuePair { key, value }
