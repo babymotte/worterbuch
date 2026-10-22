@@ -186,6 +186,7 @@ pub struct Config {
     pub license_file: Option<PathBuf>,
     pub initial_sync_timeout: Duration,
     pub log_targets_reload_interval: Option<Duration>,
+    pub enable_mdns: bool,
 }
 
 impl Config {
@@ -423,6 +424,12 @@ impl Config {
             self.log_targets_reload_interval = Some(Duration::from_secs(secs));
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_ENABLE_MDNS") {
+            let enabled = val.to_lowercase();
+            let enabled = enabled.trim();
+            self.enable_mdns = enabled == "true" || enabled == "1";
+        }
+
         debug!(
             "Config loaded from env:\n---\n{}",
             serde_yaml::to_string(&self).expect("could not serialize config")
@@ -479,6 +486,7 @@ impl Config {
             license_file: None,
             initial_sync_timeout: Duration::from_secs(10),
             log_targets_reload_interval: None,
+            enable_mdns: false,
         };
         config.load_env()?;
         if let Some(args) = args {

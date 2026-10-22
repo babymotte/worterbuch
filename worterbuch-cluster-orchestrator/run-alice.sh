@@ -1,7 +1,9 @@
 #/bin/bash
 
+WORTERBUCH_LOG=info \
 WORTERBUCH_TOKIO_CONSOLE_PORT=6666 \
 WORTERBUCH_DATA_DIR=./data/alice \
 WORTERBUCH_WS_SERVER_PORT=8080 \
 WORTERBUCH_TCP_SERVER_PORT=9090 \
+WORTERBUCH_QUIC_SERVER_PORT=5050 \
 cargo run -- --stats-port 7070 -w ../target/debug/worterbuch alice

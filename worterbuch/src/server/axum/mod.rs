@@ -81,6 +81,7 @@ use websocket::serve;
 use worterbuch_common::{
     AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
+    mdns::MdnsRegistry,
     protocol::v1::{
         ClientInfo, Delete, Get, Key, KeyValuePairs, Ls, PDelete, PGet, PSubscribe, Publish,
         RequestPattern, ServerInfo, Set, StateEvent, Subscribe, SubscribeLs, Unsubscribe,
@@ -837,6 +838,7 @@ pub(crate) async fn start(
     port: u16,
     subsys: Subsystem,
     ws_enabled: bool,
+    mdns: Option<MdnsRegistry>,
 ) -> miette::Result<()> {
     let config = worterbuch.config().to_owned();
 
@@ -864,6 +866,18 @@ pub(crate) async fn start(
             .serve(router.into_make_service_with_connect_info::<SocketAddr>()),
     );
 
+    if let Some(mdns) = mdns
+        && let Some(name) = &config.instance_name
+    {
+        publish_http(&mdns, port, name).await?;
+        if config.web_root_path.is_some() {
+            publish_webapp(&mdns, port, name).await?;
+        }
+        if ws_enabled {
+            publish_ws(&mdns, port, name).await?;
+        }
+    }
+
     if let Some(res) = (&mut serve).or_cancel_on(subsys.shutdown_requested()).await {
         res.into_diagnostic().wrap_err("server crashed")?;
     } else {
@@ -874,6 +888,29 @@ pub(crate) async fn start(
     debug!("webserver subsystem completed.");
 
     Ok(())
+}
+
+async fn publish_webapp(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+    mdns.publish_mdns_service("_http._tcp.local.", name, port, None)
+        .await
+        .wrap_err("Failed to publish mDNS service for webapp endpoint")
+}
+
+async fn publish_http(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+    let mut properties = HashMap::new();
+    properties.insert("api".to_owned(), "/api/v1/".to_owned());
+    properties.insert("info".to_owned(), "/info".to_owned());
+    mdns.publish_mdns_service("_wb_http._tcp.local.", name, port, Some(properties))
+        .await
+        .wrap_err("Failed to publish mDNS service for HTTP endpoint")
+}
+
+async fn publish_ws(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+    let mut properties = HashMap::new();
+    properties.insert("path".to_owned(), "/ws".to_owned());
+    mdns.publish_mdns_service("_wb_ws._tcp.local.", name, port, Some(properties))
+        .await
+        .wrap_err("Failed to publish mDNS service for WS endpoint")
 }
 
 pub async fn build_worterbuch_router(

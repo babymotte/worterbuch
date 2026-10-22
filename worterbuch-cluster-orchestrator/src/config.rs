@@ -171,9 +171,9 @@ struct Args {
     /// Port for stats endpoint
     #[arg(long, env = "WBCLUSTER_STATS_PORT", default_value = "8383")]
     stats_port: u16,
-    /// Port for raft consensus algorithm
+    /// Port for raft consensus algorithm. By default this will be taken from the cluster config, however if the raft socket needs to bind to a different local port than peers need to send messages to (e.g. becasue the instance is behind a NAT or firewall), it can be specified here.
     #[arg(long, env = "WBCLUSTER_RAFT_PORT")]
-    raft_port: u16,
+    raft_port: Option<u16>,
     /// Data directory
     #[arg(long, env = "WORTERBUCH_DATA_DIR", default_value = "./data")]
     data_dir: PathBuf,
@@ -401,7 +401,7 @@ async fn load_config(
         node_id: args.node_id.clone(),
         heartbeat_interval: Duration::from_millis(args.heartbeat_interval),
         heartbeat_min_timeout: args.heartbeat_min_timeout,
-        raft_port: args.raft_port,
+        raft_port: args.raft_port.unwrap_or(me.raft_port),
         quorum,
         quorum_too_low,
         sync_port: me.sync_port,

@@ -56,6 +56,7 @@ use tosub::Subsystem;
 use tracing::{debug, info};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
+    mdns::MdnsRegistry,
     protocol::v1::{
         InternalAction, SYSTEM_TOPIC_NAME, SYSTEM_TOPIC_ROOT,
         SYSTEM_TOPIC_SUPPORTED_PROTOCOL_VERSION, Trace, Value,
@@ -143,10 +144,16 @@ async fn do_run_worterbuch(
 
     set_instance_name(&mut worterbuch, &config).await?;
 
-    let web_server = web_server(&api, &subsys, &config);
-    let tcp_server = tcp_server(&api, &subsys, &config);
+    let mdns = if config.enable_mdns && config.instance_name.is_some() {
+        Some(MdnsRegistry::start(&subsys))
+    } else {
+        None
+    };
+
+    let web_server = web_server(&api, &subsys, &config, mdns.clone());
+    let tcp_server = tcp_server(&api, &subsys, &config, mdns.clone());
     let unix_socket = unix_socket(&api, &subsys, &config);
-    let quic_server = quic_server(&api, &subsys, &config);
+    let quic_server = quic_server(&api, &subsys, &config, mdns.clone());
 
     if config.role.provide_server_metadata() {
         server_metadata(api.named("server-metadata"), &mut worterbuch, &subsys).await?;
@@ -244,7 +251,12 @@ async fn set_instance_name(
     Ok(())
 }
 
-fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
+fn web_server(
+    api: &CloneableWbApi,
+    subsys: &Subsystem,
+    config: &Config,
+    mdns: Option<MdnsRegistry>,
+) -> Option<Subsystem> {
     if let Some(Endpoint {
         tls,
         bind_addr,
@@ -258,7 +270,7 @@ fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
         let port = port.to_owned();
         let ws_enabled = config.role.accept_client_connections() && !config.ws_disabled;
         subsys.spawn("webserver", async move |subsys| {
-            server::axum::start(sapi, tls, bind_addr, port, subsys, ws_enabled).await
+            server::axum::start(sapi, tls, bind_addr, port, subsys, ws_enabled, mdns).await
         })
     } else {
         info!("Web server disabled.");
@@ -266,7 +278,12 @@ fn web_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
     }
 }
 
-fn tcp_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
+fn tcp_server(
+    api: &CloneableWbApi,
+    subsys: &Subsystem,
+    config: &Config,
+    mdns: Option<MdnsRegistry>,
+) -> Option<Subsystem> {
     let cfg = config.clone();
     if config.role.accept_client_connections()
         && let Some(Endpoint {
@@ -280,7 +297,7 @@ fn tcp_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opti
         let bind_addr = bind_addr.to_owned();
         let port = port.to_owned();
         subsys.spawn("tcpserver", async move |subsys| {
-            server::tcp::start(sapi, cfg, bind_addr, port, subsys).await
+            server::tcp::start(sapi, cfg, bind_addr, port, subsys, mdns).await
         })
     } else {
         None
@@ -306,7 +323,12 @@ fn unix_socket(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
     None
 }
 
-fn quic_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Option<Subsystem> {
+fn quic_server(
+    api: &CloneableWbApi,
+    subsys: &Subsystem,
+    config: &Config,
+    mdns: Option<MdnsRegistry>,
+) -> Option<Subsystem> {
     if config.role.accept_client_connections()
         && let Some(QuicEndpoint {
             bind_addr,
@@ -322,7 +344,7 @@ fn quic_server(api: &CloneableWbApi, subsys: &Subsystem, config: &Config) -> Opt
         let cert_path = cert_path.clone();
         let key_path = key_path.clone();
         subsys.spawn("quicserver", async move |subsys| {
-            server::quic::start(sapi, bind_addr, port, cert_path, key_path, subsys).await
+            server::quic::start(sapi, bind_addr, port, cert_path, key_path, subsys, mdns).await
         })
     } else {
         None

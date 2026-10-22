@@ -43,6 +43,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
+    mdns::MdnsRegistry,
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_tcp_server_socket,
     write_line_and_flush,
@@ -60,6 +61,7 @@ pub async fn start(
     bind_addr: IpAddr,
     port: u16,
     subsys: Subsystem,
+    mdns: Option<MdnsRegistry>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
 
@@ -78,6 +80,14 @@ pub async fn start(
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
+
+    if let Some(mdns) = mdns
+        && let Some(name) = &config.instance_name
+    {
+        mdns.publish_mdns_service("_wb_tcp._tcp.local.", name, port, None)
+            .await
+            .wrap_err("Failed to publish mDNS service for TCP endpoint")?;
+    }
 
     let mut clients = HashMap::new();
     loop {
@@ -144,6 +154,10 @@ pub async fn start(
             }
             SocketEvent::ShutdownRequested => break,
         }
+    }
+
+    if config.enable_mdns {
+        // TODO unpublish mDNS service for the TCP endpoint
     }
 
     for (cid, subsys) in clients {

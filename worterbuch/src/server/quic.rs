@@ -61,6 +61,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
+    mdns::MdnsRegistry,
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_udp_server_socket,
     write_line_and_flush,
@@ -81,6 +82,7 @@ pub async fn start(
     cert_path: PathBuf,
     key_path: PathBuf,
     subsys: Subsystem,
+    mdns: Option<MdnsRegistry>,
 ) -> Result<()> {
     let server_config = load_server_config(&cert_path, &key_path)?;
 
@@ -104,13 +106,15 @@ pub async fn start(
         );
     }
 
-    bind_endpoints_and_run(worterbuch, endpoints, subsys).await
+    bind_endpoints_and_run(worterbuch, endpoints, subsys, port, mdns).await
 }
 
 async fn bind_endpoints_and_run(
     worterbuch: CloneableWbApi,
     endpoints: Vec<Endpoint>,
     subsys: Subsystem,
+    port: u16,
+    mdns: Option<MdnsRegistry>,
 ) -> Result<()> {
     let config = worterbuch.config().to_owned();
     if config.print_endpoints {
@@ -146,6 +150,14 @@ async fn bind_endpoints_and_run(
 
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
+
+    if let Some(mdns) = &mdns
+        && let Some(name) = &config.instance_name
+    {
+        mdns.publish_mdns_service("_wb_quic._udp.local.", name, port, None)
+            .await
+            .wrap_err("Failed to publish mDNS service for QUIC endpoint")?;
+    }
 
     let mut clients = HashMap::new();
     loop {
