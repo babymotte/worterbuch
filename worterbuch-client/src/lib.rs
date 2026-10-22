@@ -60,7 +60,7 @@ use tokio::net::UnixStream;
 use tokio::sync::watch;
 #[cfg(any(feature = "tcp", feature = "unix", feature = "quic"))]
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     time::sleep,
 };
 #[cfg(feature = "tokio")]
@@ -1735,10 +1735,15 @@ async fn connect_tcp(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
-    msg.push('\n');
-    debug!("Sending protocol switch message: {msg}");
-    tcp_tx.write_all(msg.as_bytes()).await?;
+    let msg = ClientMessage::ProtocolSwitchRequest(proto_switch);
+    debug!("Sending protocol switch message: {msg:#?}");
+    write_line_and_flush(
+        || cancellation_token.clone().cancelled_owned(),
+        msg,
+        &mut tcp_tx,
+        config.send_timeout,
+    )
+    .await?;
 
     match tcp_rx.next_line().await {
         Ok(None) => {
@@ -1779,10 +1784,15 @@ async fn connect_tcp(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
-            msg.push('\n');
-            debug!("Sending authorization message: {msg}");
-            tcp_tx.write_all(msg.as_bytes()).await?;
+            let msg = ClientMessage::AuthorizationRequest(handshake);
+            debug!("Sending authorization message: {msg:#?}");
+            write_line_and_flush(
+                || cancellation_token.clone().cancelled_owned(),
+                msg,
+                &mut tcp_tx,
+                config.send_timeout,
+            )
+            .await?;
 
             match tcp_rx.next_line().await {
                 Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
@@ -1932,10 +1942,15 @@ async fn connect_unix(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
-    msg.push('\n');
-    debug!("Sending protocol switch message: {msg}");
-    unix_tx.write_all(msg.as_bytes()).await?;
+    let msg = ClientMessage::ProtocolSwitchRequest(proto_switch);
+    debug!("Sending protocol switch message: {msg:#?}");
+    write_line_and_flush(
+        || cancellation_token.clone().cancelled_owned(),
+        msg,
+        &mut unix_tx,
+        config.send_timeout,
+    )
+    .await?;
 
     match unix_rx.next_line().await {
         Ok(None) => {
@@ -1976,10 +1991,15 @@ async fn connect_unix(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
-            msg.push('\n');
-            debug!("Sending authorization message: {msg}");
-            unix_tx.write_all(msg.as_bytes()).await?;
+            let msg = ClientMessage::AuthorizationRequest(handshake);
+            debug!("Sending authorization message: {msg:#?}");
+            write_line_and_flush(
+                || cancellation_token.clone().cancelled_owned(),
+                msg,
+                &mut unix_tx,
+                config.send_timeout,
+            )
+            .await?;
 
             match unix_rx.next_line().await {
                 Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
@@ -2152,13 +2172,15 @@ async fn connect_quic(
     let proto_switch = ProtocolSwitchRequest {
         version: proto_version.major(),
     };
-    let mut msg = json::to_string(&ClientMessage::ProtocolSwitchRequest(proto_switch))?;
-    msg.push('\n');
-    debug!("Sending protocol switch message: {msg}");
-    quic_tx
-        .write_all(msg.as_bytes())
-        .await
-        .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+    let msg = ClientMessage::ProtocolSwitchRequest(proto_switch);
+    debug!("Sending protocol switch message: {msg:#?}");
+    write_line_and_flush(
+        || cancellation_token.clone().cancelled_owned(),
+        msg,
+        &mut quic_tx,
+        config.send_timeout,
+    )
+    .await?;
 
     match quic_rx.next_line().await {
         Ok(None) => {
@@ -2199,13 +2221,15 @@ async fn connect_quic(
     if info.authorization_required {
         if let Some(auth_token) = config.auth_token.clone() {
             let handshake = AuthorizationRequest { auth_token };
-            let mut msg = json::to_string(&ClientMessage::AuthorizationRequest(handshake))?;
-            msg.push('\n');
-            debug!("Sending authorization message: {msg}");
-            quic_tx
-                .write_all(msg.as_bytes())
-                .await
-                .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
+            let msg = ClientMessage::AuthorizationRequest(handshake);
+            debug!("Sending authorization message: {msg:#?}");
+            write_line_and_flush(
+                || cancellation_token.clone().cancelled_owned(),
+                msg,
+                &mut quic_tx,
+                config.send_timeout,
+            )
+            .await?;
 
             match quic_rx.next_line().await {
                 Ok(None) => Err(ConnectionError::IoError(Box::new(io::Error::new(
