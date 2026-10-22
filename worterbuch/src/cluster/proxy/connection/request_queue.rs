@@ -18,6 +18,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#![allow(dead_code)]
+
 use crate::{
     Config,
     error::{IntoWbAppResult, WorterbuchAppResult},
@@ -66,7 +68,7 @@ impl InFlightRequest {
     }
 }
 
-struct PendingRequest {
+pub struct PendingRequest {
     request: WbFunction,
     response: Option<ServerMessage>,
 }
@@ -115,7 +117,7 @@ impl RequestQueue {
             return ControlFlow::Break(());
         };
 
-        let (response_tx, response_rx) = oneshot::channel();
+        let (_response_tx, response_rx) = oneshot::channel();
 
         let in_flight_request =
             InFlightRequest::new(request, response_rx, self.response_consumer.clone());
@@ -148,7 +150,7 @@ async fn forward_proxy_core_responses(
     while_select! {
         biased;
         _ = subsys.shutdown_requested() => break,
-        recv = in_flight_request_rx.pop() => forward_response(&subsys, recv, &mut in_flight_request_rx, &config).await,
+        recv = in_flight_request_rx.pop() => forward_response(&subsys, recv, &mut in_flight_request_rx, config).await,
     }
 
     let remaining_requests = in_flight_request_rx

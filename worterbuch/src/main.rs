@@ -96,7 +96,7 @@ async fn start() -> miette::Result<()> {
     let log_reload_handle = {
         use worterbuch_common::logging;
         let it = logging::init()?;
-        info!("Telemetry disabled by feature flag.");
+        tracing::info!("Telemetry disabled by feature flag.");
         it
     };
 

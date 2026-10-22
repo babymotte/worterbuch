@@ -308,7 +308,7 @@ impl CloneableWbApi {
             name: format!("{}/{}", self.name, name),
             config: self.config.clone(),
             tx: self.tx.clone(),
-            protocol: protocol,
+            protocol,
             supported_client_protocol_versions: self.supported_client_protocol_versions.clone(),
         }
     }

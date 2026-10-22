@@ -441,9 +441,9 @@ async fn subscribe(
     let client_info = http_client_info();
     connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let unique = params.get("unique").map(trueish);
-    let live_only = params.get("liveOnly").map(trueish);
-    let send_traces = params.get("sendTraces").map(trueish);
+    let unique = params.get("unique").map(|it| trueish(it));
+    let live_only = params.get("liveOnly").map(|it| trueish(it));
+    let send_traces = params.get("sendTraces").map(|it| trueish(it));
     let wb_unsub = wb.named("unsubscribe");
     let req = Subscribe {
         transaction_id,
@@ -515,9 +515,9 @@ async fn psubscribe(
     let client_info = http_client_info();
     connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let unique = params.get("unique").map(trueish);
-    let live_only = params.get("liveOnly").map(trueish);
-    let send_traces = params.get("sendTraces").map(trueish);
+    let unique = params.get("unique").map(|it| trueish(it));
+    let live_only = params.get("liveOnly").map(|it| trueish(it));
+    let send_traces = params.get("sendTraces").map(|it| trueish(it));
     let aggregate_events = params
         .get("aggregateEvents")
         .and_then(|p| p.parse::<u64>().ok());
@@ -583,7 +583,7 @@ async fn subscribels_root(
     let client_info = http_client_info();
     connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let send_traces = params.get("sendTraces").map(trueish);
+    let send_traces = params.get("sendTraces").map(|it| trueish(it));
     let parent = None;
     let wb_unsub = wb.named("unsubscribe");
     let req = SubscribeLs {
@@ -645,7 +645,7 @@ async fn subscribels(
     let client_info = http_client_info();
     connected(&wb, client_info.clone(), remote_addr).await?;
     let transaction_id = 1;
-    let send_traces = params.get("sendTraces").map(trueish);
+    let send_traces = params.get("sendTraces").map(|it| trueish(it));
     let parent = Some(parent);
     let wb_unsub = wb.named("unsubscribe");
     let req = SubscribeLs {
@@ -1088,7 +1088,7 @@ async fn connected(
     }
 }
 
-fn trueish(it: &String) -> bool {
+fn trueish(it: &str) -> bool {
     let trimmed = it.trim();
     trimmed != "0" && trimmed.to_lowercase() != "false"
 }

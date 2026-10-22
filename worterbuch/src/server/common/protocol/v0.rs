@@ -415,9 +415,7 @@ impl V0 {
             }
         };
 
-        let response = Ack {
-            transaction_id: transaction_id,
-        };
+        let response = Ack { transaction_id };
 
         let smsg = ServerMessage::Ack(response);
         let _ = self.tx.send(smsg).await;

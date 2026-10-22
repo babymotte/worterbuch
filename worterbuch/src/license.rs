@@ -19,9 +19,8 @@
 
 use crate::PersistenceMode;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::str;
-use worterbuch_common::{error::ConfigResult, protocol::v1::KeyValuePairs};
+use worterbuch_common::protocol::v1::KeyValuePairs;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,13 +108,10 @@ impl License {
     }
 }
 
-#[cfg(not(feature = "commercial"))]
-pub async fn load_license(_: Option<&Path>) -> ConfigResult<License> {
-    Ok(License::foss())
-}
-
 #[cfg(feature = "commercial")]
-pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<License> {
+pub async fn load_license(
+    license_file_path: Option<&std::path::Path>,
+) -> worterbuch_common::error::ConfigResult<License> {
     commercial::load_license(license_file_path).await
 }
 
@@ -127,27 +123,31 @@ pub mod commercial {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use std::{env, path::Path, str};
     use tokio::fs;
-    use worterbuch_common::error::{ConfigError, ConfigResult};
+    use worterbuch_common::error::{ConfigResult, IntoConfigResult, WrappedResult};
 
     pub const LICENSE_PUBLIC_KEY: &str = env!("WORTERBUCH_LICENSE_PUBLIC_KEY");
 
     pub async fn load_license(license_file_path: Option<&Path>) -> ConfigResult<License> {
         let license_file = license_file_path.unwrap_or_else(|| Path::new("./license"));
 
-        let license_file = fs::read_to_string(license_file).await.map_err(|e| {
-            ConfigError::InvalidLicense(format!("License file could not be read: {e}"))
-        })?;
+        let license_file = fs::read_to_string(license_file)
+            .await
+            .into_config_result()
+            .wrap_with(|| {
+                format!(
+                    "License file '{}' could not be read",
+                    license_file.display()
+                )
+            })?;
 
         let validation = Validation::new(Algorithm::EdDSA);
-        let key = DecodingKey::from_ed_pem(LICENSE_PUBLIC_KEY.as_ref()).map_err(|e| {
-            ConfigError::InvalidLicense(format!("License key could not be read: {e}"))
-        })?;
+        let key = DecodingKey::from_ed_pem(LICENSE_PUBLIC_KEY.as_ref())
+            .into_config_result()
+            .wrap("License key could not be read")?;
 
-        let token = decode::<License>(&license_file, &key, &validation).map_err(|e| {
-            ConfigError::InvalidLicense(format!(
-                "Validity of license token could not be confirmed: {e}"
-            ))
-        })?;
+        let token = decode::<License>(&license_file, &key, &validation)
+            .into_config_result()
+            .wrap("Validity of license token could not be confirmed")?;
 
         let wb_version = worterbuch_version();
 

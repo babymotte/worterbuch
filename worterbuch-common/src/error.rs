@@ -40,72 +40,81 @@ use tokio::sync::{
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum ConfigError {
-    #[error("invalid separator: {0}; separator must be a single ASCII char")]
+    #[error("Invalid separator: {0}; separator must be a single ASCII char")]
     InvalidSeparator(String),
-    #[error("invalid wildcard: {0}; wildcard must be a single ASCII char")]
+    #[error("Invalid wildcard: {0}; wildcard must be a single ASCII char")]
     InvalidWildcard(String),
-    #[error("invalid multi-wildcard: {0}; multi-wildcard must be a single ASCII char")]
+    #[error("Invalid multi-wildcard: {0}; multi-wildcard must be a single ASCII char")]
     InvalidMultiWildcard(String),
-    #[error("invalid port")]
+    #[error("Invalid port")]
     InvalidPort(#[source] ParseIntError),
-    #[error("invalid interval")]
+    #[error("Invalid interval")]
     InvalidInterval(#[source] ParseIntError),
-    #[error("license file could not be loaded: {0}")]
-    InvalidLicense(String),
+    #[error("License file could not be loaded")]
+    InvalidLicense(#[source] Box<ConfigError>),
     #[cfg(feature = "commercial")]
     #[error("{0}")]
     InsufficientLicense(String),
-    #[error("could not load config file")]
+    #[error("Could not load config file")]
     IoError(
         #[from]
         #[source]
         io::Error,
     ),
-    #[error("could not load config file")]
+    #[error("Could not load config file")]
     YamlError(
         #[from]
         #[source]
         serde_yaml::Error,
     ),
     #[cfg(feature = "telemetry")]
-    #[error("error setting up telemetry")]
+    #[error("Error setting up telemetry")]
     ExporterBuildError(
         #[from]
         #[source]
         ExporterBuildError,
     ),
-    #[error("parse error")]
+    #[error("Parse error")]
     ParseError(
         #[from]
         #[source]
         serde_json::Error,
     ),
-    #[error("invalid leader address(es) {1:?}")]
+    #[error("Invalid leader address(es) {1:?}")]
     InvalidLeaderAddress(#[source] io::Error, Vec<String>),
-    #[error("invalid TCP bind address: {addr}")]
+    #[error("Invalid TCP bind address: {addr}")]
     InvalidTcpBindAddress {
         addr: String,
         #[source]
         source: std::net::AddrParseError,
     },
-    #[error("invalid WS bind address: {addr}")]
+    #[error("Invalid WS bind address: {addr}")]
     InvalidWsBindAddress {
         addr: String,
         #[source]
         source: std::net::AddrParseError,
     },
-    #[error("invalid QUIC bind address: {addr}")]
+    #[error("Invalid QUIC bind address: {addr}")]
     InvalidQuicBindAddress {
         addr: String,
         #[source]
         source: std::net::AddrParseError,
     },
-    #[error("could not reload log config")]
+    #[error("Could not reload log config")]
     LogReloadError(
         #[from]
         #[source]
         tracing_subscriber::reload::Error,
     ),
+    #[cfg(feature = "commercial")]
+    #[error("Invalid JWT")]
+    JwtError(
+        #[from]
+        #[source]
+        jsonwebtoken::errors::Error,
+    ),
+    #[error("{0}")]
+    Wrapped(String, #[source] Box<ConfigError>),
 }
 
 pub trait ConfigIntContext<I> {
@@ -123,6 +132,18 @@ impl<I> ConfigIntContext<I> for Result<I, ParseIntError> {
 }
 
 pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
+
+pub trait IntoConfigResult {
+    type Output;
+    fn into_config_result(self) -> ConfigResult<Self::Output>;
+}
+
+impl<T, E: Into<ConfigError>> IntoConfigResult for Result<T, E> {
+    type Output = T;
+    fn into_config_result(self) -> ConfigResult<Self::Output> {
+        self.map_err(Into::into)
+    }
+}
 
 pub trait Context<T, E: std::error::Error> {
     fn context(self, metadata: impl FnOnce() -> String) -> Result<T, WorterbuchError>;
@@ -603,6 +624,19 @@ impl<T> WrappedResult for ConnectionResult<T> {
 
     fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
         self.map_err(|e| ConnectionError::Wrapped(f(), Box::new(e)))
+    }
+}
+
+impl<T> WrappedResult for ConfigResult<T> {
+    type Result = ConfigResult<T>;
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+        self.map_err(|e| ConfigError::Wrapped(msg.into(), Box::new(e)))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+        self.map_err(|e| ConfigError::Wrapped(f(), Box::new(e)))
     }
 }
 

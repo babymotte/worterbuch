@@ -16,7 +16,7 @@
  */
 
 use hashbrown::HashMap;
-use miette::{Context, IntoDiagnostic, bail, ensure};
+use miette::{Context, IntoDiagnostic, bail, ensure, miette};
 use serde_json::json;
 use std::{
     io,
@@ -53,8 +53,14 @@ use worterbuch_common::{
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn start(subsys: &Subsystem, sync_port: u16, started_tx: oneshot::Sender<()>) {
-    subsys.spawn("mock-server", move |s| run(s, sync_port, started_tx));
+pub fn start(
+    subsys: &Subsystem,
+    sync_port: u16,
+    started_tx: oneshot::Sender<()>,
+) -> miette::Result<Subsystem> {
+    subsys
+        .spawn("mock-server", move |s| run(s, sync_port, started_tx))
+        .ok_or_else(|| miette!("shutdown requested"))
 }
 
 async fn run(

@@ -261,7 +261,7 @@ impl<'a> VirtualProxyServer<'a> {
 
         trace!(enter = "stop_virtual_client", %client_id);
         debug!("Stopping virtual client {client_id} …");
-        let Some(client) = self.clients.remove(&client_id) else {
+        let Some(_) = self.clients.remove(&client_id) else {
             warn!(
                 "Received disconnect for unknown client {client_id} ({}/{:?})",
                 self.proxy_address, protocol

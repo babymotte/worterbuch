@@ -631,7 +631,7 @@ impl Proxy {
     }
 
     async fn re_send_in_flight_requests(&mut self) -> WorterbuchAppResult<()> {
-        for request in self.in_flight_requests.drain(..) {
+        for _request in self.in_flight_requests.drain(..) {
             todo!("re-send in flight requests");
         }
         Ok(())

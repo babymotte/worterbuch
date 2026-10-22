@@ -66,7 +66,7 @@ pub struct LeaderConnection<'a> {
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
     read_leader_addresses_from_stdin: &'a mut bool,
-    in_flight_requests: &'a mut Vec<Request>,
+    _in_flight_requests: &'a mut Vec<Request>,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -89,7 +89,7 @@ impl<'a> LeaderConnection<'a> {
             leader_addresses_updated: false,
             stdin: &mut proxy.stdin,
             read_leader_addresses_from_stdin: &mut proxy.read_leader_addresses_from_stdin,
-            in_flight_requests: &mut proxy.in_flight_requests,
+            _in_flight_requests: &mut proxy.in_flight_requests,
         }
     }
 

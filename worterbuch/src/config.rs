@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::license::{License, load_license};
+use crate::license::License;
 use clap::{Parser, Subcommand};
 use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,11 @@ pub struct Args {
     /// Instance name
     #[arg(short = 'n', long, value_name = "NAME")]
     pub instance_name: Option<String>,
+
+    /// License file path
+    #[cfg(feature = "commercial")]
+    #[arg(long, value_name = "FILE")]
+    pub license: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -177,6 +182,7 @@ pub struct Config {
     pub unix_disabled: bool,
     pub quic_disabled: bool,
     pub exit_on_stdin_close: bool,
+    #[cfg(feature = "commercial")]
     pub license_file: Option<PathBuf>,
     pub initial_sync_timeout: Duration,
     pub log_targets_reload_interval: Option<Duration>,
@@ -396,6 +402,7 @@ impl Config {
             self.exit_on_stdin_close = enabled == "true" || enabled == "1";
         }
 
+        #[cfg(feature = "commercial")]
         if let Ok(val) = env::var(prefix.to_owned() + "_LICENSE_FILE") {
             self.license_file = Some(val.into());
         }
@@ -468,6 +475,7 @@ impl Config {
             unix_disabled: false,
             quic_disabled: false,
             exit_on_stdin_close: false,
+            #[cfg(feature = "commercial")]
             license_file: None,
             initial_sync_timeout: Duration::from_secs(10),
             log_targets_reload_interval: None,
@@ -477,16 +485,24 @@ impl Config {
             config.apply_args(args);
         }
 
-        match load_license(config.license_file.as_deref()).await {
+        #[cfg(feature = "commercial")]
+        match crate::license::load_license(config.license_file.as_deref()).await {
             Ok(license) => {
                 config.license = license;
                 Ok(config)
             }
-            Err(e) => Err(ConfigError::InvalidLicense(e.to_string())),
+            Err(e) => Err(ConfigError::InvalidLicense(Box::new(e))),
         }
+        #[cfg(not(feature = "commercial"))]
+        Ok(config)
     }
 
     fn apply_args(&mut self, args: Args) {
+        #[cfg(feature = "commercial")]
+        if let Some(license_file) = args.license {
+            self.license_file = Some(license_file);
+        }
+
         match args.command {
             Some(Commands::Leader { sync_port }) => {
                 self.role = ClusterRole::Leader { sync_port };
