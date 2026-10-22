@@ -19,10 +19,10 @@
 
 use clap::Parser;
 use miette::{Context, Result};
-use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tosub::Subsystem;
+use totils::{CancelOn, Untangle};
 use tracing::warn;
 use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys, server_addresses};
 use worterbuch_client::config::Config;
@@ -70,11 +70,7 @@ struct Args {
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     logging::init()?;
-    tosub::build_root("wbpdel")
-        .catch_signals()
-        .with_timeout(Duration::from_millis(1000))
-        .start(run)
-        .await?;
+    tosub::build_default_root("wbpdel").start(run).await?;
 
     Ok(())
 }
@@ -93,13 +89,23 @@ async fn run(subsys: Subsystem) -> Result<()> {
     let raw = args.raw;
     let patterns = args.patterns;
 
-    let (wb, mut on_disconnect) = connect(config.clone()).await.wrap_err_with(|| {
-        format!(
-            "Could not connect to configured server(s): {}",
-            config.servers.join(", ")
-        )
-    })?;
-    wb.set_client_name(args.name).await?;
+    let Some((wb, mut on_disconnect)) = connect(config.clone())
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        .untangle()
+        .wrap_err_with(|| {
+            format!(
+                "Could not connect to configured server(s): {}",
+                config.servers.join(", ")
+            )
+        })?
+    else {
+        return Ok(());
+    };
+    wb.set_client_name(args.name)
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        .untangle()?;
     let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;
