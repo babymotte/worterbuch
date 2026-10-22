@@ -305,69 +305,54 @@ pub type WorterbuchResult<T> = std::result::Result<T, WorterbuchError>;
 
 #[derive(Debug, Diagnostic, Error)]
 pub enum ConnectionError {
+    #[error(transparent)]
     IoError(Box<io::Error>),
+    #[error(transparent)]
     SendError(Box<dyn std::error::Error + Send + Sync>),
     #[cfg(feature = "ws")]
+    #[error(transparent)]
     WebsocketError(Box<tungstenite::Error>),
     #[cfg(feature = "wasm")]
+    #[error(transparent)]
     WebsocketWasmError(Box<tokio_tungstenite_wasm::Error>),
+    #[error(transparent)]
     TrySendError(Box<dyn std::error::Error + Send + Sync>),
+    #[error(transparent)]
     RecvError(Box<oneshot::error::RecvError>),
+    #[error(transparent)]
     BcRecvError(Box<broadcast::error::RecvError>),
+    #[error(transparent)]
     WorterbuchError(Box<WorterbuchError>),
+    #[error(transparent)]
     ConfigError(Box<ConfigError>),
+    #[error(transparent)]
     SerdeError(Box<serde_json::Error>),
+    #[error(transparent)]
     AckError(Box<broadcast::error::SendError<u64>>),
-    Timeout(Box<String>),
+    #[error("Timeout: {0}")]
+    Timeout(String),
     #[cfg(feature = "ws")]
+    #[error(transparent)]
     HttpError(Box<tungstenite::http::Error>),
-    AuthorizationError(Box<String>),
+    #[error("Authorization error: {0}")]
+    AuthorizationError(String),
+    #[error("No server addresses configured")]
     NoServerAddressesConfigured,
+    #[error("No valid server addresses configured")]
+    NoValidServerAddressesConfigured,
+    #[error(transparent)]
     ServerResponse(Box<Err>),
     #[cfg(feature = "ws")]
+    #[error(transparent)]
     InvalidHeaderValue(Box<InvalidHeaderValue>),
-    LockLost(LockLost),
+    #[error(transparent)]
+    LockLost(Box<LockLost>),
+    #[error("Shutdown requested")]
     ShutdownRequested,
-    Wrapped(String, #[source] Box<ConnectionError>),
+    #[error("{0}")]
+    Wrapped(String, #[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("{0}")]
     Report(String, #[diagnostic_source] miette::Report),
-}
-
-impl fmt::Display for ConnectionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IoError(e) => e.fmt(f),
-            Self::SendError(e) => e.fmt(f),
-            #[cfg(feature = "ws")]
-            Self::WebsocketError(e) => e.fmt(f),
-            #[cfg(feature = "wasm")]
-            Self::WebsocketWasmError(e) => e.fmt(f),
-            Self::TrySendError(e) => e.fmt(f),
-            Self::RecvError(e) => e.fmt(f),
-            Self::BcRecvError(e) => e.fmt(f),
-            Self::WorterbuchError(e) => e.fmt(f),
-            Self::ConfigError(e) => e.fmt(f),
-            Self::SerdeError(e) => e.fmt(f),
-            Self::AckError(e) => e.fmt(f),
-            Self::Timeout(msg) => msg.fmt(f),
-            #[cfg(feature = "ws")]
-            Self::HttpError(e) => e.fmt(f),
-            Self::AuthorizationError(msg) => msg.fmt(f),
-            Self::NoServerAddressesConfigured => {
-                fmt::Display::fmt("no server addresses configured", f)
-            }
-            Self::ServerResponse(e) => e.fmt(f),
-            #[cfg(feature = "ws")]
-            Self::InvalidHeaderValue(e) => e.fmt(f),
-            Self::LockLost(lock) => write!(
-                f,
-                "lost lock on key '{}' (transaction id: {})",
-                lock.key, lock.transaction_id
-            ),
-            Self::ShutdownRequested => "shutdown requested".fmt(f),
-            Self::Wrapped(msg, _) => msg.fmt(f),
-            Self::Report(msg, _) => msg.fmt(f),
-        }
-    }
 }
 
 pub type ConnectionResult<T> = std::result::Result<T, ConnectionError>;

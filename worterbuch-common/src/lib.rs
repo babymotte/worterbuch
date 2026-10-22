@@ -657,9 +657,9 @@ pub async fn receive_msg<T: DeserializeOwned, R: AsyncRead + Unpin>(
             Ok(sm?)
         }
         Ok(Err(e)) => Err(e.into()),
-        Err(_) => Err(ConnectionError::Timeout(Box::new(
+        Err(_) => Err(ConnectionError::Timeout(
             "timeout while receiving message".to_owned(),
-        ))),
+        )),
     }
 }
 
@@ -741,7 +741,7 @@ where
         res = timeout(send_timeout, task) => res,
     };
 
-    res.map_err(|_| ConnectionError::Timeout(Box::new(format!("timeout while {msg}"))))
+    res.map_err(|_| ConnectionError::Timeout(format!("timeout while {msg}")))
 }
 
 pub fn is_grave_goods_topic(key: &str) -> bool {

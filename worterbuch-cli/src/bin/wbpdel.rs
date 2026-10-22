@@ -18,17 +18,15 @@
  */
 
 use clap::Parser;
-use miette::Result;
-use std::io;
+use miette::{Context, Result};
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tosub::Subsystem;
 use tracing::warn;
-use tracing_subscriber::EnvFilter;
-use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys};
+use worterbuch_cli::{next_item, print_del_event, print_message, provide_keys, server_addresses};
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect};
+use worterbuch_client::{AuthToken, connect, logging};
 
 #[derive(Parser)]
 #[command(author, version, about = "Delete values for keys from a Wörterbuch.", long_about = None)]
@@ -36,23 +34,34 @@ struct Args {
     /// Connect to the Wörterbuch server using SSL encryption.
     #[arg(short, long)]
     ssl: bool,
-    /// The addresses of the Wörterbuch servers in form <ip>:<port>[,<ip2>:<port2>,…]. When omitted, the value of the env var WORTERBUCH_SERVERS will be used. If that is not set, 127.0.0.1:8081 will be used.
-    #[arg(short, long)]
+    /// The address(es) of the Wörterbuch servers to be used.
+    #[arg(
+        short,
+        long,
+        name = "HOST:PORT[,HOST:PORT,…]",
+        env = "WORTERBUCH_SERVERS",
+        default_value = "127.0.0.1:8081"
+    )]
     addr: Vec<String>,
-    /// Output data in JSON and expect input data to be JSON.
+    /// Output data in JSON and expect input data to be JSON
     #[arg(short, long)]
     json: bool,
-    /// Patterns to be deleted from Wörterbuch in the form "PATTERN1 PATTERN2 PATTERN3  …". When omitted, patterns will be read from stdin. When reading patterns from stdin, one pattern is expected per line.
+    /// Patterns to be deleted from Wörterbuch in the form "PATTERN1 PATTERN2 PATTERN3  …". When omitted, patterns will be read from stdin. When reading patterns from stdin, one pattern is expected per line
     patterns: Option<Vec<String>>,
     /// Auth token to be used for acquiring authorization from the server
-    #[arg(long)]
+    #[arg(long, name = "JWT", env = "WORTERBUCH_AUTH_TOKEN")]
     auth: Option<AuthToken>,
     /// Print only the deleted key/value pairs
     #[arg(short, long)]
     raw: bool,
     /// Set a client name on the server
-    #[arg(short, long)]
-    name: Option<String>,
+    #[arg(
+        short,
+        long,
+        default_value = "wbpdel-cli",
+        env = "WORTERBUCH_CLIENT_NAME"
+    )]
+    name: String,
     /// Don't return deleted values
     #[arg(short, long)]
     quiet: bool,
@@ -60,10 +69,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
-    tracing_subscriber::fmt()
-        .with_writer(io::stderr)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    logging::init()?;
     tosub::build_root("wbpdel")
         .catch_signals()
         .with_timeout(Duration::from_millis(1000))
@@ -82,17 +88,18 @@ async fn run(subsys: Subsystem) -> Result<()> {
     if args.ssl {
         config.proto = "wss".to_owned();
     }
-    if !args.addr.is_empty() {
-        config.servers = args.addr.into_boxed_slice();
-    }
+    server_addresses(&args.addr, &mut config.servers);
     let json = args.json;
     let raw = args.raw;
     let patterns = args.patterns;
 
-    let (wb, mut on_disconnect) = connect(config).await?;
-    if let Some(name) = args.name {
-        wb.set_client_name(name).await?;
-    }
+    let (wb, mut on_disconnect) = connect(config.clone()).await.wrap_err_with(|| {
+        format!(
+            "Could not connect to configured server(s): {}",
+            config.servers.join(", ")
+        )
+    })?;
+    wb.set_client_name(args.name).await?;
     let mut responses = wb.all_messages().await?;
 
     let mut trans_id = 0;

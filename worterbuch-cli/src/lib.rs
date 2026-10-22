@@ -364,3 +364,13 @@ fn print_pstate_del(msg: &PState, json: bool) {
         }
     }
 }
+
+pub fn server_addresses(from_args: &[String], config_entry: &mut Box<[String]>) {
+    if !from_args.is_empty() {
+        *config_entry = from_args
+            .iter()
+            .map(|s| s.split(",").map(str::trim).map(ToOwned::to_owned))
+            .flatten()
+            .collect();
+    }
+}

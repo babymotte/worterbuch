@@ -24,7 +24,7 @@ use std::{env, io};
 use tosub::Subsystem;
 use totils::while_select;
 use tracing::level_filters::LevelFilter;
-use tracing::{Event, Level, Subscriber, info};
+use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::{
     Layer, Registry,
     filter::Targets,
@@ -43,7 +43,6 @@ pub fn init() -> ConfigResult<ReloadableTargets<Registry>> {
     let (log_layer, log_handle) = console_log_layer();
     let subscriber = tracing_subscriber::registry().with(log_layer);
     subscriber.init();
-    info!("Telemetry disabled by feature flag.");
     Ok(log_handle)
 }
 

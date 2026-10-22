@@ -22,7 +22,7 @@ use miette::Diagnostic;
 use std::io;
 use tokio::sync::{mpsc, oneshot};
 use tosub::RootSystemError;
-use worterbuch_common::error::{ConfigError, WorterbuchError};
+use worterbuch_common::error::{ConfigError, ConnectionResult, WorterbuchError};
 
 #[derive(Debug, Diagnostic, thiserror::Error)]
 pub enum WorterbuchAppError {
@@ -59,7 +59,7 @@ pub enum WorterbuchAppError {
         tokio::time::error::Elapsed,
     ),
     #[error("{0}")]
-    Wrapped(String, #[source] Box<WorterbuchAppError>),
+    Wrapped(String, #[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("{0}")]
     Report(String, #[diagnostic_source] miette::Report),
 }
@@ -111,38 +111,47 @@ impl<T, E: Into<WorterbuchAppError>> IntoWbAppResult<T> for Result<T, E> {
 }
 
 pub trait WrappedResult {
-    type Result;
     type Output;
 
-    fn wrap(self, msg: impl Into<String>) -> Self::Result;
+    fn wrap(self, msg: impl Into<String>) -> WorterbuchAppResult<Self::Output>;
 
-    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result;
+    fn wrap_with(self, f: impl FnOnce() -> String) -> WorterbuchAppResult<Self::Output>;
 }
 
 pub type WorterbuchAppResult<T> = Result<T, WorterbuchAppError>;
 
 impl<T> WrappedResult for WorterbuchAppResult<T> {
-    type Result = WorterbuchAppResult<T>;
     type Output = T;
 
-    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+    fn wrap(self, msg: impl Into<String>) -> WorterbuchAppResult<Self::Output> {
         self.map_err(|e| WorterbuchAppError::Wrapped(msg.into(), Box::new(e)))
     }
 
-    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+    fn wrap_with(self, f: impl FnOnce() -> String) -> WorterbuchAppResult<Self::Output> {
+        self.map_err(|e| WorterbuchAppError::Wrapped(f(), Box::new(e)))
+    }
+}
+
+impl<T> WrappedResult for ConnectionResult<T> {
+    type Output = T;
+
+    fn wrap(self, msg: impl Into<String>) -> WorterbuchAppResult<Self::Output> {
+        self.map_err(|e| WorterbuchAppError::Wrapped(msg.into(), Box::new(e)))
+    }
+
+    fn wrap_with(self, f: impl FnOnce() -> String) -> WorterbuchAppResult<Self::Output> {
         self.map_err(|e| WorterbuchAppError::Wrapped(f(), Box::new(e)))
     }
 }
 
 impl<T> WrappedResult for miette::Result<T> {
-    type Result = WorterbuchAppResult<T>;
     type Output = T;
 
-    fn wrap(self, msg: impl Into<String>) -> Self::Result {
+    fn wrap(self, msg: impl Into<String>) -> WorterbuchAppResult<Self::Output> {
         self.map_err(|e| WorterbuchAppError::Report(msg.into(), e))
     }
 
-    fn wrap_with(self, f: impl FnOnce() -> String) -> Self::Result {
+    fn wrap_with(self, f: impl FnOnce() -> String) -> WorterbuchAppResult<Self::Output> {
         self.map_err(|e| WorterbuchAppError::Report(f(), e))
     }
 }

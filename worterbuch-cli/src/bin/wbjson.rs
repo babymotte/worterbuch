@@ -20,12 +20,8 @@
 use clap::Parser;
 use miette::{IntoDiagnostic, Result};
 use serde_json::Value;
-use std::{
-    fs,
-    io::{self, Read},
-};
-use tracing_subscriber::EnvFilter;
-use worterbuch_client::KeyValuePair;
+use std::{fs, io::Read};
+use worterbuch_client::{KeyValuePair, logging};
 
 #[derive(Parser)]
 #[command(author, version, about = "Convert JSON into Wörterbuch key/value pairs.", long_about = None)]
@@ -43,10 +39,7 @@ struct Args {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
-    tracing_subscriber::fmt()
-        .with_writer(io::stderr)
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    logging::init()?;
     let args: Args = Args::parse();
 
     let json = if let Some(file) = args.file {

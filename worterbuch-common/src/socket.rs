@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::error::{ConnectionError, ConnectionResult, IntoConnectionResult, WrappedResult};
 use miette::{Context, IntoDiagnostic};
 use socket2::{Domain, Protocol, SockAddr, SockRef, Socket, TcpKeepalive, Type};
 use std::{
@@ -56,7 +57,7 @@ pub async fn connect_to_tcp_server_socket(
     addrs: impl ToSocketAddrs + std::fmt::Debug + Clone,
     timeout: Duration,
     config: TcpSocketConfig,
-) -> miette::Result<(
+) -> ConnectionResult<(
     Lines<BufReader<OwnedReadHalf>>,
     BufWriter<OwnedWriteHalf>,
     SocketAddr,
@@ -74,32 +75,32 @@ pub async fn connect_to_tcp_server_socket(
 
     let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(addrs.clone()))
         .await
-        .into_diagnostic()
-        .wrap_err_with(|| format!("connection attempt to {:?} timed out", addrs))?
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to connect to {:?}", addrs))?;
+        .map_err(|_| {
+            ConnectionError::Timeout(format!("connection attempt to {:?} timed out", addrs))
+        })?
+        .into_connection_result()?;
 
     let sf = SockRef::from(&stream);
     sf.set_tcp_keepalive(&tcp_keepalive)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP keepalive option")?;
+        .into_connection_result()
+        .wrap("failed to set TCP keepalive option")?;
     sf.set_tcp_user_timeout(Some(config.send_timeout))
-        .into_diagnostic()
-        .wrap_err("failed to set TCP_USER_TIMEOUT option")?;
+        .into_connection_result()
+        .wrap("failed to set TCP_USER_TIMEOUT option")?;
 
     stream
         .set_nodelay(true)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP_NODELAY option")?;
+        .into_connection_result()
+        .wrap("failed to set TCP_NODELAY option")?;
     stream
         .set_quickack(true)
-        .into_diagnostic()
-        .wrap_err("failed to set TCP_QUICKACK option")?;
+        .into_connection_result()
+        .wrap("failed to set TCP_QUICKACK option")?;
 
     let leader_address = stream
         .peer_addr()
-        .into_diagnostic()
-        .wrap_err("failed to get remote address")?;
+        .into_connection_result()
+        .wrap("failed to get remote address")?;
     let (rx, tx) = stream.into_split();
 
     Ok((

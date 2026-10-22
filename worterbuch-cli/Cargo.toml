@@ -11,7 +11,7 @@ keywords = ["message", "broker", "data", "base", "pubsub"]
 categories = ["database", "command-line-utilities"]
 
 [dependencies]
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = { workspace = true }
 miette = { workspace = true, features = ["fancy"] }
 serde = { workspace = true }

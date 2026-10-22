@@ -73,16 +73,13 @@ use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 #[cfg(feature = "wasm")]
 use tokio_tungstenite_wasm::{Message, connect as connect_wasm};
 #[cfg(any(feature = "tcp", feature = "quic"))]
-use tracing::{Level, debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 #[cfg(all(target_family = "unix", feature = "unix"))]
 use unix::UnixClientSocket;
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use worterbuch_common::error::{ConnectionError, ConnectionResult, WorterbuchError};
 #[cfg(feature = "tcp")]
-use worterbuch_common::{
-    error::WrappedResult,
-    socket::{TcpSocketConfig, connect_to_tcp_server_socket},
-};
+use worterbuch_common::socket::{TcpSocketConfig, connect_to_tcp_server_socket};
 #[cfg(any(feature = "ws", feature = "wasm"))]
 use ws::WsClientSocket;
 
@@ -1039,7 +1036,7 @@ impl WorterbuchConnection {
             res = task() => res,
             lost = lost_rx => {
                 match lost {
-                    Ok(lost) => return Err(ConnectionError::LockLost(lost)),
+                    Ok(lost) => return Err(ConnectionError::LockLost(Box::new(lost))),
                     Err(_) => panic!("lock has been released before the task has finished, this should never happen"),
                 }
             }
@@ -1058,7 +1055,7 @@ impl WorterbuchConnection {
             res = task() => res,
             lost = lost_rx => {
                 match lost {
-                    Ok(lost) => return Err(ConnectionError::LockLost(lost)),
+                    Ok(lost) => return Err(ConnectionError::LockLost(Box::new(lost))),
                     Err(_) => panic!("lock has been released before the task has finished, this should never happen"),
                 }
             }
@@ -1124,9 +1121,9 @@ impl WorterbuchConnection {
         counter: usize,
     ) -> ConnectionResult<()> {
         if counter >= 100 {
-            return Err(ConnectionError::Timeout(Box::new(
+            return Err(ConnectionError::Timeout(
                 "could not update, value keeps being changed by another instance".to_owned(),
-            )));
+            ));
         }
 
         let (new_val, version) = match self.cget::<T>(key.clone()).await? {
@@ -1324,8 +1321,12 @@ pub async fn connect_with_default_config() -> ConnectionResult<(Worterbuch, OnDi
     Ok((conn, disconnected, config))
 }
 
-#[instrument(, err)]
+#[instrument(, err(level = "debug"))]
 pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconnect)> {
+    if config.servers.is_empty() {
+        return Err(ConnectionError::NoServerAddressesConfigured);
+    }
+
     let cancellation_token = CancellationToken::new();
     let mut err = None;
     if config.proto == "unix" {
@@ -1351,16 +1352,19 @@ pub async fn connect(config: Config) -> ConnectionResult<(Worterbuch, OnDisconne
     if let Some(e) = err {
         Err(e)
     } else {
-        Err(ConnectionError::NoServerAddressesConfigured)
+        Err(ConnectionError::NoValidServerAddressesConfigured)
     }
 }
 
 fn to_socket_addrs(addrs: &[String]) -> Box<[SocketAddr]> {
-    addrs
+    debug!("server addresses: {:?}", addrs);
+    let parsed = addrs
         .iter()
         .filter_map(|s| s.to_socket_addrs().ok())
         .flatten()
-        .collect()
+        .collect();
+    debug!("parsed server socket addresses: {:?}", parsed);
+    parsed
 }
 
 pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbuch {
@@ -1394,7 +1398,7 @@ pub fn local_client_wrapper(api: impl WbApi + Send + Sync + 'static) -> Worterbu
     }))
 }
 
-#[instrument(skip(cancellation_token, config), err(level = Level::WARN))]
+#[instrument(skip(cancellation_token, config), err(level = "debug"))]
 async fn try_connect(
     cancellation_token: CancellationToken,
     config: Config,
@@ -1470,7 +1474,7 @@ async fn try_connect(
 }
 
 #[cfg(any(feature = "ws", feature = "wasm"))]
-#[instrument(skip(config, on_disconnect), level = Level::INFO)]
+#[instrument(skip(config, on_disconnect), level = "info")]
 async fn connect_ws(
     url: String,
     host: SocketAddr,
@@ -1644,9 +1648,9 @@ async fn connect_ws(
                 )))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(Box::new(
+            Err(ConnectionError::AuthorizationError(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            )))
+            ))
         }
     } else {
         connected(
@@ -1665,7 +1669,7 @@ async fn connect_tcp(
     host_addr: SocketAddr,
     on_disconnect: oneshot::Sender<()>,
     config: Config,
-) -> Result<Worterbuch, ConnectionError> {
+) -> ConnectionResult<Worterbuch> {
     let timeout = config.connection_timeout;
     debug!(
         "Connecting to server tcp://{host_addr} (timeout: {} ms) …",
@@ -1674,9 +1678,7 @@ async fn connect_tcp(
 
     let tcp_config = TcpSocketConfig::from(&config);
     let (mut tcp_rx, mut tcp_tx, host_addr) =
-        connect_to_tcp_server_socket(&host_addr, timeout, tcp_config)
-            .await
-            .wrap_with(|| format!("failed to connect to leader {}", host_addr))?;
+        connect_to_tcp_server_socket(&host_addr, timeout, tcp_config).await?;
 
     debug!("Connected to tcp://{host_addr}.");
 
@@ -1712,7 +1714,7 @@ async fn connect_tcp(
             Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
         },
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
 
@@ -1827,9 +1829,9 @@ async fn connect_tcp(
                 Err(e) => Err(ConnectionError::IoError(Box::new(e))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(Box::new(
+            Err(ConnectionError::AuthorizationError(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            )))
+            ))
         }
     } else {
         connected(
@@ -1851,7 +1853,7 @@ async fn connect_tcp(
 }
 
 #[cfg(all(target_family = "unix", feature = "unix"))]
-#[instrument(skip(cancellation_token, config, on_disconnect), err(level = Level::WARN))]
+#[instrument(skip(cancellation_token, config, on_disconnect), err(level = "debug"))]
 async fn connect_unix(
     cancellation_token: CancellationToken,
     path: String,
@@ -1867,7 +1869,7 @@ async fn connect_unix(
     let stream = select! {
         conn = UnixStream::connect(&path) => conn,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for UNIX connection.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for UNIX connection.".to_owned()));
         },
     }?;
     debug!("Connected to {path}.");
@@ -1909,7 +1911,7 @@ async fn connect_unix(
             Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
         },
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
 
@@ -2023,9 +2025,9 @@ async fn connect_unix(
                 Err(e) => Err(ConnectionError::IoError(Box::new(e))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(Box::new(
+            Err(ConnectionError::AuthorizationError(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            )))
+            ))
         }
     } else {
         let client_socket = ClientSocket::Unix(
@@ -2042,7 +2044,7 @@ async fn connect_unix(
 }
 
 #[cfg(feature = "quic")]
-#[instrument(skip(cancellation_token, config, on_disconnect), err(level = Level::WARN))]
+#[instrument(skip(cancellation_token, config, on_disconnect), err(level = "debug"))]
 async fn connect_quic(
     cancellation_token: CancellationToken,
     host_addr: SocketAddr,
@@ -2075,7 +2077,7 @@ async fn connect_quic(
                 .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))
         } => conn?,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for QUIC connection.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for QUIC connection.".to_owned()));
         },
     };
     debug!("Connected to quic://{host_addr}.");
@@ -2088,7 +2090,7 @@ async fn connect_quic(
     let (quic_tx, quic_rx) = select! {
         streams = connection.accept_bi() => streams.map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?,
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for QUIC stream.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for QUIC stream.".to_owned()));
         },
     };
 
@@ -2129,7 +2131,7 @@ async fn connect_quic(
             Err(e) => return Err(ConnectionError::IoError(Box::new(e))),
         },
         _ = sleep(timeout) => {
-            return Err(ConnectionError::Timeout(Box::new("Timeout while waiting for welcome message.".to_owned())));
+            return Err(ConnectionError::Timeout("Timeout while waiting for welcome message.".to_owned()));
         },
     };
 
@@ -2251,9 +2253,9 @@ async fn connect_quic(
                 Err(e) => Err(ConnectionError::IoError(Box::new(e))),
             }
         } else {
-            Err(ConnectionError::AuthorizationError(Box::new(
+            Err(ConnectionError::AuthorizationError(
                 "Server requires authorization but no auth token was provided.".to_owned(),
-            )))
+            ))
         }
     } else {
         connected(

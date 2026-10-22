@@ -95,7 +95,9 @@ async fn start() -> miette::Result<()> {
     #[cfg(not(feature = "telemetry"))]
     let log_reload_handle = {
         use worterbuch_common::logging;
-        logging::init()?
+        let it = logging::init()?;
+        info!("Telemetry disabled by feature flag.");
+        it
     };
 
     let cfg = config.clone();
