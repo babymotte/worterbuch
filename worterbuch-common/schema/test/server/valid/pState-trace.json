@@ -1,0 +1,15 @@
+{
+  "pState": {
+    "transactionId": 1,
+    "requestPattern": "$SYS/clients/#",
+    "deleted": [{ "key": "$SYS/clients/3f2b8c1e-1111-4222-8333-444455556666/protocol", "value": "TCP" }],
+    "trace": {
+      "internalAction": {
+        "clientDisconnected": {
+          "clientId": "3f2b8c1e-1111-4222-8333-444455556666",
+          "protocol": "TCP"
+        }
+      }
+    }
+  }
+}

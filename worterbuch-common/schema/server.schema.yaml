@@ -33,10 +33,7 @@ properties:
       - clientId
   authorized:
     description: A message sent by the server to indicate that client authorization was successful
-    type: object
-    properties:
-      authorized:
-        $ref: "#/properties/ack"
+    $ref: "#/properties/ack"
   state:
     description: A message sent by the server in response to a Get or Delete message
     properties:
@@ -48,6 +45,8 @@ properties:
         $ref: "#/components/schemas/Value"
       deleted:
         $ref: "#/components/schemas/Value"
+      trace:
+        $ref: "#/components/schemas/Trace"
     additionalProperties: false
     required:
       - transactionId
@@ -88,6 +87,8 @@ properties:
         $ref: "#/components/schemas/KeyValuePairs"
       deleted:
         $ref: "#/components/schemas/KeyValuePairs"
+      trace:
+        $ref: "#/components/schemas/Trace"
     additionalProperties: false
     required:
       - transactionId
@@ -115,8 +116,7 @@ properties:
         type: integer
         format: u64
       errorCode:
-        type: integer
-        format: u8
+        $ref: "#/components/schemas/ErrorCode"
       metadata:
         type: string
     additionalProperties: false
@@ -135,14 +135,32 @@ properties:
         type: array
         items:
           type: string
+      trace:
+        $ref: "#/components/schemas/Trace"
     additionalProperties: false
     required:
       - transactionId
       - children
+  lockLost:
+    description: A message sent by the server to indicate that a previously held lock has been lost
+    properties:
+      transactionId:
+        description: The transaction ID of the lock request
+        type: integer
+        format: u64
+      key:
+        description: The key of the lost lock
+        type: string
+    additionalProperties: false
+    required:
+      - transactionId
+      - key
 additionalProperties: false
 oneOf:
   - required:
       - welcome
+  - required:
+      - authorized
   - required:
       - ack
   - required:
@@ -150,9 +168,13 @@ oneOf:
   - required:
       - state
   - required:
+      - cState
+  - required:
       - pState
   - required:
       - lsState
+  - required:
+      - lockLost
 components:
   schemas:
     ServerInfo:
@@ -168,11 +190,16 @@ components:
           items:
             type: array
             prefixItems:
-              - type: number
+              - type: integer
                 format: u32
-              - type: number
+              - type: integer
                 format: u32
+            minItems: 2
             unevaluatedItems: false
+        protocolVersion:
+          description: "Deprecated: replaced by supportedProtocolVersions. Always \"0.11\""
+          type: string
+          deprecated: true
         authorizationRequired:
           description: Whether or not the client need to be authorized before sending requests to the server
           type: boolean
@@ -181,6 +208,7 @@ components:
         - version
         - supportedProtocolVersions
         - authorizationRequired
+        - protocolVersion
     Value:
       description: A value on worterbuch
     KeyValuePair:
@@ -201,3 +229,141 @@ components:
       minItems: 1
       items:
         $ref: "#/components/schemas/KeyValuePair"
+    ErrorCode:
+      description: >-
+        0 = IllegalWildcard,
+        1 = IllegalMultiWildcard,
+        2 = MultiWildcardAtIllegalPosition,
+        3 = IoError,
+        4 = SerdeError,
+        5 = NoSuchValue,
+        6 = NotSubscribed,
+        7 = ProtocolNegotiationFailed,
+        8 = InvalidServerResponse,
+        9 = ReadOnlyKey,
+        10 = AuthorizationFailed,
+        11 = AuthorizationRequired,
+        12 = AlreadyAuthorized,
+        13 = MissingValue,
+        14 = Unauthorized,
+        15 = NoPubStream,
+        16 = NotLeader,
+        17 = Cas,
+        18 = CasVersionMismatch,
+        19 = NotImplemented,
+        20 = KeyIsLocked,
+        21 = KeyIsNotLocked,
+        22 = LockAcquisitionCancelled,
+        23 = FeatureDisabled,
+        24 = ClientIDCollision,
+        25 = EmptyKey,
+        26 = LockLost,
+        27 = InternalTimeout,
+        255 = Other
+      type: integer
+      format: u8
+      enum: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 255]
+    Protocol:
+      description: The transport protocol a client is connected through
+      type: string
+      enum: [TCP, WS, HTTP, UNIX, QUIC, LOCAL]
+    ClientInfo:
+      description: Identifies a client connection
+      type: object
+      properties:
+        clientId:
+          type: string
+          format: uuid
+        protocol:
+          $ref: "#/components/schemas/Protocol"
+      additionalProperties: false
+      required:
+        - clientId
+        - protocol
+    Method:
+      description: The client request method that caused an event
+      type: string
+      enum:
+        - set
+        - cSet
+        - publish
+        - delete
+        - pDelete
+        - import
+        - subscribe
+        - pSubscribe
+        - lsSubscribe
+        - unsubscribe
+        - lock
+        - acquireLock
+        - releaseLock
+    Trace:
+      description: Describes the cause of an event. Only included if the client requested traces
+      type: object
+      properties:
+        clientRequest:
+          type: object
+          properties:
+            clientInfo:
+              $ref: "#/components/schemas/ClientInfo"
+            transactionId:
+              type: integer
+              format: u64
+            method:
+              $ref: "#/components/schemas/Method"
+          additionalProperties: false
+          required:
+            - clientInfo
+            - transactionId
+            - method
+        protocolSwitch:
+          type: object
+          properties:
+            clientInfo:
+              $ref: "#/components/schemas/ClientInfo"
+            protocolVersion:
+              description: The major protocol version the client switched to
+              type: integer
+              format: u32
+          additionalProperties: false
+          required:
+            - clientInfo
+            - protocolVersion
+        internalAction:
+          $ref: "#/components/schemas/InternalAction"
+      additionalProperties: false
+      minProperties: 1
+      maxProperties: 1
+    TraceCause:
+      type: object
+      properties:
+        cause:
+          $ref: "#/components/schemas/Trace"
+      additionalProperties: false
+      required:
+        - cause
+    InternalAction:
+      description: A server-internal action that caused an event
+      oneOf:
+        - type: string
+          enum:
+            - startup
+            - leaderSync
+            - shutdown
+        - type: object
+          properties:
+            clientConnected:
+              $ref: "#/components/schemas/ClientInfo"
+            clientDisconnected:
+              $ref: "#/components/schemas/ClientInfo"
+            subscriptionsChanged:
+              $ref: "#/components/schemas/TraceCause"
+            locksChanged:
+              $ref: "#/components/schemas/TraceCause"
+            applyingGraveGoods:
+              $ref: "#/components/schemas/TraceCause"
+            applyingLastWill:
+              $ref: "#/components/schemas/TraceCause"
+          additionalProperties: false
+          minProperties: 1
+          maxProperties: 1

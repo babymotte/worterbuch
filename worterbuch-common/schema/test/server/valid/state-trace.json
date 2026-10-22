@@ -1,0 +1,16 @@
+{
+  "state": {
+    "transactionId": 1,
+    "deleted": "world",
+    "trace": {
+      "clientRequest": {
+        "clientInfo": {
+          "clientId": "3f2b8c1e-1111-4222-8333-444455556666",
+          "protocol": "TCP"
+        },
+        "transactionId": 1,
+        "method": "delete"
+      }
+    }
+  }
+}
