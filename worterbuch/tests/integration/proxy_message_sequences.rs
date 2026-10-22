@@ -24,14 +24,13 @@ use tracing::info;
 use worterbuch::{ClusterRole, spawn_worterbuch};
 use worterbuch_client::Ack;
 use worterbuch_common::{
-    logging,
     protocol::v1::{ServerMessage, State, StateEvent, Value},
     topic,
 };
 
 #[tokio::test]
 async fn set_and_get_sequences_are_preserved() {
-    // logging::init().unwrap();
+    // worterbuch_common::logging::init().unwrap();
 
     tosub::build_default_root("set_and_get_sequences_are_preserved")
         .start(run)
