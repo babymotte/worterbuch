@@ -15,8 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod test_common;
-
 use serde_json::json;
 use std::collections::BTreeMap;
 use tokio::{select, sync::oneshot};
@@ -33,7 +31,7 @@ use worterbuch_common::{
 
 #[tokio::test]
 async fn set_and_get_sequences_are_preserved() {
-    logging::init().unwrap();
+    // logging::init().unwrap();
 
     tosub::build_default_root("set_and_get_sequences_are_preserved")
         .start(run)
@@ -54,7 +52,7 @@ async fn run(subsys: Subsystem) -> miette::Result<()> {
     // create mock leader instance
 
     let (started_tx, started) = oneshot::channel();
-    test_common::mock_server::start(&subsys, sync_port, started_tx);
+    crate::test_common::mock_server::start(&subsys, sync_port, started_tx);
 
     started.await.unwrap();
     info!("Mock server is running, starting test …");

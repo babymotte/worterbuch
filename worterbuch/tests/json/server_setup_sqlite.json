@@ -1,9 +1,11 @@
 {
   "env": {
+    "WORTERBUCH_TCP_SERVER_PORT": "13081",
+    "WORTERBUCH_WS_SERVER_PORT": "13080",
     "WORTERBUCH_USE_PERSISTENCE": "true",
     "WORTERBUCH_DATA_DIR": "./tests/data/sqlite",
     "WORTERBUCH_PERSISTENCE_MODE": "SQLite",
     "WORTERBUCH_EXIT_ON_STDIN_CLOSE": "true",
-    "WORTERBUCH_LOG": "info,worterbuch::persistence=trace"
+    "WORTERBUCH_LOG": "off"
   }
 }
