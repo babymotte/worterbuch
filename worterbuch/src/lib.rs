@@ -35,11 +35,14 @@ mod mem_tools;
 mod persistence;
 pub mod server;
 mod stats;
+
 pub(crate) mod store;
 mod subscribers;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 mod worterbuch;
+
+pub use store::dummy_state_store;
 
 use core::fmt;
 

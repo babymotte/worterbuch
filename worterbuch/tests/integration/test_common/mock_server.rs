@@ -17,10 +17,10 @@
 
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, bail, ensure, miette};
-use serde_json::json;
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{
@@ -33,13 +33,13 @@ use tokio::{
 };
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use worterbuch::{
     cluster::protocol::{
         ClientWriteCommand, ClusterStateChange, Connected, Disconnected, Handshake, LeaderMessage,
-        LeaderWelcome, ProxyHandshake, ProxyMessage, Request, StateSync,
+        LeaderWelcome, ProxyHandshake, ProxyMessage, Request,
     },
-    worterbuch_version,
+    dummy_state_store, worterbuch_version,
 };
 use worterbuch_client::ClientInfo;
 use worterbuch_common::{
@@ -53,13 +53,18 @@ use worterbuch_common::{
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
+type StateStore = Arc<Mutex<HashMap<Key, Value>>>;
+
 pub fn start(
     subsys: &Subsystem,
     sync_port: u16,
     started_tx: oneshot::Sender<()>,
+    interruptions: Option<usize>,
 ) -> miette::Result<Subsystem> {
     subsys
-        .spawn("mock-server", move |s| run(s, sync_port, started_tx))
+        .spawn("mock-server", move |s| {
+            run(s, sync_port, started_tx, interruptions)
+        })
         .ok_or_else(|| miette!("shutdown requested"))
 }
 
@@ -67,6 +72,7 @@ async fn run(
     subsys: Subsystem,
     sync_port: u16,
     started_tx: oneshot::Sender<()>,
+    interruptions: Option<usize>,
 ) -> miette::Result<()> {
     let tcp_listener = TcpListener::from_std(
         create_tcp_server_socket(
@@ -81,9 +87,11 @@ async fn run(
     info!("Mock server started");
     started_tx.send(()).unwrap();
 
+    let state = Arc::new(Mutex::new(HashMap::new()));
+
     while_select! {
         _ = subsys.shutdown_requested() => break,
-        client = tcp_listener.accept() => accepted(&subsys, client).await.unwrap(),
+        client = tcp_listener.accept() => accepted(&subsys, client,state.clone(), interruptions).await.unwrap(),
     }
 
     info!("Mock server stopped");
@@ -93,39 +101,55 @@ async fn run(
 async fn accepted(
     subsys: &Subsystem,
     client: io::Result<(TcpStream, SocketAddr)>,
+    state: StateStore,
+    interruptions: Option<usize>,
 ) -> miette::Result<()> {
     let (socket, addr) = client.into_diagnostic()?;
 
     info!("Accepted connection from {}", addr);
 
     subsys.spawn(format!("client/{addr}"), move |s| {
-        serve_proxy(s, socket, addr)
+        serve_proxy(s, socket, addr, state, interruptions)
     });
 
     Ok(())
 }
 
-async fn serve_proxy(subsys: Subsystem, socket: TcpStream, addr: SocketAddr) -> miette::Result<()> {
+async fn serve_proxy(
+    subsys: Subsystem,
+    socket: TcpStream,
+    addr: SocketAddr,
+    state: StateStore,
+    interruptions: Option<usize>,
+) -> miette::Result<()> {
     info!("Serving proxy {}", addr);
 
     let (rx, tx) = socket.into_split();
     let mut tx = BufWriter::new(tx);
     let mut rx = BufReader::new(rx).lines();
 
-    if let Err(e) = perform_handshake(&subsys, &mut rx, &mut tx).await {
+    if let Err(e) = perform_handshake(&subsys, &mut rx, &mut tx, &state).await {
         error!("Handshake with proxy {addr} failed: {e:?}");
         return Ok(());
     }
 
     info!("Handshake with proxy {addr} complete");
 
-    let mut state = HashMap::new();
+    let interrupt_every = interruptions.unwrap_or(usize::MAX);
+    let mut counter = 0;
 
     if let Err(e) = while_select! {
         _ = subsys.shutdown_requested() => {
             break Err(miette::miette!("shutdown requested"));
         },
-        line = rx.next_line() => process_line(&subsys, line, &mut tx, &mut state).await,
+        line = rx.next_line() => {
+            if counter >= interrupt_every {
+                warn!("kicking out proxy after {} requests", counter);
+                break Ok(());
+            }
+            counter += 1;
+            process_line(&subsys, line, &mut tx, &state).await
+        },
     } {
         error!("Client connection closed: {e}");
     }
@@ -137,6 +161,7 @@ async fn perform_handshake(
     subsys: &Subsystem,
     rx: &mut Lines<BufReader<OwnedReadHalf>>,
     tx: &mut BufWriter<OwnedWriteHalf>,
+    state: &StateStore,
 ) -> miette::Result<ProxyHandshake> {
     let welcome = LeaderMessage::Welcome(LeaderWelcome {
         authentication_required: false,
@@ -173,8 +198,11 @@ async fn perform_handshake(
         handshake.version
     );
 
-    // TODO make the initial state configurable
-    let state: StateSync = serde_json::from_value(json!({ "store": {} })).into_diagnostic()?;
+    let state = {
+        let lock = state.lock().unwrap();
+        dummy_state_store(&*lock)
+    };
+
     send(subsys, LeaderMessage::Init(state), tx).await?;
 
     Ok(handshake)
@@ -184,7 +212,7 @@ async fn process_line(
     subsys: &Subsystem,
     line: io::Result<Option<String>>,
     tx: &mut BufWriter<OwnedWriteHalf>,
-    state: &mut HashMap<Key, Value>,
+    state: &StateStore,
 ) -> miette::Result<()> {
     let Some(line) = line.into_diagnostic().wrap_err("tcp socket closed")? else {
         bail!("tcp connection closed");
@@ -220,7 +248,7 @@ async fn process_line(
 fn process_request(
     msg: ClientMessage,
     client_info: ClientInfo,
-    store: &mut HashMap<Key, Value>,
+    store: &StateStore,
 ) -> miette::Result<Vec<LeaderMessage>> {
     let response = match msg {
         ClientMessage::Set(Set {
@@ -228,7 +256,11 @@ fn process_request(
             key,
             value,
         }) => {
-            store.insert(key.clone(), value.clone());
+            {
+                let mut lock = store.lock().unwrap();
+                lock.insert(key.clone(), value.clone());
+            }
+
             vec![
                 state_change(
                     transaction_id,

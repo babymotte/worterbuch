@@ -21,5 +21,5 @@
 mod persistence_json;
 mod persistence_redb;
 mod persistence_sqlite;
-mod proxy_message_sequences;
+mod proxy_connection_tests;
 mod test_common;

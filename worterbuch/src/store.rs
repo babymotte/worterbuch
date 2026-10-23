@@ -17,7 +17,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::subscribers::{LsSubscriber, Subscriber};
+use crate::{
+    cluster::protocol::StateSync,
+    subscribers::{LsSubscriber, Subscriber},
+};
 use hashbrown::{
     HashMap, HashSet,
     hash_map::{Entry, Keys},
@@ -1236,6 +1239,19 @@ fn concat_key(path: &[&str], key: Option<&str>) -> String {
         string.push_str(key);
     }
     string
+}
+
+pub fn dummy_state_store(data: &HashMap<String, Value>) -> StateSync {
+    let mut store = Store::default();
+    for (key, value) in data {
+        let path = key.split('/').map(ToOwned::to_owned).collect::<Vec<_>>();
+        store.insert(&path, value.clone().into(), false).unwrap();
+    }
+    StateSync {
+        store: store.data,
+        grave_goods: HashMap::new(),
+        last_wills: HashMap::new(),
+    }
 }
 
 #[cfg(test)]

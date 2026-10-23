@@ -31,10 +31,26 @@ use worterbuch_common::{
 
 #[tokio::test]
 async fn set_and_get_sequences_are_preserved() {
-    // worterbuch_common::logging::init().expect("logging initialization failed");
+    worterbuch_common::logging::init().expect("logging initialization failed");
+
+    let total_requests = 100;
+    let interrupt_after = None;
 
     tosub::build_default_root("set_and_get_sequences_are_preserved")
-        .start(run)
+        .start(move |s| run(s, total_requests, interrupt_after))
+        .await
+        .expect("Test root system failed");
+}
+
+#[tokio::test]
+async fn set_and_get_continue_being_processed_after_proxy_reconnect() {
+    worterbuch_common::logging::init().expect("logging initialization failed");
+
+    let total_requests = 100;
+    let interrupt_after = Some(10);
+
+    tosub::build_default_root("set_and_get_continue_being_processed_after_proxy_reconnect")
+        .start(move |s| run(s, total_requests, interrupt_after))
         .await
         .expect("Test root system failed");
 }
@@ -45,13 +61,17 @@ enum Response {
     State(Value),
 }
 
-async fn run(subsys: Subsystem) -> miette::Result<()> {
+async fn run(
+    subsys: Subsystem,
+    total_requests: usize,
+    interrupt_after: Option<usize>,
+) -> miette::Result<()> {
     let sync_port = 6060;
     let proxy_port = 8081;
 
     // create mock leader instance
     let (started_tx, started) = oneshot::channel();
-    crate::test_common::mock_server::start(&subsys, sync_port, started_tx)?;
+    crate::test_common::mock_server::start(&subsys, sync_port, started_tx, interrupt_after)?;
 
     started.await.into_diagnostic()?;
     info!("Mock server is running, starting test …");
@@ -102,7 +122,7 @@ async fn run(subsys: Subsystem) -> miette::Result<()> {
 
     let mut responses = client.all_messages().await.into_diagnostic()?;
 
-    for i in 0..100 {
+    for i in 0..total_requests {
         let tid = client
             .set_async(key.clone(), json!(i))
             .await
@@ -160,6 +180,7 @@ fn check_value(
                     expected_response,
                     "get and set requests were processed out of order"
                 );
+                info!("Request {} OK", transaction_id / 2);
             }
             _ => panic!("unexpected server message: {:?}", msg),
         }
