@@ -88,12 +88,14 @@ impl MdnsRegistry {
     pub async fn publish_mdns_service(
         &self,
         service_type: impl Into<String>,
-        instance_name: impl Into<String>,
+        instance_name: Option<impl Into<String>>,
         port: u16,
         properties: Option<HashMap<String, String>>,
     ) -> miette::Result<()> {
         let service_type = service_type.into();
-        let instance_name = instance_name.into();
+        let instance_name = instance_name
+            .map(|it| it.into())
+            .unwrap_or_else(|| gethostname::gethostname().to_string_lossy().into_owned());
 
         info!(
             "Publishing '{}' service for '{}'",

@@ -866,15 +866,13 @@ pub(crate) async fn start(
             .serve(router.into_make_service_with_connect_info::<SocketAddr>()),
     );
 
-    if let Some(mdns) = mdns
-        && let Some(name) = &config.instance_name
-    {
-        publish_http(&mdns, port, name).await?;
+    if let Some(mdns) = mdns {
+        publish_http(&mdns, port, config.instance_name.as_ref()).await?;
         if config.web_root_path.is_some() {
-            publish_webapp(&mdns, port, name).await?;
+            publish_webapp(&mdns, port, config.instance_name.as_ref()).await?;
         }
         if ws_enabled {
-            publish_ws(&mdns, port, name).await?;
+            publish_ws(&mdns, port, config.instance_name.as_ref()).await?;
         }
     }
 
@@ -890,13 +888,17 @@ pub(crate) async fn start(
     Ok(())
 }
 
-async fn publish_webapp(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+async fn publish_webapp(
+    mdns: &MdnsRegistry,
+    port: u16,
+    name: Option<&String>,
+) -> miette::Result<()> {
     mdns.publish_mdns_service("_http._tcp.local.", name, port, None)
         .await
         .wrap_err("Failed to publish mDNS service for webapp endpoint")
 }
 
-async fn publish_http(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+async fn publish_http(mdns: &MdnsRegistry, port: u16, name: Option<&String>) -> miette::Result<()> {
     let mut properties = HashMap::new();
     properties.insert("api".to_owned(), "/api/v1/".to_owned());
     properties.insert("info".to_owned(), "/info".to_owned());
@@ -905,7 +907,7 @@ async fn publish_http(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::
         .wrap_err("Failed to publish mDNS service for HTTP endpoint")
 }
 
-async fn publish_ws(mdns: &MdnsRegistry, port: u16, name: &String) -> miette::Result<()> {
+async fn publish_ws(mdns: &MdnsRegistry, port: u16, name: Option<&String>) -> miette::Result<()> {
     let mut properties = HashMap::new();
     properties.insert("path".to_owned(), "/ws".to_owned());
     mdns.publish_mdns_service("_wb_ws._tcp.local.", name, port, Some(properties))

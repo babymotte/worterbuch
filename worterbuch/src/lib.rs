@@ -147,7 +147,7 @@ async fn do_run_worterbuch(
 
     set_instance_name(&mut worterbuch, &config).await?;
 
-    let mdns = if config.enable_mdns && config.instance_name.is_some() {
+    let mdns = if config.enable_mdns {
         Some(MdnsRegistry::start(&subsys))
     } else {
         None

@@ -151,12 +151,15 @@ async fn bind_endpoints_and_run(
     let (conn_closed_tx, mut conn_closed_rx) = mpsc::channel(100);
     let mut waiting_for_free_connections = false;
 
-    if let Some(mdns) = &mdns
-        && let Some(name) = &config.instance_name
-    {
-        mdns.publish_mdns_service("_wb_quic._udp.local.", name, port, None)
-            .await
-            .wrap_err("Failed to publish mDNS service for QUIC endpoint")?;
+    if let Some(mdns) = &mdns {
+        mdns.publish_mdns_service(
+            "_wb_quic._udp.local.",
+            config.instance_name.as_ref(),
+            port,
+            None,
+        )
+        .await
+        .wrap_err("Failed to publish mDNS service for QUIC endpoint")?;
     }
 
     let mut clients = HashMap::new();
