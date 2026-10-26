@@ -6886,7 +6886,6 @@ dependencies = [
  "gethostname",
  "hashbrown 0.17.1",
  "http",
- "if-addrs",
  "inferno",
  "jemalloc_pprof",
  "jsonschema",

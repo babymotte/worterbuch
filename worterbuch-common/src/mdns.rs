@@ -26,8 +26,6 @@ use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, info};
 
-use crate::socket::list_public_ips;
-
 struct MdnsRegistryAgent {
     subsys: Subsystem,
     rx: mpsc::Receiver<ServiceInfo>,
@@ -103,13 +101,8 @@ impl MdnsRegistry {
         );
 
         // Create a service info.
-        // Make sure that the service name: "mdns-sd-my-test" is not longer than the max length limit (15 by default).
-
-        let ip = list_public_ips()?
-            .into_iter()
-            .map(|it| it.to_string())
-            .reduce(|a, b| a + "," + &b)
-            .unwrap_or_default();
+        // Make sure that the service name is not longer than the max length limit (15 by default).
+        let ip = "".to_owned();
         let hostname = gethostname::gethostname().to_string_lossy().into_owned();
         let host_name = format!("{}.local.", hostname);
         let properties = if let Some(properties) = properties {
@@ -127,7 +120,8 @@ impl MdnsRegistry {
             &properties[..],
         )
         .into_diagnostic()
-        .wrap_err("Failed to create service info")?;
+        .wrap_err("Failed to create service info")?
+        .enable_addr_auto();
 
         let _ = self.tx.send(my_service).await;
 

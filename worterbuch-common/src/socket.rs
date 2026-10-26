@@ -215,14 +215,3 @@ fn domain_for_addr(addr: SocketAddr) -> Domain {
         SocketAddr::V6(_) => Domain::IPV6,
     }
 }
-
-pub fn list_public_ips() -> miette::Result<Vec<IpAddr>> {
-    let mut public_ips = Vec::new();
-
-    for iface in if_addrs::get_if_addrs().into_diagnostic()?.into_iter() {
-        if !iface.is_loopback() {
-            public_ips.push(iface.ip());
-        }
-    }
-    Ok(public_ips)
-}
