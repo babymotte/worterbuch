@@ -1245,7 +1245,9 @@ pub fn dummy_state_store(data: &HashMap<String, Value>) -> StateSync {
     let mut store = Store::default();
     for (key, value) in data {
         let path = key.split('/').map(ToOwned::to_owned).collect::<Vec<_>>();
-        store.insert(&path, value.clone().into(), false).unwrap();
+        store
+            .insert(&path, value.clone().into(), false)
+            .expect("could not insert into store");
     }
     StateSync {
         store: store.data,
