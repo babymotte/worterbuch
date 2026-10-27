@@ -81,7 +81,9 @@ use websocket::serve;
 use worterbuch_common::{
     AuthCheck, ClientId, Privilege, Protocol, RegularKeySegment, WbApi,
     error::{AuthorizationError, WorterbuchError, WorterbuchResult},
-    mdns::MdnsRegistry,
+    mdns::{
+        MDNS_SERVICE_TYPE_HTTP, MDNS_SERVICE_TYPE_WB_HTTP, MDNS_SERVICE_TYPE_WB_WS, MdnsRegistry,
+    },
     protocol::v1::{
         ClientInfo, Delete, Get, Key, KeyValuePairs, Ls, PDelete, PGet, PSubscribe, Publish,
         RequestPattern, ServerInfo, Set, StateEvent, Subscribe, SubscribeLs, Unsubscribe,
@@ -893,7 +895,7 @@ async fn publish_webapp(
     port: u16,
     name: Option<&String>,
 ) -> miette::Result<()> {
-    mdns.publish_mdns_service("_http._tcp.local.", name, port, None)
+    mdns.publish_mdns_service(MDNS_SERVICE_TYPE_HTTP, name, port, None)
         .await
         .wrap_err("Failed to publish mDNS service for webapp endpoint")
 }
@@ -902,7 +904,7 @@ async fn publish_http(mdns: &MdnsRegistry, port: u16, name: Option<&String>) -> 
     let mut properties = HashMap::new();
     properties.insert("api".to_owned(), "/api/v1/".to_owned());
     properties.insert("info".to_owned(), "/info".to_owned());
-    mdns.publish_mdns_service("_wb_http._tcp.local.", name, port, Some(properties))
+    mdns.publish_mdns_service(MDNS_SERVICE_TYPE_WB_HTTP, name, port, Some(properties))
         .await
         .wrap_err("Failed to publish mDNS service for HTTP endpoint")
 }
@@ -910,7 +912,7 @@ async fn publish_http(mdns: &MdnsRegistry, port: u16, name: Option<&String>) -> 
 async fn publish_ws(mdns: &MdnsRegistry, port: u16, name: Option<&String>) -> miette::Result<()> {
     let mut properties = HashMap::new();
     properties.insert("path".to_owned(), "/ws".to_owned());
-    mdns.publish_mdns_service("_wb_ws._tcp.local.", name, port, Some(properties))
+    mdns.publish_mdns_service(MDNS_SERVICE_TYPE_WB_WS, name, port, Some(properties))
         .await
         .wrap_err("Failed to publish mDNS service for WS endpoint")
 }

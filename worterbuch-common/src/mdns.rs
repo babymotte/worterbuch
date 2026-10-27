@@ -24,7 +24,13 @@ use std::ops::ControlFlow;
 use tokio::sync::mpsc;
 use tosub::Subsystem;
 use totils::while_select;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+pub const MDNS_SERVICE_TYPE_WB_WS: &str = "_wb_ws._tcp.local.";
+pub const MDNS_SERVICE_TYPE_WB_TCP: &str = "_wb_tcp._tcp.local.";
+pub const MDNS_SERVICE_TYPE_WB_QUIC: &str = "_wb_quic._udp.local.";
+pub const MDNS_SERVICE_TYPE_WB_HTTP: &str = "_wb_http._tcp.local.";
+pub const MDNS_SERVICE_TYPE_HTTP: &str = "_http._tcp.local.";
 
 struct MdnsRegistryAgent {
     subsys: Subsystem,
@@ -49,17 +55,37 @@ impl MdnsRegistryAgent {
         self.subsys
             .spawn("event-monitor", |s| monitor_mdns_events(s, receiver));
 
-        while let Some(service_info) = self.rx.recv().await {
-            // Register with the daemon, which publishes the service.
-            mdns.register(service_info)
-                .into_diagnostic()
-                .wrap_err("Failed to register our service")?;
+        while_select! {
+            _ = self.subsys.shutdown_requested() => break,
+            recv = self.rx.recv() => match recv {
+                // Register with the daemon, which publishes the service.
+                Some(service_info) => {
+                    mdns.register(service_info)
+                        .into_diagnostic()
+                        .wrap_err("Failed to register our service")?;
+                    ControlFlow::Continue(())
+                }
+                None => break,
+            },
         }
 
-        // Gracefully shutdown the daemon
-        mdns.shutdown()
+        // Gracefully shutdown the daemon (this also sends goodbye packets for all registered services)
+        let shutdown_complete = mdns
+            .shutdown()
             .into_diagnostic()
             .wrap_err("Failed to shutdown daemon")?;
+
+        info!("Shutting down mDNS registry …");
+
+        while let Ok(event) = shutdown_complete.recv_async().await {
+            match event {
+                mdns_sd::DaemonStatus::Running => {
+                    tracing::info!("Still waiting for mDNS daemon to shut down …");
+                }
+                mdns_sd::DaemonStatus::Shutdown => break,
+                _ => warn!("Received unexpected mDNS daemon status: {:?}", event),
+            }
+        }
 
         info!("mDNS registry shut down.");
 
@@ -141,7 +167,14 @@ async fn monitor_mdns_events(
 }
 
 async fn process_event(event: Result<mdns_sd::DaemonEvent, mdns_sd::RecvError>) -> ControlFlow<()> {
-    // TODO: Implement handling of mDNS events based on the received event.
-    debug!("Received mDNS event: {:?}", event);
+    match event {
+        Ok(mdns_sd::DaemonEvent::NameChange(change)) => warn!(
+            "mDNS name conflict on interface {}: {} record '{}' renamed to '{}'. If this host has multiple interfaces on the same subnet, this is likely a false positive.",
+            change.intf_name, change.rr_type, change.original, change.new_name
+        ),
+        Ok(mdns_sd::DaemonEvent::Error(e)) => warn!("mDNS daemon error: {e}"),
+        Ok(event) => debug!("Received mDNS event: {:?}", event),
+        Err(_) => return ControlFlow::Break(()),
+    }
     ControlFlow::Continue(())
 }

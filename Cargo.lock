@@ -2893,6 +2893,7 @@ dependencies = [
  "if-addrs",
  "log",
  "mio",
+ "serde",
  "socket-pktinfo",
  "socket2",
 ]
@@ -6810,6 +6811,7 @@ version = "1.7.0-alpha.31"
 dependencies = [
  "clap",
  "dotenvy",
+ "mdns-sd",
  "miette",
  "serde",
  "serde_json",

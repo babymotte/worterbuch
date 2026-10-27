@@ -43,7 +43,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    mdns::MdnsRegistry,
+    mdns::{MDNS_SERVICE_TYPE_WB_TCP, MdnsRegistry},
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_tcp_server_socket,
     write_line_and_flush,
@@ -83,7 +83,7 @@ pub async fn start(
 
     if let Some(mdns) = mdns {
         mdns.publish_mdns_service(
-            "_wb_tcp._tcp.local.",
+            MDNS_SERVICE_TYPE_WB_TCP,
             config.instance_name.as_ref(),
             port,
             None,

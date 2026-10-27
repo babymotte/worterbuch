@@ -61,7 +61,7 @@ use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
-    mdns::MdnsRegistry,
+    mdns::{MDNS_SERVICE_TYPE_WB_QUIC, MdnsRegistry},
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_udp_server_socket,
     write_line_and_flush,
@@ -153,7 +153,7 @@ async fn bind_endpoints_and_run(
 
     if let Some(mdns) = &mdns {
         mdns.publish_mdns_service(
-            "_wb_quic._udp.local.",
+            MDNS_SERVICE_TYPE_WB_QUIC,
             config.instance_name.as_ref(),
             port,
             None,
