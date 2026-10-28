@@ -22,7 +22,7 @@ use quinn::{
     rustls::{
         self, DigitallySignedStruct, SignatureScheme,
         client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-        pki_types::{CertificateDer, ServerName, UnixTime},
+        pki_types::{CertificateDer, ServerName, UnixTime, pem::PemObject},
     },
 };
 use rustls_platform_verifier::BuilderVerifierExt;
@@ -153,11 +153,9 @@ pub(crate) fn build_client_config(config: &Config) -> ConnectionResult<quinn::Cl
     }
 
     if let Some(ca_cert) = &config.quic_ca_cert {
-        let file = std::fs::File::open(ca_cert)?;
-        let mut reader = io::BufReader::new(file);
         let mut roots = rustls::RootCertStore::empty();
-        for cert in rustls_pemfile::certs(&mut reader) {
-            let cert = cert?;
+        for cert in CertificateDer::pem_file_iter(ca_cert).map_err(pem_error)? {
+            let cert = cert.map_err(pem_error)?;
             roots
                 .add(cert)
                 .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
@@ -188,6 +186,13 @@ pub(crate) fn build_client_config(config: &Config) -> ConnectionResult<quinn::Cl
     let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
         .map_err(|e| ConnectionError::IoError(Box::new(io::Error::other(e))))?;
     Ok(client_config_with_keepalive(quic_crypto))
+}
+
+fn pem_error(e: rustls::pki_types::pem::Error) -> ConnectionError {
+    match e {
+        rustls::pki_types::pem::Error::Io(e) => e.into(),
+        e => ConnectionError::IoError(Box::new(io::Error::other(e))),
+    }
 }
 
 /// quinn's default max_idle_timeout is 30s and it never sends keep-alive

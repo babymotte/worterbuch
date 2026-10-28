@@ -41,7 +41,7 @@ use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, Result};
 use quinn::{
     Connection, Endpoint, Incoming, RecvStream, SendStream,
-    rustls::pki_types::{CertificateDer, PrivateKeyDer},
+    rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
 use std::{
     io,
@@ -597,23 +597,16 @@ fn load_server_config(cert_path: &Path, key_path: &Path) -> Result<quinn::Server
 }
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let file = std::fs::File::open(path)
+    CertificateDer::pem_file_iter(path)
         .into_diagnostic()
-        .with_context(|| format!("failed to open QUIC certificate file {}", path.display()))?;
-    let mut reader = io::BufReader::new(file);
-    rustls_pemfile::certs(&mut reader)
+        .with_context(|| format!("failed to open QUIC certificate file {}", path.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .into_diagnostic()
         .with_context(|| format!("failed to parse QUIC certificate file {}", path.display()))
 }
 
 fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let file = std::fs::File::open(path)
+    PrivateKeyDer::from_pem_file(path)
         .into_diagnostic()
-        .with_context(|| format!("failed to open QUIC private key file {}", path.display()))?;
-    let mut reader = io::BufReader::new(file);
-    rustls_pemfile::private_key(&mut reader)
-        .into_diagnostic()
-        .with_context(|| format!("failed to parse QUIC private key file {}", path.display()))?
-        .ok_or_else(|| miette::miette!("no private key found in {}", path.display()))
+        .with_context(|| format!("failed to parse QUIC private key file {}", path.display()))
 }

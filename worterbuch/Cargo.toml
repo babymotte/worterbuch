@@ -66,7 +66,7 @@ opentelemetry-semantic-conventions = { workspace = true, optional = true }
 quinn = { workspace = true }
 redb = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
-rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

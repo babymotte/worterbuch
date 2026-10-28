@@ -61,7 +61,7 @@ random_word = { version = "0.5.3", features = ["en"] }
 redb = "4.4.0"
 regex = "1.13.0"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
-rustls-pemfile = "2.2.0"
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
 rustls-platform-verifier = "0.7.1"
 schemars = "1.2.3"
 serde = "1.0.229"
