@@ -84,6 +84,12 @@ pub async fn connect_to_tcp_server_socket(
     sf.set_tcp_keepalive(&tcp_keepalive)
         .into_connection_result()
         .wrap("failed to set TCP keepalive option")?;
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
     sf.set_tcp_user_timeout(Some(config.send_timeout))
         .into_connection_result()
         .wrap("failed to set TCP_USER_TIMEOUT option")?;
