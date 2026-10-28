@@ -98,6 +98,12 @@ pub async fn connect_to_tcp_server_socket(
         .set_nodelay(true)
         .into_connection_result()
         .wrap("failed to set TCP_NODELAY option")?;
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
     stream
         .set_quickack(true)
         .into_connection_result()
@@ -172,6 +178,12 @@ pub fn create_tcp_server_socket(
         .set_tcp_nodelay(true)
         .into_diagnostic()
         .wrap_err("failed to set TCP_NODELAY option")?;
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
     socket
         .set_tcp_quickack(true)
         .into_diagnostic()
