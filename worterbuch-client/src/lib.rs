@@ -1418,15 +1418,10 @@ async fn try_connect(
             .to_string_lossy()
             .to_string()
     } else {
-        format!(
-            "{}://{}{}",
-            proto,
-            host_addr.expect("no host address"),
-            path
-        )
+        format_url(proto, host_addr, path)
     };
     #[cfg(not(target_family = "unix"))]
-    let url = format!("{proto}://{host_addr}{path}");
+    let url = format_url(proto, host_addr, path);
 
     debug!("Got server url from config: {url}");
 
@@ -1471,6 +1466,15 @@ async fn try_connect(
     let disconnected = OnDisconnect { rx: disco_rx };
 
     Ok((wb, disconnected))
+}
+
+fn format_url(proto: &str, host_addr: Option<SocketAddr>, path: &str) -> String {
+    format!(
+        "{}://{}{}",
+        proto,
+        host_addr.expect("no host address"),
+        path
+    )
 }
 
 #[cfg(any(feature = "ws", feature = "wasm"))]
