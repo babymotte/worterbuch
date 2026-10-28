@@ -40,35 +40,35 @@ http = "1.5.0"
 http-body-util = "0.1.5"
 inferno = "0.12.8"
 jemalloc_pprof = { version = "0.9.0", features = ["flamegraph"] }
-jsonschema = { version = "0.59.0", default-features = false }
+jsonschema = { version = "0.60.2", default-features = false }
 jsonwebtoken = "11.1.0"
 lazy_static = "1.5.1"
-libc = "0.2.189"
+libc = "0.2.191"
 mappings = "0.7.0"
 mdns-sd = "0.21.6"
 miette = "7.5.0"
-mio = { version = "1.2.2", default-features = false }
+mio = { version = "1.2.4", default-features = false }
 opentelemetry = "0.33.1"
-opentelemetry_sdk = "0.33.0"
-opentelemetry-appender-tracing = "0.33.0"
-opentelemetry-otlp = "0.33.0"
+opentelemetry_sdk = "0.33.1"
+opentelemetry-appender-tracing = "0.33.1"
+opentelemetry-otlp = "0.33.1"
 opentelemetry-resource-detectors = "0.13.0"
-opentelemetry-semantic-conventions = "0.33.0"
+opentelemetry-semantic-conventions = "0.33.1"
 pprof_util = { version = "0.8.0", features = ["flamegraph"] }
 quinn = "0.11.12"
 rand = "0.10.3"
-random_word = { version = "0.5.0", features = ["en"] }
-redb = "4.3.0"
+random_word = { version = "0.5.3", features = ["en"] }
+redb = "4.4.0"
 regex = "1.13.0"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 rustls-pemfile = "2.2.0"
 rustls-platform-verifier = "0.7.1"
-schemars = "1.2.2"
+schemars = "1.2.3"
 serde = "1.0.229"
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 serde_repr = "0.1.21"
 serde_yaml = "0.9.34"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 socket2 = { version = "0.6.5", features = ["all"] }
 strum = { version = "0.28.0", features = ["derive"] }
 supports-color = "3.0.2"
@@ -78,21 +78,21 @@ tikv-jemallocator = { version = "0.7.0", features = [
     "profiling",
     "unprefixed_malloc_on_supported_platforms",
 ] }
-tokio = "1.53.1"
+tokio = "1.54.1"
 tokio-metrics = "0.5.2"
 tokio-process-terminate = "0.3.2"
 tokio-stream = "0.1.19"
 tokio-tungstenite = "0.30.0"
 tokio-tungstenite-wasm = "0.9.0"
-tosub = "4.0.0"
+tosub = "4.0.1"
 totils = { version = "1.5.2", features = ["while_select", "peekable_mpsc"] }
 tower-http = "0.7.1"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.34.0"
 tracing-subscriber = "0.3.20"
 tungstenite = "0.30.0"
-turso = "0.8.1"
-uuid = "1.26.0"
+turso = "0.8.3"
+uuid = "1.29.0"
 
 [profile.release]
 lto = "fat"
