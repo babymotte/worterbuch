@@ -22,10 +22,7 @@ pub mod protocol;
 use crate::{Config, cluster::protocol::locks::Locks, stats::VERSION};
 use hashbrown::HashMap;
 use std::{fmt, net::SocketAddr, time::Duration};
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::timeout,
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, debug, instrument, trace};
 use worterbuch_common::{
     ClientId, Export, LockAcquiredReceiver, LockLostReceiver, LsSubscription, PSubscription,
@@ -339,12 +336,11 @@ impl CloneableWbApi {
         request: &str,
     ) -> WorterbuchResult<()> {
         trace!(self.name, request, "sending request to core system …",);
-        if timeout(
-            self.config.channel_buffer_timeout,
-            self.tx.send(wb_function),
-        )
-        .await
-        .is_err()
+        if self
+            .tx
+            .send_timeout(wb_function, self.config.channel_buffer_timeout)
+            .await
+            .is_err()
         {
             return Err(WorterbuchError::InternalChannelTimeout(format!(
                 "timeout while sending '{}' request to core system",
