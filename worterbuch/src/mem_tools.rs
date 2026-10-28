@@ -58,12 +58,22 @@ pub fn schedule_trim() {
     *guard = Some(handle);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "cygwin",
+))]
 fn trim_now() -> bool {
     unsafe { libc::malloc_trim(0) != 0 }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "cygwin",
+)))]
 fn trim_now() -> bool {
     false
 }
