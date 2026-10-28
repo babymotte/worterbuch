@@ -114,6 +114,7 @@ async fn run(
         .into_diagnostic()?;
     wb_config.ws_disabled = true;
     wb_config.quic_disabled = true;
+    wb_config.unix_disabled = true;
 
     wb_config.ws_endpoint.as_mut().map(|it| it.port = http_port);
     wb_config
