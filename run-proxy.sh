@@ -6,4 +6,4 @@ WORTERBUCH_WS_SERVER_PORT=8084 \
 WORTERBUCH_TCP_SERVER_PORT=9094 \
 WORTERBUCH_QUIC_SERVER_PORT=7074 \
 WORTERBUCH_INITIAL_SYNC_TIMEOUT=5 \
-cargo run -p worterbuch -- --instance-name proxy proxy -l localhost:6060 -l localhost:6061 -l localhost:6062
+cargo run -p worterbuch "$@" -- --instance-name proxy proxy -l localhost:6060 -l localhost:6061 -l localhost:6062
