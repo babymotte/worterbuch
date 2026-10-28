@@ -5728,9 +5728,9 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "4.0.1"
+version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13a44c064e837b7e6c546795f93717e7e3cf84329f8e07efd8069ac2bcf1b382"
+checksum = "977b8b355c8e6bd533c2b1b8f6ba0306f21396e47d65c66d05251fdfdcb35a37"
 dependencies = [
  "miette",
  "serde",
