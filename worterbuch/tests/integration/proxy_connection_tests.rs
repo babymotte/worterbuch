@@ -35,9 +35,21 @@ async fn set_and_get_sequences_are_preserved() {
 
     let total_requests = 100;
     let interrupt_after = None;
+    let sync_port = 6060;
+    let proxy_port = 8081;
+    let http_port = 8080;
 
     tosub::build_default_root("set_and_get_sequences_are_preserved")
-        .start(move |s| run(s, total_requests, interrupt_after))
+        .start(move |s| {
+            run(
+                s,
+                total_requests,
+                interrupt_after,
+                sync_port,
+                proxy_port,
+                http_port,
+            )
+        })
         .await
         .expect("Test root system failed");
 }
@@ -48,9 +60,21 @@ async fn set_and_get_continue_being_processed_after_proxy_reconnect() {
 
     let total_requests = 100;
     let interrupt_after = Some(10);
+    let sync_port = 6070;
+    let proxy_port = 8091;
+    let http_port = 8090;
 
     tosub::build_default_root("set_and_get_continue_being_processed_after_proxy_reconnect")
-        .start(move |s| run(s, total_requests, interrupt_after))
+        .start(move |s| {
+            run(
+                s,
+                total_requests,
+                interrupt_after,
+                sync_port,
+                proxy_port,
+                http_port,
+            )
+        })
         .await
         .expect("Test root system failed");
 }
@@ -65,10 +89,10 @@ async fn run(
     subsys: Subsystem,
     total_requests: usize,
     interrupt_after: Option<usize>,
+    sync_port: u16,
+    proxy_port: u16,
+    http_port: u16,
 ) -> miette::Result<()> {
-    let sync_port = 6060;
-    let proxy_port = 8081;
-
     // create mock leader instance
     let (started_tx, started) = oneshot::channel();
     crate::test_common::mock_server::start(&subsys, sync_port, started_tx, interrupt_after)?;
@@ -85,9 +109,17 @@ async fn run(
         #[cfg(feature = "commercial")]
         license: Some("tests/license".into()),
     };
-    let wb_config = worterbuch::Config::new(Some(args))
+    let mut wb_config = worterbuch::Config::new(Some(args))
         .await
         .into_diagnostic()?;
+    wb_config.ws_disabled = true;
+    wb_config.quic_disabled = true;
+
+    wb_config.ws_endpoint.as_mut().map(|it| it.port = http_port);
+    wb_config
+        .tcp_endpoint
+        .as_mut()
+        .map(|it| it.port = proxy_port);
 
     spawn_worterbuch(&subsys, wb_config, None)
         .await
