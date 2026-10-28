@@ -188,137 +188,378 @@ fn serve(
 ) {
     info!("Follower {} connected.", client.1);
 
-    subsys.spawn(client.1.to_string(), async move |s| {
-        let follower_addr = client.1;
-        if let Err(e) = follower_serve_loop(
-            &s,
-            client.0,
-            client.1,
+    subsys.spawn(client.1.to_string(), move |s| {
+        SyncClientHandler {
+            subsys: s,
+            follower_addr: client.1,
             on_follower_connected,
+            on_follower_disconnected,
             config,
             wb,
             proxy_sessions,
-        )
-        .await
-        {
+        }
+        .run(client.0)
+    });
+}
+
+struct SyncClientHandler {
+    subsys: Subsystem,
+    follower_addr: SocketAddr,
+    on_follower_connected: OnFollowerConnected,
+    on_follower_disconnected: OnFollowerDisconnected,
+    config: Config,
+    wb: CloneableWbApi,
+    proxy_sessions: ProxySessions,
+}
+
+impl SyncClientHandler {
+    async fn run(self, tcp_stream: TcpStream) -> miette::Result<()> {
+        if let Err(e) = self.follower_serve_loop(tcp_stream).await {
             error!("Error in follower serve loop: {e}");
             eprintln!("{e:?}");
         }
 
-        on_follower_disconnected
-            .try_send(follower_addr)
-            .expect("follower disconnected channel is clogged");
+        self.on_follower_disconnected
+            .send_timeout(self.follower_addr, self.config.channel_buffer_timeout)
+            .await
+            .into_diagnostic()?;
 
-        s.request_local_shutdown_because("TCP connection to follower/proxy closed");
-    });
-}
+        self.subsys
+            .request_local_shutdown_because("TCP connection to follower/proxy closed");
 
-async fn follower_serve_loop(
-    subsys: &Subsystem,
-    tcp_stream: TcpStream,
-    follower: SocketAddr,
-    on_follower_connected: OnFollowerConnected,
-    config: Config,
-    worterbuch: CloneableWbApi,
-    proxy_sessions: ProxySessions,
-) -> miette::Result<()> {
-    let (send_tx, send_rx) = mpsc::channel(config.channel_buffer_size);
-    let mut proxy_server = VirtualProxyServer {
-        subsys,
-        clients: HashMap::new(),
-        worterbuch: worterbuch.named("server/virtual-proxy"),
-        config: config.clone(),
-        proxy_address: follower,
-        send_tx,
-    };
-    let mut proxy_id = None;
-
-    let res = follower_session(
-        tcp_stream,
-        follower,
-        on_follower_connected,
-        config,
-        &mut proxy_server,
-        send_rx,
-        &proxy_sessions,
-        &mut proxy_id,
-    )
-    .await;
-
-    // no matter how the session ended, all of its clients must be disconnected before this task ends,
-    // a new connection of the same proxy waits for this task to end before registering its clients
-    proxy_server.disconnect_all().await;
-
-    if let Some(proxy_id) = proxy_id {
-        proxy_sessions.release_own(proxy_id, follower);
+        Ok(())
     }
 
-    res
-}
+    async fn follower_serve_loop(&self, tcp_stream: TcpStream) -> miette::Result<()> {
+        let (send_tx, send_rx) = mpsc::channel(self.config.channel_buffer_size);
+        let mut proxy_server = VirtualProxyServer {
+            subsys: &self.subsys,
+            clients: HashMap::new(),
+            worterbuch: self.wb.named("server/virtual-proxy"),
+            config: self.config.clone(),
+            proxy_address: self.follower_addr,
+            send_tx,
+        };
+        let mut proxy_id = None;
 
-#[allow(clippy::too_many_arguments)]
-async fn follower_session<'a>(
-    tcp_stream: TcpStream,
-    follower: SocketAddr,
-    on_follower_connected: OnFollowerConnected,
-    config: Config,
-    proxy_server: &mut VirtualProxyServer<'a>,
-    send_rx: mpsc::Receiver<VirtualServerMessage>,
-    proxy_sessions: &ProxySessions,
-    proxy_id: &mut Option<ProxyId>,
-) -> miette::Result<()> {
-    let (socket_rx, socket_tx) = tcp_stream.into_split();
-    let mut socket_tx = BufWriter::new(socket_tx);
-    let mut proxy_messages = BufReader::new(socket_rx).lines();
+        let res = self
+            .follower_session(tcp_stream, &mut proxy_server, send_rx, &mut proxy_id)
+            .await;
 
-    send_welcome(proxy_server.subsys, &mut socket_tx, follower, &config).await?;
-    let handshake = receive_handshake(&mut proxy_messages, follower).await?;
+        // no matter how the session ended, all of its clients must be disconnected before this task ends,
+        // a new connection of the same proxy waits for this task to end before registering its clients
+        proxy_server.disconnect_all().await;
 
-    let is_proxy = process_handshake(
-        proxy_server.subsys,
-        handshake,
-        &config,
-        proxy_server,
-        proxy_sessions,
-        proxy_id,
-    )
-    .await?;
+        if let Some(proxy_id) = proxy_id {
+            self.proxy_sessions
+                .release_own(proxy_id, self.follower_addr);
+        }
 
-    let (sync_tx, sync_rx) = oneshot::channel();
-    on_follower_connected
-        .send((sync_tx, follower, is_proxy))
+        res
+    }
+
+    async fn follower_session<'a>(
+        &self,
+        tcp_stream: TcpStream,
+        proxy_server: &mut VirtualProxyServer<'a>,
+        send_rx: mpsc::Receiver<VirtualServerMessage>,
+        proxy_id: &mut Option<ProxyId>,
+    ) -> miette::Result<()> {
+        let (socket_rx, socket_tx) = tcp_stream.into_split();
+        let mut socket_tx = BufWriter::new(socket_tx);
+        let mut proxy_messages = BufReader::new(socket_rx).lines();
+
+        self.send_welcome(&mut socket_tx).await?;
+        let handshake = self.receive_handshake(&mut proxy_messages).await?;
+
+        let is_proxy = self
+            .process_handshake(handshake, proxy_server, proxy_id)
+            .await?;
+
+        let (sync_tx, sync_rx) = oneshot::channel();
+        self.on_follower_connected
+            .send((sync_tx, self.follower_addr, is_proxy))
+            .await
+            .into_diagnostic()
+            .wrap_err("failed to forward follower connected event")?;
+
+        let (state, commands) = sync_rx.await.into_diagnostic()?;
+
+        self.send_initial_state(
+            proxy_server.subsys,
+            &mut socket_tx,
+            self.follower_addr,
+            &self.config,
+            state,
+        )
+        .await?;
+
+        let follower_addr = self.follower_addr;
+        let config = self.config.clone();
+
+        proxy_server.subsys.spawn(
+            format!("state-and-response-forwarder/{}", follower_addr),
+            move |s| {
+                forward_messages_to_proxy(
+                    s,
+                    follower_addr,
+                    config.clone(),
+                    send_rx,
+                    socket_tx,
+                    commands,
+                )
+            },
+        );
+
+        while_select! {
+            _ = proxy_server.subsys.shutdown_requested() => break,
+            recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, self.follower_addr).await.wrap_err("error processing proxy message")?,
+        }
+
+        info!(
+            "TCP connection to follower/proxy {} closed.",
+            self.follower_addr
+        );
+
+        Ok(())
+    }
+
+    async fn send_welcome(&self, tcp_stream: &mut BufWriter<OwnedWriteHalf>) -> miette::Result<()> {
+        trace!(enter = "send_welcome");
+        let authentication_required = self.config.auth_token_key.is_some();
+        let version = worterbuch_version();
+
+        write_line_and_flush(
+            || self.subsys.shutdown_requested(),
+            LeaderMessage::Welcome(LeaderWelcome {
+                version,
+                authentication_required,
+            }),
+            tcp_stream,
+            self.config.send_timeout,
+        )
         .await
         .into_diagnostic()
-        .wrap_err("failed to forward follower connected event")?;
-
-    let (state, commands) = sync_rx.await.into_diagnostic()?;
-
-    send_initial_state(
-        proxy_server.subsys,
-        &mut socket_tx,
-        follower,
-        &config,
-        state,
-    )
-    .await?;
-
-    proxy_server.subsys.spawn(
-        format!("state-and-response-forwarder/{follower}"),
-        move |s| forward_messages_to_proxy(s, follower, config, send_rx, socket_tx, commands),
-    );
-
-    while_select! {
-        _ = proxy_server.subsys.shutdown_requested() => break,
-        recv = proxy_messages.next_line() => proxy_server.process_proxy_message(recv, follower).await.wrap_err("error processing proxy message")?,
+        .wrap_err_with(|| {
+            format!(
+                "could not send current state to follower/proxy {}",
+                self.follower_addr
+            )
+        })?;
+        trace!(exit = "send_welcome");
+        Ok(())
     }
 
-    info!("TCP connection to follower/proxy {} closed.", follower);
+    async fn receive_handshake(
+        &self,
+        tcp_stream: &mut Lines<BufReader<OwnedReadHalf>>,
+    ) -> miette::Result<Handshake> {
+        trace!(enter = "receive_handshake");
+        let handshake = match tcp_stream.next_line().await {
+            Ok(Some(line)) => {
+                debug!("Received handshake message from follower/proxy: {line}");
 
-    Ok(())
+                let msg: ProxyMessage = serde_json::from_str(&line)
+                    .into_diagnostic()
+                    .wrap_err("could not parse follower/proxy message")?;
+
+                match msg {
+                    ProxyMessage::Handshake(handshake) => Ok(handshake),
+                    msg => {
+                        trace!(exit = "receive_handshake", error = true);
+                        bail!(
+                            "expected handshake message from follower/proxy {}, but got:\n{:#?}",
+                            self.follower_addr,
+                            msg
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                trace!(exit = "receive_handshake", error = true);
+                bail!(
+                    "connection to follower/proxy {} closed before handshake",
+                    self.follower_addr
+                );
+            }
+            Err(e) => {
+                trace!(exit = "receive_handshake", error = true);
+                bail!(
+                    "error receiving handshake message from follower/proxy {}: {}",
+                    self.follower_addr,
+                    e
+                );
+            }
+        };
+        trace!(exit = "receive_handshake");
+        handshake
+    }
+
+    async fn process_handshake<'a>(
+        &self,
+        handshake: Handshake,
+        proxy_server: &mut VirtualProxyServer<'a>,
+        proxy_id: &mut Option<ProxyId>,
+    ) -> miette::Result<bool> {
+        trace!(enter = "process_handshake");
+        self.check_version(handshake.version())
+            .wrap_err("version mismatch between leader and follower/proxy")?;
+
+        self.authenticate(handshake.auth_token())
+            .wrap_err("could not authenticate follower/proxy")?;
+
+        if let Handshake::Proxy(proxy_handshake) = handshake {
+            let id = proxy_handshake.proxy_id;
+            *proxy_id = Some(id);
+            self.take_over_proxy_session(id, proxy_server).await;
+
+            let client_txs = proxy_server
+                .register_clients(&proxy_handshake.connected_clients)
+                .await?;
+            let updated_locks = proxy_server.restore_locks(proxy_handshake.locks).await?;
+
+            for (client_id, keys) in &updated_locks.lost {
+                let Some(tx) = client_txs.get(client_id) else {
+                    error!(
+                        "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                    );
+                    continue;
+                };
+                for (tid, _) in keys {
+                    let msg = ServerMessage::Err(Err {
+                        transaction_id: *tid,
+                        error_code: ErrorCode::LockLost,
+                        metadata: json!("lock lost").to_string(),
+                    });
+                    let _ = tx.send(msg).await;
+                }
+            }
+
+            for (client_id, pending_locks) in updated_locks.pending {
+                let Some(client) = client_txs.get(&client_id) else {
+                    error!(
+                        "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                    );
+                    continue;
+                };
+                for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
+                    let client = client.to_owned();
+                    self.subsys.spawn("forward_lock_acquired", move |s| {
+                        protocol::forward_lock_acquired(
+                            s,
+                            client,
+                            transaction_id,
+                            acquired_rx,
+                            lost_rx,
+                        )
+                    });
+                }
+            }
+
+            trace!(exit = "process_handshake");
+            Ok(true)
+        } else {
+            trace!(exit = "process_handshake");
+            Ok(false)
+        }
+    }
+
+    /// Registers this connection as the active session of the proxy. If the proxy still has a previous connection
+    /// (e.g. one that broke without the leader noticing yet), that connection is closed and all of its clients are
+    /// disconnected before this returns, so that the clients of the new connection can be registered without
+    /// colliding with their stale registrations.
+    async fn take_over_proxy_session<'a>(
+        &self,
+        proxy_id: ProxyId,
+        proxy_server: &VirtualProxyServer<'a>,
+    ) {
+        trace!(enter = "take_over_proxy_session");
+        let previous = self.proxy_sessions.update(
+            proxy_id,
+            (proxy_server.proxy_address, proxy_server.subsys.clone()),
+        );
+
+        let Some((previous_addr, previous_subsys)) = previous else {
+            return;
+        };
+
+        info!(
+            "Proxy {proxy_id} re-connected from {} while its previous connection from {previous_addr} is still open, closing previous connection …",
+            proxy_server.proxy_address
+        );
+        previous_subsys.request_local_shutdown_because(format!(
+            "proxy {proxy_id} re-connected from {}",
+            proxy_server.proxy_address
+        ));
+        if let Err(e) = previous_subsys.join().await {
+            warn!(
+                "Previous connection of proxy {proxy_id} from {previous_addr} did not shut down cleanly: {e}"
+            );
+        } else {
+            info!("Previous connection of proxy {proxy_id} from {previous_addr} closed.");
+        }
+        trace!(exit = "take_over_proxy_session");
+    }
+
+    fn check_version(&self, version: &WorterbuchVersion) -> miette::Result<()> {
+        ensure!(
+            version == &worterbuch_version(),
+            "follower/proxy version mismatch: expected {}, got {}",
+            worterbuch_version(),
+            version
+        );
+        Ok(())
+    }
+
+    fn authenticate(&self, auth_token: Option<&str>) -> miette::Result<()> {
+        trace!(enter = "authenticate");
+        match &self.config.auth_token_key {
+            Some(key) => self.authenticate_against_key(auth_token, key),
+            None => Ok(()),
+        }?;
+        trace!(exit = "authenticate");
+        Ok(())
+    }
+
+    fn authenticate_against_key(
+        &self,
+        _auth_token: Option<&str>,
+        _key: &str,
+    ) -> miette::Result<()> {
+        // TODO
+        Ok(())
+    }
+
+    async fn send_initial_state(
+        &self,
+        subsys: &Subsystem,
+        tcp_stream: &mut BufWriter<OwnedWriteHalf>,
+        follower: SocketAddr,
+        config: &Config,
+        state: StateSync,
+    ) -> miette::Result<()> {
+        trace!(enter = "send_initial_state");
+        write_line_and_flush(
+            || subsys.shutdown_requested(),
+            LeaderMessage::Init(state),
+            tcp_stream,
+            config.send_timeout,
+        )
+        .await
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "could not send current state to follower/proxy {}",
+                follower
+            )
+        })?;
+        trace!(exit = "send_initial_state");
+        Ok(())
+    }
 }
 
 async fn forward_messages_to_proxy(
-    s: Subsystem,
+    subsys: Subsystem,
     follower: SocketAddr,
     config: Config,
     mut send_rx: mpsc::Receiver<VirtualServerMessage>,
@@ -326,239 +567,10 @@ async fn forward_messages_to_proxy(
     mut commands: mpsc::Receiver<ClusterStateChange>,
 ) -> std::prelude::v1::Result<(), miette::Error> {
     while_select! {
-        _ = s.shutdown_requested() => break,
-        recv = commands.recv() => forward_change_to_follower(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
-        recv = send_rx.recv() => forward_response_to_proxy(&s, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
+        _ = subsys.shutdown_requested() => break,
+        recv = commands.recv() => forward_change_to_follower(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding change message to follower/proxy")?,
+        recv = send_rx.recv() => forward_response_to_proxy(&subsys, recv, &mut socket_tx, &config, follower).await.wrap_err("error forwarding response message to proxy")?,
     }
-    Ok(())
-}
-
-async fn send_welcome(
-    subsys: &Subsystem,
-    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
-    follower: SocketAddr,
-    config: &Config,
-) -> miette::Result<()> {
-    trace!(enter = "send_welcome");
-    let authentication_required = config.auth_token_key.is_some();
-    let version = worterbuch_version();
-
-    write_line_and_flush(
-        || subsys.shutdown_requested(),
-        LeaderMessage::Welcome(LeaderWelcome {
-            version,
-            authentication_required,
-        }),
-        tcp_stream,
-        config.send_timeout,
-    )
-    .await
-    .into_diagnostic()
-    .wrap_err_with(|| {
-        format!(
-            "could not send current state to follower/proxy {}",
-            follower
-        )
-    })?;
-    trace!(exit = "send_welcome");
-    Ok(())
-}
-
-async fn receive_handshake(
-    tcp_stream: &mut Lines<BufReader<OwnedReadHalf>>,
-    follower: SocketAddr,
-) -> miette::Result<Handshake> {
-    trace!(enter = "receive_handshake");
-    let handshake = match tcp_stream.next_line().await {
-        Ok(Some(line)) => {
-            debug!("Received handshake message from follower/proxy: {line}");
-
-            let msg: ProxyMessage = serde_json::from_str(&line)
-                .into_diagnostic()
-                .wrap_err("could not parse follower/proxy message")?;
-
-            match msg {
-                ProxyMessage::Handshake(handshake) => Ok(handshake),
-                msg => {
-                    trace!(exit = "receive_handshake", error = true);
-                    bail!(
-                        "expected handshake message from follower/proxy {}, but got:\n{:#?}",
-                        follower,
-                        msg
-                    );
-                }
-            }
-        }
-        Ok(None) => {
-            trace!(exit = "receive_handshake", error = true);
-            bail!(
-                "connection to follower/proxy {} closed before handshake",
-                follower
-            );
-        }
-        Err(e) => {
-            trace!(exit = "receive_handshake", error = true);
-            bail!(
-                "error receiving handshake message from follower/proxy {}: {}",
-                follower,
-                e
-            );
-        }
-    };
-    trace!(exit = "receive_handshake");
-    handshake
-}
-
-async fn process_handshake<'a>(
-    subsys: &Subsystem,
-    handshake: Handshake,
-    config: &Config,
-    proxy_server: &mut VirtualProxyServer<'a>,
-    proxy_sessions: &ProxySessions,
-    proxy_id: &mut Option<ProxyId>,
-) -> miette::Result<bool> {
-    trace!(enter = "process_handshake");
-    check_version(handshake.version())
-        .wrap_err("version mismatch between leader and follower/proxy")?;
-
-    authenticate(handshake.auth_token(), config)
-        .wrap_err("could not authenticate follower/proxy")?;
-
-    if let Handshake::Proxy(proxy_handshake) = handshake {
-        let id = proxy_handshake.proxy_id;
-        *proxy_id = Some(id);
-        take_over_proxy_session(proxy_sessions, id, proxy_server).await;
-
-        let client_txs = proxy_server
-            .register_clients(&proxy_handshake.connected_clients)
-            .await?;
-        let updated_locks = proxy_server.restore_locks(proxy_handshake.locks).await?;
-
-        for (client_id, keys) in &updated_locks.lost {
-            let Some(tx) = client_txs.get(client_id) else {
-                error!(
-                    "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
-                );
-                continue;
-            };
-            for (tid, _) in keys {
-                let msg = ServerMessage::Err(Err {
-                    transaction_id: *tid,
-                    error_code: ErrorCode::LockLost,
-                    metadata: json!("lock lost").to_string(),
-                });
-                let _ = tx.send(msg).await;
-            }
-        }
-
-        for (client_id, pending_locks) in updated_locks.pending {
-            let Some(client) = client_txs.get(&client_id) else {
-                error!(
-                    "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
-                );
-                continue;
-            };
-            for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
-                let client = client.to_owned();
-                subsys.spawn("forward_lock_acquired", move |s| {
-                    protocol::forward_lock_acquired(s, client, transaction_id, acquired_rx, lost_rx)
-                });
-            }
-        }
-
-        trace!(exit = "process_handshake");
-        Ok(true)
-    } else {
-        trace!(exit = "process_handshake");
-        Ok(false)
-    }
-}
-
-/// Registers this connection as the active session of the proxy. If the proxy still has a previous connection
-/// (e.g. one that broke without the leader noticing yet), that connection is closed and all of its clients are
-/// disconnected before this returns, so that the clients of the new connection can be registered without
-/// colliding with their stale registrations.
-async fn take_over_proxy_session<'a>(
-    proxy_sessions: &ProxySessions,
-    proxy_id: ProxyId,
-    proxy_server: &VirtualProxyServer<'a>,
-) {
-    trace!(enter = "take_over_proxy_session");
-    let previous = proxy_sessions.update(
-        proxy_id,
-        (proxy_server.proxy_address, proxy_server.subsys.clone()),
-    );
-
-    let Some((previous_addr, previous_subsys)) = previous else {
-        return;
-    };
-
-    info!(
-        "Proxy {proxy_id} re-connected from {} while its previous connection from {previous_addr} is still open, closing previous connection …",
-        proxy_server.proxy_address
-    );
-    previous_subsys.request_local_shutdown_because(format!(
-        "proxy {proxy_id} re-connected from {}",
-        proxy_server.proxy_address
-    ));
-    if let Err(e) = previous_subsys.join().await {
-        warn!(
-            "Previous connection of proxy {proxy_id} from {previous_addr} did not shut down cleanly: {e}"
-        );
-    } else {
-        info!("Previous connection of proxy {proxy_id} from {previous_addr} closed.");
-    }
-    trace!(exit = "take_over_proxy_session");
-}
-
-fn check_version(version: &WorterbuchVersion) -> miette::Result<()> {
-    ensure!(
-        version == &worterbuch_version(),
-        "follower/proxy version mismatch: expected {}, got {}",
-        worterbuch_version(),
-        version
-    );
-    Ok(())
-}
-
-fn authenticate(auth_token: Option<&str>, config: &Config) -> miette::Result<()> {
-    trace!(enter = "authenticate");
-    match &config.auth_token_key {
-        Some(key) => authenticate_against_key(auth_token, key),
-        None => Ok(()),
-    }?;
-    trace!(exit = "authenticate");
-    Ok(())
-}
-
-fn authenticate_against_key(_auth_token: Option<&str>, _key: &str) -> miette::Result<()> {
-    // TODO
-    Ok(())
-}
-
-async fn send_initial_state(
-    subsys: &Subsystem,
-    tcp_stream: &mut BufWriter<OwnedWriteHalf>,
-    follower: SocketAddr,
-    config: &Config,
-    state: StateSync,
-) -> miette::Result<()> {
-    trace!(enter = "send_initial_state");
-    write_line_and_flush(
-        || subsys.shutdown_requested(),
-        LeaderMessage::Init(state),
-        tcp_stream,
-        config.send_timeout,
-    )
-    .await
-    .into_diagnostic()
-    .wrap_err_with(|| {
-        format!(
-            "could not send current state to follower/proxy {}",
-            follower
-        )
-    })?;
-    trace!(exit = "send_initial_state");
     Ok(())
 }
 
