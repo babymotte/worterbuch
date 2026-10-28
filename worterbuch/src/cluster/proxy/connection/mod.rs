@@ -17,14 +17,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod request_queue;
+// mod request_queue;
 
 use crate::{
     cluster::{
         self,
         protocol::{
             ClientWriteCommand, ClusterStateChange, Connected, Disconnected, LeaderMessage,
-            ProxyMessage, Request, locks::Locks,
+            ProxyMessage, Request, RequestId, locks::Locks,
         },
         proxy::{ClientResponseInterests, Proxy, read_stdin, update_leader_addresses},
     },
@@ -33,7 +33,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, bail};
-use std::ops::ControlFlow;
+use std::{collections::BTreeMap, ops::ControlFlow};
 use tokio::{
     io::{BufReader, Lines},
     net::tcp::OwnedReadHalf,
@@ -66,7 +66,7 @@ pub struct LeaderConnection<'a> {
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
     read_leader_addresses_from_stdin: &'a mut bool,
-    _in_flight_requests: &'a mut Vec<Request>,
+    in_flight_requests: &'a mut BTreeMap<RequestId, Request>,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -89,15 +89,17 @@ impl<'a> LeaderConnection<'a> {
             leader_addresses_updated: false,
             stdin: &mut proxy.stdin,
             read_leader_addresses_from_stdin: &mut proxy.read_leader_addresses_from_stdin,
-            _in_flight_requests: &mut proxy.in_flight_requests,
+            in_flight_requests: &mut proxy.in_flight_requests,
         }
     }
 
     pub async fn run(mut self) -> miette::Result<bool> {
         debug!(
-            "Starting new leder session with inherited response interests: {:#?}",
-            self.response_interests
+            "Starting new leder session with inherited:\tResponse interests: {:#?}\n\tIn-flight requests: {:#?}",
+            self.response_interests, self.in_flight_requests
         );
+
+        self.re_send_in_flight_requests().await?;
 
         loop {
             trace!("Entering select loop for leader connection");
@@ -122,6 +124,15 @@ impl<'a> LeaderConnection<'a> {
         let leader_addresses_updated = self.leader_addresses_updated;
 
         Ok(leader_addresses_updated)
+    }
+
+    async fn re_send_in_flight_requests(&mut self) -> miette::Result<()> {
+        for request in std::mem::take(self.in_flight_requests).into_values() {
+            self.queue_leader_request(ProxyMessage::Request(request))
+                .await?;
+        }
+
+        Ok(())
     }
 
     fn update_leader_address(&mut self, recv: Option<String>) -> ControlFlow<()> {
@@ -264,6 +275,7 @@ impl<'a> LeaderConnection<'a> {
     async fn process_api_call(&mut self, function: WbFunction) -> miette::Result<()> {
         trace!(enter = "process_api_call");
         debug!("Processing API call: {function:?}");
+
         match function {
             WbFunction::Connected(client_info, addr, eject, tx, span) => {
                 let request = ProxyMessage::Connected(Connected {
@@ -539,6 +551,11 @@ impl<'a> LeaderConnection<'a> {
 
     async fn queue_leader_request(&mut self, request: ProxyMessage) -> miette::Result<()> {
         trace!(enter = "queue_leader_request");
+
+        if let ProxyMessage::Request(r) = &request {
+            self.in_flight_requests.insert(r.id(), r.clone());
+        }
+
         self.proxy_request_tx
             .send(request)
             .await
@@ -553,6 +570,16 @@ impl<'a> LeaderConnection<'a> {
         client_id: ClientId,
         server_message: ServerMessage,
     ) -> WorterbuchResult<()> {
+        if let Some(request_id) = server_message
+            .transaction_id()
+            .map(|transaction_id| RequestId {
+                client_id,
+                transaction_id,
+            })
+        {
+            self.in_flight_requests.remove(&request_id);
+        }
+
         match server_message {
             ServerMessage::Welcome(welcome) => {
                 warn!("Received unexpected welcome message from leader");

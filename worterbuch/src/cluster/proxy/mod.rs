@@ -25,7 +25,7 @@ use crate::{
         LeaderState, Mode,
         protocol::{
             Connected, Handshake, LeaderMessage, LeaderWelcome, ProxyHandshake, ProxyId,
-            ProxyMessage, Request, locks::Locks,
+            ProxyMessage, Request, RequestId, locks::Locks,
         },
         proxy::connection::LeaderConnection,
         shutdown,
@@ -39,7 +39,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use serde_json::json;
-use std::{future::pending, ops::ControlFlow, time::Duration};
+use std::{collections::BTreeMap, future::pending, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{BufReader, BufWriter, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -80,7 +80,7 @@ struct Proxy {
     response_interests: HashMap<ClientId, ClientResponseInterests>,
     read_leader_addresses_from_stdin: bool,
     proxy_id: ProxyId,
-    in_flight_requests: Vec<Request>,
+    in_flight_requests: BTreeMap<RequestId, Request>,
 }
 
 impl Proxy {
@@ -106,7 +106,7 @@ impl Proxy {
         let locks = Locks::default();
         let response_interests = HashMap::new();
         let proxy_id = ProxyId::new_v4();
-        let in_flight_requests = Vec::new();
+        let in_flight_requests = BTreeMap::new();
 
         Ok(Proxy {
             subsys,
@@ -392,8 +392,6 @@ impl Proxy {
             )
             .await?;
 
-        self.re_send_in_flight_requests().await?;
-
         trace!(exit = "establish_leader_session");
         Ok(Ok(()))
     }
@@ -627,13 +625,6 @@ impl Proxy {
         })?;
 
         trace!(exit = "initial_sync");
-        Ok(())
-    }
-
-    async fn re_send_in_flight_requests(&mut self) -> WorterbuchAppResult<()> {
-        for _request in self.in_flight_requests.drain(..) {
-            todo!("re-send in flight requests");
-        }
         Ok(())
     }
 }

@@ -171,7 +171,7 @@ async fn respond(
 
     // this is just a dumb mock server, it does not do anything meaningful with the messages, it just always responds with an ack
 
-    let transaction_id = msg.transaction_id().unwrap_or(0);
+    let transaction_id = msg.transaction_id();
     #[cfg(feature = "trace")]
     trace!(transaction_id, "sending Ack");
     let ack = ServerMessage::Ack(Ack { transaction_id });

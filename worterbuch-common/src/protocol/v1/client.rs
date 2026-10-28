@@ -53,31 +53,29 @@ pub enum ClientMessage {
 }
 
 impl ClientMessage {
-    pub fn transaction_id(&self) -> Option<TransactionId> {
+    pub fn transaction_id(&self) -> TransactionId {
         match self {
-            ClientMessage::ProtocolSwitchRequest(_) | ClientMessage::AuthorizationRequest(_) => {
-                Some(0)
-            }
-            ClientMessage::Get(m) | ClientMessage::CGet(m) => Some(m.transaction_id),
-            ClientMessage::PGet(m) => Some(m.transaction_id),
-            ClientMessage::Set(m) => Some(m.transaction_id),
-            ClientMessage::CSet(m) => Some(m.transaction_id),
-            ClientMessage::SPubInit(m) => Some(m.transaction_id),
-            ClientMessage::SPub(m) => Some(m.transaction_id),
-            ClientMessage::Publish(m) => Some(m.transaction_id),
-            ClientMessage::Subscribe(m) => Some(m.transaction_id),
-            ClientMessage::PSubscribe(m) => Some(m.transaction_id),
-            ClientMessage::Unsubscribe(m) => Some(m.transaction_id),
-            ClientMessage::Delete(m) => Some(m.transaction_id),
-            ClientMessage::PDelete(m) => Some(m.transaction_id),
-            ClientMessage::Ls(m) => Some(m.transaction_id),
-            ClientMessage::PLs(m) => Some(m.transaction_id),
-            ClientMessage::SubscribeLs(m) => Some(m.transaction_id),
-            ClientMessage::UnsubscribeLs(m) => Some(m.transaction_id),
-            ClientMessage::Lock(m) => Some(m.transaction_id),
-            ClientMessage::AcquireLock(m) => Some(m.transaction_id),
-            ClientMessage::ReleaseLock(m) => Some(m.transaction_id),
-            // ClientMessage::Transform(m) => Some(m.transaction_id),
+            ClientMessage::ProtocolSwitchRequest(_) | ClientMessage::AuthorizationRequest(_) => 0,
+            ClientMessage::Get(m) | ClientMessage::CGet(m) => m.transaction_id,
+            ClientMessage::PGet(m) => m.transaction_id,
+            ClientMessage::Set(m) => m.transaction_id,
+            ClientMessage::CSet(m) => m.transaction_id,
+            ClientMessage::SPubInit(m) => m.transaction_id,
+            ClientMessage::SPub(m) => m.transaction_id,
+            ClientMessage::Publish(m) => m.transaction_id,
+            ClientMessage::Subscribe(m) => m.transaction_id,
+            ClientMessage::PSubscribe(m) => m.transaction_id,
+            ClientMessage::Unsubscribe(m) => m.transaction_id,
+            ClientMessage::Delete(m) => m.transaction_id,
+            ClientMessage::PDelete(m) => m.transaction_id,
+            ClientMessage::Ls(m) => m.transaction_id,
+            ClientMessage::PLs(m) => m.transaction_id,
+            ClientMessage::SubscribeLs(m) => m.transaction_id,
+            ClientMessage::UnsubscribeLs(m) => m.transaction_id,
+            ClientMessage::Lock(m) => m.transaction_id,
+            ClientMessage::AcquireLock(m) => m.transaction_id,
+            ClientMessage::ReleaseLock(m) => m.transaction_id,
+            // ClientMessage::Transform(m) => m.transaction_id,
         }
     }
 }

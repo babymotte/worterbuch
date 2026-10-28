@@ -31,7 +31,7 @@ use worterbuch_common::{
 
 #[tokio::test]
 async fn set_and_get_sequences_are_preserved() {
-    worterbuch_common::logging::init().expect("logging initialization failed");
+    // worterbuch_common::logging::init().expect("logging initialization failed");
 
     let total_requests = 100;
     let interrupt_after = None;
@@ -44,7 +44,7 @@ async fn set_and_get_sequences_are_preserved() {
 
 #[tokio::test]
 async fn set_and_get_continue_being_processed_after_proxy_reconnect() {
-    worterbuch_common::logging::init().expect("logging initialization failed");
+    // worterbuch_common::logging::init().expect("logging initialization failed");
 
     let total_requests = 100;
     let interrupt_after = Some(10);

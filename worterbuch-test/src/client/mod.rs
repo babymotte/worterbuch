@@ -92,7 +92,7 @@ impl<W: AsyncWrite + Unpin> TestClient<W> {
         let set_commands = std::mem::take(&mut self.set_commands);
 
         for msg in set_commands {
-            let transaction_id = msg.transaction_id().expect("tid must be present");
+            let transaction_id = msg.transaction_id();
 
             self.pending_acks.insert(transaction_id);
 

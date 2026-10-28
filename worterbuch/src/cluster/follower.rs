@@ -432,7 +432,7 @@ async fn process_leader_message(
                 )
                 .await
                 .map(|_| ()),
-            ClientWriteCommand::Publish(_, _) => {
+            ClientWriteCommand::Publish(..) => {
                 panic!("leader should never forward a Publish command to a follower")
             }
             ClientWriteCommand::Import(persisted_store) => worterbuch
@@ -444,7 +444,7 @@ async fn process_leader_message(
                 .await
                 .map(|_| ()),
         },
-        LeaderMessage::ClientResponse(_, _) | LeaderMessage::EjectClient(_) => {
+        LeaderMessage::ClientResponse(..) | LeaderMessage::EjectClient(..) => {
             return Err(crate::error::WorterbuchAppError::ClusterError(
                 "leader should never send a ClientResponse to a follower".to_owned(),
             ));

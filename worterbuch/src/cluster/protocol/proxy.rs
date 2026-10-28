@@ -20,8 +20,8 @@
 use crate::cluster::protocol::locks::Locks;
 use serde::{Deserialize, Serialize};
 use worterbuch_common::{
-    WorterbuchVersion,
-    protocol::v1::{ClientInfo, ClientMessage, GraveGoods, LastWill},
+    ClientId, WorterbuchVersion,
+    protocol::v1::{ClientInfo, ClientMessage, GraveGoods, LastWill, TransactionId},
 };
 
 pub type ProxyId = uuid::Uuid;
@@ -109,4 +109,17 @@ impl Request {
             msg: client_message,
         }
     }
+
+    pub fn id(&self) -> RequestId {
+        RequestId {
+            client_id: self.client_info.client_id,
+            transaction_id: self.msg.transaction_id(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RequestId {
+    pub client_id: ClientId,
+    pub transaction_id: TransactionId,
 }
