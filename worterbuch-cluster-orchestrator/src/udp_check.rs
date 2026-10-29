@@ -19,6 +19,7 @@ use crate::{
     PeerMessage, Ping,
     config::{self},
     socket::init_socket,
+    stats::start_stats_endpoint,
 };
 use miette::{Context, IntoDiagnostic, bail};
 use serde_json::json;
@@ -45,6 +46,11 @@ pub async fn run_udp_check(subsys: Subsystem, config: config::Config) -> miette:
     let mut socket = init_socket(&config)
         .await
         .wrap_err("failed to create raft UDP socket")?;
+
+    let stats = start_stats_endpoint(&subsys, config.stats_port)
+        .await
+        .wrap_err("failed to create stats endpoint")?;
+    stats.candidate().await;
 
     let mut buf = [0u8; 65507];
 
