@@ -159,10 +159,6 @@ pub async fn start(
         }
     }
 
-    if config.enable_mdns {
-        // TODO unpublish mDNS service for the TCP endpoint
-    }
-
     for (cid, subsys) in clients {
         subsys.request_local_shutdown_because(
             "server shutting down, closing remaining client connections",

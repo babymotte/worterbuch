@@ -645,10 +645,8 @@ impl<'a> LeaderConnection<'a> {
                 trace!(msg = ?ls_state);
             }
             ServerMessage::Authorized(ack) => {
-                // TODO handle this correctly
-                warn!(
-                    "Received Authorized message from leader; handler not yet implemented: {ack:?}"
-                );
+                warn!("Received unexpected Authorized message from leader");
+                trace!(msg = ?ack);
             }
             ServerMessage::Ack(ack) => {
                 if let Some(tx) = self.get_ack_response_interest(client_id, ack.transaction_id) {
