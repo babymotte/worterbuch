@@ -251,12 +251,9 @@ async fn do_import(request: Request, wb: &CloneableWbApi) -> WorterbuchResult<Re
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    let res = wb
-        .import(Uuid::new_v4(), 1, json)
+    wb.import(Uuid::new_v4(), 1, json)
         .await
-        .map(|_| ().into_response());
-
-    res
+        .map(|_| ().into_response())
 }
 
 fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
