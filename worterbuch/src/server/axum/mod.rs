@@ -304,11 +304,7 @@ async fn get_value(
     }
     let client_info = http_client_info();
 
-    connected(&wb, client_info.clone(), remote_addr).await?;
-    let res = do_get_value(key, content_type, &params, &wb, client_info.clone()).await;
-    wb.disconnected(client_info, Some(remote_addr)).await?;
-
-    res
+    do_get_value(key, content_type, &params, &wb, client_info.clone()).await
 }
 
 async fn do_get_value(
@@ -366,11 +362,7 @@ async fn pget(
     }
     let client_info = http_client_info();
 
-    connected(&wb, client_info.clone(), remote_addr).await?;
-    let res = do_pget(pattern, &wb, client_info.clone()).await;
-    wb.disconnected(client_info, Some(remote_addr)).await?;
-
-    res
+    do_pget(pattern, &wb, client_info.clone()).await
 }
 
 async fn do_pget(
@@ -536,11 +528,7 @@ async fn ls(
     }
     let client_info = http_client_info();
 
-    connected(&wb, client_info.clone(), remote_addr).await?;
-    let res = do_ls(Some(parent), &wb, client_info.clone()).await;
-    wb.disconnected(client_info, Some(remote_addr)).await?;
-
-    res
+    do_ls(Some(parent), &wb, client_info.clone()).await
 }
 
 async fn ls_root(
@@ -553,11 +541,7 @@ async fn ls_root(
     }
     let client_info = http_client_info();
 
-    connected(&wb, client_info.clone(), remote_addr).await?;
-    let res = do_ls(None, &wb, client_info.clone()).await;
-    wb.disconnected(client_info, Some(remote_addr)).await?;
-
-    res
+    do_ls(None, &wb, client_info.clone()).await
 }
 
 async fn do_ls(
