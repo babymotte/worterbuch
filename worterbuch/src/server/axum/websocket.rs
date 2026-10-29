@@ -163,7 +163,9 @@ async fn process_next_message(
             Ok(incoming_msg) => {
                 debug!("Processing incoming message …");
                 if let Message::Text(text) = incoming_msg {
-                    let msg_processed = proto.process_incoming_message(&text, authorized).await?;
+                    let msg_processed = proto
+                        .process_incoming_message(&text, authorized, false)
+                        .await?;
                     if !msg_processed {
                         return Ok(ControlFlow::Break(()));
                     }

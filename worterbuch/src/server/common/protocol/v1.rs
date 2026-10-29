@@ -44,13 +44,15 @@ impl V1 {
         &self,
         msg: ClientMessage,
         authorized: &mut Option<JwtClaims>,
+        skip_auth: bool,
     ) -> WorterbuchResult<()> {
         match msg {
             ClientMessage::CGet(msg) => {
-                if self
-                    .v0
-                    .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
-                    .await?
+                if !skip_auth
+                    && self
+                        .v0
+                        .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
+                        .await?
                 {
                     trace!("Getting CAS value for client {} …", self.v0.client_id());
                     self.cget(msg).await;
@@ -58,10 +60,11 @@ impl V1 {
                 }
             }
             ClientMessage::CSet(msg) => {
-                if self
-                    .v0
-                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
-                    .await?
+                if !skip_auth
+                    && self
+                        .v0
+                        .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                        .await?
                 {
                     trace!("Setting cas value for client {} …", self.v0.client_id());
                     self.cset(msg).await;
@@ -69,10 +72,11 @@ impl V1 {
                 }
             }
             ClientMessage::Lock(msg) => {
-                if self
-                    .v0
-                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
-                    .await?
+                if !skip_auth
+                    && self
+                        .v0
+                        .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                        .await?
                 {
                     trace!("Locking key for client {} …", self.v0.client_id());
                     self.lock(msg).await;
@@ -80,10 +84,11 @@ impl V1 {
                 }
             }
             ClientMessage::AcquireLock(msg) => {
-                if self
-                    .v0
-                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
-                    .await?
+                if !skip_auth
+                    && self
+                        .v0
+                        .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                        .await?
                 {
                     trace!("Locking key for client {} …", self.v0.client_id());
                     self.acquire_lock(msg).await;
@@ -91,10 +96,11 @@ impl V1 {
                 }
             }
             ClientMessage::ReleaseLock(msg) => {
-                if self
-                    .v0
-                    .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
-                    .await?
+                if !skip_auth
+                    && self
+                        .v0
+                        .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
+                        .await?
                 {
                     trace!("Unlocking key for client {} …", self.v0.client_id());
                     self.release_lock(msg).await;
@@ -102,7 +108,9 @@ impl V1 {
                 }
             }
             msg => {
-                self.v0.process_incoming_message(msg, authorized).await?;
+                self.v0
+                    .process_incoming_message(msg, authorized, skip_auth)
+                    .await?;
             }
         }
         Ok(())

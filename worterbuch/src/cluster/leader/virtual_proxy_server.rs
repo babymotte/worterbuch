@@ -328,7 +328,7 @@ impl<'a> VirtualProxyServer<'a> {
 
         let msg_processed = client_handler
             .proto
-            .process_client_message(msg, &mut client_handler.authorized)
+            .process_client_message(msg, &mut client_handler.authorized, true)
             .await?;
 
         trace!(exit = "process_client_request", %client_id);

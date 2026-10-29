@@ -112,13 +112,17 @@ impl Proto {
         &mut self,
         msg: &str,
         authorized: &mut Option<JwtClaims>,
+        skip_auth: bool,
     ) -> WorterbuchResult<bool> {
         trace!(client_id=%self.client_id(), "Received message from client");
         let deserialized = async { serde_json::from_str(msg) }
             .instrument(trace_span!("from_str"))
             .await;
         match deserialized {
-            Ok(Some(msg)) => self.process_client_message(msg, authorized).await,
+            Ok(Some(msg)) => {
+                self.process_client_message(msg, authorized, skip_auth)
+                    .await
+            }
             Ok(None) => {
                 // client disconnected
                 Ok(false)
@@ -136,6 +140,7 @@ impl Proto {
         &mut self,
         msg: ClientMessage,
         authorized: &mut Option<JwtClaims>,
+        skip_auth: bool,
     ) -> WorterbuchResult<bool> {
         if let ClientMessage::ProtocolSwitchRequest(protocol_switch_request) = &msg {
             debug!("Switching protocol to v{}", protocol_switch_request.version);
@@ -160,13 +165,16 @@ impl Proto {
         } else {
             match &self.handler {
                 ProtocolHandler::V0(v0) => {
-                    v0.process_incoming_message(msg, authorized).await?;
+                    v0.process_incoming_message(msg, authorized, skip_auth)
+                        .await?;
                 }
                 ProtocolHandler::V1(v1) => {
-                    v1.process_incoming_message(msg, authorized).await?;
+                    v1.process_incoming_message(msg, authorized, skip_auth)
+                        .await?;
                 }
                 ProtocolHandler::V2(v2) => {
-                    v2.process_incoming_message(msg, authorized).await?;
+                    v2.process_incoming_message(msg, authorized, skip_auth)
+                        .await?;
                 }
             }
         }

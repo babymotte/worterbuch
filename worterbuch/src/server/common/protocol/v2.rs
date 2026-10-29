@@ -36,7 +36,10 @@ impl V2 {
         &self,
         msg: ClientMessage,
         authorized: &mut Option<JwtClaims>,
+        skip_auth: bool,
     ) -> WorterbuchResult<()> {
-        self.v1.process_incoming_message(msg, authorized).await
+        self.v1
+            .process_incoming_message(msg, authorized, skip_auth)
+            .await
     }
 }

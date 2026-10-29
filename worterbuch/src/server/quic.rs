@@ -502,7 +502,7 @@ impl<'a> ServeLoop<'a> {
         trace!("Processing incoming message of client {} …", self.client_id);
         let msg_processed = self
             .proto
-            .process_incoming_message(&json, &mut self.authorized)
+            .process_incoming_message(&json, &mut self.authorized, false)
             .await?;
         if !msg_processed {
             return Ok(ControlFlow::Break(()));
