@@ -42,7 +42,7 @@ use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace, warn};
 use worterbuch_common::{
-    ClientId, Protocol, WbApi,
+    ClientId, Protocol,
     mdns::{MDNS_SERVICE_TYPE_WB_TCP, MdnsRegistry},
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
     socket::create_tcp_server_socket,

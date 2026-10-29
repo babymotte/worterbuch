@@ -218,7 +218,7 @@ impl fmt::Debug for WbFunction {
             WbFunction::Lock(req, ..) => req.fmt(f),
             WbFunction::AcquireLock(req, ..) => req.fmt(f),
             WbFunction::ReleaseLock(req, ..) => req.fmt(f),
-            WbFunction::Connected(client_info, remote_addr, _, _, _) => f
+            WbFunction::Connected(client_info, remote_addr, ..) => f
                 .debug_tuple("Connected")
                 .field(client_info)
                 .field(remote_addr)
@@ -360,6 +360,44 @@ impl fmt::Display for CloneableWbApi {
             &self.name
         };
         name.fmt(f)
+    }
+}
+
+impl CloneableWbApi {
+    #[instrument(level=Level::TRACE, skip(self))]
+    pub async fn connected(
+        &self,
+        client_info: ClientInfo,
+        remote_addr: Option<SocketAddr>,
+    ) -> WorterbuchResult<mpsc::Receiver<()>> {
+        let (tx, rx) = oneshot::channel();
+        let (eject, eject_rx) = mpsc::channel(1);
+        let function = WbFunction::Connected(client_info, remote_addr, eject, tx, Span::current());
+        self.request_with_timeout(function, "connected", rx).await?;
+        Ok(eject_rx)
+    }
+
+    #[instrument(level=Level::TRACE, skip(self))]
+    pub async fn protocol_switched(
+        &self,
+        client_info: ClientInfo,
+        protocol: ProtocolMajorVersion,
+    ) -> WorterbuchResult<()> {
+        let function = WbFunction::ProtocolSwitched(client_info, protocol, Span::current());
+        self.send_with_timeout(function, "protocol switched")
+            .await?;
+        Ok(())
+    }
+
+    #[instrument(level=Level::TRACE, skip(self))]
+    pub async fn disconnected(
+        &self,
+        client_info: ClientInfo,
+        remote_addr: Option<SocketAddr>,
+    ) -> WorterbuchResult<()> {
+        let function = WbFunction::Disconnected(client_info, remote_addr, Span::current());
+        self.send_with_timeout(function, "disconnected").await?;
+        Ok(())
     }
 }
 
@@ -532,42 +570,6 @@ impl WbApi for CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let function = WbFunction::PDelete(req, client_info, tx, Span::current());
         self.request_with_timeout(function, "pdelete", rx).await
-    }
-
-    #[instrument(level=Level::TRACE, skip(self))]
-    async fn connected(
-        &self,
-        client_info: ClientInfo,
-        remote_addr: Option<SocketAddr>,
-    ) -> WorterbuchResult<mpsc::Receiver<()>> {
-        let (tx, rx) = oneshot::channel();
-        let (eject, eject_rx) = mpsc::channel(1);
-        let function = WbFunction::Connected(client_info, remote_addr, eject, tx, Span::current());
-        self.request_with_timeout(function, "connected", rx).await?;
-        Ok(eject_rx)
-    }
-
-    #[instrument(level=Level::TRACE, skip(self))]
-    async fn protocol_switched(
-        &self,
-        client_info: ClientInfo,
-        protocol: ProtocolMajorVersion,
-    ) -> WorterbuchResult<()> {
-        let function = WbFunction::ProtocolSwitched(client_info, protocol, Span::current());
-        self.send_with_timeout(function, "protocol switched")
-            .await?;
-        Ok(())
-    }
-
-    #[instrument(level=Level::TRACE, skip(self))]
-    async fn disconnected(
-        &self,
-        client_info: ClientInfo,
-        remote_addr: Option<SocketAddr>,
-    ) -> WorterbuchResult<()> {
-        let function = WbFunction::Disconnected(client_info, remote_addr, Span::current());
-        self.send_with_timeout(function, "disconnected").await?;
-        Ok(())
     }
 
     async fn export(

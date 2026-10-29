@@ -34,7 +34,7 @@ use tosub::Subsystem;
 use totils::while_select;
 use tracing::{debug, error, info, trace};
 use worterbuch_common::{
-    ClientId, Protocol, WbApi,
+    ClientId, Protocol,
     protocol::v1::{ClientInfo, ProtocolVersion, ServerInfo, ServerMessage, Welcome},
 };
 

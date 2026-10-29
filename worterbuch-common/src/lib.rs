@@ -30,10 +30,10 @@ use crate::{
     error::{ConnectionError, ConnectionResult},
     protocol::v1::{
         CSet, CasVersion, ClientInfo, Delete, Get, GraveGoods, Key, KeyValuePair, KeyValuePairs,
-        LastWill, Lock, Ls, PDelete, PGet, PLs, PStateEvent, PSubscribe, ProtocolMajorVersion,
-        ProtocolVersion, Publish, SPub, SPubInit, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
-        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, Set, StateEvent, Subscribe, SubscribeLs, Trace,
-        TransactionId, Unsubscribe, UnsubscribeLs, Value,
+        LastWill, Lock, Ls, PDelete, PGet, PLs, PStateEvent, PSubscribe, ProtocolVersion, Publish,
+        SPub, SPubInit, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL,
+        SYSTEM_TOPIC_ROOT, Set, StateEvent, Subscribe, SubscribeLs, Trace, TransactionId,
+        Unsubscribe, UnsubscribeLs, Value,
     },
 };
 use error::WorterbuchResult;
@@ -602,24 +602,6 @@ pub trait WbApi {
         req: PDelete,
         client_info: ClientInfo,
     ) -> impl Future<Output = WorterbuchResult<KeyValuePairs>> + Send;
-
-    fn connected(
-        &self,
-        client_info: ClientInfo,
-        remote_addr: Option<SocketAddr>,
-    ) -> impl Future<Output = WorterbuchResult<mpsc::Receiver<()>>> + Send;
-
-    fn protocol_switched(
-        &self,
-        client_info: ClientInfo,
-        protocol: ProtocolMajorVersion,
-    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
-
-    fn disconnected(
-        &self,
-        client_info: ClientInfo,
-        remote_addr: Option<SocketAddr>,
-    ) -> impl Future<Output = WorterbuchResult<()>> + Send;
 
     fn export(&self, span: Span) -> impl Future<Output = WorterbuchResult<Export>> + Send;
 

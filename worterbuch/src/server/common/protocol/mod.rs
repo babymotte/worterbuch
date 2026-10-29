@@ -31,7 +31,7 @@ use tracing::{Instrument, Level, debug, instrument, trace, trace_span, warn};
 use v0::V0;
 use v1::V1;
 use worterbuch_common::{
-    ClientId, LockAcquiredReceiver, LockLostReceiver, WbApi,
+    ClientId, LockAcquiredReceiver, LockLostReceiver,
     error::{Context, WorterbuchError, WorterbuchResult},
     protocol::v1::{
         Ack, ClientInfo, ClientMessage, Err, ErrorCode, ProtocolVersionSegment, ServerMessage,
