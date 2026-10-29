@@ -39,7 +39,7 @@ use worterbuch_common::protocol::v1::{InternalAction, Trace, TraceData};
 pub type ClusterStateChangeReceiver = mpsc::Receiver<ClusterStateChange>;
 pub type ClusterStateChangeSender = mpsc::Sender<ClusterStateChange>;
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Mode {
     Standalone,

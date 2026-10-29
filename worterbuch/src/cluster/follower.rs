@@ -132,8 +132,7 @@ pub(crate) async fn run(
         }
     };
 
-    // TODO check version
-    send_handshake(welcome, &worterbuch, &config, &follower_request_tx).await;
+    send_handshake(welcome, &config, &follower_request_tx).await?;
 
     info!("Handshake complete. Waiting for initial sync message …");
 
@@ -204,14 +203,21 @@ pub(crate) async fn run(
 
 async fn send_handshake(
     welcome: LeaderWelcome,
-    _worterbuch: &Worterbuch,
-    _config: &Config,
+    config: &Config,
     follower_request_tx: &mpsc::Sender<ProxyMessage>,
-) {
+) -> WorterbuchAppResult<()> {
     let version = worterbuch_version();
+
+    if welcome.version != version {
+        error!("Leader is running a different version: {}", welcome.version);
+        return Err(WorterbuchAppError::ClusterError(format!(
+            "Version mismatch: Leader :{} vs Local: {}",
+            welcome.version, version
+        )));
+    }
+
     let auth_token = if welcome.authentication_required {
-        // TODO
-        None
+        config.follower_auth_token.clone()
     } else {
         None
     };
@@ -222,6 +228,7 @@ async fn send_handshake(
     }));
 
     let _ = follower_request_tx.send(handshake).await;
+    Ok(())
 }
 
 async fn try_process_leader_message(

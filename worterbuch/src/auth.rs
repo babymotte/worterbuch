@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::Config;
+use crate::{Config, cluster::Mode};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::{Deserialize, Serialize};
 use tracing::{Level, error, instrument};
@@ -30,31 +30,51 @@ const EMPTY_PRIVILEGES: Vec<String> = vec![];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum JwtContent {
+    #[serde(rename = "mode")]
+    Follower(Mode),
+    #[serde(rename = "worterbuchPrivileges")]
+    Client(Privileges),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JwtClaims {
     pub sub: String,
     pub name: String,
     pub exp: u64,
-    pub worterbuch_privileges: Privileges,
+    #[serde(flatten)]
+    pub content: JwtContent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Privileges {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub read: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub write: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub delete: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub profile: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub web_login: Option<bool>,
 }
 
 impl JwtClaims {
     #[instrument(level=Level::DEBUG, err)]
     pub fn authorize(&self, privilege: &Privilege, check: AuthCheck) -> AuthorizationResult<()> {
+        let JwtContent::Client(worterbuch_privileges) = &self.content else {
+            return Err(AuthorizationError::InsufficientPrivileges(
+                privilege.to_owned(),
+                check.into(),
+            ));
+        };
         match privilege {
             Privilege::Read => {
                 if let AuthCheck::Pattern(pattern) = check {
-                    if self
-                        .worterbuch_privileges
+                    if worterbuch_privileges
                         .read
                         .as_ref()
                         .unwrap_or(&EMPTY_PRIVILEGES)
@@ -75,8 +95,7 @@ impl JwtClaims {
             }
             Privilege::Write => {
                 if let AuthCheck::Pattern(pattern) = check {
-                    if self
-                        .worterbuch_privileges
+                    if worterbuch_privileges
                         .write
                         .as_ref()
                         .unwrap_or(&EMPTY_PRIVILEGES)
@@ -97,8 +116,7 @@ impl JwtClaims {
             }
             Privilege::Delete => {
                 if let AuthCheck::Pattern(pattern) = check {
-                    if self
-                        .worterbuch_privileges
+                    if worterbuch_privileges
                         .delete
                         .as_ref()
                         .unwrap_or(&EMPTY_PRIVILEGES)
@@ -119,12 +137,7 @@ impl JwtClaims {
             }
             Privilege::Profile => {
                 if let AuthCheck::Flag = check {
-                    if *self
-                        .worterbuch_privileges
-                        .profile
-                        .as_ref()
-                        .unwrap_or(&false)
-                    {
+                    if *worterbuch_privileges.profile.as_ref().unwrap_or(&false) {
                         Ok(())
                     } else {
                         Err(AuthorizationError::InsufficientPrivileges(
@@ -139,12 +152,7 @@ impl JwtClaims {
             }
             Privilege::WebLogin => {
                 if let AuthCheck::Flag = check {
-                    if *self
-                        .worterbuch_privileges
-                        .web_login
-                        .as_ref()
-                        .unwrap_or(&false)
-                    {
+                    if *worterbuch_privileges.web_login.as_ref().unwrap_or(&false) {
                         Ok(())
                     } else {
                         Err(AuthorizationError::InsufficientPrivileges(
@@ -157,6 +165,22 @@ impl JwtClaims {
                     Err(AuthorizationError::InvalidCheck)
                 }
             }
+        }
+    }
+
+    pub fn is_proxy(&self) -> bool {
+        if let JwtContent::Follower(mode) = &self.content {
+            *mode == Mode::Proxy
+        } else {
+            false
+        }
+    }
+
+    pub fn is_follower(&self) -> bool {
+        if let JwtContent::Follower(mode) = &self.content {
+            *mode == Mode::Follower
+        } else {
+            false
         }
     }
 }
@@ -216,6 +240,42 @@ pub fn pattern_matches(pattern: &str, key: &str) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn client_jwt_serializes_as_expected() {
+        let claims = JwtClaims {
+            sub: "client_id".to_string(),
+            name: "client_name".to_string(),
+            exp: 1234567890,
+            content: JwtContent::Client(Privileges {
+                read: None,
+                write: None,
+                delete: None,
+                profile: Some(true),
+                web_login: Some(true),
+            }),
+        };
+        let serialized = serde_json::to_string(&claims).unwrap();
+        assert_eq!(
+            &serialized,
+            r#"{"sub":"client_id","name":"client_name","exp":1234567890,"worterbuchPrivileges":{"profile":true,"web-login":true}}"#
+        );
+    }
+
+    #[test]
+    fn follower_jwt_serializes_as_expected() {
+        let claims = JwtClaims {
+            sub: "client_id".to_string(),
+            name: "client_name".to_string(),
+            exp: 1234567890,
+            content: JwtContent::Follower(Mode::Proxy),
+        };
+        let serialized = serde_json::to_string(&claims).unwrap();
+        assert_eq!(
+            &serialized,
+            r#"{"sub":"client_id","name":"client_name","exp":1234567890,"mode":"PROXY"}"#
+        );
+    }
 
     #[test]
     fn test_matches() {

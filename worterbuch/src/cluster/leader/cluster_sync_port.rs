@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    Config,
+    Config, auth,
     cluster::{
         ClusterStateChangeReceiver,
         leader::virtual_proxy_server::{VirtualProxyServer, VirtualServerMessage},
@@ -272,6 +272,9 @@ impl SyncClientHandler {
         self.send_welcome(&mut socket_tx).await?;
         let handshake = self.receive_handshake(&mut proxy_messages).await?;
 
+        self.check_version(handshake.version())
+            .wrap_err("version mismatch between leader and follower/proxy")?;
+
         let is_proxy = self
             .process_handshake(handshake, proxy_server, proxy_id)
             .await?;
@@ -402,65 +405,69 @@ impl SyncClientHandler {
         proxy_id: &mut Option<ProxyId>,
     ) -> miette::Result<bool> {
         trace!(enter = "process_handshake");
-        self.check_version(handshake.version())
-            .wrap_err("version mismatch between leader and follower/proxy")?;
 
-        self.authenticate(handshake.auth_token())
-            .wrap_err("could not authenticate follower/proxy")?;
+        match handshake {
+            Handshake::Proxy(proxy_handshake) => {
+                self.authenticate(proxy_handshake.auth_token.as_deref(), true)
+                    .wrap_err("could not authenticate proxy")?;
 
-        if let Handshake::Proxy(proxy_handshake) = handshake {
-            let id = proxy_handshake.proxy_id;
-            *proxy_id = Some(id);
-            self.take_over_proxy_session(id, proxy_server).await;
+                let id = proxy_handshake.proxy_id;
+                *proxy_id = Some(id);
+                self.take_over_proxy_session(id, proxy_server).await;
 
-            let client_txs = proxy_server
-                .register_clients(&proxy_handshake.connected_clients)
-                .await?;
-            let updated_locks = proxy_server.restore_locks(proxy_handshake.locks).await?;
+                let client_txs = proxy_server
+                    .register_clients(&proxy_handshake.connected_clients)
+                    .await?;
+                let updated_locks = proxy_server.restore_locks(proxy_handshake.locks).await?;
 
-            for (client_id, keys) in &updated_locks.lost {
-                let Some(tx) = client_txs.get(client_id) else {
-                    error!(
-                        "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
-                    );
-                    continue;
-                };
-                for (tid, _) in keys {
-                    let msg = ServerMessage::Err(Err {
-                        transaction_id: *tid,
-                        error_code: ErrorCode::LockLost,
-                        metadata: json!("lock lost").to_string(),
-                    });
-                    let _ = tx.send(msg).await;
+                for (client_id, keys) in &updated_locks.lost {
+                    let Some(tx) = client_txs.get(client_id) else {
+                        error!(
+                            "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                        );
+                        continue;
+                    };
+                    for (tid, _) in keys {
+                        let msg = ServerMessage::Err(Err {
+                            transaction_id: *tid,
+                            error_code: ErrorCode::LockLost,
+                            metadata: json!("lock lost").to_string(),
+                        });
+                        let _ = tx.send(msg).await;
+                    }
                 }
-            }
 
-            for (client_id, pending_locks) in updated_locks.pending {
-                let Some(client) = client_txs.get(&client_id) else {
-                    error!(
-                        "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
-                    );
-                    continue;
-                };
-                for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
-                    let client = client.to_owned();
-                    self.subsys.spawn("forward_lock_acquired", move |s| {
-                        protocol::forward_lock_acquired(
-                            s,
-                            client,
-                            transaction_id,
-                            acquired_rx,
-                            lost_rx,
-                        )
-                    });
+                for (client_id, pending_locks) in updated_locks.pending {
+                    let Some(client) = client_txs.get(&client_id) else {
+                        error!(
+                            "No client message broadcaster for client {client_id} found, cannot notify about lost locks."
+                        );
+                        continue;
+                    };
+                    for (transaction_id, _, acquired_rx, lost_rx) in pending_locks {
+                        let client = client.to_owned();
+                        self.subsys.spawn("forward_lock_acquired", move |s| {
+                            protocol::forward_lock_acquired(
+                                s,
+                                client,
+                                transaction_id,
+                                acquired_rx,
+                                lost_rx,
+                            )
+                        });
+                    }
                 }
-            }
 
-            trace!(exit = "process_handshake");
-            Ok(true)
-        } else {
-            trace!(exit = "process_handshake");
-            Ok(false)
+                trace!(exit = "process_handshake");
+                Ok(true)
+            }
+            Handshake::Follower(follower_handshake) => {
+                self.authenticate(follower_handshake.auth_token.as_deref(), false)
+                    .wrap_err("could not authenticate follower")?;
+
+                trace!(exit = "process_handshake");
+                Ok(false)
+            }
         }
     }
 
@@ -511,22 +518,20 @@ impl SyncClientHandler {
         Ok(())
     }
 
-    fn authenticate(&self, auth_token: Option<&str>) -> miette::Result<()> {
+    fn authenticate(&self, auth_token: Option<&str>, is_proxy: bool) -> miette::Result<()> {
         trace!(enter = "authenticate");
-        match &self.config.auth_token_key {
-            Some(key) => self.authenticate_against_key(auth_token, key),
-            None => Ok(()),
-        }?;
-        trace!(exit = "authenticate");
-        Ok(())
-    }
+        let claims = auth::get_claims(auth_token, &self.config)?;
 
-    fn authenticate_against_key(
-        &self,
-        _auth_token: Option<&str>,
-        _key: &str,
-    ) -> miette::Result<()> {
-        // TODO
+        dbg!(&claims);
+
+        if is_proxy && !claims.is_proxy() {
+            bail!("authentication failed: expected proxy token");
+        }
+        if !is_proxy && !claims.is_follower() {
+            bail!("authentication failed: expected follower token");
+        }
+
+        trace!(exit = "authenticate");
         Ok(())
     }
 

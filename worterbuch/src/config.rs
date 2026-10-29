@@ -35,7 +35,7 @@ use tracing::debug;
 use worterbuch_common::{
     Path,
     error::{ConfigError, ConfigIntContext, ConfigResult},
-    protocol::v1::{AuthTokenKey, ProtocolVersion},
+    protocol::v1::{AuthToken, AuthTokenKey, ProtocolVersion},
     socket::TcpSocketConfig,
 };
 
@@ -170,6 +170,7 @@ pub struct Config {
     pub channel_buffer_timeout: Duration,
     pub extended_monitoring: bool,
     pub auth_token_key: Option<AuthTokenKey>,
+    pub follower_auth_token: Option<AuthToken>,
     pub license: License,
     pub shutdown_timeout: Duration,
     pub role: ClusterRole,
@@ -353,6 +354,10 @@ impl Config {
             self.auth_token_key = Some(val);
         }
 
+        if let Ok(val) = env::var(prefix.to_owned() + "_FOLLOWER_AUTH_TOKEN") {
+            self.follower_auth_token = Some(val);
+        }
+
         if let Ok(val) = env::var(prefix.to_owned() + "_SHUTDOWN_TIMEOUT") {
             let secs = val.parse().to_interval()?;
             self.shutdown_timeout = Duration::from_secs(secs);
@@ -470,6 +475,7 @@ impl Config {
             channel_buffer_timeout: Duration::from_secs(10),
             extended_monitoring: true,
             auth_token_key: None,
+            follower_auth_token: None,
             license: License::default(),
             shutdown_timeout: Duration::from_secs(1),
             role: ClusterRole::Standalone,

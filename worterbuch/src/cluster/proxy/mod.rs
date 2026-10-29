@@ -487,9 +487,17 @@ impl Proxy {
         trace!(enter = "send_handshake", ?welcome);
 
         let version = worterbuch_version();
+
+        if welcome.version != version {
+            error!("Leader is running a different version: {}", welcome.version);
+            return Err(WorterbuchAppError::ClusterError(format!(
+                "Version mismatch: Leader :{} vs Local: {}",
+                welcome.version, version
+            )));
+        }
+
         let auth_token = if welcome.authentication_required {
-            // TODO
-            None
+            self.config.follower_auth_token.clone()
         } else {
             None
         };

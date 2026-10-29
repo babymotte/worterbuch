@@ -48,13 +48,6 @@ impl Handshake {
             Handshake::Follower(follower_handshake) => &follower_handshake.version,
         }
     }
-
-    pub(crate) fn auth_token(&self) -> Option<&str> {
-        match self {
-            Handshake::Proxy(proxy_handshake) => proxy_handshake.auth_token.as_deref(),
-            Handshake::Follower(follower_handshake) => follower_handshake.auth_token.as_deref(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
