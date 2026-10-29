@@ -74,7 +74,7 @@ impl V0 {
                 trace!("Authorizing client {} done.", self.client_id());
             }
             ClientMessage::Get(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -84,7 +84,7 @@ impl V0 {
                 }
             }
             ClientMessage::PGet(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(
                         Privilege::Read,
                         &msg.request_pattern,
@@ -99,7 +99,7 @@ impl V0 {
                 }
             }
             ClientMessage::Set(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -109,7 +109,7 @@ impl V0 {
                 }
             }
             ClientMessage::SPubInit(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -130,7 +130,7 @@ impl V0 {
                 trace!("Setting value for client {} done.", self.client_id());
             }
             ClientMessage::Publish(msg) => {
-                if !skip_auth  && self
+                if skip_auth || self
                     .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -140,7 +140,7 @@ impl V0 {
                 }
             }
             ClientMessage::Subscribe(msg) => {
-                if !skip_auth  && self
+                if skip_auth || self
                     .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -150,7 +150,7 @@ impl V0 {
                 }
             }
             ClientMessage::PSubscribe(msg) => {
-                if !skip_auth  && self
+                if skip_auth || self
                     .check_auth(
                         Privilege::Read,
                         &msg.request_pattern,
@@ -166,7 +166,7 @@ impl V0 {
             }
             ClientMessage::Unsubscribe(msg) => self.unsubscribe(msg).await,
             ClientMessage::Delete(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Delete, &msg.key, authorized, msg.transaction_id)
                     .await?
                 {
@@ -176,7 +176,7 @@ impl V0 {
                 }
             }
             ClientMessage::PDelete(msg) => {
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(
                         Privilege::Delete,
                         &msg.request_pattern,
@@ -196,7 +196,7 @@ impl V0 {
                     .as_ref()
                     .map(|it| format!("{it}/?"))
                     .unwrap_or("?".to_owned());
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
@@ -211,7 +211,7 @@ impl V0 {
                     .as_ref()
                     .map(|it| format!("{it}/?"))
                     .unwrap_or("?".to_owned());
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {
@@ -229,7 +229,7 @@ impl V0 {
                     .as_ref()
                     .map(|it| format!("{it}/?"))
                     .unwrap_or("?".to_owned());
-                if !skip_auth && self
+                if skip_auth || self
                     .check_auth(Privilege::Read, pattern, authorized, msg.transaction_id)
                     .await?
                 {

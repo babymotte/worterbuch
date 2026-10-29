@@ -48,8 +48,8 @@ impl V1 {
     ) -> WorterbuchResult<()> {
         match msg {
             ClientMessage::CGet(msg) => {
-                if !skip_auth
-                    && self
+                if skip_auth
+                    || self
                         .v0
                         .check_auth(Privilege::Read, &msg.key, authorized, msg.transaction_id)
                         .await?
@@ -60,8 +60,8 @@ impl V1 {
                 }
             }
             ClientMessage::CSet(msg) => {
-                if !skip_auth
-                    && self
+                if skip_auth
+                    || self
                         .v0
                         .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                         .await?
@@ -72,8 +72,8 @@ impl V1 {
                 }
             }
             ClientMessage::Lock(msg) => {
-                if !skip_auth
-                    && self
+                if skip_auth
+                    || self
                         .v0
                         .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                         .await?
@@ -84,8 +84,8 @@ impl V1 {
                 }
             }
             ClientMessage::AcquireLock(msg) => {
-                if !skip_auth
-                    && self
+                if skip_auth
+                    || self
                         .v0
                         .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                         .await?
@@ -96,8 +96,8 @@ impl V1 {
                 }
             }
             ClientMessage::ReleaseLock(msg) => {
-                if !skip_auth
-                    && self
+                if skip_auth
+                    || self
                         .v0
                         .check_auth(Privilege::Write, &msg.key, authorized, msg.transaction_id)
                         .await?
