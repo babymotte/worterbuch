@@ -319,11 +319,11 @@ impl<'a> VirtualProxyServer<'a> {
     ) -> miette::Result<bool> {
         trace!(enter = "process_client_request", %client_id, ?msg);
         let Some(client_handler) = self.clients.get_mut(&client_id) else {
-            bail!(
+            warn!(
                 "Received request for unknown client {client_id} ({}/{:?})",
-                self.proxy_address,
-                protocol
+                self.proxy_address, protocol
             );
+            return Ok(false);
         };
 
         let msg_processed = client_handler
