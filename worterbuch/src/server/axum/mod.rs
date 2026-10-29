@@ -123,12 +123,16 @@ async fn info(State(wb): State<CloneableWbApi>) -> WorterbuchResult<Json<ServerI
 #[instrument(skip(wb), err)]
 async fn export(
     State(wb): State<CloneableWbApi>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     privileges: Option<JwtClaims>,
     request: Request,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("#"))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
 
     let base64 = request.headers().get("accept") == Some(&HeaderValue::from_static("text/plain"));
 
@@ -183,12 +187,15 @@ async fn export(
             .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
     }
 
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
     Ok(response)
 }
 
 #[instrument(skip(wb), err)]
 async fn import(
     State(wb): State<CloneableWbApi>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     privileges: Option<JwtClaims>,
     request: Request,
 ) -> WorterbuchResult<Response> {
@@ -198,9 +205,12 @@ async fn import(
         return Err(WorterbuchError::from(e));
     }
 
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let base64 = request.headers().typed_get::<ContentType>() == Some(ContentType::text());
 
-    // this won't work if the body is an long running stream
+    // this won't work if the body is a long running stream
     let data = request
         .into_body()
         .collect()
@@ -231,9 +241,14 @@ async fn import(
     };
     let json = String::from_utf8_lossy(&json).to_string();
 
-    wb.import(Uuid::new_v4(), 1, json)
+    let res = wb
+        .import(Uuid::new_v4(), 1, json)
         .await
-        .map(|_| ().into_response())
+        .map(|_| ().into_response());
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    res
 }
 
 fn compress(data: &[u8], base64: bool) -> io::Result<Vec<u8>> {
@@ -277,10 +292,15 @@ async fn get_value(
     Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let pointer = params.get("pointer");
     let raw = params.get("raw");
 
@@ -290,7 +310,7 @@ async fn get_value(
         transaction_id: 1,
         key: key.clone(),
     };
-    match wb.get(req, http_client_info()).await {
+    let res = match wb.get(req, http_client_info()).await {
         Ok(value) => {
             if let Some(pointer) = pointer {
                 let key = key + pointer;
@@ -315,57 +335,86 @@ async fn get_value(
             }
         }
         Err(e) => Err(e)?,
-    }
+    };
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    res
 }
 
 async fn pget(
     Path(pattern): Path<Key>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = PGet {
         transaction_id: 1,
         request_pattern: pattern,
     };
-    Ok(Json(wb.pget(req, http_client_info()).await?))
+    let res = wb.pget(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    Ok(Json(res))
 }
 
 async fn set(
     Path(key): Path<Key>,
     State(wb): State<CloneableWbApi>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     privileges: Option<JwtClaims>,
     Json(value): Json<Value>,
 ) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = Set {
         transaction_id: 1,
         key,
         value,
     };
-    wb.set(req, http_client_info()).await?;
+    wb.set(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
     Ok(Json("Ok"))
 }
 
 async fn publish(
     Path(key): Path<Key>,
     State(wb): State<CloneableWbApi>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     privileges: Option<JwtClaims>,
     Json(value): Json<Value>,
 ) -> WorterbuchResult<Json<&'static str>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Write, AuthCheck::Pattern(&key))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = Publish {
         transaction_id: 1,
         key,
         value,
     };
-    wb.publish(req, http_client_info()).await?;
+    wb.publish(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
     Ok(Json("Ok"))
 }
 
@@ -373,15 +422,24 @@ async fn delete_value(
     Path(key): Path<Key>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<Value>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&key))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = Delete {
         transaction_id: 1,
         key,
     };
-    Ok(Json(wb.delete(req, http_client_info()).await?))
+    let res = wb.delete(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    Ok(Json(res))
 }
 
 async fn pdelete(
@@ -389,46 +447,73 @@ async fn pdelete(
     Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Delete, AuthCheck::Pattern(&pattern))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let quiet = params.get("quiet").map(|it| it.to_lowercase() != "false");
     let req = PDelete {
         transaction_id: 1,
         request_pattern: pattern,
         quiet,
     };
-    Ok(Json(wb.pdelete(req, http_client_info()).await?))
+    let res = wb.pdelete(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    Ok(Json(res))
 }
 
 async fn ls(
     Path(parent): Path<Key>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = Ls {
         transaction_id: 1,
         parent: Some(parent),
     };
-    Ok(Json(wb.ls(req, http_client_info()).await?))
+    let res = wb.ls(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    Ok(Json(res))
 }
 
 async fn ls_root(
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
     }
+
+    let client_info = http_client_info();
+    connected(&wb, client_info.clone(), remote_addr).await?;
+
     let req = Ls {
         transaction_id: 1,
         parent: None,
     };
-    Ok(Json(wb.ls(req, http_client_info()).await?))
+    let res = wb.ls(req, client_info.clone()).await?;
+
+    wb.disconnected(client_info, Some(remote_addr)).await?;
+
+    Ok(Json(res))
 }
 
 async fn subscribe(
