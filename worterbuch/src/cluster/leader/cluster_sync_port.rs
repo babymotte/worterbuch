@@ -417,9 +417,10 @@ impl SyncClientHandler {
 
         match handshake {
             Handshake::Proxy(proxy_handshake) => {
-                self.authenticate(proxy_handshake.auth_token.as_deref(), true)
-                    .wrap_err("could not authenticate proxy")?;
-
+                if self.requires_authentication() {
+                    self.authenticate(proxy_handshake.auth_token.as_deref(), true)
+                        .wrap_err("could not authenticate proxy")?;
+                }
                 let id = proxy_handshake.proxy_id;
                 *proxy_id = Some(id);
                 self.take_over_proxy_session(id, proxy_server).await;
@@ -471,8 +472,10 @@ impl SyncClientHandler {
                 Ok(true)
             }
             Handshake::Follower(follower_handshake) => {
-                self.authenticate(follower_handshake.auth_token.as_deref(), false)
-                    .wrap_err("could not authenticate follower")?;
+                if self.requires_authentication() {
+                    self.authenticate(follower_handshake.auth_token.as_deref(), false)
+                        .wrap_err("could not authenticate follower")?;
+                }
 
                 trace!(exit = "process_handshake");
                 Ok(false)
@@ -567,6 +570,10 @@ impl SyncClientHandler {
         })?;
         trace!(exit = "send_initial_state");
         Ok(())
+    }
+
+    fn requires_authentication(&self) -> bool {
+        self.config.auth_token_key.is_some()
     }
 }
 
