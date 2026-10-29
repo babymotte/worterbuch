@@ -188,8 +188,8 @@ fn serve(
 ) {
     info!("Follower {} connected.", client.1);
 
-    subsys.spawn(client.1.to_string(), move |s| {
-        SyncClientHandler {
+    subsys.spawn(client.1.to_string(), move |s| async move {
+        let client_handler = SyncClientHandler {
             subsys: s,
             follower_addr: client.1,
             on_follower_connected,
@@ -197,8 +197,10 @@ fn serve(
             config,
             wb,
             proxy_sessions,
+        };
+        if let Err(e) = client_handler.run(client.0).await {
+            error!("Error in sync client handler: {e}");
         }
-        .run(client.0)
     });
 }
 
@@ -300,10 +302,11 @@ impl SyncClientHandler {
         let follower_addr = self.follower_addr;
         let config = self.config.clone();
 
+        let parent_subsys = proxy_server.subsys.clone();
         proxy_server.subsys.spawn(
             format!("state-and-response-forwarder/{}", follower_addr),
-            move |s| {
-                forward_messages_to_proxy(
+            move |s| async move {
+                if let Err(e) = forward_messages_to_proxy(
                     s,
                     follower_addr,
                     config.clone(),
@@ -311,6 +314,12 @@ impl SyncClientHandler {
                     socket_tx,
                     commands,
                 )
+                .await
+                {
+                    error!("Error forwarding messages to proxy: {e}");
+                    parent_subsys
+                        .request_local_shutdown_because("state-and-response-forwarder failed");
+                }
             },
         );
 
