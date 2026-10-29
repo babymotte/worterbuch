@@ -25,9 +25,9 @@ use crate::{
         LeaderState, Mode,
         protocol::{
             Connected, Handshake, LeaderMessage, LeaderWelcome, ProxyHandshake, ProxyId,
-            ProxyMessage, Request, RequestId, locks::Locks,
+            ProxyMessage, locks::Locks,
         },
-        proxy::connection::LeaderConnection,
+        proxy::connection::{LeaderConnection, PendingRequest},
         shutdown,
     },
     error::{WorterbuchAppError, WorterbuchAppResult},
@@ -39,7 +39,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use serde_json::json;
-use std::{collections::BTreeMap, future::pending, ops::ControlFlow, time::Duration};
+use std::{future::pending, ops::ControlFlow, time::Duration};
 use tokio::{
     io::{BufReader, BufWriter, Lines},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -80,7 +80,7 @@ struct Proxy {
     response_interests: HashMap<ClientId, ClientResponseInterests>,
     read_leader_addresses_from_stdin: bool,
     proxy_id: ProxyId,
-    in_flight_requests: BTreeMap<RequestId, Request>,
+    in_flight_requests: Vec<PendingRequest>,
 }
 
 impl Proxy {
@@ -106,7 +106,7 @@ impl Proxy {
         let locks = Locks::default();
         let response_interests = HashMap::new();
         let proxy_id = ProxyId::new_v4();
-        let in_flight_requests = BTreeMap::new();
+        let in_flight_requests = Vec::new();
 
         Ok(Proxy {
             subsys,
@@ -334,7 +334,8 @@ impl Proxy {
         let leader_addresses_updated = match leader_connection.run().await {
             Ok(it) => it,
             Err(e) => {
-                error!("Leader connection broke with an error: {:?}", e);
+                error!("Leader connection broke with an error: {}", e);
+                eprintln!("{e:?}");
                 false
             }
         };

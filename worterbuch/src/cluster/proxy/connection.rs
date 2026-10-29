@@ -31,7 +31,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use miette::{Context, IntoDiagnostic, bail};
-use std::{collections::BTreeMap, ops::ControlFlow};
+use std::ops::ControlFlow;
 use tokio::{
     io::{BufReader, Lines},
     net::tcp::OwnedReadHalf,
@@ -51,6 +51,30 @@ use worterbuch_common::{
     receive_msg,
 };
 
+#[derive(Debug, Clone)]
+pub struct PendingRequest {
+    request: Request,
+    counter: usize,
+}
+
+impl PendingRequest {
+    fn bump(&self) -> usize {
+        self.counter + 1
+    }
+
+    fn retries_exceeded(&self) -> bool {
+        let max_retries = 3;
+        self.counter >= max_retries
+    }
+
+    fn with_attempts(clone: Request, attempts: usize) -> PendingRequest {
+        Self {
+            request: clone,
+            counter: attempts,
+        }
+    }
+}
+
 pub struct LeaderConnection<'a> {
     leader_address: String,
     subsys: &'a Subsystem,
@@ -64,7 +88,7 @@ pub struct LeaderConnection<'a> {
     leader_addresses_updated: bool,
     stdin: &'a mut mpsc::Receiver<String>,
     read_leader_addresses_from_stdin: &'a mut bool,
-    in_flight_requests: &'a mut BTreeMap<RequestId, Request>,
+    in_flight_requests: &'a mut Vec<PendingRequest>,
 }
 
 impl<'a> LeaderConnection<'a> {
@@ -125,9 +149,12 @@ impl<'a> LeaderConnection<'a> {
     }
 
     async fn re_send_in_flight_requests(&mut self) -> miette::Result<()> {
-        for request in std::mem::take(self.in_flight_requests).into_values() {
-            self.queue_leader_request(ProxyMessage::Request(request))
-                .await?;
+        for request in std::mem::take(self.in_flight_requests) {
+            let client_id = request.request.client_info.client_id;
+            if !self.retry_leader_request(request).await? {
+                warn!("Request of client {client_id} exceeded max retries, ejecting client.");
+                self.worterbuch.eject_client(client_id).await;
+            }
         }
 
         Ok(())
@@ -547,11 +574,35 @@ impl<'a> LeaderConnection<'a> {
         Ok(())
     }
 
+    async fn retry_leader_request(&mut self, request: PendingRequest) -> miette::Result<bool> {
+        trace!(enter = "retry_leader_request");
+
+        if request.retries_exceeded() {
+            return Ok(false);
+        }
+
+        let attempt = request.bump();
+
+        self.queue_leader_request_with_attempts(ProxyMessage::Request(request.request), attempt)
+            .await?;
+        trace!(exit = "retry_leader_request");
+        Ok(true)
+    }
+
     async fn queue_leader_request(&mut self, request: ProxyMessage) -> miette::Result<()> {
+        self.queue_leader_request_with_attempts(request, 0).await
+    }
+
+    async fn queue_leader_request_with_attempts(
+        &mut self,
+        request: ProxyMessage,
+        attempt: usize,
+    ) -> miette::Result<()> {
         trace!(enter = "queue_leader_request");
 
         if let ProxyMessage::Request(r) = &request {
-            self.in_flight_requests.insert(r.id(), r.clone());
+            self.in_flight_requests
+                .push(PendingRequest::with_attempts(r.clone(), attempt));
         }
 
         self.proxy_request_tx
@@ -575,7 +626,8 @@ impl<'a> LeaderConnection<'a> {
                 transaction_id,
             })
         {
-            self.in_flight_requests.remove(&request_id);
+            self.in_flight_requests
+                .retain(|r| r.request.id() != request_id);
         }
 
         match server_message {
