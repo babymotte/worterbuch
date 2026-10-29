@@ -531,8 +531,6 @@ impl SyncClientHandler {
         trace!(enter = "authenticate");
         let claims = auth::get_claims(auth_token, &self.config)?;
 
-        dbg!(&claims);
-
         if is_proxy && !claims.is_proxy() {
             bail!("authentication failed: expected proxy token");
         }
