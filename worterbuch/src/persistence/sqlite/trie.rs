@@ -20,6 +20,7 @@
 use crate::persistence::error::PersistenceResult;
 use rusqlite::{Connection, params};
 use std::{collections::HashMap, io, path::Path};
+use tokio::sync::oneshot;
 use tracing::trace;
 use worterbuch_common::{ValueEntry, protocol::v1::KeyValuePair};
 
@@ -271,6 +272,7 @@ impl SqliTrie {
         &self,
         client_id: uuid::Uuid,
         last_will: Option<Vec<KeyValuePair>>,
+        tx: oneshot::Sender<()>,
     ) -> PersistenceResult<()> {
         let client_id = client_id.to_string();
 
@@ -287,6 +289,7 @@ impl SqliTrie {
                 .execute(params![client_id])?;
         }
 
+        let _ = tx.send(());
         Ok(())
     }
 
@@ -294,6 +297,7 @@ impl SqliTrie {
         &self,
         client_id: uuid::Uuid,
         grave_goods: Option<Vec<String>>,
+        tx: oneshot::Sender<()>,
     ) -> PersistenceResult<()> {
         let client_id = client_id.to_string();
 
@@ -309,6 +313,8 @@ impl SqliTrie {
                 .prepare_cached("DELETE FROM grave_goods WHERE client_id = ?1;")?
                 .execute(params![client_id])?;
         }
+
+        let _ = tx.send(());
         Ok(())
     }
 

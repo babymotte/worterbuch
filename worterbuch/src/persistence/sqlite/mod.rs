@@ -40,8 +40,8 @@ use worterbuch_common::{
 
 enum StoreAction {
     Update(Key, ValueEntry),
-    UpdateLastWill(ClientId, Option<LastWill>),
-    UpdateGraveGoods(ClientId, Option<GraveGoods>),
+    UpdateLastWill(ClientId, Option<LastWill>, oneshot::Sender<()>),
+    UpdateGraveGoods(ClientId, Option<GraveGoods>, oneshot::Sender<()>),
     Delete(Key),
     Clear,
     Load(oneshot::Sender<Worterbuch>),
@@ -52,10 +52,10 @@ impl fmt::Debug for StoreAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreAction::Update(key, _) => f.debug_tuple("Update").field(key).finish(),
-            StoreAction::UpdateLastWill(client_id, _) => {
+            StoreAction::UpdateLastWill(client_id, ..) => {
                 f.debug_tuple("UpdateLastWill").field(client_id).finish()
             }
-            StoreAction::UpdateGraveGoods(client_id, _) => {
+            StoreAction::UpdateGraveGoods(client_id, ..) => {
                 f.debug_tuple("UpdateGraveGoods").field(client_id).finish()
             }
             StoreAction::Delete(key) => f.debug_tuple("Delete").field(key).finish(),
@@ -123,10 +123,12 @@ impl PersistentStorage for PersistentSQLiteStore {
         client_id: ClientId,
         grave_goods: Option<GraveGoods>,
     ) -> PersistenceResult<()> {
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
-            .send(StoreAction::UpdateGraveGoods(client_id, grave_goods))
+            .send(StoreAction::UpdateGraveGoods(client_id, grave_goods, tx))
             .await;
+        rx.await?;
         Ok(())
     }
 
@@ -135,10 +137,12 @@ impl PersistentStorage for PersistentSQLiteStore {
         client_id: ClientId,
         last_will: Option<LastWill>,
     ) -> PersistenceResult<()> {
+        let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
-            .send(StoreAction::UpdateLastWill(client_id, last_will))
+            .send(StoreAction::UpdateLastWill(client_id, last_will, tx))
             .await;
+        rx.await?;
         Ok(())
     }
 
@@ -200,13 +204,13 @@ fn run(
                 update_timestamp = true;
                 update_value(&mut db, key, value, &mut rx, &mut next_action)
             }
-            StoreAction::UpdateLastWill(client_id, last_will) => {
+            StoreAction::UpdateLastWill(client_id, last_will, tx) => {
                 update_timestamp = true;
-                update_last_will(&mut db, client_id, last_will)
+                update_last_will(&mut db, client_id, last_will, tx)
             }
-            StoreAction::UpdateGraveGoods(client_id, grave_goods) => {
+            StoreAction::UpdateGraveGoods(client_id, grave_goods, tx) => {
                 update_timestamp = true;
-                update_grave_goods(&mut db, client_id, grave_goods)
+                update_grave_goods(&mut db, client_id, grave_goods, tx)
             }
             StoreAction::Delete(key) => {
                 update_timestamp = true;
@@ -290,11 +294,11 @@ fn update_last_will(
     db: &mut SqliTrie,
     client_id: ClientId,
     last_will: Option<LastWill>,
+    tx: oneshot::Sender<()>,
 ) -> PersistenceResult<()> {
     trace!("Updating last will of client {client_id}={last_will:?}");
 
-    db.insert_last_will(client_id, last_will)?;
-
+    db.insert_last_will(client_id, last_will, tx)?;
     Ok(())
 }
 
@@ -302,11 +306,11 @@ fn update_grave_goods(
     db: &mut SqliTrie,
     client_id: ClientId,
     grave_goods: Option<GraveGoods>,
+    tx: oneshot::Sender<()>,
 ) -> PersistenceResult<()> {
     trace!("Updating grave goods of client {client_id}={grave_goods:?}");
 
-    db.insert_grave_goods(client_id, grave_goods)?;
-
+    db.insert_grave_goods(client_id, grave_goods, tx)?;
     Ok(())
 }
 

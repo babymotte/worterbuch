@@ -19,6 +19,7 @@
 
 use crate::persistence::error::PersistenceResult;
 use std::{collections::HashMap, io, path::Path};
+use tokio::sync::oneshot;
 use turso::Value;
 use worterbuch_common::{KeyValuePair, ValueEntry};
 
@@ -195,6 +196,7 @@ impl TursoTrie {
         &mut self,
         client_id: uuid::Uuid,
         last_will: Option<Vec<KeyValuePair>>,
+        tx: oneshot::Sender<()>,
     ) -> PersistenceResult<()> {
         let client_id = client_id.to_string();
         if let Some(last_will) = last_will {
@@ -210,6 +212,7 @@ impl TursoTrie {
                 .execute("DELETE FROM last_wills WHERE client_id = ?1", (client_id,))
                 .await?;
         }
+        let _ = tx.send(());
         Ok(())
     }
 
@@ -217,6 +220,7 @@ impl TursoTrie {
         &mut self,
         client_id: uuid::Uuid,
         grave_goods: Option<Vec<String>>,
+        tx: oneshot::Sender<()>,
     ) -> PersistenceResult<()> {
         let client_id = client_id.to_string();
         if let Some(grave_goods) = grave_goods {
@@ -232,6 +236,7 @@ impl TursoTrie {
                 .execute("DELETE FROM grave_goods WHERE client_id = ?1", (client_id,))
                 .await?;
         }
+        let _ = tx.send(());
         Ok(())
     }
 
