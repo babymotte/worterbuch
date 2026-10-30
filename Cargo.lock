@@ -6821,7 +6821,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cli"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "clap",
  "dotenvy",
@@ -6839,7 +6839,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -6864,7 +6864,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-cluster-orchestrator"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "axum",
  "clap",
@@ -6896,7 +6896,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "axum",
  "gethostname",
@@ -6937,7 +6937,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-speedtest"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "axum",
  "clap",
@@ -6979,7 +6979,7 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-tui"
-version = "1.7.0-rc.2"
+version = "1.7.0-rc.3"
 dependencies = [
  "crossterm",
  "dotenvy",
