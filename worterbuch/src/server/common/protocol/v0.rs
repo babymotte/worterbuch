@@ -25,6 +25,7 @@ use crate::{
 };
 use serde_json::json;
 use std::time::Duration;
+use tokio::spawn;
 use tosub::Subsystem;
 use tracing::{Level, debug, instrument, trace, warn};
 use worterbuch_common::{
@@ -425,32 +426,34 @@ impl V0 {
         let client_sub = self.tx.clone();
         let client_info = self.client_info();
 
-        self.subsys
-            .spawn("protocol/subscribe/send-loop", move |_| async move {
-                debug!("Receiving events for subscription {subscription:?} …");
-                while let Some((event, trace)) = rx.recv().await {
-                    let state = State {
-                        transaction_id,
-                        event,
-                        trace,
-                    };
-                    if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
-                        debug!("Error sending STATE message to client: {e}");
-                        break;
-                    };
-                }
+        // plain tokio task instead of a subsystem: the loop terminates on its own once the
+        // subscription is removed, and spawning subsystems does not scale to large numbers
+        // of subscriptions
+        spawn(async move {
+            debug!("Receiving events for subscription {subscription:?} …");
+            while let Some((event, trace)) = rx.recv().await {
+                let state = State {
+                    transaction_id,
+                    event,
+                    trace,
+                };
+                if let Err(e) = client_sub.send(ServerMessage::State(state)).await {
+                    debug!("Error sending STATE message to client: {e}");
+                    break;
+                };
+            }
 
-                let req = Unsubscribe { transaction_id };
-                match wb_unsub.unsubscribe(req, client_info).await {
-                    Ok(()) => {
-                        warn!("Subscription was not cleaned up properly!");
-                    }
-                    Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-                    Err(e) => {
-                        debug!("Error while unsubscribing: {e}");
-                    }
+            let req = Unsubscribe { transaction_id };
+            match wb_unsub.unsubscribe(req, client_info).await {
+                Ok(()) => {
+                    warn!("Subscription was not cleaned up properly!");
                 }
-            });
+                Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+                Err(e) => {
+                    debug!("Error while unsubscribing: {e}");
+                }
+            }
+        });
 
         true
     }
@@ -488,44 +491,42 @@ impl V0 {
                 request_pattern,
                 transaction_id,
             };
-            self.subsys
-                .spawn("protocol/pSubscribe/aggregate-loop", move |_| async move {
-                    aggregate_loop(rx, subscription, client_sub, client_info.client_id).await;
+            spawn(async move {
+                aggregate_loop(rx, subscription, client_sub, client_info.client_id).await;
 
-                    let req = Unsubscribe { transaction_id };
-                    match wb_unsub.unsubscribe(req, client_info).await {
-                        Ok(()) => {
-                            warn!("Subscription was not cleaned up properly!");
-                        }
-                        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-                        Err(e) => {
-                            debug!("Error while unsubscribing: {e}");
-                        }
+                let req = Unsubscribe { transaction_id };
+                match wb_unsub.unsubscribe(req, client_info).await {
+                    Ok(()) => {
+                        warn!("Subscription was not cleaned up properly!");
                     }
-                });
+                    Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+                    Err(e) => {
+                        debug!("Error while unsubscribing: {e}");
+                    }
+                }
+            });
         } else {
-            self.subsys
-                .spawn("protocol/pSubscribe/send-loop", move |_| async move {
-                    forward_loop(
-                        rx,
-                        transaction_id,
-                        request_pattern,
-                        subscription,
-                        client_sub,
-                    )
-                    .await;
+            spawn(async move {
+                forward_loop(
+                    rx,
+                    transaction_id,
+                    request_pattern,
+                    subscription,
+                    client_sub,
+                )
+                .await;
 
-                    let req = Unsubscribe { transaction_id };
-                    match wb_unsub.unsubscribe(req, client_info).await {
-                        Ok(()) => {
-                            warn!("Subscription was not cleaned up properly!");
-                        }
-                        Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-                        Err(e) => {
-                            debug!("Error while unsubscribing: {e}");
-                        }
+                let req = Unsubscribe { transaction_id };
+                match wb_unsub.unsubscribe(req, client_info).await {
+                    Ok(()) => {
+                        warn!("Subscription was not cleaned up properly!");
                     }
-                });
+                    Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+                    Err(e) => {
+                        debug!("Error while unsubscribing: {e}");
+                    }
+                }
+            });
         }
 
         true
@@ -650,34 +651,31 @@ impl V0 {
         let client_sub = self.tx.clone();
         let client_info = self.client_info();
 
-        self.subsys.spawn(
-            format!("protocol/lsSubscribe/send-loop/{subscription}"),
-            move |_| async move {
-                debug!("Receiving events for ls subscription {subscription:?} …");
-                while let Some((children, trace)) = rx.recv().await {
-                    let state = LsState {
-                        transaction_id,
-                        children,
-                        trace,
-                    };
-                    if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
-                        debug!("Error sending LSSTATE message to client: {e}");
-                        break;
-                    };
-                }
+        spawn(async move {
+            debug!("Receiving events for ls subscription {subscription:?} …");
+            while let Some((children, trace)) = rx.recv().await {
+                let state = LsState {
+                    transaction_id,
+                    children,
+                    trace,
+                };
+                if let Err(e) = client_sub.send(ServerMessage::LsState(state)).await {
+                    debug!("Error sending LSSTATE message to client: {e}");
+                    break;
+                };
+            }
 
-                let req = UnsubscribeLs { transaction_id };
-                match wb_unsub.unsubscribe_ls(req, client_info).await {
-                    Ok(()) => {
-                        warn!("Ls Subscription was not cleaned up properly!");
-                    }
-                    Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
-                    Err(e) => {
-                        debug!("Error while unsubscribing ls: {e}");
-                    }
+            let req = UnsubscribeLs { transaction_id };
+            match wb_unsub.unsubscribe_ls(req, client_info).await {
+                Ok(()) => {
+                    warn!("Ls Subscription was not cleaned up properly!");
                 }
-            },
-        );
+                Err(WorterbuchError::NotSubscribed) => { /* this is expected */ }
+                Err(e) => {
+                    debug!("Error while unsubscribing ls: {e}");
+                }
+            }
+        });
 
         true
     }
