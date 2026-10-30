@@ -19,12 +19,11 @@ use crate::{
     PeerMessage, Ping,
     config::{self},
     socket::init_socket,
-    stats::start_stats_endpoint,
 };
 use miette::{Context, IntoDiagnostic, bail};
 use serde_json::json;
 use std::{
-    env, io,
+    io,
     net::{SocketAddr, ToSocketAddrs},
     ops::ControlFlow,
     time::Duration,
@@ -33,24 +32,20 @@ use tosub::Subsystem;
 use totils::while_select;
 use tracing::{info, warn};
 
-pub async fn run_udp_check(subsys: Subsystem, config: config::Config) -> miette::Result<()> {
-    let udp_check_address = env::var("WBCLUSTER_UDP_CHECK_ADDRESS")
-        .into_diagnostic()
-        .wrap_err("WBCLUSTER_UDP_CHECK_ADDRESS not set")?;
-    let udp_check_address: Vec<SocketAddr> = udp_check_address
+pub async fn run_udp_check(
+    subsys: &Subsystem,
+    addr: &str,
+    config: &config::Config,
+) -> miette::Result<()> {
+    let udp_check_address: Vec<SocketAddr> = addr
         .to_socket_addrs()
         .into_diagnostic()
-        .wrap_err("WBCLUSTER_UDP_CHECK_ADDRESS is not a valid socket address")?
+        .wrap_err("UDP check address is not a valid socket address")?
         .collect();
 
     let mut socket = init_socket(&config)
         .await
         .wrap_err("failed to create raft UDP socket")?;
-
-    let stats = start_stats_endpoint(&subsys, config.stats_port)
-        .await
-        .wrap_err("failed to create stats endpoint")?;
-    stats.candidate().await;
 
     let mut buf = [0u8; 65507];
 

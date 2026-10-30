@@ -171,7 +171,7 @@ struct Args {
     /// Port for stats endpoint
     #[arg(long, env = "WBCLUSTER_STATS_PORT", default_value = "8383")]
     stats_port: u16,
-    /// Port for raft consensus algorithm. By default this will be taken from the cluster config, however if the raft socket needs to bind to a different local port than peers need to send messages to (e.g. becasue the instance is behind a NAT or firewall), it can be specified here.
+    /// Port for raft consensus algorithm [default: taken from cluster config]
     #[arg(long, env = "WBCLUSTER_RAFT_PORT")]
     raft_port: Option<u16>,
     /// Data directory
@@ -180,6 +180,9 @@ struct Args {
     /// Config scan interval in seconds
     #[arg(long, env = "WBCLUSTER_CONFIG_SCAN_INTERVAL", default_value_t = 5)]
     config_scan_interval: u64,
+    /// Delay start until UDP traffic is routed to the provided socket address (can be useful when running in kubernetes)
+    #[arg(long, env = "WBCLUSTER_UDP_CHECK", name = "HOST:PORT")]
+    udp_check: Option<String>,
 }
 
 fn quorum_sanity_check(quorum: Option<usize>, peers: &[PeerInfo]) -> Result<(usize, bool)> {
@@ -274,6 +277,7 @@ pub struct Config {
     pub suicide_on_split_brain: bool,
     priority: Option<i64>,
     pub quorum_configured: Option<usize>,
+    pub udp_check: Option<String>,
 }
 
 impl Config {
@@ -412,6 +416,7 @@ async fn load_config(
         data_dir,
         quorum_configured: config_file.quorum,
         config_scan_interval: args.config_scan_interval,
+        udp_check: args.udp_check,
     };
     let _ = tx.send((peers, me, config_file.quorum)).await;
     let config_path = args.config_path.into();

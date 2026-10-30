@@ -47,4 +47,4 @@ ENV WBCLUSTER_SYNC_PORT=8282
 ENV WBCLUSTER_WB_EXECUTABLE=/usr/local/bin/worterbuch
 VOLUME [ "/cfg" ]
 VOLUME [ /profiling ]
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/worterbuch-cluster-orchestrator"]

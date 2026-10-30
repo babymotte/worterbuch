@@ -6,4 +6,4 @@ WORTERBUCH_DATA_DIR=./data/bob \
 WORTERBUCH_WS_SERVER_PORT=8081 \
 WORTERBUCH_TCP_SERVER_PORT=9091 \
 WORTERBUCH_QUIC_SERVER_PORT=5051 \
-cargo run -- --stats-port 7071 -w ../target/debug/worterbuch bob
+cargo run -- --udp-check 127.0.0.1:1338 --stats-port 7071 -w ../target/debug/worterbuch bob

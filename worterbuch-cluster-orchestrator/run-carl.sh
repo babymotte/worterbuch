@@ -6,4 +6,4 @@ WORTERBUCH_DATA_DIR=./data/carl \
 WORTERBUCH_WS_SERVER_PORT=8082 \
 WORTERBUCH_TCP_SERVER_PORT=9092 \
 WORTERBUCH_QUIC_SERVER_PORT=5052 \
-cargo run -- --stats-port 7072 -w ../target/debug/worterbuch carl
+cargo run -- --udp-check 127.0.0.1:1339 --stats-port 7072 -w ../target/debug/worterbuch carl

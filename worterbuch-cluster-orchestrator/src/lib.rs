@@ -27,7 +27,7 @@ mod telemetry;
 mod udp_check;
 mod utils;
 
-use crate::{config::Peers, udp_check::run_udp_check};
+use crate::{config::Peers, stats::StatsSender, udp_check::run_udp_check};
 use config::instrument_and_load_config;
 use election::{ElectionOutcome, elect_leader};
 use follower::follow;
@@ -138,20 +138,23 @@ pub async fn instrument_and_run_main(subsys: Subsystem) -> Result<()> {
     let (config, peers_rx) = instrument_and_load_config(&subsys)
         .await
         .wrap_err("failed to init telemetry and config")?;
-    run_main(subsys, config, peers_rx).await
-}
 
-pub async fn instrument_and_run_udp_check(subsys: Subsystem) -> Result<()> {
-    let (config, _) = instrument_and_load_config(&subsys)
+    let stats = start_stats_endpoint(&subsys, config.stats_port)
         .await
-        .wrap_err("failed to init telemetry and config")?;
-    run_udp_check(subsys, config).await
+        .wrap_err("failed to create stats endpoint")?;
+    stats.candidate().await;
+
+    if let Some(udp_check_addr) = &config.udp_check {
+        run_udp_check(&subsys, udp_check_addr, &config).await?;
+    }
+    run_main(subsys, config, peers_rx, stats).await
 }
 
 async fn run_main(
     subsys: Subsystem,
     mut config: config::Config,
     mut peers_rx: mpsc::Receiver<(Peers, PeerInfo, Option<usize>)>,
+    stats: StatsSender,
 ) -> Result<()> {
     let (mut peers, mut me, _) = peers_rx
         .recv()
@@ -161,10 +164,6 @@ async fn run_main(
     let mut socket = init_socket(&config)
         .await
         .wrap_err("failed to create raft UDP socket")?;
-
-    let stats = start_stats_endpoint(&subsys, config.stats_port)
-        .await
-        .wrap_err("failed to create stats endpoint")?;
 
     while !subsys.is_shut_down() {
         let prio = config.priority().await;
