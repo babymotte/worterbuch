@@ -297,7 +297,6 @@ async fn get_value(
     Query(params): Query<HashMap<String, String>>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Response> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&key))?;
@@ -355,7 +354,6 @@ async fn pget(
     Path(pattern): Path<Key>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<KeyValuePairs>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&pattern))?;
@@ -521,7 +519,6 @@ async fn ls(
     Path(parent): Path<Key>,
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern(&format!("{parent}/?")))?;
@@ -534,7 +531,6 @@ async fn ls(
 async fn ls_root(
     State(wb): State<CloneableWbApi>,
     privileges: Option<JwtClaims>,
-    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
 ) -> WorterbuchResult<Json<Vec<RegularKeySegment>>> {
     if let Some(privileges) = privileges {
         privileges.authorize(&Privilege::Read, AuthCheck::Pattern("?"))?;
