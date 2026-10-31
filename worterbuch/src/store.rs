@@ -432,6 +432,12 @@ impl Store {
         PersistedStore { data }
     }
 
+    /// Consume the store and return its data, excluding system topics.
+    pub(crate) fn into_data(mut self) -> StoreNode {
+        self.data.strip();
+        self.data
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }

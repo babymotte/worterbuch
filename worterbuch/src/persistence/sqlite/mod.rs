@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod convert;
 mod trie;
 
 use crate::{
@@ -80,6 +81,7 @@ impl PersistentSQLiteStore {
         tokio::fs::create_dir_all(&config.data_dir).await?;
 
         let db = if config.role.restore_from_persistence() {
+            convert::convert_json_store_if_needed(&config, &path).await;
             SqliTrie::open(path)?
         } else {
             SqliTrie::new(path)?

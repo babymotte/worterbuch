@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::persistence::error::PersistenceResult;
+use crate::{persistence::error::PersistenceResult, store::StoreNode};
 use hashbrown::HashMap;
 use rusqlite::{Connection, params};
 use serde_json::Value;
@@ -224,6 +224,53 @@ impl SqliTrie {
 
         self.node_cache = node_cache;
 
+        Ok(())
+    }
+
+    /// Write all entries of `data` into an empty trie in a single transaction.
+    /// Returns the number of entries written.
+    pub fn import(&mut self, data: &StoreNode) -> PersistenceResult<usize> {
+        self.with_transaction(|trie| trie.import_children(ROOT_ID, data))
+    }
+
+    fn import_children(&self, parent_id: i64, node: &StoreNode) -> PersistenceResult<usize> {
+        let Some(tree) = &node.tree else {
+            return Ok(0);
+        };
+
+        let mut count = 0;
+        for (key_segment, child) in tree {
+            let value = child
+                .value
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            self.conn
+                .prepare_cached(
+                    "INSERT INTO worterbuch (parent_id, key_segment, value) VALUES (?1, ?2, ?3)",
+                )?
+                .execute(params![parent_id, key_segment, value])?;
+            let id = self.conn.last_insert_rowid();
+
+            let written = usize::from(value.is_some()) + self.import_children(id, child)?;
+            if written == 0 {
+                // don't persist nodes that have no values in their entire sub tree
+                self.conn
+                    .prepare_cached("DELETE FROM worterbuch WHERE id = ?1")?
+                    .execute(params![id])?;
+            }
+            count += written;
+        }
+
+        Ok(count)
+    }
+
+    /// Merge the WAL into the main database file and close the connection, so
+    /// that afterwards the database consists of a single file that can safely
+    /// be moved or renamed.
+    pub fn close(self) -> PersistenceResult<()> {
+        self.conn.execute_batch("PRAGMA journal_mode = DELETE;")?;
+        self.conn.close().map_err(|(_, e)| e)?;
         Ok(())
     }
 

@@ -403,6 +403,10 @@ impl Worterbuch {
         Worterbuch::new(config, store)
     }
 
+    pub(crate) fn into_store(self) -> Store {
+        self.store
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
