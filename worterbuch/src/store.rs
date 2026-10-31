@@ -17,10 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    cluster::protocol::StateSync,
-    subscribers::{LsSubscriber, Subscriber},
-};
+use crate::{cluster::protocol::StateSync, subscribers::LsSubscriber};
 use hashbrown::{
     HashMap, HashSet,
     hash_map::{Entry, Keys},
@@ -376,9 +373,33 @@ impl<V> Default for Node<V> {
 
 #[derive(Debug, Clone, Default)]
 pub struct SubscribersNode {
-    _subscribers: Vec<Subscriber>,
     ls_subscribers: Vec<LsSubscriber>,
     pub tree: SubscribersTree,
+}
+
+impl SubscribersNode {
+    fn is_empty(&self) -> bool {
+        self.ls_subscribers.is_empty() && self.tree.is_empty()
+    }
+
+    /// Removes the ls subscription registered for `parent` (relative to this node) and prunes
+    /// all nodes along the way that end up empty. Returns whether the subscription was found.
+    fn remove_ls(&mut self, parent: &[RegularKeySegment], subscription: &SubscriptionId) -> bool {
+        let Some((head, tail)) = parent.split_first() else {
+            let before = self.ls_subscribers.len();
+            self.ls_subscribers.retain(|s| &s.id != subscription);
+            return self.ls_subscribers.len() != before;
+        };
+
+        let Some(child) = self.tree.get_mut(head) else {
+            return false;
+        };
+        let removed = child.remove_ls(tail, subscription);
+        if child.is_empty() {
+            self.tree.remove(head);
+        }
+        removed
+    }
 }
 
 #[derive(Debug)]
@@ -1080,18 +1101,7 @@ impl Store {
     }
 
     pub fn remove_ls_subscriber(&mut self, subscriber: LsSubscriber) {
-        let mut current = &mut self.subscribers;
-
-        for elem in &subscriber.parent {
-            if let Some(node) = current.tree.get_mut(elem) {
-                current = node;
-            } else {
-                warn!("No ls subscriber found for parent {:?}", subscriber.parent);
-                return;
-            }
-        }
-
-        current.ls_subscribers.retain(|s| s.id != subscriber.id);
+        self.unsubscribe_ls(&subscriber.parent, &subscriber.id);
     }
 
     pub fn unsubscribe_ls(
@@ -1099,27 +1109,11 @@ impl Store {
         parent: &[RegularKeySegment],
         subscription: &SubscriptionId,
     ) -> bool {
-        let mut current = &mut self.subscribers;
-
-        for elem in parent {
-            if let Some(node) = current.tree.get_mut(elem) {
-                current = node;
-            } else {
-                warn!("No ls subscriber found for pattern {:?}", parent);
-                return false;
-            }
-        }
-        let mut removed = false;
-        current.ls_subscribers.retain(|s| {
-            let retain = &s.id != subscription;
-            removed = removed || !retain;
-            if !retain {
-                debug!("Removing subscription {subscription:?} to parent {parent:?}");
-            }
-            retain
-        });
-        if !removed {
-            debug!("no matching subscription found")
+        let removed = self.subscribers.remove_ls(parent, subscription);
+        if removed {
+            debug!("Removed ls subscription {subscription:?} to parent {parent:?}");
+        } else {
+            debug!("No ls subscription {subscription:?} found for parent {parent:?}");
         }
         removed
     }
@@ -1453,6 +1447,39 @@ mod test {
             res.iter()
                 .any(|e| e == &KeyValuePair::of("trolo/c/b/d".to_owned(), json!("5")))
         );
+    }
+
+    #[test]
+    fn empty_ls_subscriber_nodes_are_pruned() {
+        let mut store = Store::default();
+        let (tx, _) = mpsc::channel(1);
+        let add = |store: &mut Store, parent: &[&str], tid| {
+            let parent: Vec<String> = parent.iter().map(|s| (*s).to_owned()).collect();
+            let subscriber = LsSubscriber::new(
+                SubscriptionId::new(ClientId::nil(), tid),
+                parent.clone(),
+                tx.clone(),
+                false,
+            );
+            store.add_ls_subscriber(&parent, subscriber.clone());
+            subscriber
+        };
+        let s1 = add(&mut store, &["a", "b"], 1);
+        let s2 = add(&mut store, &["a", "c"], 2);
+        let s3 = add(&mut store, &["a"], 3);
+
+        assert!(store.unsubscribe_ls(&s1.parent, &s1.id));
+        assert!(!store.unsubscribe_ls(&s1.parent, &s1.id));
+        let a = &store.subscribers.tree["a"];
+        assert!(!a.tree.contains_key("b"));
+        assert!(a.tree.contains_key("c"));
+
+        store.remove_ls_subscriber(s2);
+        // "a" still has a subscriber of its own
+        assert!(store.subscribers.tree["a"].tree.is_empty());
+
+        assert!(store.unsubscribe_ls(&s3.parent, &s3.id));
+        assert!(store.subscribers.is_empty());
     }
 
     #[test]

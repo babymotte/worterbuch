@@ -19,7 +19,7 @@
 
 use hashbrown::HashMap;
 use miette::{IntoDiagnostic, Result, bail};
-use tracing::{debug, warn};
+use tracing::debug;
 use worterbuch_common::{
     KeySegment, LsSubscriptionSender, PSubscriptionSender, RegularKeySegment, SubscriptionId,
     SubscriptionSender,
@@ -143,13 +143,54 @@ impl Node {
         }
     }
 
-    fn child_mut(&mut self, segment: &KeySegment) -> Option<&mut Node> {
-        match segment {
-            KeySegment::Regular(segment) => self.tree.get_mut(segment.as_str()),
-            KeySegment::Wildcard => self.wildcard.as_deref_mut(),
-            KeySegment::MultiWildcard => self.multi_wildcard.as_deref_mut(),
+    fn is_empty(&self) -> bool {
+        self.subscribers.is_empty()
+            && self.tree.is_empty()
+            && self.wildcard.is_none()
+            && self.multi_wildcard.is_none()
+    }
+
+    /// Removes the subscription registered for `pattern` (relative to this node) and prunes all
+    /// nodes along the way that end up empty. Returns whether the subscription was found.
+    fn remove(&mut self, pattern: &[KeySegment], subscription: &SubscriptionId) -> bool {
+        let Some((head, tail)) = pattern.split_first() else {
+            let before = self.subscribers.len();
+            self.subscribers.retain(|s| &s.id != subscription);
+            return self.subscribers.len() != before;
+        };
+
+        match head {
+            KeySegment::Regular(segment) => {
+                let Some(child) = self.tree.get_mut(segment.as_str()) else {
+                    return false;
+                };
+                let removed = child.remove(tail, subscription);
+                if child.is_empty() {
+                    self.tree.remove(segment.as_str());
+                }
+                removed
+            }
+            KeySegment::Wildcard => remove_from_slot(&mut self.wildcard, tail, subscription),
+            KeySegment::MultiWildcard => {
+                remove_from_slot(&mut self.multi_wildcard, tail, subscription)
+            }
         }
     }
+}
+
+fn remove_from_slot(
+    slot: &mut Option<Box<Node>>,
+    pattern: &[KeySegment],
+    subscription: &SubscriptionId,
+) -> bool {
+    let Some(child) = slot else {
+        return false;
+    };
+    let removed = child.remove(pattern, subscription);
+    if child.is_empty() {
+        *slot = None;
+    }
+    removed
 }
 
 #[derive(Default)]
@@ -178,27 +219,11 @@ impl Subscribers {
     }
 
     pub fn unsubscribe(&mut self, pattern: &[KeySegment], subscription: &SubscriptionId) -> bool {
-        let mut current = &mut self.data;
-
-        for elem in pattern {
-            if let Some(node) = current.child_mut(elem) {
-                current = node;
-            } else {
-                warn!("No subscriber found for pattern {:?}", pattern);
-                return false;
-            }
-        }
-        let mut removed = false;
-        current.subscribers.retain(|s| {
-            let retain = &s.id != subscription;
-            removed = removed || !retain;
-            if !retain {
-                debug!("Removing subscription {subscription:?} to pattern {pattern:?}");
-            }
-            retain
-        });
-        if !removed {
-            debug!("no matching subscription found")
+        let removed = self.data.remove(pattern, subscription);
+        if removed {
+            debug!("Removed subscription {subscription:?} to pattern {pattern:?}");
+        } else {
+            debug!("No subscription {subscription:?} found for pattern {pattern:?}");
         }
         removed
     }
@@ -385,5 +410,31 @@ mod test {
         assert!(!subscribers.unsubscribe(&key_segs("x/y"), &s1.id));
         assert!(subscribers.unsubscribe(&key_segs("a/b/c"), &s1.id));
         assert!(matches(&subscribers, "a/b/c").is_empty());
+    }
+
+    #[test]
+    fn empty_nodes_are_pruned() {
+        let mut subscribers = Subscribers::default();
+        let s1 = add(&mut subscribers, "a/b/c", 1);
+        let s2 = add(&mut subscribers, "a/b/d", 2);
+        let s3 = add(&mut subscribers, "a/?/#", 3);
+        let s4 = add(&mut subscribers, "a/b", 4);
+
+        assert!(subscribers.unsubscribe(&key_segs("a/b/c"), &s1.id));
+        // siblings and their shared parents are kept
+        let a = &subscribers.data.tree["a"];
+        assert!(!a.tree["b"].tree.contains_key("c"));
+        assert!(a.tree["b"].tree.contains_key("d"));
+        assert_eq!(matches(&subscribers, "a/b/d"), vec![2, 3]);
+
+        assert!(subscribers.unsubscribe(&key_segs("a/?/#"), &s3.id));
+        assert!(subscribers.data.tree["a"].wildcard.is_none());
+
+        assert!(subscribers.unsubscribe(&key_segs("a/b/d"), &s2.id));
+        // "a/b" still has a subscriber of its own
+        assert!(subscribers.data.tree["a"].tree["b"].tree.is_empty());
+
+        subscribers.remove_subscriber(&s4);
+        assert!(subscribers.data.is_empty());
     }
 }
