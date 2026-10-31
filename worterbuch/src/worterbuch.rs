@@ -71,6 +71,7 @@ pub type Subscriptions = HashMap<SubscriptionId, Vec<KeySegment>>;
 pub type LsSubscriptions = HashMap<SubscriptionId, Vec<RegularKeySegment>>;
 
 type Map<K, V> = LinkedHashMap<K, V>;
+type ClientSubscriptionIndex = HashMap<ClientId, HashSet<TransactionId>>;
 
 pub struct SubscriptionFlags {
     unique: bool,
@@ -372,8 +373,10 @@ pub struct Worterbuch {
     subscriptions: Subscriptions,
     /// index of [`Self::subscriptions`] by client, so a client's subscriptions can be found
     /// without scanning all subscriptions
-    client_subscriptions: HashMap<ClientId, HashSet<TransactionId>>,
+    client_subscriptions: ClientSubscriptionIndex,
     ls_subscriptions: LsSubscriptions,
+    /// index of [`Self::ls_subscriptions`] by client, see [`Self::client_subscriptions`]
+    client_ls_subscriptions: ClientSubscriptionIndex,
     subscribers: Subscribers,
     clients: HashMap<ClientId, ClientInfo>,
     spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
@@ -391,6 +394,7 @@ impl Worterbuch {
             subscribers: Default::default(),
             subscriptions: Default::default(),
             client_subscriptions: Default::default(),
+            client_ls_subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
             followers: Default::default(),
@@ -849,21 +853,30 @@ impl Worterbuch {
     }
 
     fn add_subscription(&mut self, subscription_id: SubscriptionId, path: Vec<KeySegment>) {
-        self.client_subscriptions
-            .entry(subscription_id.client_id)
-            .or_default()
-            .insert(subscription_id.transaction_id);
+        index_subscription(&mut self.client_subscriptions, &subscription_id);
         self.subscriptions.insert(subscription_id, path);
     }
 
     fn remove_subscription(&mut self, subscription_id: &SubscriptionId) -> Option<Vec<KeySegment>> {
-        if let Entry::Occupied(mut e) = self.client_subscriptions.entry(subscription_id.client_id) {
-            e.get_mut().remove(&subscription_id.transaction_id);
-            if e.get().is_empty() {
-                e.remove();
-            }
-        }
+        unindex_subscription(&mut self.client_subscriptions, subscription_id);
         self.subscriptions.remove(subscription_id)
+    }
+
+    fn add_ls_subscription(
+        &mut self,
+        subscription_id: SubscriptionId,
+        path: Vec<RegularKeySegment>,
+    ) {
+        index_subscription(&mut self.client_ls_subscriptions, &subscription_id);
+        self.ls_subscriptions.insert(subscription_id, path);
+    }
+
+    fn remove_ls_subscription(
+        &mut self,
+        subscription_id: &SubscriptionId,
+    ) -> Option<Vec<RegularKeySegment>> {
+        unindex_subscription(&mut self.client_ls_subscriptions, subscription_id);
+        self.ls_subscriptions.remove(subscription_id)
     }
 
     async fn update_subscription_count(
@@ -922,7 +935,7 @@ impl Worterbuch {
             .expect("rx is neither closed nor dropped");
         let subscription_id =
             SubscriptionId::new(trace_data.client_id(), trace_data.transaction_id);
-        self.ls_subscriptions.insert(subscription_id, path);
+        self.add_ls_subscription(subscription_id, path);
         debug!("Total ls subscriptions: {}", self.ls_subscriptions.len());
         Ok((rx, subscription))
     }
@@ -1102,7 +1115,7 @@ impl Worterbuch {
     }
 
     fn do_unsubscribe_ls(&mut self, subscription: &SubscriptionId) -> WorterbuchResult<()> {
-        if let Some(path) = self.ls_subscriptions.remove(subscription) {
+        if let Some(path) = self.remove_ls_subscription(subscription) {
             debug!(
                 "Remaining ls subscriptions: {}",
                 self.ls_subscriptions.len()
@@ -1832,15 +1845,7 @@ impl Worterbuch {
 
         self.clients.remove(&client_id);
 
-        let subscription_keys: Vec<SubscriptionId> = self
-            .client_subscriptions
-            .get(&client_id)
-            .map(|tids| {
-                tids.iter()
-                    .map(|tid| SubscriptionId::new(client_id, *tid))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let subscription_keys = indexed_subscriptions(&self.client_subscriptions, client_id);
         if !subscription_keys.is_empty() {
             debug!(
                 "Removing {} subscription(s) of client {client_id} ({}).",
@@ -1856,6 +1861,12 @@ impl Worterbuch {
                 .await
             {
                 debug!("Inconsistent subscription state: {e}");
+            }
+        }
+
+        for subscription in indexed_subscriptions(&self.client_ls_subscriptions, client_id) {
+            if let Err(e) = self.do_unsubscribe_ls(&subscription) {
+                debug!("Inconsistent ls subscription state: {e}");
             }
         }
 
@@ -2389,6 +2400,36 @@ fn check_for_read_only_key(key: &str, client_id: ClientId) -> WorterbuchResult<(
     Err(WorterbuchError::ReadOnlyKey(key.to_owned()))
 }
 
+fn index_subscription(index: &mut ClientSubscriptionIndex, subscription_id: &SubscriptionId) {
+    index
+        .entry(subscription_id.client_id)
+        .or_default()
+        .insert(subscription_id.transaction_id);
+}
+
+fn unindex_subscription(index: &mut ClientSubscriptionIndex, subscription_id: &SubscriptionId) {
+    if let Entry::Occupied(mut e) = index.entry(subscription_id.client_id) {
+        e.get_mut().remove(&subscription_id.transaction_id);
+        if e.get().is_empty() {
+            e.remove();
+        }
+    }
+}
+
+fn indexed_subscriptions(
+    index: &ClientSubscriptionIndex,
+    client_id: ClientId,
+) -> Vec<SubscriptionId> {
+    index
+        .get(&client_id)
+        .map(|tids| {
+            tids.iter()
+                .map(|tid| SubscriptionId::new(client_id, *tid))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn escape_wildcards(pattern: &str) -> String {
     pattern.replace('#', "%23").replace('?', "%3F")
 }
@@ -2501,8 +2542,21 @@ mod test {
             .await
             .unwrap();
 
+        let (mut ls_a, _) = wb
+            .subscribe_ls(
+                Some("a".to_owned()),
+                false,
+                TraceData::new(3, client_a.clone()),
+            )
+            .await
+            .unwrap();
+        // initial state
+        assert!(ls_a.recv().await.is_some());
+
         assert_eq!(wb.subscriptions.len(), 3);
         assert_eq!(wb.client_subscriptions[&client_a.client_id].len(), 2);
+        assert_eq!(wb.ls_subscriptions.len(), 1);
+        assert_eq!(wb.client_ls_subscriptions[&client_a.client_id].len(), 1);
         assert_eq!(wb.client_subscriptions[&client_b.client_id].len(), 1);
 
         wb.unsubscribe(TraceData::new(1, client_a.clone()))
@@ -2514,6 +2568,13 @@ mod test {
         wb.disconnected(client_a.clone(), None).await;
         assert_eq!(wb.subscriptions.len(), 1);
         assert!(!wb.client_subscriptions.contains_key(&client_a.client_id));
+        assert!(wb.ls_subscriptions.is_empty());
+        assert!(wb.client_ls_subscriptions.is_empty());
+        // ls subscriber was removed from the store, so its channel is closed
+        assert_eq!(
+            ls_a.try_recv().unwrap_err(),
+            mpsc::error::TryRecvError::Disconnected
+        );
         assert!(
             wb.subscriptions
                 .contains_key(&SubscriptionId::new(client_b.client_id, 1))
