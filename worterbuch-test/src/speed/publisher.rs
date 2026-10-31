@@ -147,7 +147,7 @@ impl LatencyTestPublisher {
         );
 
         let mut keys = HashSet::new();
-        keys.insert(format!("speed-test/latency/{}", self.id));
+        keys.insert(format!("test/speed/{}", self.id));
         if self.key_length > 0 {
             for _l in 0..(self.key_length - 1) {
                 let mut next_gen = HashSet::new();

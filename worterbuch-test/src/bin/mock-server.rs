@@ -42,7 +42,7 @@ async fn main() -> miette::Result<()> {
     let _ = dotenvy::dotenv();
     let _ = logging::init()?;
 
-    tosub::build_default_root("worterbuch-speedtest")
+    tosub::build_default_root("worterbuch-mockserver")
         .with_timeout(Duration::from_secs(10))
         .start(run)
         .await?;

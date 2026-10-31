@@ -587,43 +587,6 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'worterbuch-speedtest'",
-      "cargo": {
-        "args": [
-          "build",
-          "--bin=worterbuch-speedtest",
-          "--package=worterbuch-speedtest"
-        ],
-        "filter": {
-          "name": "worterbuch-speedtest",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'worterbuch-speedtest'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=worterbuch-speedtest",
-          "--package=worterbuch-speedtest"
-        ],
-        "filter": {
-          "name": "worterbuch-speedtest",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
     }
   ]
 }

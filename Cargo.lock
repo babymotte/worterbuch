@@ -5614,7 +5614,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -6944,29 +6943,6 @@ dependencies = [
  "tracing-subscriber",
  "tungstenite 0.30.0",
  "uuid",
-]
-
-[[package]]
-name = "worterbuch-speedtest"
-version = "1.7.0-rc.5"
-dependencies = [
- "axum",
- "clap",
- "dotenvy",
- "futures",
- "hostname",
- "miette",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tosub",
- "totils",
- "tower-http 0.7.1",
- "tracing",
- "tracing-subscriber",
- "worterbuch-client",
- "worterbuch-common",
 ]
 
 [[package]]

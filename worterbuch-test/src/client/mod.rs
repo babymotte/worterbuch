@@ -503,7 +503,7 @@ async fn send_subscribe_request<W: AsyncWrite + Unpin>(
 
     let msg = ClientMessage::PSubscribe(PSubscribe {
         transaction_id,
-        request_pattern: "speed-test/latency/#".to_owned(),
+        request_pattern: "test/speed/#".to_owned(),
         unique: Some(false),
         live_only: Some(true),
         send_traces: Some(false),
