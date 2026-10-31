@@ -34,7 +34,6 @@ RUN cargo build -p worterbuch-cluster-orchestrator --release
 FROM babymotte/worterbuch:${WORTERBUCH_VERSION}
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
-COPY --from=wbco-builder /app/target/release/udp-check /usr/local/bin
 ENV WORTERBUCH_LOG=info,worterbuch_cluster_orchestrator::stats=warn
 ENV WORTERBUCH_TRACING=info,worterbuch_cluster_orchestrator=debug,worterbuch=debug
 ENV WBCLUSTER_CONFIG_PATH=/cfg/config.yaml
