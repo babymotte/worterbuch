@@ -21,7 +21,7 @@ pub mod protocol;
 
 use crate::{Config, cluster::protocol::locks::Locks, stats::VERSION};
 use hashbrown::HashMap;
-use std::{fmt, net::SocketAddr, time::Duration};
+use std::{fmt, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Level, Span, debug, instrument, trace};
 use worterbuch_common::{
@@ -251,13 +251,15 @@ impl fmt::Debug for WbFunction {
     }
 }
 
+/// Cheap to clone: a handle like this is held by every client connection and every
+/// subscription, so the config and protocol versions are shared instead of copied.
 #[derive(Clone)]
 pub struct CloneableWbApi {
     name: String,
-    config: Config,
+    config: Arc<Config>,
     tx: mpsc::Sender<WbFunction>,
     protocol: Protocol,
-    supported_client_protocol_versions: Box<[ProtocolVersionSegment]>,
+    supported_client_protocol_versions: Arc<[ProtocolVersionSegment]>,
 }
 
 impl Drop for CloneableWbApi {
@@ -279,7 +281,7 @@ impl CloneableWbApi {
         CloneableWbApi {
             name: "".to_string(),
             tx,
-            config,
+            config: Arc::new(config),
             protocol,
             supported_client_protocol_versions: supported_client_protocol_versions
                 .iter()
