@@ -23,7 +23,7 @@ telemetry = [
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
 ]
-tokio-console = ["console-subscriber"]
+tokio-console = ["console-subscriber", "tosub/tokio_unstable"]
 commercial = ["worterbuch-common/commercial"]
 redb = ["worterbuch-common/redb", "dep:redb"]
 sqlite = ["dep:rusqlite"]
@@ -77,7 +77,7 @@ tikv-jemalloc-ctl = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "tracing"] }
 tokio-metrics = { workspace = true }
 tokio-stream = { workspace = true }
-tosub = { workspace = true, features = ["tokio_unstable"] }
+tosub = { workspace = true }
 totils = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
 tracing = { workspace = true }
