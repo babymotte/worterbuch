@@ -255,7 +255,7 @@ mod test {
                 web_login: Some(true),
             }),
         };
-        let serialized = serde_json::to_string(&claims).unwrap();
+        let serialized = serde_json::to_string(&claims).expect("failed to serialize claims");
         assert_eq!(
             &serialized,
             r#"{"sub":"client_id","name":"client_name","exp":1234567890,"worterbuchPrivileges":{"profile":true,"web-login":true}}"#
@@ -270,7 +270,7 @@ mod test {
             exp: 1234567890,
             content: JwtContent::Follower(Mode::Proxy),
         };
-        let serialized = serde_json::to_string(&claims).unwrap();
+        let serialized = serde_json::to_string(&claims).expect("failed to serialize claims");
         assert_eq!(
             &serialized,
             r#"{"sub":"client_id","name":"client_name","exp":1234567890,"mode":"PROXY"}"#

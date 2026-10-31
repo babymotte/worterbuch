@@ -80,18 +80,18 @@ async fn run(
             sync_port,
             TcpSocketConfig::default(),
         )
-        .unwrap(),
+        .expect("failed to create TCP socket"),
     )
-    .unwrap();
+    .expect("failed to create TCP listener");
 
     info!("Mock server started");
-    started_tx.send(()).unwrap();
+    started_tx.send(()).expect("failed to send started signal");
 
     let state = Arc::new(Mutex::new(HashMap::new()));
 
     while_select! {
         _ = subsys.shutdown_requested() => break,
-        client = tcp_listener.accept() => accepted(&subsys, client,state.clone(), interruptions).await.unwrap(),
+        client = tcp_listener.accept() => accepted(&subsys, client,state.clone(), interruptions).await.expect("failed to accept client"),
     }
 
     info!("Mock server stopped");
@@ -199,8 +199,8 @@ async fn perform_handshake(
     );
 
     let state = {
-        let lock = state.lock().unwrap();
-        dummy_state_store(&*lock)
+        let lock = state.lock().expect("mutex poisoned");
+        dummy_state_store(&lock)
     };
 
     send(subsys, LeaderMessage::Init(state), tx).await?;
@@ -257,7 +257,7 @@ fn process_request(
             value,
         }) => {
             {
-                let mut lock = store.lock().unwrap();
+                let mut lock = store.lock().expect("mutex poisoned");
                 lock.insert(key.clone(), value.clone());
             }
 

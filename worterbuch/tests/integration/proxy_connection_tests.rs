@@ -116,11 +116,12 @@ async fn run(
     wb_config.quic_disabled = true;
     wb_config.unix_disabled = true;
 
-    wb_config.ws_endpoint.as_mut().map(|it| it.port = http_port);
-    wb_config
-        .tcp_endpoint
-        .as_mut()
-        .map(|it| it.port = proxy_port);
+    if let Some(endpoint) = wb_config.ws_endpoint.as_mut() {
+        endpoint.port = http_port
+    }
+    if let Some(endpoint) = wb_config.tcp_endpoint.as_mut() {
+        endpoint.port = proxy_port
+    }
 
     spawn_worterbuch(&subsys, wb_config, None)
         .await

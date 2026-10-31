@@ -33,8 +33,9 @@ async fn main() {
         send_timeout: Duration::from_secs(5),
     };
 
-    let socket = create_tcp_server_socket("0.0.0.0".parse().unwrap(), 1337, config)
-        .expect("socket creation failed");
+    let socket =
+        create_tcp_server_socket("0.0.0.0".parse().expect("valid IPv4 address"), 1337, config)
+            .expect("socket creation failed");
 
     let socket = TcpListener::from_std(socket).expect("socket conversion failed");
 

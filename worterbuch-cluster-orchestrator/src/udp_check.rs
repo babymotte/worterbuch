@@ -43,7 +43,7 @@ pub async fn run_udp_check(
         .wrap_err("UDP check address is not a valid socket address")?
         .collect();
 
-    let mut socket = init_socket(&config)
+    let mut socket = init_socket(config)
         .await
         .wrap_err("failed to create raft UDP socket")?;
 
