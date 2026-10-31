@@ -377,6 +377,9 @@ pub struct Worterbuch {
     ls_subscriptions: LsSubscriptions,
     /// index of [`Self::ls_subscriptions`] by client, see [`Self::client_subscriptions`]
     client_ls_subscriptions: ClientSubscriptionIndex,
+    /// cause of the most recent change to the number of subscriptions that has not yet been
+    /// published to `$SYS/subscriptions`, see [`Self::tick`]
+    pending_subscription_count_change: Option<Trace>,
     subscribers: Subscribers,
     clients: HashMap<ClientId, ClientInfo>,
     spub_keys: HashMap<ClientId, HashMap<TransactionId, Key>>,
@@ -395,6 +398,7 @@ impl Worterbuch {
             subscriptions: Default::default(),
             client_subscriptions: Default::default(),
             client_ls_subscriptions: Default::default(),
+            pending_subscription_count_change: None,
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
             followers: Default::default(),
@@ -692,6 +696,7 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.add_subscription(subscription_id, path);
+        self.subscription_count_changed(&cause);
 
         let mut client_subs = 0;
         if let Some(client) = self.clients.get_mut(&client_id) {
@@ -706,21 +711,6 @@ impl Worterbuch {
             && !key.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
             && client_id != INTERNAL_CLIENT_ID
         {
-            if let Err(e) = self
-                .internal_set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
-                    json!(self.subscriptions.len()),
-                    INTERNAL_CLIENT_ID,
-                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
-                        cause: Box::new(cause.clone()),
-                    }),
-                    true,
-                )
-                .await
-            {
-                debug!("Error in subscription monitoring: {e}");
-            }
-
             let subs_key = topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -797,6 +787,7 @@ impl Worterbuch {
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
         self.add_subscription(subscription_id, path);
+        self.subscription_count_changed(&cause);
         let mut client_subs = 0;
         if let Some(client) = self.clients.get_mut(&client_id) {
             client_subs = client.subscriptions.saturating_add(1);
@@ -811,20 +802,6 @@ impl Worterbuch {
             && !pattern.starts_with(SYSTEM_TOPIC_ROOT_PREFIX)
             && client_id != INTERNAL_CLIENT_ID
         {
-            if let Err(e) = self
-                .internal_set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
-                    json!(self.subscriptions.len()),
-                    INTERNAL_CLIENT_ID,
-                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
-                        cause: Box::new(cause.clone()),
-                    }),
-                    true,
-                )
-                .await
-            {
-                debug!("Error in subscription monitoring: {e}");
-            }
             let subs_key = topic!(
                 SYSTEM_TOPIC_ROOT,
                 SYSTEM_TOPIC_CLIENTS,
@@ -850,6 +827,32 @@ impl Worterbuch {
         }
 
         Ok((rx, subscription))
+    }
+
+    fn subscription_count_changed(&mut self, cause: &Trace) {
+        if self.config.extended_monitoring {
+            self.pending_subscription_count_change = Some(cause.clone());
+        }
+    }
+
+    /// Called periodically to publish monitoring data that would be too expensive to update
+    /// on every change.
+    pub(crate) async fn tick(&mut self) {
+        if let Some(cause) = self.pending_subscription_count_change.take()
+            && let Err(e) = self
+                .internal_set(
+                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
+                    json!(self.subscriptions.len()),
+                    INTERNAL_CLIENT_ID,
+                    Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                        cause: Box::new(cause),
+                    }),
+                    true,
+                )
+                .await
+        {
+            debug!("Error in subscription monitoring: {e}");
+        }
     }
 
     fn add_subscription(&mut self, subscription_id: SubscriptionId, path: Vec<KeySegment>) {
@@ -1023,15 +1026,18 @@ impl Worterbuch {
     pub async fn unsubscribe(&mut self, trace_data: TraceData) -> WorterbuchResult<()> {
         let trace = Trace::client_request(Method::Unsubscribe, &trace_data);
         let subscription = SubscriptionId::new(trace_data.client_id(), trace_data.transaction_id);
-        self.do_unsubscribe(&subscription, trace_data.client_id(), trace)
+        self.do_unsubscribe(&subscription, trace_data.client_id(), trace, true)
             .await
     }
 
+    /// `update_client_entries` controls whether the client's subscription entries under `$SYS`
+    /// are updated. It can be set to false when those entries are going to be removed anyway.
     async fn do_unsubscribe(
         &mut self,
         subscription: &SubscriptionId,
         client_id: ClientId,
         cause: Trace,
+        update_client_entries: bool,
     ) -> WorterbuchResult<()> {
         if let Some(path) = self.remove_subscription(subscription) {
             let mut client_subs = 0;
@@ -1039,7 +1045,9 @@ impl Worterbuch {
                 client_subs = client.subscriptions.saturating_sub(1);
                 client.subscriptions = client_subs;
             }
-            if self.config.extended_monitoring
+            self.subscription_count_changed(&cause);
+            if update_client_entries
+                && self.config.extended_monitoring
                 && path[0] != KeySegment::MultiWildcard
                 && path[0].deref() != SYSTEM_TOPIC_ROOT
                 && client_id != INTERNAL_CLIENT_ID
@@ -1079,22 +1087,6 @@ impl Worterbuch {
             }
             debug!("Remaining subscriptions: {}", self.subscriptions.len());
 
-            if self.config.extended_monitoring
-                && client_id != INTERNAL_CLIENT_ID
-                && let Err(e) = self
-                    .internal_set(
-                        topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
-                        json!(self.subscriptions.len()),
-                        INTERNAL_CLIENT_ID,
-                        Trace::InternalAction(InternalAction::SubscriptionsChanged {
-                            cause: Box::new(cause),
-                        }),
-                        true,
-                    )
-                    .await
-            {
-                debug!("Error in subscription monitoring: {e}");
-            }
             if self.subscribers.unsubscribe(&path, subscription) {
                 Ok(())
             } else {
@@ -1855,9 +1847,17 @@ impl Worterbuch {
                     .unwrap_or_else(|| "<unknown>".to_owned())
             );
         }
+        // the leader removes all of the client's $SYS entries below, so there is no need to
+        // update them for each individual subscription
+        let update_client_entries = !self.is_leader();
         for subscription in subscription_keys {
             if let Err(e) = self
-                .do_unsubscribe(&subscription, client_id, trace.clone())
+                .do_unsubscribe(
+                    &subscription,
+                    client_id,
+                    trace.clone(),
+                    update_client_entries,
+                )
                 .await
             {
                 debug!("Inconsistent subscription state: {e}");
@@ -1868,20 +1868,6 @@ impl Worterbuch {
             if let Err(e) = self.do_unsubscribe_ls(&subscription) {
                 debug!("Inconsistent ls subscription state: {e}");
             }
-        }
-
-        if self.config.extended_monitoring
-            && let Err(e) = self
-                .internal_set(
-                    topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS),
-                    json!(self.subscriptions.len()),
-                    INTERNAL_CLIENT_ID,
-                    trace.clone(),
-                    true,
-                )
-                .await
-        {
-            debug!("Error in subscription monitoring: {e}");
         }
 
         if self.is_leader() {
@@ -2583,5 +2569,68 @@ mod test {
         wb.disconnected(client_b.clone(), None).await;
         assert!(wb.subscriptions.is_empty());
         assert!(wb.client_subscriptions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn subscription_monitoring() {
+        let _ = dotenvy::dotenv();
+        let mut config = Config::new(None).await.unwrap();
+        config.extended_monitoring = true;
+        let mut wb = Worterbuch::with_config(config);
+
+        let client = ClientInfo {
+            client_id: ClientId::new_v4(),
+            protocol: Protocol::Tcp,
+        };
+        let (eject, _eject_rx) = mpsc::channel(1);
+        wb.connected(client.clone(), None, eject).await.unwrap();
+
+        let total_key = topic!(SYSTEM_TOPIC_ROOT, SYSTEM_TOPIC_SUBSCRIPTIONS);
+        let client_count_key = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client.client_id,
+            SYSTEM_TOPIC_SUBSCRIPTIONS
+        );
+        // matches the client's subscription count as well as one entry per subscription
+        let client_pattern = topic!(client_count_key, "#");
+
+        let flags = || SubscriptionFlags::new(false, true, false);
+        let _s1 = wb
+            .subscribe("a/1".to_owned(), flags(), TraceData::new(1, client.clone()))
+            .await
+            .unwrap();
+        let _s2 = wb
+            .psubscribe("a/#".to_owned(), flags(), TraceData::new(2, client.clone()))
+            .await
+            .unwrap();
+
+        // per-client entries are updated immediately ...
+        assert_eq!(wb.get(&client_count_key).unwrap(), json!(2));
+        assert_eq!(wb.pget(&client_pattern).unwrap().len(), 3);
+        // ... the total count only on the next tick
+        assert!(wb.get(&total_key).is_err());
+        wb.tick().await;
+        assert_eq!(wb.get(&total_key).unwrap(), json!(2));
+
+        wb.unsubscribe(TraceData::new(1, client.clone()))
+            .await
+            .unwrap();
+        assert_eq!(wb.get(&client_count_key).unwrap(), json!(1));
+        assert_eq!(wb.pget(&client_pattern).unwrap().len(), 2);
+        assert_eq!(wb.get(&total_key).unwrap(), json!(2));
+        wb.tick().await;
+        assert_eq!(wb.get(&total_key).unwrap(), json!(1));
+
+        wb.disconnected(client.clone(), None).await;
+        let client_entries = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client.client_id,
+            "#"
+        );
+        assert!(wb.pget(&client_entries).unwrap().is_empty());
+        wb.tick().await;
+        assert_eq!(wb.get(&total_key).unwrap(), json!(0));
     }
 }

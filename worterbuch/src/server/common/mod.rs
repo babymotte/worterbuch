@@ -192,6 +192,7 @@ pub enum WbFunction {
         Span,
     ),
     Len(oneshot::Sender<usize>, Span),
+    Tick(Span),
     ReGrantLocks(Locks, oneshot::Sender<WorterbuchResult<UpdatedLocks>>, Span),
 }
 
@@ -245,6 +246,7 @@ impl fmt::Debug for WbFunction {
                 f.debug_tuple("ReGrantLocks").field(locks).finish()
             }
             WbFunction::Len(_, _) => f.debug_tuple("Len").finish(),
+            WbFunction::Tick(_) => f.debug_tuple("Tick").finish(),
         }
     }
 }
@@ -314,6 +316,12 @@ impl CloneableWbApi {
         let (tx, rx) = oneshot::channel();
         let function = WbFunction::ReGrantLocks(locks, tx, Span::current());
         self.request_with_timeout(function, "re grant locks", rx)
+            .await
+    }
+
+    /// Triggers periodic maintenance in the core system, see [`crate::worterbuch::Worterbuch::tick`].
+    pub(crate) async fn tick(&self) -> WorterbuchResult<()> {
+        self.send_with_timeout(WbFunction::Tick(Span::current()), "tick")
             .await
     }
 

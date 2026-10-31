@@ -54,8 +54,10 @@ use crate::{
     worterbuch::Worterbuch,
 };
 use serde_json::json;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tosub::Subsystem;
+use totils::CancelOn;
 use tracing::{debug, info};
 use worterbuch_common::{
     INTERNAL_CLIENT_ID, Protocol, WorterbuchVersion,
@@ -160,6 +162,11 @@ async fn do_run_worterbuch(
 
     if config.role.provide_server_metadata() {
         server_metadata(api.named("server-metadata"), &mut worterbuch, &subsys).await?;
+    }
+
+    if config.extended_monitoring && config.role.accept_client_connections() {
+        let api = api.named("ticker");
+        subsys.spawn("ticker", |s| ticker(s, api));
     }
 
     let stdin = stdin.unwrap_or_else(|| mpsc::channel(1).1);
@@ -351,6 +358,22 @@ fn quic_server(
         })
     } else {
         None
+    }
+}
+
+async fn ticker(subsys: Subsystem, api: CloneableWbApi) {
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    while interval
+        .tick()
+        .or_cancel_on(subsys.shutdown_requested())
+        .await
+        .is_some()
+    {
+        if let Err(e) = api.tick().await {
+            debug!("Stopping ticker: {e}");
+            break;
+        }
     }
 }
 

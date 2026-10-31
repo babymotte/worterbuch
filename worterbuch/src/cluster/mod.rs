@@ -272,6 +272,9 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             let res = worterbuch.len();
             let _ = tx.send(res);
         }
+        WbFunction::Tick(span) => {
+            worterbuch.tick().instrument(span).await;
+        }
         WbFunction::ReGrantLocks(locks, tx, span) => {
             let res = worterbuch.re_grant_locks(locks).instrument(span).await;
             let _ = tx.send(res);
