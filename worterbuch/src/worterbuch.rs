@@ -30,7 +30,7 @@ use crate::{
     subscribers::{EventSender, LsSubscriber, Subscriber, Subscribers},
 };
 use chrono::prelude::{DateTime, Utc};
-use hashbrown::{HashMap, hash_map::Entry};
+use hashbrown::{HashMap, HashSet, hash_map::Entry};
 use hashlink::LinkedHashMap;
 use serde_json::{Value, from_str, json};
 use std::{
@@ -370,6 +370,9 @@ pub struct Worterbuch {
     config: Config,
     store: Store,
     subscriptions: Subscriptions,
+    /// index of [`Self::subscriptions`] by client, so a client's subscriptions can be found
+    /// without scanning all subscriptions
+    client_subscriptions: HashMap<ClientId, HashSet<TransactionId>>,
     ls_subscriptions: LsSubscriptions,
     subscribers: Subscribers,
     clients: HashMap<ClientId, ClientInfo>,
@@ -387,6 +390,7 @@ impl Worterbuch {
             ls_subscriptions: Default::default(),
             subscribers: Default::default(),
             subscriptions: Default::default(),
+            client_subscriptions: Default::default(),
             spub_keys: Default::default(),
             persistent_storage: Default::default(),
             followers: Default::default(),
@@ -683,7 +687,7 @@ impl Worterbuch {
             }
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
-        self.subscriptions.insert(subscription_id, path);
+        self.add_subscription(subscription_id, path);
 
         let mut client_subs = 0;
         if let Some(client) = self.clients.get_mut(&client_id) {
@@ -788,7 +792,7 @@ impl Worterbuch {
                 .expect("rx is neither closed nor dropped");
         }
         let subscription_id = SubscriptionId::new(client_id, transaction_id);
-        self.subscriptions.insert(subscription_id, path);
+        self.add_subscription(subscription_id, path);
         let mut client_subs = 0;
         if let Some(client) = self.clients.get_mut(&client_id) {
             client_subs = client.subscriptions.saturating_add(1);
@@ -842,6 +846,24 @@ impl Worterbuch {
         }
 
         Ok((rx, subscription))
+    }
+
+    fn add_subscription(&mut self, subscription_id: SubscriptionId, path: Vec<KeySegment>) {
+        self.client_subscriptions
+            .entry(subscription_id.client_id)
+            .or_default()
+            .insert(subscription_id.transaction_id);
+        self.subscriptions.insert(subscription_id, path);
+    }
+
+    fn remove_subscription(&mut self, subscription_id: &SubscriptionId) -> Option<Vec<KeySegment>> {
+        if let Entry::Occupied(mut e) = self.client_subscriptions.entry(subscription_id.client_id) {
+            e.get_mut().remove(&subscription_id.transaction_id);
+            if e.get().is_empty() {
+                e.remove();
+            }
+        }
+        self.subscriptions.remove(subscription_id)
     }
 
     async fn update_subscription_count(
@@ -998,7 +1020,7 @@ impl Worterbuch {
         client_id: ClientId,
         cause: Trace,
     ) -> WorterbuchResult<()> {
-        if let Some(path) = self.subscriptions.remove(subscription) {
+        if let Some(path) = self.remove_subscription(subscription) {
             let mut client_subs = 0;
             if let Some(client) = self.clients.get_mut(&client_id) {
                 client_subs = client.subscriptions.saturating_sub(1);
@@ -1811,11 +1833,14 @@ impl Worterbuch {
         self.clients.remove(&client_id);
 
         let subscription_keys: Vec<SubscriptionId> = self
-            .subscriptions
-            .keys()
-            .filter(|k| k.client_id == client_id)
-            .map(ToOwned::to_owned)
-            .collect();
+            .client_subscriptions
+            .get(&client_id)
+            .map(|tids| {
+                tids.iter()
+                    .map(|tid| SubscriptionId::new(client_id, *tid))
+                    .collect()
+            })
+            .unwrap_or_default();
         if !subscription_keys.is_empty() {
             debug!(
                 "Removing {} subscription(s) of client {client_id} ({}).",
@@ -2430,5 +2455,72 @@ mod test {
             r#"[{"t":{"hello":{"t":{"world":{"v":"test"}}}}},{"17e679d9-a1d5-48ed-a8ec-aee155b90557":["this/should/be/exported"]},{}]"#,
             &serde_json::to_string(&export).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn client_subscription_index_stays_consistent() {
+        let _ = dotenvy::dotenv();
+        let mut wb = Worterbuch::with_config(Config::new(None).await.unwrap());
+
+        let client_a = ClientInfo {
+            client_id: ClientId::new_v4(),
+            protocol: Protocol::Tcp,
+        };
+        let client_b = ClientInfo {
+            client_id: ClientId::new_v4(),
+            protocol: Protocol::Tcp,
+        };
+        let (eject_a, _eject_rx_a) = mpsc::channel(1);
+        let (eject_b, _eject_rx_b) = mpsc::channel(1);
+        wb.connected(client_a.clone(), None, eject_a).await.unwrap();
+        wb.connected(client_b.clone(), None, eject_b).await.unwrap();
+
+        let flags = || SubscriptionFlags::new(false, true, false);
+        let _a1 = wb
+            .subscribe(
+                "a/1".to_owned(),
+                flags(),
+                TraceData::new(1, client_a.clone()),
+            )
+            .await
+            .unwrap();
+        let _a2 = wb
+            .psubscribe(
+                "a/#".to_owned(),
+                flags(),
+                TraceData::new(2, client_a.clone()),
+            )
+            .await
+            .unwrap();
+        let _b1 = wb
+            .subscribe(
+                "b/1".to_owned(),
+                flags(),
+                TraceData::new(1, client_b.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(wb.subscriptions.len(), 3);
+        assert_eq!(wb.client_subscriptions[&client_a.client_id].len(), 2);
+        assert_eq!(wb.client_subscriptions[&client_b.client_id].len(), 1);
+
+        wb.unsubscribe(TraceData::new(1, client_a.clone()))
+            .await
+            .unwrap();
+        assert_eq!(wb.subscriptions.len(), 2);
+        assert_eq!(wb.client_subscriptions[&client_a.client_id].len(), 1);
+
+        wb.disconnected(client_a.clone(), None).await;
+        assert_eq!(wb.subscriptions.len(), 1);
+        assert!(!wb.client_subscriptions.contains_key(&client_a.client_id));
+        assert!(
+            wb.subscriptions
+                .contains_key(&SubscriptionId::new(client_b.client_id, 1))
+        );
+
+        wb.disconnected(client_b.clone(), None).await;
+        assert!(wb.subscriptions.is_empty());
+        assert!(wb.client_subscriptions.is_empty());
     }
 }
