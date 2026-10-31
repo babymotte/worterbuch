@@ -31,7 +31,47 @@ const ROOT_ID: i64 = 0;
 pub struct SqliTrie {
     conn: Connection,
     // Caches (parent_id, key_segment) -> child node id to skip re-querying shared prefixes.
-    node_cache: HashMap<(i64, String), i64>,
+    node_cache: NodeCache,
+}
+
+/// Maps (parent node id, key segment) to child node id. Children are grouped by parent so a
+/// lookup can borrow the key segment instead of allocating an owned key.
+#[derive(Default)]
+struct NodeCache(HashMap<i64, HashMap<String, i64>>);
+
+impl NodeCache {
+    fn get(&self, parent_id: i64, key_segment: &str) -> Option<i64> {
+        self.0.get(&parent_id)?.get(key_segment).copied()
+    }
+
+    fn insert(&mut self, parent_id: i64, key_segment: String, id: i64) {
+        self.0.entry(parent_id).or_default().insert(key_segment, id);
+    }
+
+    fn remove(&mut self, parent_id: i64, key_segment: &str) {
+        if let Some(children) = self.0.get_mut(&parent_id) {
+            children.remove(key_segment);
+            if children.is_empty() {
+                self.0.remove(&parent_id);
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[cfg(test)]
+    fn key_segments(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .values()
+            .flat_map(|children| children.keys().map(String::as_str))
+    }
 }
 
 impl SqliTrie {
@@ -39,7 +79,7 @@ impl SqliTrie {
         let conn = Connection::open(path)?;
         let trie = Self {
             conn,
-            node_cache: HashMap::new(),
+            node_cache: NodeCache::default(),
         };
         Ok(trie)
     }
@@ -48,7 +88,7 @@ impl SqliTrie {
         let conn = Connection::open(path)?;
         let trie = Self {
             conn,
-            node_cache: HashMap::new(),
+            node_cache: NodeCache::default(),
         };
         trie.setup()?;
         Ok(trie)
@@ -135,8 +175,7 @@ impl SqliTrie {
 
             if !has_children && !has_value {
                 let parent_id = if i == 0 { ROOT_ID } else { ids[i - 1] };
-                self.node_cache
-                    .remove(&(parent_id, key_segment[i].to_string()));
+                self.node_cache.remove(parent_id, key_segment[i]);
                 self.conn
                     .prepare_cached("DELETE FROM worterbuch WHERE id = ?1")?
                     .execute(params![node_id])?;
@@ -161,7 +200,7 @@ impl SqliTrie {
         F: FnMut(&[String], ValueEntry) -> PersistenceResult<()>,
     {
         let mut nodes: HashMap<i64, LoadedNode> = HashMap::new();
-        let mut node_cache = HashMap::new();
+        let mut node_cache = NodeCache::default();
         let mut deferred_inner_nodes: Vec<i64> = Vec::new();
         let mut deferred_entries: Vec<(i64, String)> = Vec::new();
         let mut path = Vec::new();
@@ -297,8 +336,7 @@ impl SqliTrie {
     fn walk_or_create(&mut self, key: &str) -> PersistenceResult<i64> {
         let mut parent_id = ROOT_ID;
         for key_segment in key.split('/') {
-            let cache_key = (parent_id, key_segment.to_string());
-            if let Some(&id) = self.node_cache.get(&cache_key) {
+            if let Some(id) = self.node_cache.get(parent_id, key_segment) {
                 parent_id = id;
                 continue;
             }
@@ -317,7 +355,8 @@ impl SqliTrie {
                     )?
                     .query_row(params![parent_id, key_segment], |row| row.get(0))?
             };
-            self.node_cache.insert(cache_key, id);
+            self.node_cache
+                .insert(parent_id, key_segment.to_owned(), id);
             parent_id = id;
         }
         Ok(parent_id)
@@ -329,8 +368,7 @@ impl SqliTrie {
         let mut parent_id = ROOT_ID;
         let mut ids = Vec::new();
         for key_segment in key.split('/') {
-            let cache_key = (parent_id, key_segment.to_string());
-            if let Some(&id) = self.node_cache.get(&cache_key) {
+            if let Some(id) = self.node_cache.get(parent_id, key_segment) {
                 ids.push(id);
                 parent_id = id;
                 continue;
@@ -343,7 +381,8 @@ impl SqliTrie {
                 .query_row(params![parent_id, key_segment], |row| row.get::<_, i64>(0))
             {
                 Ok(id) => {
-                    self.node_cache.insert(cache_key, id);
+                    self.node_cache
+                        .insert(parent_id, key_segment.to_owned(), id);
                     ids.push(id);
                     parent_id = id;
                 }
@@ -490,10 +529,10 @@ struct LoadedNode {
 }
 
 impl LoadedNode {
-    fn cache_as_inner_node(&mut self, id: i64, node_cache: &mut HashMap<(i64, String), i64>) {
+    fn cache_as_inner_node(&mut self, id: i64, node_cache: &mut NodeCache) {
         if !self.cached {
             self.cached = true;
-            node_cache.insert((self.parent_id, self.key_segment.clone()), id);
+            node_cache.insert(self.parent_id, self.key_segment.clone(), id);
         }
     }
 }
@@ -579,7 +618,7 @@ mod test {
         );
 
         // only inner nodes are cached: a, a/b, i
-        let mut cached: Vec<&str> = trie.node_cache.keys().map(|(_, s)| s.as_str()).collect();
+        let mut cached: Vec<&str> = trie.node_cache.key_segments().collect();
         cached.sort();
         assert_eq!(cached, vec!["a", "b", "i"]);
 
