@@ -415,6 +415,7 @@ impl Worterbuch {
         Worterbuch::new(config, store)
     }
 
+    #[cfg(feature = "sqlite")]
     pub(crate) fn into_store(self) -> Store {
         self.store
     }

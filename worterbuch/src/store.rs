@@ -454,6 +454,7 @@ impl Store {
     }
 
     /// Consume the store and return its data, excluding system topics.
+    #[cfg(feature = "sqlite")]
     pub(crate) fn into_data(mut self) -> StoreNode {
         self.data.strip();
         self.data
