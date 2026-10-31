@@ -354,8 +354,10 @@ impl SqliTrie {
         Ok(ids)
     }
 
-    pub(crate) fn clear(&self) -> PersistenceResult<()> {
+    pub(crate) fn clear(&mut self) -> PersistenceResult<()> {
         trace!("Dropping 'worterbuch', 'grave_goods', and 'last_wills' tables");
+        // node ids are re-assigned once the tables are re-created
+        self.node_cache.clear();
         self.conn.execute_batch(
             "DROP TABLE IF EXISTS worterbuch;
              DROP TABLE IF EXISTS grave_goods;
