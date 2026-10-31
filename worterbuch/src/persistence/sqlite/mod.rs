@@ -347,13 +347,11 @@ fn load(
 }
 
 fn restore_entries(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()> {
-    for (key, value) in db.load()? {
-        trace!(key, ?value, "read entry");
-        let path = parse_segments(&key)?;
-        store.insert(&path, value, true)?;
-    }
-
-    Ok(())
+    db.load(|path, value| {
+        trace!(?path, ?value, "read entry");
+        store.insert(path, value, true)?;
+        Ok(())
+    })
 }
 
 fn apply_pending_grave_goods(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()> {

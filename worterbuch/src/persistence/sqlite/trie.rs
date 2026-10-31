@@ -18,8 +18,10 @@
  */
 
 use crate::persistence::error::PersistenceResult;
+use hashbrown::HashMap;
 use rusqlite::{Connection, params};
-use std::{collections::HashMap, io, path::Path};
+use serde_json::Value;
+use std::{io, path::Path};
 use tokio::sync::oneshot;
 use tracing::trace;
 use worterbuch_common::{ValueEntry, protocol::v1::KeyValuePair};
@@ -146,35 +148,83 @@ impl SqliTrie {
         Ok(true)
     }
 
-    /// Iterate over every `(full_key, value)` pair stored in the trie.
-    /// Full keys are reconstructed by the recursive CTE, so no additional
-    /// round-trips are needed.
-    pub fn load(&self) -> PersistenceResult<Vec<(String, ValueEntry)>> {
-        let mut stmt = self.conn.prepare_cached(
-            "WITH RECURSIVE full_paths(id, full_key, value) AS (
-                     SELECT id, key_segment, value
-                     FROM worterbuch
-                     WHERE parent_id = 0 AND id != 0
-                     UNION ALL
-                     SELECT w.id, fp.full_key || '/' || w.key_segment, w.value
-                     FROM worterbuch w
-                     JOIN full_paths fp ON w.parent_id = fp.id
-                 )
-                 SELECT full_key, value
-                 FROM full_paths
-                 WHERE value IS NOT NULL",
-        )?;
+    /// Call `f` with the path and value of every entry stored in the trie and
+    /// pre-populate the node cache with all inner nodes.
+    ///
+    /// Nodes are read in a single table scan ordered by id. Since a parent is
+    /// always inserted before its children and rowids only ever increase, a
+    /// node's ancestors are normally known by the time the node itself is read,
+    /// so its path can be reconstructed right away. Entries for which that does
+    /// not hold are deferred until the scan is complete.
+    pub fn load<F>(&mut self, mut f: F) -> PersistenceResult<()>
+    where
+        F: FnMut(&[String], ValueEntry) -> PersistenceResult<()>,
+    {
+        let mut nodes: HashMap<i64, LoadedNode> = HashMap::new();
+        let mut node_cache = HashMap::new();
+        let mut deferred_inner_nodes: Vec<i64> = Vec::new();
+        let mut deferred_entries: Vec<(i64, String)> = Vec::new();
+        let mut path = Vec::new();
 
-        let pairs = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<(String, String)>>>()?
-            .into_iter()
-            .map(|(key, val_str)| serde_json::from_str(&val_str).map(|v| (key, v)))
-            .collect::<serde_json::error::Result<Vec<_>>>()?;
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, parent_id, key_segment, value
+                 FROM worterbuch
+                 WHERE id != 0
+                 ORDER BY id",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let id: i64 = row.get(0)?;
+                let parent_id: i64 = row.get(1)?;
+                let key_segment: String = row.get(2)?;
+                let value: Option<String> = row.get(3)?;
 
-        Ok(pairs)
+                if parent_id != ROOT_ID {
+                    match nodes.get_mut(&parent_id) {
+                        Some(parent) => parent.cache_as_inner_node(parent_id, &mut node_cache),
+                        None => deferred_inner_nodes.push(parent_id),
+                    }
+                }
+                nodes.insert(
+                    id,
+                    LoadedNode {
+                        parent_id,
+                        key_segment,
+                        cached: false,
+                    },
+                );
+
+                if let Some(value) = value {
+                    if build_path(&nodes, id, &mut path) {
+                        f(&path, parse_value_entry(&value)?)?;
+                    } else {
+                        deferred_entries.push((id, value));
+                    }
+                }
+            }
+        }
+
+        for id in deferred_inner_nodes {
+            if let Some(node) = nodes.get_mut(&id) {
+                node.cache_as_inner_node(id, &mut node_cache);
+            }
+        }
+
+        for (id, value) in deferred_entries {
+            if !build_path(&nodes, id, &mut path) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("trie node {id} has a missing ancestor"),
+                )
+                .into());
+            }
+            f(&path, parse_value_entry(&value)?)?;
+        }
+
+        self.node_cache = node_cache;
+
+        Ok(())
     }
 
     /// Execute `f` inside a single SQLite transaction. Use this to batch many
@@ -366,5 +416,184 @@ impl SqliTrie {
         self.conn.execute_batch("DELETE FROM last_wills")?;
 
         Ok(map)
+    }
+}
+
+/// Equivalent to `serde_json::from_str::<ValueEntry>`, but considerably faster,
+/// since it avoids serde's buffering of untagged enum variants.
+fn parse_value_entry(json: &str) -> serde_json::Result<ValueEntry> {
+    let value: Value = serde_json::from_str(json)?;
+    if let Value::Object(map) = &value
+        && map.len() == 1
+        && let Some(Value::Array(cas)) = map.get("Cas")
+        && let [cas_value, Value::Number(version)] = cas.as_slice()
+        && let Some(version) = version.as_u64()
+    {
+        return Ok(ValueEntry::Cas(cas_value.clone(), version));
+    }
+    Ok(ValueEntry::Plain(value))
+}
+
+struct LoadedNode {
+    parent_id: i64,
+    key_segment: String,
+    cached: bool,
+}
+
+impl LoadedNode {
+    fn cache_as_inner_node(&mut self, id: i64, node_cache: &mut HashMap<(i64, String), i64>) {
+        if !self.cached {
+            self.cached = true;
+            node_cache.insert((self.parent_id, self.key_segment.clone()), id);
+        }
+    }
+}
+
+/// Reconstruct the path of node `id` into `path`. Returns `false` if any of the
+/// node's ancestors is not (yet) known.
+fn build_path(nodes: &HashMap<i64, LoadedNode>, id: i64, path: &mut Vec<String>) -> bool {
+    path.clear();
+    let mut current = id;
+    while current != ROOT_ID {
+        // guard against cycles in a corrupted database
+        if path.len() >= nodes.len() {
+            return false;
+        }
+        let Some(node) = nodes.get(&current) else {
+            return false;
+        };
+        path.push(node.key_segment.to_owned());
+        current = node.parent_id;
+    }
+    path.reverse();
+    true
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use serde_json::json;
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "worterbuch-sqlitrie-{name}-{}.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    fn load_all(trie: &mut SqliTrie) -> Vec<(String, ValueEntry)> {
+        let mut entries = Vec::new();
+        trie.load(|path, value| {
+            entries.push((path.join("/"), value));
+            Ok(())
+        })
+        .expect("load failed");
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    }
+
+    #[test]
+    fn load_restores_entries_and_populates_inner_node_cache() {
+        let path = temp_db_path("load");
+
+        {
+            let mut trie = SqliTrie::open(&path).expect("could not open db");
+            trie.with_transaction(|t| {
+                t.insert("a/b/c", ValueEntry::Plain(json!(1)))?;
+                t.insert("a/b", ValueEntry::Plain(json!("inner value")))?;
+                t.insert("a/b/d", ValueEntry::Cas(json!({"x": true}), 3))?;
+                t.insert("a/e/f/g", ValueEntry::Plain(json!(null)))?;
+                t.insert("h", ValueEntry::Plain(json!([1, 2])))?;
+                t.insert("i/j", ValueEntry::Plain(json!(2)))?;
+                t.insert("i/j", ValueEntry::Plain(json!(3)))?;
+                t.delete("a/e/f/g")?;
+                Ok(())
+            })
+            .expect("transaction failed");
+        }
+
+        let mut trie = SqliTrie::open(&path).expect("could not reopen db");
+        assert!(trie.node_cache.is_empty());
+
+        let entries = load_all(&mut trie);
+        assert_eq!(
+            entries,
+            vec![
+                ("a/b".to_owned(), ValueEntry::Plain(json!("inner value"))),
+                ("a/b/c".to_owned(), ValueEntry::Plain(json!(1))),
+                ("a/b/d".to_owned(), ValueEntry::Cas(json!({"x": true}), 3)),
+                ("h".to_owned(), ValueEntry::Plain(json!([1, 2]))),
+                ("i/j".to_owned(), ValueEntry::Plain(json!(3))),
+            ]
+        );
+
+        // only inner nodes are cached: a, a/b, i
+        let mut cached: Vec<&str> = trie.node_cache.keys().map(|(_, s)| s.as_str()).collect();
+        cached.sort();
+        assert_eq!(cached, vec!["a", "b", "i"]);
+
+        // the cache must be consistent with the database
+        trie.with_transaction(|t| {
+            t.insert("a/b/k", ValueEntry::Plain(json!(4)))?;
+            t.delete("a/b/c")?;
+            Ok(())
+        })
+        .expect("transaction failed");
+        let entries = load_all(&mut trie);
+        let keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, vec!["a/b", "a/b/d", "a/b/k", "h", "i/j"]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parse_value_entry_matches_serde() {
+        for json in [
+            r#"1"#,
+            r#""text""#,
+            r#"null"#,
+            r#"{"value":"x"}"#,
+            r#"{"Cas":[{"a":1},7]}"#,
+            r#"{"Cas":[1,-7]}"#,
+            r#"{"Cas":[1,7.5]}"#,
+            r#"{"Cas":[1]}"#,
+            r#"{"Cas":[1,2,3]}"#,
+            r#"{"Cas":[1,2],"other":true}"#,
+            r#"{"Cas":"no array"}"#,
+            r#"[1,2]"#,
+        ] {
+            let expected: ValueEntry = serde_json::from_str(json).expect("serde failed");
+            assert_eq!(
+                parse_value_entry(json).expect("parse failed"),
+                expected,
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_handles_children_with_lower_ids_than_their_parents() {
+        let path = temp_db_path("order");
+
+        {
+            let trie = SqliTrie::open(&path).expect("could not open db");
+            trie.conn
+                .execute_batch(
+                    r#"INSERT INTO worterbuch (id, parent_id, key_segment, value) VALUES (5, 9, 'leaf', '1');
+                       INSERT INTO worterbuch (id, parent_id, key_segment, value) VALUES (9, 0, 'root', NULL);"#,
+                )
+                .expect("insert failed");
+        }
+
+        let mut trie = SqliTrie::open(&path).expect("could not reopen db");
+        let entries = load_all(&mut trie);
+        assert_eq!(
+            entries,
+            vec![("root/leaf".to_owned(), ValueEntry::Plain(json!(1)))]
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }
