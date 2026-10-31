@@ -35,8 +35,6 @@ FROM babymotte/worterbuch:${WORTERBUCH_VERSION}
 WORKDIR /app
 COPY --from=wbco-builder /app/target/release/worterbuch-cluster-orchestrator /usr/local/bin
 COPY --from=wbco-builder /app/target/release/udp-check /usr/local/bin
-COPY worterbuch-cluster-orchestrator/docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod a+x /app/entrypoint.sh
 ENV WORTERBUCH_LOG=info,worterbuch_cluster_orchestrator::stats=warn
 ENV WORTERBUCH_TRACING=info,worterbuch_cluster_orchestrator=debug,worterbuch=debug
 ENV WBCLUSTER_CONFIG_PATH=/cfg/config.yaml
