@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use hashbrown::{HashMap, hash_map::Entry};
+use hashbrown::HashMap;
 use miette::{IntoDiagnostic, Result, bail};
 use tracing::{debug, warn};
 use worterbuch_common::{
@@ -27,7 +27,7 @@ use worterbuch_common::{
 };
 
 type Subs = Vec<Subscriber>;
-type Tree = HashMap<KeySegment, Node>;
+type Tree = HashMap<RegularKeySegment, Node>;
 
 #[derive(Clone, Debug)]
 pub enum EventSender {
@@ -123,10 +123,33 @@ impl LsSubscriber {
     }
 }
 
+/// A node in the subscriber tree. Children for regular key segments are kept in a map keyed by
+/// the plain segment string, so lookups for concrete keys need no allocation. Wildcard children
+/// are kept separately, so they can be checked without a map lookup.
 #[derive(Default)]
-pub struct Node {
-    pub subscribers: Subs,
-    pub tree: Tree,
+struct Node {
+    subscribers: Subs,
+    tree: Tree,
+    wildcard: Option<Box<Node>>,
+    multi_wildcard: Option<Box<Node>>,
+}
+
+impl Node {
+    fn child_or_insert(&mut self, segment: &KeySegment) -> &mut Node {
+        match segment {
+            KeySegment::Regular(segment) => self.tree.entry_ref(segment.as_str()).or_default(),
+            KeySegment::Wildcard => self.wildcard.get_or_insert_default(),
+            KeySegment::MultiWildcard => self.multi_wildcard.get_or_insert_default(),
+        }
+    }
+
+    fn child_mut(&mut self, segment: &KeySegment) -> Option<&mut Node> {
+        match segment {
+            KeySegment::Regular(segment) => self.tree.get_mut(segment.as_str()),
+            KeySegment::Wildcard => self.wildcard.as_deref_mut(),
+            KeySegment::MultiWildcard => self.multi_wildcard.as_deref_mut(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -135,7 +158,7 @@ pub struct Subscribers {
 }
 
 impl Subscribers {
-    pub fn get_subscribers(&self, key: &[RegularKeySegment]) -> Vec<Subscriber> {
+    pub fn get_subscribers(&self, key: &[RegularKeySegment]) -> Vec<&Subscriber> {
         let mut all_subscribers = Vec::new();
 
         add_matches(&self.data, key, &mut all_subscribers);
@@ -148,10 +171,7 @@ impl Subscribers {
         let mut current = &mut self.data;
 
         for elem in pattern {
-            current = match current.tree.entry(elem.to_owned()) {
-                Entry::Occupied(e) => e.into_mut(),
-                Entry::Vacant(e) => e.insert(Node::default()),
-            };
+            current = current.child_or_insert(elem);
         }
 
         current.subscribers.push(subscriber);
@@ -161,7 +181,7 @@ impl Subscribers {
         let mut current = &mut self.data;
 
         for elem in pattern {
-            if let Some(node) = current.tree.get_mut(elem) {
+            if let Some(node) = current.child_mut(elem) {
                 current = node;
             } else {
                 warn!("No subscriber found for pattern {:?}", pattern);
@@ -183,52 +203,47 @@ impl Subscribers {
         removed
     }
 
-    pub fn remove_subscriber(&mut self, subscriber: Subscriber) {
-        let mut current = &mut self.data;
-
-        for elem in &subscriber.pattern {
-            if let Some(node) = current.tree.get_mut(elem) {
-                current = node;
-            } else {
-                warn!("No subscriber found for pattern {:?}", subscriber.pattern);
-                return;
-            }
-        }
-
-        current.subscribers.retain(|s| s.id != subscriber.id);
+    pub fn remove_subscriber(&mut self, subscriber: &Subscriber) {
+        self.unsubscribe(&subscriber.pattern, &subscriber.id);
     }
 }
 
-fn add_matches(
-    mut current: &Node,
+fn add_matches<'a>(
+    mut current: &'a Node,
     remaining_path: &[RegularKeySegment],
-    all_subscribers: &mut Vec<Subscriber>,
+    all_subscribers: &mut Vec<&'a Subscriber>,
 ) {
     let mut remaining_path = remaining_path;
 
     for elem in remaining_path {
         remaining_path = &remaining_path[1..];
 
-        if let Some(node) = current.tree.get(&KeySegment::Wildcard) {
+        if let Some(node) = &current.wildcard {
             add_matches(node, remaining_path, all_subscribers);
         }
 
-        if let Some(node) = current.tree.get(&KeySegment::MultiWildcard) {
+        if let Some(node) = &current.multi_wildcard {
             add_all_children(node, all_subscribers);
         }
 
-        if let Some(node) = current.tree.get(&KeySegment::from(elem.to_owned())) {
+        if let Some(node) = current.tree.get(elem.as_str()) {
             current = node;
         } else {
             return;
         }
     }
-    all_subscribers.extend(current.subscribers.clone());
+    all_subscribers.extend(&current.subscribers);
 }
 
-fn add_all_children(node: &Node, all_subscribers: &mut Vec<Subscriber>) {
-    all_subscribers.extend(node.subscribers.clone());
+fn add_all_children<'a>(node: &'a Node, all_subscribers: &mut Vec<&'a Subscriber>) {
+    all_subscribers.extend(&node.subscribers);
     for node in node.tree.values() {
+        add_all_children(node, all_subscribers);
+    }
+    if let Some(node) = &node.wildcard {
+        add_all_children(node, all_subscribers);
+    }
+    if let Some(node) = &node.multi_wildcard {
         add_all_children(node, all_subscribers);
     }
 }
@@ -308,5 +323,67 @@ mod test {
 
         let res = subscribers.get_subscribers(&reg_key_segs("test/a/b/c/d"));
         assert_eq!(res.len(), 0);
+    }
+
+    fn add(subscribers: &mut Subscribers, pattern: &str, transaction_id: u64) -> Subscriber {
+        let (tx, _rx) = channel(1);
+        let pattern = key_segs(pattern);
+        let id = SubscriptionId {
+            client_id: ClientId::nil(),
+            transaction_id,
+        };
+        let subscriber =
+            Subscriber::new(id, pattern.clone(), EventSender::PState(tx), false, false);
+        subscribers.add_subscriber(&pattern, subscriber.clone());
+        subscriber
+    }
+
+    fn matches(subscribers: &Subscribers, key: &str) -> Vec<u64> {
+        let mut tids: Vec<u64> = subscribers
+            .get_subscribers(&reg_key_segs(key))
+            .into_iter()
+            .map(|s| s.id.transaction_id)
+            .collect();
+        tids.sort();
+        tids
+    }
+
+    #[test]
+    fn pattern_matching() {
+        let mut subscribers = Subscribers::default();
+        add(&mut subscribers, "a/b/c", 1);
+        add(&mut subscribers, "a/?/c", 2);
+        add(&mut subscribers, "a/#", 3);
+        add(&mut subscribers, "?/b/#", 4);
+        add(&mut subscribers, "#", 5);
+        add(&mut subscribers, "a/b", 6);
+        add(&mut subscribers, "a/b/c", 7);
+
+        assert_eq!(matches(&subscribers, "a/b/c"), vec![1, 2, 3, 4, 5, 7]);
+        assert_eq!(matches(&subscribers, "a/x/c"), vec![2, 3, 5]);
+        // multi-wildcards do not match their parent
+        assert_eq!(matches(&subscribers, "a/b"), vec![3, 5, 6]);
+        assert_eq!(matches(&subscribers, "a"), vec![5]);
+        assert_eq!(matches(&subscribers, "x/b/y/z"), vec![4, 5]);
+        assert_eq!(matches(&subscribers, "x"), vec![5]);
+    }
+
+    #[test]
+    fn unsubscribe_and_remove() {
+        let mut subscribers = Subscribers::default();
+        let s1 = add(&mut subscribers, "a/b/c", 1);
+        let s2 = add(&mut subscribers, "a/?/c", 2);
+        let s3 = add(&mut subscribers, "a/#", 3);
+
+        assert!(subscribers.unsubscribe(&key_segs("a/?/c"), &s2.id));
+        assert!(!subscribers.unsubscribe(&key_segs("a/?/c"), &s2.id));
+        assert_eq!(matches(&subscribers, "a/b/c"), vec![1, 3]);
+
+        subscribers.remove_subscriber(&s3);
+        assert_eq!(matches(&subscribers, "a/b/c"), vec![1]);
+
+        assert!(!subscribers.unsubscribe(&key_segs("x/y"), &s1.id));
+        assert!(subscribers.unsubscribe(&key_segs("a/b/c"), &s1.id));
+        assert!(matches(&subscribers, "a/b/c").is_empty());
     }
 }

@@ -1135,13 +1135,16 @@ impl Worterbuch {
 
         let subscribers = self.subscribers.get_subscribers(path);
 
-        let filtered_subscribers: Vec<Subscriber> = subscribers
+        let filtered_subscribers: Vec<&Subscriber> = subscribers
             .into_iter()
             .filter(|s| value_changed || !s.is_unique())
             .collect();
 
         let len = filtered_subscribers.len();
         trace!(key, "Calling {} subscribers …", len);
+        // subscribers are only borrowed while sending, the ones that could not be reached are
+        // removed afterwards
+        let mut failed = Vec::new();
         for subscriber in filtered_subscribers {
             if subscriber.is_pstate_subscriber() {
                 let kvps = vec![KeyValuePair::of(key, value)];
@@ -1155,7 +1158,7 @@ impl Worterbuch {
                         .await
                 } {
                     debug!("Error calling subscriber: {e}");
-                    self.subscribers.remove_subscriber(subscriber);
+                    failed.push(subscriber.clone());
                 }
             } else {
                 let value = value.to_owned();
@@ -1169,9 +1172,13 @@ impl Worterbuch {
                         .await
                 } {
                     debug!("Error calling subscriber: {e}");
-                    self.subscribers.remove_subscriber(subscriber);
+                    failed.push(subscriber.clone());
                 }
             }
+        }
+
+        for subscriber in &failed {
+            self.subscribers.remove_subscriber(subscriber);
         }
 
         trace!("Calling {} subscribers done.", len);
