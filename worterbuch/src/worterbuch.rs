@@ -1856,8 +1856,17 @@ impl Worterbuch {
             }
         }
 
-        let grave_goods = self.grave_goods_for_client(&client_id);
-        let last_wills = self.last_will_for_client(&client_id);
+        // Grave goods and last wills are only applied by the leader. A proxy hands them to the
+        // leader along with the disconnect and receives the resulting changes like any others,
+        // so applying them locally as well would apply them twice.
+        let (grave_goods, last_wills) = if self.is_leader() {
+            (
+                self.grave_goods_for_client(&client_id),
+                self.last_will_for_client(&client_id),
+            )
+        } else {
+            (None, None)
+        };
 
         self.clients.remove(&client_id);
 
