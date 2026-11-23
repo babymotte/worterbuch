@@ -29,7 +29,7 @@ use std::{
 use tokio::{spawn, sync::mpsc, time::sleep};
 use tosub::Subsystem;
 use totils::{CancelOn, Untangle, while_select};
-use tracing::error;
+use tracing::{error, warn};
 use worterbuch_client::{
     Key, KeyValuePair, KeyValuePairs, LastWill,
     protocol::v1::{Err, LsState, PState, PStateEvent, ServerMessage, State, StateEvent},
@@ -384,7 +384,11 @@ pub async fn set_grave_goods_and_last_will(
         let last_will: LastWill = last_will
             .iter()
             .flat_map(|it| it.split(',').map(str::trim))
-            .filter_map(|it| KeyValuePair::try_from(it).ok())
+            .filter_map(|it| {
+                KeyValuePair::try_from(it)
+                    .map_err(|e| warn!("Error parsing key-value pair: {e}"))
+                    .ok()
+            })
             .collect();
         wb.set_last_will(&last_will)
             .or_cancel_on(subsys.shutdown_requested())

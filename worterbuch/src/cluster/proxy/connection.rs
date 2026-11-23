@@ -383,20 +383,30 @@ impl<'a> LeaderConnection<'a> {
                     self.queue_leader_request(request).await?;
                 }
             }
-            WbFunction::CSet(req, client_info, tx, _span) => {
+            WbFunction::CSet(req, client_info, tx, span) => {
                 let transaction_id = req.transaction_id;
-                let client_message = ClientMessage::CSet(req);
-                let request = ProxyMessage::Request(Request::new(
-                    client_message.clone(),
-                    client_info.clone(),
-                ));
-                self.register_ack_interest(
-                    client_info.client_id,
-                    transaction_id,
-                    client_message,
-                    tx,
-                );
-                self.queue_leader_request(request).await?;
+                let is_grave_goods_or_last_will =
+                    is_grave_goods_topic(&req.key) || is_last_will_topic(&req.key);
+                if is_grave_goods_or_last_will {
+                    cluster::process_api_call(
+                        self.worterbuch,
+                        WbFunction::CSet(req, client_info, tx, span),
+                    )
+                    .await;
+                } else {
+                    let client_message = ClientMessage::CSet(req);
+                    let request = ProxyMessage::Request(Request::new(
+                        client_message.clone(),
+                        client_info.clone(),
+                    ));
+                    self.register_ack_interest(
+                        client_info.client_id,
+                        transaction_id,
+                        client_message,
+                        tx,
+                    );
+                    self.queue_leader_request(request).await?;
+                }
             }
             WbFunction::SPubInit(req, client_info, tx, _span) => {
                 let transaction_id = req.transaction_id;
