@@ -12,8 +12,8 @@ resolver = "3"
 
 [workspace.dependencies]
 # Internal crates
-worterbuch-common = { version = "1.7.0-rc.8", path = "worterbuch-common" }
-worterbuch-client = { version = "1.7.0-rc.8", path = "worterbuch-client" }
+worterbuch-common = { version = "1.7.0-rc.9", path = "worterbuch-common" }
+worterbuch-client = { version = "1.7.0-rc.9", path = "worterbuch-client" }
 
 axum = "0.8.7"
 axum-extra = "0.12.2"
