@@ -95,7 +95,7 @@ async fn main() -> miette::Result<()> {
 
     let args = Args::parse();
 
-    tosub::build_default_root("worterbuch-test")
+    let _ = tosub::build_default_root("worterbuch-test")
         .with_timeout(Duration::from_secs(10))
         .start(|s| run(s, args))
         .await?;

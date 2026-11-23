@@ -13,7 +13,7 @@ categories = ["database"]
 [features]
 default = ["tcp", "unix", "ws", "quic"]
 tcp = ["tokio/net"]
-ws = ["worterbuch-common/ws", "tokio/rt", "tokio-tungstenite", "async-stream"]
+ws = ["worterbuch-common/ws", "tokio/rt", "tokio-tungstenite"]
 unix = ["tokio/net"]
 quic = [
     "dep:quinn",
@@ -29,7 +29,6 @@ wasm = [
 ]
 
 [dependencies]
-async-stream = { workspace = true, optional = true }
 futures-core = { workspace = true, optional = true }
 futures-util = { workspace = true }
 getrandom = { workspace = true, optional = true, features = ["wasm_js"] }

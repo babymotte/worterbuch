@@ -22,6 +22,7 @@ telemetry = [
     "opentelemetry_sdk",
     "tracing-opentelemetry",
     "opentelemetry-appender-tracing",
+    "gethostname",
 ]
 tokio-console = ["console-subscriber", "tosub/tokio_unstable"]
 commercial = ["worterbuch-common/commercial"]
@@ -45,7 +46,7 @@ hashbrown = { workspace = true, features = ["serde"] }
 hashlink = { workspace = true }
 headers = { workspace = true }
 hex = { workspace = true }
-hostname = { workspace = true }
+gethostname = { workspace = true, optional = true }
 http-body-util = { workspace = true }
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 lazy_static = { workspace = true }
@@ -75,7 +76,6 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "tracing"] }
-tokio-metrics = { workspace = true }
 tokio-stream = { workspace = true }
 tosub = { workspace = true }
 totils = { workspace = true }

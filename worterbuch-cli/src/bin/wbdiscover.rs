@@ -139,7 +139,7 @@ async fn main() -> miette::Result<()> {
     logging::init()?;
     let args: Args = Args::parse();
 
-    tosub::build_default_root("wbdiscover")
+    let _ = tosub::build_default_root("wbdiscover")
         .start(move |s| run(s, args))
         .await?;
 

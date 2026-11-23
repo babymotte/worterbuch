@@ -49,7 +49,7 @@ async fn main() -> miette::Result<()> {
 
     init_logging();
 
-    tosub::build_default_root("worterbuch-tui")
+    let _ = tosub::build_default_root("worterbuch-tui")
         .start(backend::start)
         .await?;
 

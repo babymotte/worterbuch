@@ -73,7 +73,7 @@ struct Args {
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     logging::init()?;
-    tosub::build_default_root("wbspub").start(run).await?;
+    let _ = tosub::build_default_root("wbspub").start(run).await?;
 
     Ok(())
 }

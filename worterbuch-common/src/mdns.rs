@@ -79,8 +79,11 @@ impl MdnsRegistryAgent {
 
         while let Ok(event) = shutdown_complete.recv_async().await {
             match event {
-                mdns_sd::DaemonStatus::Running => {
-                    tracing::info!("Still waiting for mDNS daemon to shut down …");
+                mdns_sd::DaemonStatus::Running(state) => {
+                    tracing::info!(
+                        "Still waiting for mDNS daemon to shut down (currently {:?}) …",
+                        state
+                    );
                 }
                 mdns_sd::DaemonStatus::Shutdown => break,
                 _ => warn!("Received unexpected mDNS daemon status: {:?}", event),

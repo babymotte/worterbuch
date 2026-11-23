@@ -12,7 +12,7 @@ categories = ["database-implementations"]
 default-run = "worterbuch-cluster-orchestrator"
 
 [features]
-jemalloc = ["worterbuch-common/jemalloc"]
+jemalloc = ["worterbuch-common/jemalloc", "tower-http"]
 default = ["jemalloc"]
 
 [dependencies]
@@ -43,7 +43,7 @@ tokio = { workspace = true, features = [
 ] }
 tokio-process-terminate = { workspace = true }
 tosub = { workspace = true }
-tower-http = { workspace = true, features = ["trace", "cors"] }
+tower-http = { workspace = true, features = ["trace", "cors"], optional = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

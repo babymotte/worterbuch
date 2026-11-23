@@ -23,7 +23,7 @@ use worterbuch_cluster_orchestrator::instrument_and_run_main;
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
 
-    tosub::build_root("cluster-orchestrator")
+    let _ = tosub::build_root("cluster-orchestrator")
         .catch_signals()
         .with_timeout(Duration::from_secs(5))
         .start(instrument_and_run_main)

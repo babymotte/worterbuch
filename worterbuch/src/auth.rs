@@ -193,7 +193,7 @@ pub fn get_claims(jwt: Option<&str>, config: &Config) -> AuthorizationResult<Jwt
             let (alg, key) = match &header.alg {
                 Algorithm::ES256 => (header.alg, DecodingKey::from_ec_pem(key.as_ref())?),
                 Algorithm::EdDSA => (header.alg, DecodingKey::from_ed_pem(key.as_ref())?),
-                Algorithm::HS256 => (header.alg, DecodingKey::from_secret(key.as_ref())),
+                Algorithm::HS256 => (header.alg, DecodingKey::from_secret(key.as_ref())?),
                 _ => {
                     return Err(AuthorizationError::UnsupportedEncryptionAlgorithm(
                         header.alg,

@@ -69,9 +69,7 @@ async fn start() -> miette::Result<()> {
     let (_telemetry_drop_guard, log_reload_handle) = {
         use worterbuch::{Commands, telemetry};
 
-        let hostname = hostname::get()
-            .into_diagnostic()
-            .wrap_err("Failed to get hostname")?;
+        let hostname = gethostname::gethostname();
         let cluster_role = match args.command {
             Some(Commands::Leader { .. }) => Some("leader".to_owned()),
             Some(Commands::Follower { .. }) => Some("follower".to_owned()),
@@ -120,7 +118,7 @@ async fn start() -> miette::Result<()> {
         root_builder = root_builder.shutdown_on_stdin_close();
     }
 
-    root_builder
+    let _ = root_builder
         .start(move |s| async move {
             if let Some(reload_interval) = reload_interval {
                 log_reload_handle.start_log_targets_reload_loop(&s, reload_interval);
