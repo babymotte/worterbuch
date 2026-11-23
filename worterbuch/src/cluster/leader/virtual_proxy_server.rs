@@ -460,7 +460,7 @@ impl<'a> VirtualProxyServer<'a> {
             ),
             value: json!(grave_goods),
         };
-        self.worterbuch.set(req, client_info.clone()).await?;
+        self.worterbuch.force_set(req, client_info.clone()).await?;
 
         let req = Set {
             transaction_id: 1,
@@ -472,7 +472,7 @@ impl<'a> VirtualProxyServer<'a> {
             ),
             value: json!(last_will),
         };
-        self.worterbuch.set(req, client_info).await?;
+        self.worterbuch.force_set(req, client_info).await?;
 
         trace!(exit = "apply_grave_goods_and_last_will", %client_id,);
         Ok(())

@@ -72,12 +72,12 @@ async fn process_api_call(worterbuch: &mut Worterbuch, function: WbFunction) {
             let res = worterbuch.cget(&req.key);
             let _ = tx.send(res);
         }
-        WbFunction::Set(req, client_info, tx, span) => {
+        WbFunction::Set(req, client_info, tx, force, span) => {
             let res = worterbuch
                 .set(
                     req.key,
                     req.value,
-                    false,
+                    force,
                     TraceData::new(req.transaction_id, client_info),
                 )
                 .instrument(span)

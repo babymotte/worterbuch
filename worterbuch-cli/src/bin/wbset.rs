@@ -29,7 +29,7 @@ use worterbuch_cli::{
     set_grave_goods_and_last_will,
 };
 use worterbuch_client::config::Config;
-use worterbuch_client::{AuthToken, connect, logging};
+use worterbuch_client::{AuthToken, CasVersion, connect, logging};
 
 #[derive(Parser)]
 #[command(author, version, about = "Set values of keys on a Wörterbuch.", long_about = None)]
@@ -68,6 +68,9 @@ struct Args {
     /// Grave goods to be buried by the client when it disconnects
     #[arg(long = "gg", name = "<KEY>[,<KEY>,…]")]
     grave_goods: Option<Vec<String>>,
+    /// Perform compare-and-swap sets, starting with the given version number
+    #[arg(short, long, name = "VERSION")]
+    cas: Option<CasVersion>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -130,6 +133,8 @@ async fn run(subsys: Subsystem) -> Result<()> {
     });
     let mut done = false;
 
+    let mut cas_version = args.cas;
+
     loop {
         if done && acked >= trans_id {
             break;
@@ -148,7 +153,15 @@ async fn run(subsys: Subsystem) -> Result<()> {
                 print_message(&msg, json, false);
             },
             recv = next_item(&mut rx, done) => match recv {
-                Some((key, value)) => trans_id = wb.set_async(key, &value).await?,
+                Some((key, value)) => trans_id = {
+                    match cas_version {
+                        Some(version) => {
+                            cas_version = Some(version + 1);
+                            wb.cset_async(key, &value, version).await?
+                        },
+                        None => wb.set_async(key, &value).await?
+                    }
+                },
                 None => done = true,
             },
         }

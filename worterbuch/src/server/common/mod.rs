@@ -29,8 +29,8 @@ use worterbuch_common::{
     Protocol, RegularKeySegment, Subscription, ValueEntry, WbApi,
     error::{WorterbuchError, WorterbuchResult},
     protocol::v1::{
-        CSet, CasVersion, ClientInfo, Delete, Get, GraveGoods, Key, KeyValuePairs, LastWill, Lock,
-        Ls, PDelete, PGet, PLs, PSubscribe, ProtocolMajorVersion, ProtocolVersion,
+        CSet, CasVersion, ClientInfo, Delete, ForceSet, Get, GraveGoods, Key, KeyValuePairs,
+        LastWill, Lock, Ls, PDelete, PGet, PLs, PSubscribe, ProtocolMajorVersion, ProtocolVersion,
         ProtocolVersionSegment, Publish, RequestPattern, SPub, SPubInit, Set, Subscribe,
         SubscribeLs, TransactionId, Unsubscribe, UnsubscribeLs, Value,
     },
@@ -70,7 +70,13 @@ pub enum WbFunction {
         oneshot::Sender<WorterbuchResult<(Value, CasVersion)>>,
         Span,
     ),
-    Set(Set, ClientInfo, oneshot::Sender<WorterbuchResult<()>>, Span),
+    Set(
+        Set,
+        ClientInfo,
+        oneshot::Sender<WorterbuchResult<()>>,
+        ForceSet,
+        Span,
+    ),
     CSet(
         CSet,
         ClientInfo,
@@ -409,6 +415,13 @@ impl CloneableWbApi {
         self.send_with_timeout(function, "disconnected").await?;
         Ok(())
     }
+
+    #[instrument(level=Level::TRACE, skip(self), err)]
+    pub async fn force_set(&self, req: Set, client_info: ClientInfo) -> WorterbuchResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let function = WbFunction::Set(req, client_info, tx, true, Span::current());
+        self.request_with_timeout(function, "set", rx).await
+    }
 }
 
 impl WbApi for CloneableWbApi {
@@ -446,7 +459,7 @@ impl WbApi for CloneableWbApi {
     #[instrument(level=Level::TRACE, skip(self), err)]
     async fn set(&self, req: Set, client_info: ClientInfo) -> WorterbuchResult<()> {
         let (tx, rx) = oneshot::channel();
-        let function = WbFunction::Set(req, client_info, tx, Span::current());
+        let function = WbFunction::Set(req, client_info, tx, false, Span::current());
         self.request_with_timeout(function, "set", rx).await
     }
 

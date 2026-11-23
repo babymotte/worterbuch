@@ -358,14 +358,14 @@ impl<'a> LeaderConnection<'a> {
                 )
                 .await;
             }
-            WbFunction::Set(req, client_info, tx, span) => {
+            WbFunction::Set(req, client_info, tx, force, span) => {
                 let transaction_id = req.transaction_id;
                 let is_grave_goods_or_last_will =
                     is_grave_goods_topic(&req.key) || is_last_will_topic(&req.key);
                 if is_grave_goods_or_last_will {
                     cluster::process_api_call(
                         self.worterbuch,
-                        WbFunction::Set(req, client_info, tx, span),
+                        WbFunction::Set(req, client_info, tx, force, span),
                     )
                     .await;
                 } else {
