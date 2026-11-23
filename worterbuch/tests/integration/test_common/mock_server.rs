@@ -228,7 +228,7 @@ async fn process_line(
         ProxyMessage::Handshake(_) => {
             bail!("received handshake after initial handshake");
         }
-        ProxyMessage::Connected(Connected { client_info }) => {
+        ProxyMessage::Connected(Connected { client_info, .. }) => {
             info!("Client {} connected", client_info.client_id);
         }
         ProxyMessage::Disconnected(Disconnected { client_info, .. }) => {

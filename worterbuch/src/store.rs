@@ -36,8 +36,8 @@ use worterbuch_common::{
     error::{WorterbuchError, WorterbuchResult},
     format_path,
     protocol::v1::{
-        CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_LOCKS,
-        SYSTEM_TOPIC_ROOT, Value,
+        CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS,
+        SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_ROOT, Value,
     },
 };
 
@@ -1285,7 +1285,11 @@ impl Store {
     /// Leader-owned subtrees (see [`LEADER_OWNED_SYS_TOPICS`]) are not taken from the local store
     /// but from `data`, since local copies may be stale (e.g. locks held by clients of a previous
     /// leader instance). If `data` does not contain them, they are dropped.
-    pub(crate) fn merge_local_sys_into(&self, data: &mut StoreNode) {
+    ///
+    /// The exception are the grave goods and last wills of `local_clients`: a proxy keeps those
+    /// to itself and only hands them to the leader when the client disconnects, so the leader
+    /// does not know them and the local entries must be retained.
+    pub(crate) fn merge_local_sys_into(&self, data: &mut StoreNode, local_clients: &[ClientId]) {
         let leader_owned = data
             .get_child_mut(SYSTEM_TOPIC_ROOT)
             .and_then(|sys| sys.tree.take())
@@ -1310,10 +1314,38 @@ impl Store {
             sys.add_or_replace_child(key, node);
         }
 
+        self.retain_proxy_local_client_entries(&mut sys, local_clients);
+
         if sys.value.is_some() || sys.tree.as_ref().is_some_and(|t| !t.is_empty()) {
             data.add_or_replace_child(SYSTEM_TOPIC_ROOT.to_owned(), sys);
         } else {
             data.strip();
+        }
+    }
+}
+
+impl Store {
+    fn retain_proxy_local_client_entries(&self, sys: &mut StoreNode, local_clients: &[ClientId]) {
+        let Some(local_clients_node) = self
+            .data
+            .get_child(SYSTEM_TOPIC_ROOT)
+            .and_then(|sys| sys.get_child(SYSTEM_TOPIC_CLIENTS))
+        else {
+            return;
+        };
+
+        for client_id in local_clients {
+            let client_id = client_id.to_string();
+            let Some(local_client) = local_clients_node.get_child(&client_id) else {
+                continue;
+            };
+            for field in [SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL] {
+                if let Some(entry) = local_client.get_child(field) {
+                    let (clients, _) = sys.get_or_create_child(SYSTEM_TOPIC_CLIENTS.to_owned());
+                    let (client, _) = clients.get_or_create_child(client_id.clone());
+                    client.add_or_replace_child(field.to_owned(), entry.to_owned());
+                }
+            }
         }
     }
 }
@@ -2020,8 +2052,16 @@ mod test {
     }
 
     fn sync_proxy(leader: &mut Store, proxy: &mut Store) -> Vec<String> {
+        sync_proxy_with_clients(leader, proxy, &[])
+    }
+
+    fn sync_proxy_with_clients(
+        leader: &mut Store,
+        proxy: &mut Store,
+        local_clients: &[ClientId],
+    ) -> Vec<String> {
         let mut data = leader.export_for_proxy();
-        proxy.merge_local_sys_into(&mut data);
+        proxy.merge_local_sys_into(&mut data, local_clients);
         let diff = proxy.reset_with_diff(data);
         let mut removed: Vec<String> = diff.removed.iter().map(|e| e.path.join("/")).collect();
         removed.sort();
@@ -2133,5 +2173,54 @@ mod test {
         assert_eq!(restored.get(&reg_key_segs("b")), Some(&json!(null)));
         assert!(restored.data.is_clean());
         assert_eq!(restored.len(), 3);
+    }
+
+    #[test]
+    fn proxy_sync_retains_grave_goods_and_last_will_of_local_clients() {
+        let local = ClientId::from_u128(1);
+        let remote = ClientId::from_u128(2);
+        let mut proxy = store_with(&[
+            (&format!("$SYS/clients/{local}/clientName"), json!("local")),
+            (&format!("$SYS/clients/{local}/graveGoods"), json!(["gg/#"])),
+            (
+                &format!("$SYS/clients/{local}/lastWill"),
+                json!([{"key": "lw", "value": 1}]),
+            ),
+            (&format!("$SYS/clients/{remote}/graveGoods"), json!(["x/#"])),
+            (&format!("$SYS/clients/{remote}/lastWill"), json!([])),
+        ]);
+        // new leader re-registered the local client (incl. its name), never heard of `remote`
+        let mut leader = store_with(&[
+            (&format!("$SYS/clients/{local}/clientName"), json!("local")),
+            (&format!("$SYS/clients/{local}/protocol"), json!("TCP")),
+        ]);
+
+        let removed = sync_proxy_with_clients(&mut leader, &mut proxy, &[local]);
+
+        let get = |store: &Store, field: &str, client: ClientId| {
+            store
+                .get(&reg_key_segs(&format!("$SYS/clients/{client}/{field}")))
+                .cloned()
+        };
+        assert_eq!(get(&proxy, "graveGoods", local), Some(json!(["gg/#"])));
+        assert_eq!(
+            get(&proxy, "lastWill", local),
+            Some(json!([{"key": "lw", "value": 1}]))
+        );
+        assert_eq!(get(&proxy, "clientName", local), Some(json!("local")));
+        assert_eq!(get(&proxy, "protocol", local), Some(json!("TCP")));
+        assert_eq!(get(&proxy, "graveGoods", remote), None);
+        assert_eq!(get(&proxy, "lastWill", remote), None);
+        assert!(proxy.data.is_clean());
+
+        // retained entries are not reported as removed, so subscribers see no flicker
+        assert!(
+            !removed.iter().any(|k| k.contains(&local.to_string())),
+            "{removed:?}"
+        );
+        assert!(
+            removed.contains(&format!("$SYS/clients/{remote}/graveGoods")),
+            "{removed:?}"
+        );
     }
 }

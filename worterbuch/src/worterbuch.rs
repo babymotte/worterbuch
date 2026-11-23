@@ -1956,7 +1956,8 @@ impl Worterbuch {
         retain_sys: bool,
     ) -> WorterbuchResult<()> {
         if retain_sys {
-            self.store.merge_local_sys_into(&mut data);
+            let local_clients: Vec<ClientId> = self.clients.keys().copied().collect();
+            self.store.merge_local_sys_into(&mut data, &local_clients);
         }
 
         self.reset_persistent_storage(&data).await?;
@@ -2467,6 +2468,7 @@ mod test {
                 ClientInfo {
                     client_id: INTERNAL_CLIENT_ID,
                     protocol: Protocol::Local,
+                    client_name: None,
                 },
             ),
         )
@@ -2481,6 +2483,7 @@ mod test {
                 ClientInfo {
                     client_id: INTERNAL_CLIENT_ID,
                     protocol: Protocol::Http,
+                    client_name: None,
                 },
             ),
         )
@@ -2495,6 +2498,7 @@ mod test {
                 ClientInfo {
                     client_id: INTERNAL_CLIENT_ID,
                     protocol: Protocol::Http,
+                    client_name: None,
                 },
             ),
         )
@@ -2516,10 +2520,12 @@ mod test {
         let client_a = ClientInfo {
             client_id: ClientId::new_v4(),
             protocol: Protocol::Tcp,
+            client_name: None,
         };
         let client_b = ClientInfo {
             client_id: ClientId::new_v4(),
             protocol: Protocol::Tcp,
+            client_name: None,
         };
         let (eject_a, _eject_rx_a) = mpsc::channel(1);
         let (eject_b, _eject_rx_b) = mpsc::channel(1);
@@ -2605,6 +2611,7 @@ mod test {
         let client = ClientInfo {
             client_id: ClientId::new_v4(),
             protocol: Protocol::Tcp,
+            client_name: None,
         };
         let (eject, _eject_rx) = mpsc::channel(1);
         wb.connected(client.clone(), None, eject).await.unwrap();

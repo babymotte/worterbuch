@@ -41,8 +41,9 @@ use tracing::{Level, debug, enabled, error, info, instrument, trace, warn};
 use worterbuch_common::{
     ClientId, Protocol, WbApi,
     protocol::v1::{
-        ClientInfo, ClientMessage, GraveGoods, LastWill, SYSTEM_TOPIC_CLIENTS,
-        SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT, ServerMessage, Set,
+        ClientInfo, ClientMessage, GraveGoods, LastWill, SYSTEM_TOPIC_CLIENT_NAME,
+        SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_GRAVE_GOODS, SYSTEM_TOPIC_LAST_WILL, SYSTEM_TOPIC_ROOT,
+        ServerMessage, Set,
     },
     topic,
 };
@@ -58,6 +59,7 @@ impl VirtualProxyClientHandler {
         ClientInfo {
             client_id,
             protocol: self.protocol.clone(),
+            client_name: None,
         }
     }
 }
@@ -102,6 +104,7 @@ impl<'a> Drop for VirtualProxyServer<'a> {
                         ClientInfo {
                             client_id,
                             protocol,
+                            client_name: None,
                         },
                         None,
                     )
@@ -151,14 +154,16 @@ impl<'a> VirtualProxyServer<'a> {
             ProxyMessage::Handshake(_) => {
                 bail!("received handshake message from proxy after initial handshake");
             }
-            ProxyMessage::Connected(Connected { client_info }) => {
+            ProxyMessage::Connected(Connected { mut client_info }) => {
                 let client_id = client_info.client_id;
+                let client_name = client_info.client_name.take();
                 self.spawn_virtual_client(
-                    client_info,
+                    client_info.clone(),
                     self.config.clone(),
                     self.worterbuch.named(format!("client/{client_id}")),
                 )
                 .await?;
+                self.restore_client_name(client_info, client_name).await?;
             }
             ProxyMessage::Disconnected(Disconnected {
                 client_info,
@@ -201,6 +206,7 @@ impl<'a> VirtualProxyServer<'a> {
         let client_info = ClientInfo {
             client_id,
             protocol: proxied_protocol.clone(),
+            client_name: None,
         };
 
         // register the client before anything else so that the registration is guaranteed to be processed
@@ -315,6 +321,7 @@ impl<'a> VirtualProxyServer<'a> {
         ClientInfo {
             client_id,
             protocol,
+            ..
         }: ClientInfo,
     ) -> miette::Result<bool> {
         trace!(enter = "process_client_request", %client_id, ?msg);
@@ -343,15 +350,18 @@ impl<'a> VirtualProxyServer<'a> {
         let mut client_txs = HashMap::new();
 
         for Connected { client_info } in connected_clients {
+            let mut client_info = client_info.to_owned();
+            let client_id = client_info.client_id;
+            let client_name = client_info.client_name.take();
             let tx = self
                 .spawn_virtual_client(
-                    client_info.to_owned(),
+                    client_info.clone(),
                     self.config.clone(),
-                    self.worterbuch
-                        .named(format!("client/{}", client_info.client_id)),
+                    self.worterbuch.named(format!("client/{client_id}")),
                 )
                 .await?;
-            client_txs.insert(client_info.client_id, tx);
+            client_txs.insert(client_id, tx);
+            self.restore_client_name(client_info, client_name).await?;
         }
 
         trace!(exit = "register_clients");
@@ -398,6 +408,38 @@ impl<'a> VirtualProxyServer<'a> {
 
         trace!(exit = "restore_locks");
         Ok(updated_locks)
+    }
+
+    /// Re-apply the client name a proxy sent along when (re-)registering a client, e.g. after it
+    /// switched over to a new leader that has never seen the client before.
+    ///
+    /// The name is taken out of the [`ClientInfo`] before it is used anywhere else, so the
+    /// virtual client's info (and thus its traces) look the same as for any other client.
+    async fn restore_client_name(
+        &self,
+        client_info: ClientInfo,
+        client_name: Option<String>,
+    ) -> miette::Result<()> {
+        let Some(client_name) = client_name else {
+            return Ok(());
+        };
+        let client_id = client_info.client_id;
+        trace!(enter = "restore_client_name", %client_id, ?client_name);
+
+        let req = Set {
+            transaction_id: 1,
+            key: topic!(
+                SYSTEM_TOPIC_ROOT,
+                SYSTEM_TOPIC_CLIENTS,
+                client_id,
+                SYSTEM_TOPIC_CLIENT_NAME
+            ),
+            value: json!(client_name),
+        };
+        self.worterbuch.set(req, client_info).await?;
+
+        trace!(exit = "restore_client_name", %client_id);
+        Ok(())
     }
 
     async fn apply_grave_goods_and_last_will(

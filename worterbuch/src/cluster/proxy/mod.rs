@@ -781,6 +781,10 @@ fn connected_clients(worterbuch: &Worterbuch) -> Vec<Connected> {
             client_info: ClientInfo {
                 client_id: *client_id,
                 protocol: client_info.protocol.clone(),
+                // the leader we are re-registering with may not know the client's name (e.g. after
+                // a leader restart), so send it along so it can be restored. Grave goods and last
+                // will stay local to the proxy until the client disconnects.
+                client_name: worterbuch.client_name(*client_id),
             },
         })
         .collect()

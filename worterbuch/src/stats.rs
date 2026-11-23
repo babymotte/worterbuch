@@ -48,6 +48,7 @@ fn client_info() -> ClientInfo {
     ClientInfo {
         client_id: INTERNAL_CLIENT_ID,
         protocol: Protocol::Local,
+        client_name: None,
     }
 }
 

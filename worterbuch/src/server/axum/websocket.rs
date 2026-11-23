@@ -51,6 +51,7 @@ pub(crate) async fn serve(
     let client_info = ClientInfo {
         client_id,
         protocol: Protocol::Ws,
+        client_name: None,
     };
 
     match worterbuch
@@ -126,6 +127,7 @@ async fn serve_loop(
     let client_info = ClientInfo {
         client_id,
         protocol: Protocol::Ws,
+        client_name: None,
     };
 
     let mut proto = Proto::new(

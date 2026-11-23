@@ -424,6 +424,7 @@ mod test {
                 client_info: ClientInfo {
                     client_id,
                     protocol: Protocol::Local,
+                    client_name: None,
                 },
                 method: Method::Delete,
                 transaction_id: 1,
@@ -455,6 +456,7 @@ mod test {
                 client_info: ClientInfo {
                     client_id,
                     protocol: Protocol::Tcp,
+                    client_name: None,
                 },
                 method: Method::Delete,
                 transaction_id: 1,
@@ -488,6 +490,7 @@ mod test {
                 ClientInfo {
                     client_id,
                     protocol: Protocol::Tcp,
+                    client_name: None,
                 },
             ))),
         };
@@ -521,6 +524,7 @@ mod test {
                         client_info: ClientInfo {
                             client_id,
                             protocol: Protocol::Local,
+                            client_name: None,
                         },
                         transaction_id: 123,
                         method: Method::Unsubscribe,

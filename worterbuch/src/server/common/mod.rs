@@ -608,6 +608,7 @@ impl WbApi for CloneableWbApi {
             ClientInfo {
                 client_id,
                 protocol: self.protocol.clone(),
+                client_name: None,
             },
             json,
             tx,

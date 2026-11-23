@@ -205,6 +205,7 @@ async fn serve(
     let client_info = ClientInfo {
         client_id,
         protocol: Protocol::Tcp,
+        client_name: None,
     };
 
     match worterbuch
@@ -294,6 +295,7 @@ async fn serve_loop(
     let client_info = ClientInfo {
         client_id,
         protocol: Protocol::Tcp,
+        client_name: None,
     };
 
     let proto = Proto::new(

@@ -286,6 +286,11 @@ components:
           format: uuid
         protocol:
           $ref: "#/components/schemas/Protocol"
+        clientName:
+          description: >-
+            The client's name, see $SYS/clients/<clientId>/clientName. Only included where the
+            name needs to be transferred explicitly, so clients must not rely on its presence.
+          type: string
       additionalProperties: false
       required:
         - clientId

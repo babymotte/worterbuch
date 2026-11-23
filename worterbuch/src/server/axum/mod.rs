@@ -288,6 +288,7 @@ fn http_client_info() -> ClientInfo {
     ClientInfo {
         client_id: Uuid::new_v4(),
         protocol: Protocol::Http,
+        client_name: None,
     }
 }
 

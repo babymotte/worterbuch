@@ -215,6 +215,10 @@ impl TraceData {
 pub struct ClientInfo {
     pub client_id: ClientId,
     pub protocol: Protocol,
+    /// The client's name (see `$SYS/clients/<client_id>/clientName`). Only set where it needs to be
+    /// transferred explicitly, e.g. when a proxy re-registers its clients with a new leader.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub client_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

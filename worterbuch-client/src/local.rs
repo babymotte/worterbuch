@@ -93,6 +93,7 @@ async fn forward_loop(
     let client_info = ClientInfo {
         client_id: INTERNAL_CLIENT_ID,
         protocol: Protocol::Local,
+        client_name: None,
     };
 
     while let Some(client_message) = crx.recv().await {

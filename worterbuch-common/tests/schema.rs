@@ -243,6 +243,7 @@ fn client_info() -> ClientInfo {
     ClientInfo {
         client_id: Uuid::new_v4(),
         protocol: Protocol::Tcp,
+        client_name: None,
     }
 }
 
@@ -262,6 +263,7 @@ fn traces() -> Vec<Trace> {
         Trace::InternalAction(InternalAction::ClientConnected(ClientInfo {
             client_id: Uuid::new_v4(),
             protocol: Protocol::Proxied(Box::new(Protocol::Ws)),
+            client_name: None,
         })),
         Trace::InternalAction(InternalAction::ClientDisconnected(client_info())),
         Trace::InternalAction(InternalAction::SubscriptionsChanged { cause: cause() }),

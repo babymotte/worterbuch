@@ -1071,6 +1071,7 @@ mod test {
                 ClientInfo {
                     client_id: INTERNAL_CLIENT_ID,
                     protocol: Protocol::Local,
+                    client_name: None,
                 },
             ),
         )
