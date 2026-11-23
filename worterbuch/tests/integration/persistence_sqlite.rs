@@ -15,11 +15,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::test_common::TestRunner;
-
 #[cfg(feature = "sqlite")]
 #[test]
 fn grave_goods_and_last_will_are_persisted_with_sqlite_storage_and_applied_after_crash() {
+    use crate::test_common::TestRunner;
+
     let runner = TestRunner::new(
         "./tests/json/server_setup_sqlite.json",
         "./tests/json/test_grave_goods_last_will.json",

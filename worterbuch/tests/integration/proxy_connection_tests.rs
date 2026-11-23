@@ -39,7 +39,7 @@ async fn set_and_get_sequences_are_preserved() {
     let proxy_port = 8081;
     let http_port = 8080;
 
-    tosub::build_default_root("set_and_get_sequences_are_preserved")
+    let _ = tosub::build_default_root("set_and_get_sequences_are_preserved")
         .start(move |s| {
             run(
                 s,
@@ -64,7 +64,7 @@ async fn set_and_get_continue_being_processed_after_proxy_reconnect() {
     let proxy_port = 8091;
     let http_port = 8090;
 
-    tosub::build_default_root("set_and_get_continue_being_processed_after_proxy_reconnect")
+    let _ = tosub::build_default_root("set_and_get_continue_being_processed_after_proxy_reconnect")
         .start(move |s| {
             run(
                 s,

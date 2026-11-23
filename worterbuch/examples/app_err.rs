@@ -22,7 +22,7 @@ use worterbuch::error::{IntoWbAppResult, WorterbuchAppResult, WrappedResult};
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-    tosub::build_default_root("worterbuch").start(run).await?;
+    let _ = tosub::build_default_root("worterbuch").start(run).await?;
     Ok(())
 }
 
