@@ -35,10 +35,22 @@ use worterbuch_common::{
     LockLostSender, LockLostSenders, RegularKeySegment, SubscriptionId, ValueEntry,
     error::{WorterbuchError, WorterbuchResult},
     format_path,
-    protocol::v1::{CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_ROOT, Value},
+    protocol::v1::{
+        CasVersion, KeyValuePair, KeyValuePairs, SYSTEM_TOPIC_CLIENTS, SYSTEM_TOPIC_LOCKS,
+        SYSTEM_TOPIC_ROOT, Value,
+    },
 };
 
 type Tree<V> = HashMap<RegularKeySegment, Node<V>>;
+
+/// Children of `$SYS` that are exclusively written by the leader and mirrored to proxies. When a
+/// proxy (re-)syncs with a leader, its local copies of these subtrees are stale and must be
+/// replaced with the leader's version instead of being retained.
+pub(crate) const LEADER_OWNED_SYS_TOPICS: [&str; 2] = [SYSTEM_TOPIC_LOCKS, SYSTEM_TOPIC_CLIENTS];
+
+fn is_leader_owned_sys_topic(key: &str) -> bool {
+    LEADER_OWNED_SYS_TOPICS.contains(&key)
+}
 type SubscribersTree = HashMap<RegularKeySegment, SubscribersNode>;
 
 pub type AffectedLsSubscribers = (Vec<LsSubscriber>, Vec<RegularKeySegment>);
@@ -185,11 +197,26 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node<V> {
     #[serde(rename = "v")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default = "Option::default",
+        deserialize_with = "deserialize_present_value"
+    )]
     pub value: Option<V>,
     #[serde(rename = "t")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tree: Option<Tree<V>>,
+}
+
+/// Deserializes a present `"v"` field as `Some`, even if it is `null`. A missing field still
+/// yields `None` via `#[serde(default)]`. Without this, a key whose value is JSON `null`
+/// (serialized as `"v": null`) would come back as a node without a value.
+fn deserialize_present_value<'de, V, D>(deserializer: D) -> Result<Option<V>, D::Error>
+where
+    V: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    V::deserialize(deserializer).map(Some)
 }
 
 impl<V> Node<V> {
@@ -204,6 +231,21 @@ impl<V> Node<V> {
     fn strip(&mut self) {
         if let Some(t) = &mut self.tree {
             t.remove(SYSTEM_TOPIC_ROOT);
+        }
+    }
+
+    /// Like [`Self::strip`], but keeps the leader-owned subtrees of `$SYS` (see
+    /// [`LEADER_OWNED_SYS_TOPICS`]), since proxies mirror those from the leader.
+    fn strip_for_proxy(&mut self) {
+        let Some(sys) = self.get_child_mut(SYSTEM_TOPIC_ROOT) else {
+            return;
+        };
+        sys.value = None;
+        if let Some(t) = &mut sys.tree {
+            t.retain(|key, _| is_leader_owned_sys_topic(key));
+        }
+        if sys.tree.as_ref().is_none_or(|t| t.is_empty()) {
+            self.strip();
         }
     }
 
@@ -436,10 +478,25 @@ pub struct Store {
 impl Store {
     #[instrument(level=Level::DEBUG, skip(self))]
     pub fn export(&mut self) -> StoreNode {
+        self.export_internal(false)
+    }
+
+    /// Export a copy of the store for the initial sync of a proxy. Unlike [`Self::export`] this
+    /// includes the leader-owned subtrees of `$SYS` (see [`LEADER_OWNED_SYS_TOPICS`]).
+    #[instrument(level=Level::DEBUG, skip(self))]
+    pub fn export_for_proxy(&mut self) -> StoreNode {
+        self.export_internal(true)
+    }
+
+    fn export_internal(&mut self, for_proxy: bool) -> StoreNode {
         debug!("Exporting slim copy of store with {} entries …", self.len);
         let data_copy = self.data.clone();
         let mut original_data = mem::replace(&mut self.data, data_copy);
-        original_data.strip();
+        if for_proxy {
+            original_data.strip_for_proxy();
+        } else {
+            original_data.strip();
+        }
         debug!(
             "Exported slim copy with {} entries.",
             Store::ncount_values(&original_data)
@@ -1223,10 +1280,41 @@ impl Store {
         diff
     }
 
-    pub(crate) fn export_sys(&self) -> Option<StoreNode> {
-        self.data
-            .get_child(SYSTEM_TOPIC_ROOT)
-            .map(ToOwned::to_owned)
+    /// Graft this store's local `$SYS` subtree onto `data` received from a leader.
+    ///
+    /// Leader-owned subtrees (see [`LEADER_OWNED_SYS_TOPICS`]) are not taken from the local store
+    /// but from `data`, since local copies may be stale (e.g. locks held by clients of a previous
+    /// leader instance). If `data` does not contain them, they are dropped.
+    pub(crate) fn merge_local_sys_into(&self, data: &mut StoreNode) {
+        let leader_owned = data
+            .get_child_mut(SYSTEM_TOPIC_ROOT)
+            .and_then(|sys| sys.tree.take())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(key, _)| is_leader_owned_sys_topic(key));
+
+        let mut sys = match self.data.get_child(SYSTEM_TOPIC_ROOT) {
+            Some(local) => Node {
+                value: local.value.clone(),
+                tree: local.tree.as_ref().map(|t| {
+                    t.iter()
+                        .filter(|(key, _)| !is_leader_owned_sys_topic(key))
+                        .map(|(key, node)| (key.to_owned(), node.to_owned()))
+                        .collect()
+                }),
+            },
+            None => Node::default(),
+        };
+
+        for (key, node) in leader_owned {
+            sys.add_or_replace_child(key, node);
+        }
+
+        if sys.value.is_some() || sys.tree.as_ref().is_some_and(|t| !t.is_empty()) {
+            data.add_or_replace_child(SYSTEM_TOPIC_ROOT.to_owned(), sys);
+        } else {
+            data.strip();
+        }
     }
 }
 
@@ -1919,5 +2007,131 @@ mod test {
         let json = json!(val).to_string();
         let deserialized = serde_json::from_str(&json).unwrap();
         assert_eq!(val, deserialized);
+    }
+
+    fn store_with(entries: &[(&str, Value)]) -> Store {
+        let mut store = Store::default();
+        for (key, value) in entries {
+            store
+                .insert(&reg_key_segs(key), value.clone().into(), false)
+                .unwrap();
+        }
+        store
+    }
+
+    fn sync_proxy(leader: &mut Store, proxy: &mut Store) -> Vec<String> {
+        let mut data = leader.export_for_proxy();
+        proxy.merge_local_sys_into(&mut data);
+        let diff = proxy.reset_with_diff(data);
+        let mut removed: Vec<String> = diff.removed.iter().map(|e| e.path.join("/")).collect();
+        removed.sort();
+        removed
+    }
+
+    #[test]
+    fn export_for_proxy_only_keeps_leader_owned_sys_topics() {
+        let mut leader = store_with(&[
+            ("$SYS/locks/a", json!("client-1")),
+            ("$SYS/clients/client-1/address", json!("127.0.0.1")),
+            ("$SYS/version", json!("1.7.0")),
+            ("data/a", json!(1)),
+        ]);
+
+        let mut export = Store::default();
+        export.reset(leader.export_for_proxy());
+
+        assert_eq!(
+            export.get(&reg_key_segs("$SYS/locks/a")),
+            Some(&json!("client-1"))
+        );
+        assert_eq!(
+            export.get(&reg_key_segs("$SYS/clients/client-1/address")),
+            Some(&json!("127.0.0.1"))
+        );
+        assert_eq!(export.get(&reg_key_segs("$SYS/version")), None);
+        assert_eq!(export.get(&reg_key_segs("data/a")), Some(&json!(1)));
+
+        let plain = leader.export();
+        assert!(plain.get_child(SYSTEM_TOPIC_ROOT).is_none());
+    }
+
+    #[test]
+    fn proxy_sync_replaces_stale_leader_owned_sys_topics() {
+        // proxy state mirrored from a previous leader instance
+        let mut proxy = store_with(&[
+            ("$SYS/locks/a", json!("leader-client")),
+            ("$SYS/locks/b", json!("proxy-client")),
+            ("$SYS/clients/leader-client/address", json!("10.0.0.1")),
+            ("$SYS/clients/proxy-client/address", json!("10.0.0.2")),
+            ("$SYS/mode", json!("proxy")),
+            ("data/a", json!(1)),
+        ]);
+        // new leader instance only knows about the proxy's client and its lock
+        let mut leader = store_with(&[
+            ("$SYS/locks/b", json!("proxy-client")),
+            ("$SYS/clients/proxy-client/address", json!("10.0.0.2")),
+            ("$SYS/mode", json!("leader")),
+            ("data/a", json!(1)),
+        ]);
+
+        let removed = sync_proxy(&mut leader, &mut proxy);
+
+        assert_eq!(proxy.get(&reg_key_segs("$SYS/locks/a")), None);
+        assert_eq!(
+            proxy.get(&reg_key_segs("$SYS/clients/leader-client/address")),
+            None
+        );
+        assert_eq!(
+            proxy.get(&reg_key_segs("$SYS/locks/b")),
+            Some(&json!("proxy-client"))
+        );
+        assert_eq!(
+            proxy.get(&reg_key_segs("$SYS/clients/proxy-client/address")),
+            Some(&json!("10.0.0.2"))
+        );
+        // proxy-local $SYS topics are retained
+        assert_eq!(proxy.get(&reg_key_segs("$SYS/mode")), Some(&json!("proxy")));
+        assert_eq!(proxy.get(&reg_key_segs("data/a")), Some(&json!(1)));
+
+        // subscribers get notified about the stale entries being removed
+        assert!(removed.contains(&"$SYS/locks/a".to_owned()), "{removed:?}");
+        assert!(
+            removed.contains(&"$SYS/clients/leader-client/address".to_owned()),
+            "{removed:?}"
+        );
+    }
+
+    #[test]
+    fn proxy_sync_drops_stale_locks_when_leader_has_none() {
+        let mut proxy = store_with(&[
+            ("$SYS/locks/a", json!("leader-client")),
+            ("$SYS/mode", json!("proxy")),
+        ]);
+        let mut leader = store_with(&[("data/a", json!(1))]);
+
+        let removed = sync_proxy(&mut leader, &mut proxy);
+
+        assert_eq!(proxy.get(&reg_key_segs("$SYS/locks/a")), None);
+        assert_eq!(proxy.get(&reg_key_segs("$SYS/mode")), Some(&json!("proxy")));
+        assert_eq!(proxy.get(&reg_key_segs("data/a")), Some(&json!(1)));
+        assert!(removed.contains(&"$SYS/locks/a".to_owned()), "{removed:?}");
+    }
+
+    #[test]
+    fn null_values_survive_serde_roundtrip() {
+        let mut store = store_with(&[
+            ("a/null", json!(null)),
+            ("a/one", json!(1)),
+            ("b", json!(null)),
+        ]);
+        let json = serde_json::to_string(&store.export()).unwrap();
+        let mut restored = Store::default();
+        restored.reset(serde_json::from_str(&json).unwrap());
+
+        assert_eq!(restored.get(&reg_key_segs("a/null")), Some(&json!(null)));
+        assert_eq!(restored.get(&reg_key_segs("a/one")), Some(&json!(1)));
+        assert_eq!(restored.get(&reg_key_segs("b")), Some(&json!(null)));
+        assert!(restored.data.is_clean());
+        assert_eq!(restored.len(), 3);
     }
 }

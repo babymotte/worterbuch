@@ -959,6 +959,22 @@ impl Worterbuch {
         (store, grave_goods, last_will)
     }
 
+    /// Like [`Self::export`], but the exported store additionally contains the leader-owned parts
+    /// of `$SYS` that proxies mirror (see [`crate::store::LEADER_OWNED_SYS_TOPICS`]).
+    pub fn export_for_proxy(
+        &mut self,
+    ) -> (
+        StoreNode,
+        HashMap<ClientId, GraveGoods>,
+        HashMap<ClientId, LastWill>,
+    ) {
+        let store = self.store.export_for_proxy();
+        let grave_goods = self.grave_goods();
+        let last_will = self.last_wills();
+
+        (store, grave_goods, last_will)
+    }
+
     #[instrument(level=Level::TRACE, skip(self))]
     pub fn export_for_persistence(&mut self) -> Export {
         let store = self.store.export_for_persistence();
@@ -1939,8 +1955,8 @@ impl Worterbuch {
         mut data: StoreNode,
         retain_sys: bool,
     ) -> WorterbuchResult<()> {
-        if retain_sys && let Some(sys_data) = self.store.export_sys() {
-            data.add_or_replace_child(SYSTEM_TOPIC_ROOT.to_owned(), sys_data);
+        if retain_sys {
+            self.store.merge_local_sys_into(&mut data);
         }
 
         self.reset_persistent_storage(&data).await?;

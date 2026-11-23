@@ -140,7 +140,11 @@ async fn forward_follower_connected(
     match recv {
         Some((state_tx, remote_addr, is_proxy)) => {
             let (client_write_tx, client_write_rx) = mpsc::channel(config.channel_buffer_size);
-            let (current_state, grave_goods, last_wills) = worterbuch.export();
+            let (current_state, grave_goods, last_wills) = if is_proxy {
+                worterbuch.export_for_proxy()
+            } else {
+                worterbuch.export()
+            };
             let state_sync = StateSync {
                 store: current_state,
                 grave_goods,
