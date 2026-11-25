@@ -412,7 +412,25 @@ impl CloneableWbApi {
         remote_addr: Option<SocketAddr>,
     ) -> WorterbuchResult<()> {
         let function = WbFunction::Disconnected(client_info, remote_addr, Span::current());
-        self.send_with_timeout(function, "disconnected").await?;
+        // A disconnect must never be dropped: if it is lost, the client stays registered forever
+        // (and, in proxy mode, gets re-registered with the leader - including its locks - on every
+        // leader reconnect). The core system / proxy may legitimately not drain the channel for a
+        // long time (e.g. while a proxy is re-syncing with a leader), so wait as long as it takes.
+        // The send can only fail if the receiver is gone, i.e. the core system has shut down.
+        //
+        // The send is done in a separate task so that it cannot be cancelled: callers typically
+        // call this at the end of a client's serve future, which may be dropped at any time (e.g.
+        // when the client's subsystem shuts down after its serve loop has stopped). Dropping the
+        // join handle does not abort the task, so the disconnect is delivered regardless.
+        trace!(self.name, "sending disconnect to core system …");
+        let tx = self.tx.clone();
+        let sent = tokio::spawn(async move { tx.send(function).await.is_ok() }).await;
+        if !matches!(sent, Ok(true)) {
+            return Err(WorterbuchError::InternalChannelTimeout(
+                "core system closed while sending 'disconnected' request".to_owned(),
+            ));
+        }
+        trace!(self.name, "sent disconnect to core system");
         Ok(())
     }
 
