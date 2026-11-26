@@ -32,8 +32,12 @@ COPY . .
 RUN cargo build -p worterbuch --release
 
 FROM debian:trixie-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends linux-perf \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=worterbuch-builder /app/target/release/worterbuch /usr/local/bin
+COPY --chmod=755 worterbuch/docker/wb-perf-top.sh /usr/local/bin/wb-perf-top
 ENV WORTERBUCH_LOG=info
 ENV WORTERBUCH_TRACING=info,worterbuch=debug
 ENV WORTERBUCH_WS_BIND_ADDRESS=0.0.0.0
