@@ -2455,6 +2455,9 @@ fn escape_wildcards(pattern: &str) -> String {
 }
 
 #[cfg(test)]
+mod disconnect_bench;
+
+#[cfg(test)]
 mod test {
 
     #![allow(clippy::as_conversions)]

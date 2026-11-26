@@ -367,6 +367,24 @@ fn load(
     Ok(())
 }
 
+/// Loads the store from an SQLite file without modifying it and also returns all keys in load
+/// order. Only used by benchmarks.
+#[cfg(test)]
+pub(crate) fn load_store_with_keys(
+    path: &std::path::Path,
+) -> PersistenceResult<(Store, Vec<String>)> {
+    let mut db = SqliTrie::new(path)?;
+    let mut store = Store::default();
+    let mut keys = Vec::new();
+    db.load(|path, value| {
+        keys.push(path.join("/"));
+        store.insert(path, value, true)?;
+        Ok(())
+    })?;
+    store.count_entries();
+    Ok((store, keys))
+}
+
 fn restore_entries(db: &mut SqliTrie, store: &mut Store) -> PersistenceResult<()> {
     db.load(|path, value| {
         trace!(?path, ?value, "read entry");

@@ -30,6 +30,8 @@ mod turso;
 use crate::persistence::redb::PersistentRedbStore;
 #[cfg(feature = "sqlite")]
 use crate::persistence::sqlite::PersistentSQLiteStore;
+#[cfg(all(test, feature = "sqlite"))]
+pub(crate) use crate::persistence::sqlite::load_store_with_keys;
 #[cfg(feature = "turso")]
 use crate::persistence::turso::PersistentTursoStore;
 use crate::{
