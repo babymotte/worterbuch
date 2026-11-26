@@ -280,20 +280,21 @@ impl<V> Node<V> {
         }
     }
 
-    /// Removes any obsolete children
-    fn trim(&mut self) -> bool {
-        let mut removed = false;
-        if let Some(t) = self.tree.as_mut() {
-            t.retain(|_, child| {
-                let obsolete = child.is_obsolete();
-                removed |= obsolete;
-                !obsolete
-            });
-            if t.is_empty() {
-                self.tree = None;
-            }
+    /// Removes the child `key` if it is obsolete. This is all that is needed after modifying a
+    /// single child and, unlike [`Self::trim`], does not have to look at all other children,
+    /// which is expensive for nodes with many children.
+    fn trim_child(&mut self, key: &str) -> bool {
+        let Some(t) = self.tree.as_mut() else {
+            return false;
+        };
+        if !t.get(key).is_some_and(Node::is_obsolete) {
+            return false;
         }
-        removed
+        t.remove(key);
+        if t.is_empty() {
+            self.tree = None;
+        }
+        true
     }
 
     /// Test if a node is obsolete. A leaf node is obsolete, if it has no value, an internal node is obsolete if it has no value and no children.
@@ -588,7 +589,7 @@ impl Store {
 
         if let Some(next) = node.get_child_mut(head) {
             Store::ndelete_lock_nodes(next, tail);
-            node.trim();
+            node.trim_child(head);
         }
     }
 
@@ -640,16 +641,15 @@ impl Store {
                 subscribers.and_then(|s| s.tree.get(head)),
                 ls_subscribers,
             )?;
-            if node.trim() {
+            if node.trim_child(head)
+                && let Some(subscribers) = subscribers.as_ref()
+                && !subscribers.ls_subscribers.is_empty()
+            {
                 let new_children = node.ls_owned();
-                if let Some(subscribers) = subscribers.as_ref()
-                    && !subscribers.ls_subscribers.is_empty()
-                {
-                    let subscribers = subscribers.ls_subscribers.clone();
-                    ls_subscribers
-                        .get_or_insert_default()
-                        .push((subscribers, new_children));
-                }
+                let subscribers = subscribers.ls_subscribers.clone();
+                ls_subscribers
+                    .get_or_insert_default()
+                    .push((subscribers, new_children));
             }
             Ok(val)
         } else {
@@ -722,7 +722,8 @@ impl Store {
                 )?;
             }
         }
-        node.trim();
+        // no need to trim here, ndelete_child_matches already removed every child it emptied
+        // and the multi wildcard case dropped all children anyway
 
         Ok(())
     }
@@ -747,16 +748,15 @@ impl Store {
                 subscribers.and_then(|s| s.tree.get(id)),
                 ls_subscribers,
             )?;
-            if node.trim() {
+            if node.trim_child(id)
+                && let Some(subscribers) = subscribers.as_ref()
+                && !subscribers.ls_subscribers.is_empty()
+            {
                 let new_children = node.ls_owned();
-                if let Some(subscribers) = subscribers.as_ref()
-                    && !subscribers.ls_subscribers.is_empty()
-                {
-                    let subscribers = subscribers.ls_subscribers.clone();
-                    ls_subscribers
-                        .get_or_insert_default()
-                        .push((subscribers, new_children));
-                }
+                let subscribers = subscribers.ls_subscribers.clone();
+                ls_subscribers
+                    .get_or_insert_default()
+                    .push((subscribers, new_children));
             }
         }
 

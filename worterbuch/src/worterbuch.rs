@@ -1670,6 +1670,33 @@ impl Worterbuch {
         }
     }
 
+    async fn remove_client_subscription_entries(&mut self, client_id: uuid::Uuid, trace: Trace) {
+        if !self.config.extended_monitoring {
+            return;
+        }
+        // `#` also matches the subscription count stored at the parent key itself
+        let pattern = topic!(
+            SYSTEM_TOPIC_ROOT,
+            SYSTEM_TOPIC_CLIENTS,
+            client_id,
+            SYSTEM_TOPIC_SUBSCRIPTIONS,
+            "#"
+        );
+        debug!("Deleting {pattern}");
+        if let Err(e) = self
+            .internal_pdelete(
+                pattern,
+                INTERNAL_CLIENT_ID,
+                Trace::InternalAction(InternalAction::SubscriptionsChanged {
+                    cause: Box::new(trace),
+                }),
+            )
+            .await
+        {
+            debug!("Error in subscription monitoring: {e}");
+        }
+    }
+
     pub async fn protocol_switched(
         &mut self,
         client_info: protocol::v1::ClientInfo,
@@ -1880,21 +1907,21 @@ impl Worterbuch {
                     .unwrap_or_else(|| "<unknown>".to_owned())
             );
         }
-        // the leader removes all of the client's $SYS entries below, so there is no need to
-        // update them for each individual subscription
-        let update_client_entries = !self.is_leader();
+        // The client's $SYS subscription entries are removed in one go below, updating them for
+        // each individual subscription would be quadratic in the number of subscriptions.
         for subscription in subscription_keys {
             if let Err(e) = self
-                .do_unsubscribe(
-                    &subscription,
-                    client_id,
-                    trace.clone(),
-                    update_client_entries,
-                )
+                .do_unsubscribe(&subscription, client_id, trace.clone(), false)
                 .await
             {
                 debug!("Inconsistent subscription state: {e}");
             }
+        }
+        if !self.is_leader() {
+            // Subscriptions are handled locally by proxies, so their $SYS entries only exist
+            // here. The leader removes all of the client's $SYS entries itself (see below).
+            self.remove_client_subscription_entries(client_id, trace.clone())
+                .await;
         }
 
         for subscription in indexed_subscriptions(&self.client_ls_subscriptions, client_id) {
@@ -2521,6 +2548,87 @@ mod test {
         assert_eq!(
             r#"[{"t":{"hello":{"t":{"world":{"v":"test"}}}}},{"17e679d9-a1d5-48ed-a8ec-aee155b90557":["this/should/be/exported"]},{}]"#,
             &serde_json::to_string(&export).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_removes_client_subscription_entries_on_disconnect() {
+        let mut config = Config::new(None).await.unwrap();
+        config.use_persistence = false;
+        config.extended_monitoring = true;
+        config.role = ClusterRole::Proxy {
+            leader_addresses: Box::new(["localhost:1234".to_owned()]),
+        };
+        let mut wb = Worterbuch::with_config(config);
+
+        let client = ClientInfo {
+            client_id: ClientId::new_v4(),
+            protocol: Protocol::Tcp,
+            client_name: None,
+        };
+        let other = ClientInfo {
+            client_id: ClientId::new_v4(),
+            protocol: Protocol::Tcp,
+            client_name: None,
+        };
+        let (eject, _eject_rx) = mpsc::channel(1);
+        wb.connected(client.clone(), None, eject.clone())
+            .await
+            .unwrap();
+        wb.connected(other.clone(), None, eject).await.unwrap();
+
+        let flags = || SubscriptionFlags::new(false, true, false);
+        let mut keep = Vec::new();
+        for (tid, key) in ["a/1", "a/2", "b/c/d"].into_iter().enumerate() {
+            keep.push(
+                wb.subscribe(
+                    key.to_owned(),
+                    flags(),
+                    TraceData::new(tid as TransactionId, client.clone()),
+                )
+                .await
+                .unwrap(),
+            );
+        }
+        let _p = wb
+            .psubscribe(
+                "a/?".to_owned(),
+                flags(),
+                TraceData::new(10, client.clone()),
+            )
+            .await
+            .unwrap();
+        let _o = wb
+            .subscribe("a/1".to_owned(), flags(), TraceData::new(1, other.clone()))
+            .await
+            .unwrap();
+
+        let subs = |id: ClientId| format!("$SYS/clients/{id}/subscriptions");
+        assert_eq!(wb.get(&subs(client.client_id)).unwrap(), json!(4));
+        assert_eq!(
+            wb.pget(&format!("{}/#", subs(client.client_id)))
+                .unwrap()
+                .len(),
+            5
+        );
+
+        wb.disconnected(client.clone(), None).await;
+
+        assert!(
+            wb.pget(&format!("{}/#", subs(client.client_id)))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            wb.subscriptions
+                .keys()
+                .all(|s| s.client_id != client.client_id)
+        );
+        // other clients' entries are untouched
+        assert_eq!(wb.get(&subs(other.client_id)).unwrap(), json!(1));
+        assert_eq!(
+            wb.get(&format!("{}/a/1", subs(other.client_id))).unwrap(),
+            json!(1)
         );
     }
 

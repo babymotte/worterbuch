@@ -265,10 +265,9 @@ async fn disconnect_bench_sqlite() {
     config.use_persistence = false;
     config.channel_buffer_size = 1_000_000;
     let mut wb = Worterbuch::with_store(store, config);
-    let proxy = || ClusterRole::Proxy {
+    wb.config.role = ClusterRole::Proxy {
         leader_addresses: Box::new(["localhost:1234".to_owned()]),
     };
-    wb.config.role = proxy();
     wb.config.extended_monitoring = true;
 
     let mut keep: Vec<Box<dyn std::any::Any + Send>> = Vec::new();
@@ -308,10 +307,7 @@ async fn disconnect_bench_sqlite() {
         })
         .cloned()
         .collect();
-    eprintln!(
-        "{} children with values below {parent}",
-        concentrated.len()
-    );
+    eprintln!("{} children with values below {parent}", concentrated.len());
 
     async fn subscribe_all(
         wb: &mut Worterbuch,
@@ -340,21 +336,41 @@ async fn disconnect_bench_sqlite() {
         let (eject, eject_rx) = mpsc::channel(1);
         wb.connected(info.clone(), None, eject).await.unwrap();
         keep.push(Box::new(eject_rx));
-        subscribe_all(&mut wb, &info, &spread(bg_subs, c * 31), &mut tid, &mut keep).await;
+        subscribe_all(
+            &mut wb,
+            &info,
+            &spread(bg_subs, c * 31),
+            &mut tid,
+            &mut keep,
+        )
+        .await;
     }
     eprintln!(
         "connected {bg_clients} background clients with {bg_subs} subscriptions each in {:?}",
         start.elapsed()
     );
 
-    let modes: [(&str, fn() -> ClusterRole, bool); 3] = [
-        ("proxy, ext. monitoring", || ClusterRole::Proxy {
-            leader_addresses: Box::new(["localhost:1234".to_owned()]),
-        }, true),
-        ("proxy, no ext. monitoring", || ClusterRole::Proxy {
-            leader_addresses: Box::new(["localhost:1234".to_owned()]),
-        }, false),
-        ("standalone, ext. monitoring", || ClusterRole::Standalone, true),
+    type Mode = (&'static str, fn() -> ClusterRole, bool);
+    let modes: [Mode; 3] = [
+        (
+            "proxy, ext. monitoring",
+            || ClusterRole::Proxy {
+                leader_addresses: Box::new(["localhost:1234".to_owned()]),
+            },
+            true,
+        ),
+        (
+            "proxy, no ext. monitoring",
+            || ClusterRole::Proxy {
+                leader_addresses: Box::new(["localhost:1234".to_owned()]),
+            },
+            false,
+        ),
+        (
+            "standalone, ext. monitoring",
+            || ClusterRole::Standalone,
+            true,
+        ),
     ];
 
     for (kind, patterns) in [("spread", None), ("concentrated", Some(&concentrated))] {
